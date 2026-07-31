@@ -1,0 +1,72 @@
+# Line endings.
+#
+# The platform runs in Docker on a Raspberry Pi. A shell script or entrypoint
+# checked out with CRLF fails there with an error that names the interpreter
+# rather than the line ending, which is a bad hour to spend. Everything text
+# is stored and checked out as LF regardless of who committed it or on what.
+#
+# This also stops whole-file diffs appearing when team members on different
+# machines touch the same file.
+
+* text=auto eol=lf
+
+# --- Explicit, so nothing depends on detection -------------------------------
+*.py      text eol=lf
+*.pyi     text eol=lf
+*.md      text eol=lf
+*.txt     text eol=lf
+*.sql     text eol=lf
+*.sh      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.json    text eol=lf
+*.toml    text eol=lf
+*.cfg     text eol=lf
+*.ini     text eol=lf
+*.env     text eol=lf
+*.html    text eol=lf
+*.css     text eol=lf
+*.js      text eol=lf
+*.jsx     text eol=lf
+*.ts      text eol=lf
+*.tsx     text eol=lf
+
+# Firmware — Arduino Uno R4 WiFi (Renesas RA4M1)
+*.ino     text eol=lf
+*.cpp     text eol=lf
+*.hpp     text eol=lf
+*.c       text eol=lf
+*.h       text eol=lf
+
+Dockerfile      text eol=lf
+*.dockerfile    text eol=lf
+Makefile        text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+
+# --- Binary. Never converted, never diffed as text ---------------------------
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.pdf     binary
+*.woff    binary
+*.woff2   binary
+*.ttf     binary
+*.zip     binary
+*.gz      binary
+*.db      binary
+*.sqlite3 binary
+
+# Received products — waterfalls, decoded images, raw IQ. These are gitignored,
+# but marked binary so an accidental `git add -f` cannot corrupt one.
+*.wav     binary
+*.iq      binary
+*.raw     binary
+*.cf32    binary
+
+# --- Diff hints --------------------------------------------------------------
+*.py      diff=python
+*.md      diff=markdown
+*.ipynb   text eol=lf
