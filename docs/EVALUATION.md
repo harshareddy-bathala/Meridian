@@ -15,6 +15,9 @@ How every claim in this project is tested, and the threats to validity, stated b
 | SC-3 | Orbital timing uncertainty is correctly estimated | ≥ 68% of passes within stated 1σ |
 | SC-4 | Our station is reliable | ≥ 90% pass capture rate over 30 days |
 | SC-5 | Failures are detected quickly | ≤ 90 s time to detect |
+| SC-6 | A station is registered, online and publicly visible | Achieved / not |
+
+SC-6 is the only criterion that is pass/fail rather than measured, and it is effectively the Phase 1 exit criterion. It is listed here because a methodology document that omits the easiest criterion to verify — and the most visible to an examiner — has the omission the wrong way round.
 
 ---
 

@@ -180,4 +180,20 @@ Carried from `MSP-SPEC.md` §9, to be resolved before the MSP 0.1 freeze.
 
 ## Applying these
 
-D-003 through D-008 and D-010 change `MSP-SPEC.md` and `DATA-MODEL.md`. **Those documents are not yet edited.** MSP-SPEC's closing line requires review by all three team members before implementation begins, and these decisions are the substance of that review. They land in the specification at the MSP 0.1 freeze, as one reviewed change, with the version bumped.
+**Landed 2026-07-31**, on branch `msp-0.1-decisions`.
+
+| Decision | Applied to |
+|---|---|
+| D-003 decline via `held_assignments` | `MSP-SPEC.md` §4.2, §4.3 |
+| D-004 error body | `MSP-SPEC.md` §6 |
+| D-005 `simulated` top-level | `MSP-SPEC.md` §4.1, §5 |
+| D-006 invite token | `MSP-SPEC.md` §3, §4.1 |
+| D-007 assignment cap of 8 | `MSP-SPEC.md` §4.2 |
+| D-008 `assignments.state` | `DATA-MODEL.md` |
+| D-009 interference measurement and profile | `DATA-MODEL.md` |
+| D-010 `outcome` enum pinned to MSP §4.4 | `DATA-MODEL.md` |
+| D-011 SC-6 restored | `EVALUATION.md` §1 |
+
+**The specification is still a draft.** The joint review by all three team members that `MSP-SPEC.md` requires before Phase 1 implementation has not taken place. These decisions were prepared *for* that review, not ratified by it — the document becomes 0.1 final when the review signs it off, and any of this can change before then.
+
+O-1 through O-4 in `MSP-SPEC.md` §9 remain open.
