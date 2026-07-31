@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Tooling
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets — deploy/.env.example is tracked deliberately, see README quick start
+.env
+*.env
+!deploy/.env.example
+
+# Data. Nothing in the observation lineage belongs in git.
+*.db
+*.sqlite3
+data/
+products/
+snapshots/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Node / dashboard
+node_modules/
+dist/
+build/
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
