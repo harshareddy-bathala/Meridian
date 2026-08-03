@@ -1,0 +1,203 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # Pinned to 3.11 deliberately: Raspberry Pi OS bookworm ships 3.11 and the
+  # platform runs on the Pi. Testing on 3.12 and deploying on 3.11 is a
+  # week-15 surprise.
+  PYTHON_VERSION: "3.11"
+  # Pinned for the same reason every image tag in deploy/ is pinned: the
+  # database CI tests against and the database on the Pi should be one build.
+  TIMESCALE_IMAGE: "timescale/timescaledb:2.29.0-pg16"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --dev
+      - name: ruff check
+        run: uv run ruff check .
+      - name: ruff format
+        run: uv run ruff format --check .
+      - name: Lockfile matches pyproject
+        # `uv sync --frozen` in deploy/Dockerfile fails the build if the lock has
+        # drifted. Catching it here turns a broken image build into a lint error
+        # with an obvious fix.
+        run: uv lock --check
+
+  types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --dev
+      - run: uv run mypy platform/src client/src simulator/src
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: timescale/timescaledb:2.29.0-pg16
+        env:
+          POSTGRES_USER: meridian
+          POSTGRES_PASSWORD: meridian
+          POSTGRES_DB: meridian_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U meridian"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Tests run against real TimescaleDB, never SQLite. The schema uses
+      # timestamptz, arrays, CHECK constraints, generated columns and
+      # hypertables; a suite that passes on SQLite says nothing about what runs
+      # on the Pi.
+      #
+      # ONE value, serving both Alembic and psycopg. meridian.config adds and
+      # strips the +psycopg driver suffix as each needs it — see D-033. Before
+      # that this job could not both migrate and query, which is why it ran the
+      # integration tests against an empty database.
+      DATABASE_URL: postgresql://meridian:meridian@localhost:5432/meridian_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --dev
+
+      - name: Apply migrations
+        run: uv run alembic -c deploy/alembic.ini upgrade head
+
+      - name: Migrations are idempotent
+        # Compose runs the migrate service on every `up`, so this path executes
+        # on the second, third and hundredth start. If it were not a no-op the
+        # ten-minute bring-up would hold exactly once per machine.
+        run: uv run alembic -c deploy/alembic.ini upgrade head
+
+      # Split from the integration run so a schema failure and a logic failure
+      # are distinguishable in the run summary rather than one red X.
+      - name: Unit tests
+        run: uv run pytest -m "not integration and not e2e and not msp_conformance"
+
+      - name: Integration tests
+        run: uv run pytest -m integration
+
+  image:
+    # Build the runtime image and prove the deployment artefact works.
+    #
+    # This drives `docker compose` rather than a hand-rolled `docker run` against
+    # a service container. The compose file is what runs on the Pi, so testing it
+    # directly is what makes "docker compose up brings the platform up on a clean
+    # machine" an assertion instead of a claim — and it exercises the db →
+    # migrate → api dependency chain, which a bare `docker run` skips entirely.
+    #
+    # Build and smoke test only, no registry push: no credentials means this
+    # works unchanged on a fork PR. The multi-arch build and the GHCR push the Pi
+    # pulls from arrive with the deployment stage.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose file is valid
+        # Catches a typo in docker-compose.yml here rather than on the Pi at the
+        # moment someone is trying to bring the platform up.
+        run: |
+          set -euo pipefail
+          cp deploy/.env.example .env
+          docker compose -f deploy/docker-compose.yml config --quiet
+          docker compose -f deploy/docker-compose.yml --profile metrics \
+            --profile public --profile sim config --quiet
+
+      - name: Bring the stack up
+        run: |
+          set -euo pipefail
+          cp deploy/.env.example .env
+          docker compose -f deploy/docker-compose.yml up -d --build
+
+      - name: Migrations ran and the API is healthy
+        run: |
+          set -euo pipefail
+          # `migrate` is a one-shot service; the api service will not start until
+          # it has exited successfully, so a non-zero code here means the schema
+          # never landed.
+          test "$(docker compose -f deploy/docker-compose.yml ps -a \
+            --format '{{.Service}} {{.ExitCode}}' | grep '^migrate' | cut -d' ' -f2)" = "0"
+
+          for _ in $(seq 1 45); do
+            if curl -fsS http://localhost:8000/healthz > /tmp/health.json; then break; fi
+            sleep 2
+          done
+          cat /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+          grep -q '"database":"ok"' /tmp/health.json
+
+      - name: Declared executables resolve inside the image
+        # `meridian --version` is the one CLI subcommand that does real work, so
+        # it proves the distribution installed and imports cleanly in the image —
+        # which is exactly what the missing meridian.cli module broke.
+        run: |
+          set -euo pipefail
+          docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint "" \
+            api meridian --version
+          docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint "" \
+            api python -c "import meridian, meridian.cli, meridian_sim.station"
+
+      - name: The sim profile reports instead of crash-looping
+        run: |
+          set -euo pipefail
+          docker compose -f deploy/docker-compose.yml --profile sim up simulator \
+            --exit-code-from simulator || test $? -eq 2
+          test "$(docker inspect meridian-simulator-1 --format '{{.RestartCount}}')" = "0"
+
+      - name: Stack logs on failure
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --no-color || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f deploy/docker-compose.yml --profile sim down -v || true
+
+  conventions:
+    # GIT-WORKFLOW.md rules 3 and 7, automated. A rule enforced only by a human
+    # is a rule that erodes.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Commit subjects are Conventional Commits with a known scope
+        run: |
+          set -euo pipefail
+          pattern='^(feat|fix|docs|test|refactor|perf|chore|ci|spec)\((orbit|prediction|scheduler|registry|observations|reliability|api|client|simulator|dashboard|firmware|ingest|deploy|docs|msp|repo)\): [a-z].{0,60}$'
+          failed=0
+          while read -r subject; do
+            [ -z "$subject" ] && continue
+            if ! printf '%s' "$subject" | grep -Eq "$pattern"; then
+              echo "::error::bad commit subject: $subject"
+              failed=1
+            fi
+          done < <(git log --format=%s "origin/${{ github.base_ref }}..HEAD")
+          exit $failed
+
+      - name: Warn when the diff exceeds 400 lines
+        run: |
+          set -euo pipefail
+          changed=$(git diff --shortstat "origin/${{ github.base_ref }}...HEAD" \
+            | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' \
+            | paste -sd+ - | bc || echo 0)
+          echo "diff size: ${changed} lines"
+          if [ "${changed:-0}" -gt 400 ]; then
+            echo "::warning::PR is ${changed} lines. Rule 7 asks for under 400 — consider splitting, usually interface first and implementation second."
+          fi

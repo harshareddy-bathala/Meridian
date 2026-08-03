@@ -1,10 +1,16 @@
 # Meridian Station Protocol (MSP)
 
-**Version 0.1 — draft**
+**Version 0.1**
 
 An open protocol for satellite ground stations to join a scheduling network.
 
-> **Status.** Decisions D-003 through D-007 in `docs/DECISIONS.md` are applied to this text as of 2026-07-31. The joint review by all three team members required before Phase 1 implementation **has not yet taken place** — this document is a draft prepared for that review, not a frozen specification. It becomes 0.1 final when the review signs it off.
+> **Status.** Frozen at 0.1 on 2026-08-01. Decisions D-003 through D-007 were applied on 2026-07-31; D-015 and D-016 followed, adding the clock fields to §4.2, correcting `not_attempted` in §4.4, defining the observation acknowledgement and `GET /msp/v0/time`, and settling version parsing in §7.
+>
+> **Completed 2026-08-02** by D-023 through D-032, which closed the remaining undefined recovery behaviour — lost registration responses, `401` semantics, the clock-offset sign, assignment delivery and expiry, observation identity, and request limits — and resolved all four open questions in §9.
+>
+> All of it is additive except one: **`registration_key` in §4.1 is a new required field**, which under §7's own rule is a major-version change. It is not treated as one, because between the freeze on 2026-08-01 and this amendment no endpoint had been implemented and no client existed to break. This is the last change that gets that argument. From here the version rules apply as written.
+>
+> The joint review by all three team members that this document originally required before implementation was not held as a meeting. The decision log was written in its place — see the closing note of `docs/DECISIONS.md`.
 
 ---
 
@@ -75,6 +81,7 @@ Station → platform. Once, on first join.
 ```json
 {
   "invite_token": "…",
+  "registration_key": "…",
   "name": "nec-rooftop-01",
   "operator": "NTTF NEC",
   "location": { "lat": 12.9716, "lon": 77.5946, "alt_m": 920 },
@@ -87,7 +94,11 @@ Station → platform. Once, on first join.
       "modes": ["lrpt", "fsk", "afsk"],
       "polarisation": "rhcp",
       "tracking": true,
-      "min_elevation_deg": 10
+      "min_elevation_deg": 10,
+      "horizon_mask": [
+        { "az_deg": 0, "min_el_deg": 25 },
+        { "az_deg": 90, "min_el_deg": 8 }
+      ]
     }
   ],
   "client": { "impl": "meridian-reference", "version": "0.1.0" }
@@ -103,8 +114,26 @@ Response:
 **Notes.**
 
 - `min_elevation_deg` is the station's declared floor, not its measured horizon — the platform learns the real obstruction profile from observation history and may override this downward per azimuth. Altitude is required: it materially affects pass geometry.
+- `horizon_mask` is **optional** and azimuth-resolved: an obstruction the operator already knows about, because they can see the building. The platform applies `max(declared, learned)` per azimuth bin, so a declaration constrains scheduling immediately but never overwrites a measurement and never becomes training data for the learned profile. A station that omits it is not claiming a clear horizon, only that it has not measured one. See `docs/DECISIONS.md` D-031.
 - `simulated` is **required** and **top-level**, alongside `name` and `location`. It is a property of the station, not of the client implementation — a physical station may run the simulator's client build for testing, and a simulated station may be driven by the reference client. See §5 and `docs/DECISIONS.md` D-005.
 - `invite_token` is consumed by a successful registration. A rejected or reused token returns `403` with error code `invalid_invite`.
+
+**`registration_key` is required, and it is what makes registration recoverable.** The station generates it once — 32 bytes of cryptographic randomness — and **persists it locally before sending the request**. The platform stores only its hash.
+
+The failure it exists for: the platform commits the registration, the response is lost in flight, and the station is left with a consumed invite and no token. Presenting the *same* invite with the *same* `registration_key` then returns the same `station_id` and a **newly minted** bearer token, so retrying is safe. The same invite with a *different* key is `403 invalid_invite` — that is a second station trying to use a spent invite.
+
+Recovery is available only while the station **has never sent a heartbeat** *and* the request arrives within the platform's recovery window (one hour by default) of `registered_at`. **Both conditions, not either.** A station that has heartbeat holds a working token by definition; a station that never heartbeat but registered a month ago is a consumed invite that would otherwise stay live forever. Requiring both is what stops a leaked invite from rotating credentials at will. See `docs/DECISIONS.md` D-023.
+
+**Past that window, recovery is a bound replacement invite.** An operator issues an invite naming an existing `station_id`; the station presents it with its stored `registration_key` and receives a new token on that same `station_id`, with no second row for one physical installation. A bound invite is exempt from the recovery window — an operator authorised this specific rotation, which is the thing the window exists to require — and is `403 invalid_invite` if the key does not match the station it names. This is the path §6 sends a station down after a `401`. See `docs/DECISIONS.md` D-034.
+
+| Invite | `registration_key` | Result |
+|---|---|---|
+| Unconsumed, unbound | any | Create a station, store the key hash, return a token |
+| Consumed, unbound, in recovery | matches the station that consumed it | Same `station_id`, newly minted token |
+| Consumed, unbound, in recovery | differs | `403 invalid_invite` |
+| Consumed or out of recovery, unbound | — | `403 invalid_invite` |
+| Unconsumed, bound to a station | matches that station | Same `station_id`, newly minted token, window ignored |
+| Unconsumed, bound to a station | differs | `403 invalid_invite` |
 
 ### 4.2 `heartbeat`
 
@@ -122,6 +151,8 @@ Station → platform. Every `heartbeat_interval_s`.
     "centre_freq_hz": 137900000,
     "mode": "lrpt"
   },
+  "clock_offset_s": 0.184,
+  "clock_uncertainty_s": 0.05,
   "health": {
     "uptime_s": 84213,
     "disk_free_pct": 62,
@@ -134,14 +165,36 @@ Station → platform. Every `heartbeat_interval_s`.
 
 `state` is one of `idle`, `slewing`, `listening`, `processing`, `degraded`, `maintenance`.
 
+`clock_offset_s` and `clock_uncertainty_s` are optional and may be `null`. **`null` means unknown and is never the same as `0.0`** — a station claiming a perfect clock and a station that cannot measure its own are opposite cases, and treating them alike corrupts every timing measurement derived from them.
+
+**The sign convention, stated once for the whole network:**
+
+```
+clock_offset = platform clock − station clock
+```
+
+estimated from §8's `/time` endpoint as:
+
+```
+offset = server_time − (t_send + t_recv) / 2
+```
+
+**A station whose clock runs fast reports a negative offset.** The convention is named here rather than left implied by the formula because the same quantity is written by the client, stored in a column, consumed by the timing analysis and printed in the report — and a sign flip in any one of those is silent, survives review, and inverts a published figure (`docs/DECISIONS.md` D-025).
+
+The estimator is specified here rather than left to the implementer because timing error against element-set age is aggregated across every station in the network, and offsets derived by different methods cannot be pooled. Uncertainty is the station's own 1σ estimate of that offset — typically NTP's reported dispersion. It is an unsigned magnitude, not an interval. `docs/EVALUATION.md` §6.1 discards any measured timing error smaller than the reported uncertainty, which needs both numbers to be present.
+
 **The `listening` block is the most important field in this protocol.** Without it, an absence of observations is ambiguous. With it, the platform can assert that a station was tuned to a specific frequency for a specific target at a specific time and heard nothing — which is a real measurement.
+
+All four of its fields are stored, `mode` included: a station tuned to the right frequency running the wrong demodulator did not observe the pass, and the platform must be able to tell that apart from a miss. The block is all-or-nothing — send every field or omit the block — because a partial block cannot support the assertion the block exists to make.
+
+`health` is opaque to the platform and stored verbatim, and is capped at **4 KiB** serialised; a larger object is `malformed`. See §6 on request limits.
 
 **`held_assignments` is how the platform learns what a station actually has.** It lists every assignment the station currently holds and intends to execute. The platform reconciles it against what it issued:
 
 | Situation | Platform reads it as |
 |---|---|
 | Issued, and present in the list | The station holds it — state `held` |
-| Issued, absent, window still ahead | Not accepted. Reissue elsewhere or mark `expired` |
+| Issued, absent, window still ahead | The station has not accepted it. **Phase 1 changes nothing** — it stays `issued`, is offered again on the next heartbeat, and expires after `end_at` if it is never taken. Reissue to another station arrives with the scheduler (D-022) |
 | Absent, window has passed | `expired` — the station never took the work |
 | Present, but never issued to this station | Protocol error. Log and ignore; do not act on it |
 
@@ -157,7 +210,23 @@ Response carries any assignments due:
 { "assignments": [ /* see 4.3 */ ], "server_time": "2026-08-14T09:31:02Z" }
 ```
 
-**`assignments` contains at most 8 entries.** A constrained client must be able to size its buffer at compile time. Where more are due, the platform returns the 8 with the earliest `start_at` and the remainder arrive on subsequent heartbeats — at a 30-second interval, against an 8-to-15-minute pass, this is not a delay that matters.
+**`assignments` contains at most 8 entries.** A constrained client must be able to size its buffer at compile time.
+
+**Delivery policy.** An assignment is returned to its station when
+
+```
+state is 'issued' or 'held'   and   end_at >= now   and   start_at <= now + 2 h
+```
+
+sorted by `start_at` ascending, capped at 8.
+
+**The lower bound is `end_at`, not `start_at`.** An assignment whose window has opened is the station's *current* work, and dropping it from the response at the moment it became current would contradict the redelivery rule below — a station that lost its state mid-pass would be told it had nothing to do.
+
+**An assignment the station already holds is returned again.** Delivery is not once-only: a station sees the same assignment on every heartbeat until it is reported or its `end_at` has passed. This is the same idea as `held_assignments` above, in the other direction — the response states the current work rather than announcing a change, so a lost response is not lost work and the next heartbeat carries the same truth. **A client must deduplicate by `assignment_id`** and must not treat redelivery as a new assignment.
+
+**The cap is not a queue.** Because held assignments are redelivered, returning the earliest 8 of 9 returns the *same* 8 every time: the ninth waits behind them rather than arriving in turn, and may never be delivered at all. MSP 0.x forbids the situation rather than paginating it — **at most 8 assignments may be eligible for one station at any instant**, which is an invariant on whoever creates them: by hand in Phase 1, the scheduler in Phase 2. The platform logs a warning when a station's eligible set exceeds 8, so a violation is visible rather than silent. Pagination, or the per-assignment delivery state it would need, arrives with the scheduler that could produce the overload. See `docs/DECISIONS.md` D-035.
+
+Consequently there is no acknowledgement message and none is needed. An assignment expires when its `end_at` has passed and the station never reported it. Phase 1 does not reissue an expired assignment to another station; that arrives with the scheduler (`docs/DECISIONS.md` D-022, D-026).
 
 `server_time` lets a station estimate clock offset without NTP. Stations should report their offset in the next heartbeat.
 
@@ -223,13 +292,27 @@ Station → platform, after every attempt — **including failures**.
 | `signal_no_decode` | Signal present, decoding failed |
 | `no_signal` | Station verifiably listening, nothing detected |
 | `aborted` | Station started but could not complete |
-| `not_attempted` | Station never began — declined, offline, or unhealthy |
+| `not_attempted` | Station never began — offline or unhealthy |
 
 **`no_signal` and `not_attempted` must never be conflated.** The first is data. The second is an operational failure.
 
+**Neither is a decline.** A declined assignment produces no observation at all — it is absence from `held_assignments` in §4.2, and the platform records it as `expired`. `not_attempted` means the station took the work and then failed to start it.
+
 `first_detection_at` is what makes pass-timing-error measurement possible: the difference between it and the predicted acquisition time, against element-set age, is the project's primary measurement of orbital data quality.
 
-`doppler_samples` are optional and only expected from stations with adequate frequency stability.
+`doppler_samples` are optional and only expected from stations with adequate frequency stability. **At most 512 samples**; more is `malformed`. That is one sample every 1.75 seconds across a fifteen-minute pass, beyond both what any receiver here produces and what is useful on a curve this smooth. They are transmitted as samples rather than as a fitted curve because they are the raw measurement, and the residual against a model is what the orbit-uncertainty analysis needs to see (`docs/DECISIONS.md` D-032).
+
+`products` carries **metadata only** — `kind`, `uri`, `sha256`, and whatever else the product type warrants. The platform stores the array as submitted. **MSP 0.x defines no transfer mechanism**; a station with nowhere to put an artefact omits the array entirely, which is valid. When transfer is defined it will be a pre-signed PUT to object storage, off the MSP path, rather than an inline upload — a waterfall is megabytes and this protocol's request bodies are sized for a microcontroller (`docs/DECISIONS.md` D-029).
+
+Response is an acknowledgement:
+
+```json
+{ "observation_id": "ob_05601bd09768", "assignment_id": "as_44b2", "superseded": false }
+```
+
+`observation_id` is stable and derived from the assignment and revision, so **a resubmission that changes nothing returns the identical id** — the queued-retry case of §6 is idempotent all the way out to the acknowledgement. It is `ob_` followed by twelve hexadecimal characters; the example above is the real id for `as_44b2` revision 1, and is regenerable. It is an opaque string; do not parse it.
+
+`superseded` is `true` when the platform already held an observation for this assignment and this submission replaced it as the current one. A station that resubmits after a period offline can log the difference; a constrained client may ignore the field entirely.
 
 ---
 
@@ -278,16 +361,31 @@ Two flat string fields. No nesting, no arrays, no optional members. A microcontr
 
 Beyond that:
 
-- A station that receives `401` re-registers.
+- A station that receives `401` **stops, logs, and surfaces the failure to its operator.** It does not re-register and does not retry with the same token. Its own invite was consumed at registration and cannot be reused; recovery is the operator issuing a **replacement invite bound to that `station_id`**, which the station presents together with its stored `registration_key` to rotate its credential under §4.1 — onto the same station row, and without the recovery window that governs the lost-response case. Retrying a revoked token on a 30-second loop is a denial of service a network inflicts on itself. See `docs/DECISIONS.md` D-024 and D-034.
 - A station that cannot reach the platform **continues executing assignments it already holds** and queues observations for later submission. Reception is not blocked on connectivity.
 - Queued observations are submitted with their original timestamps; the platform accepts late submissions and records submission delay separately.
-- The platform must be idempotent on `assignment_id` — a resubmitted observation replaces rather than duplicates.
+- The platform must be idempotent on `assignment_id` — a resubmitted observation **supersedes** rather than duplicates. A station never sees two current observations for one assignment. Internally the platform appends rather than overwrites, so the earlier report survives as part of the record; that is invisible on the wire and stations need not account for it.
+
+### Request limits
+
+A request over its limit is rejected as `malformed` before the body is parsed.
+
+| Limit | Value |
+|---|---|
+| `register`, `heartbeat`, `time` body | 64 KiB |
+| `observations` body | 256 KiB |
+| `health` object, serialised | 4 KiB |
+| `doppler_samples` | 512 entries |
+
+These are stated in the protocol rather than left to the deployment because a station needs to know what it may send before it sends it, and because `health` is opaque JSON written every thirty seconds by every station — unbounded, that is storage exhaustion with no attacker required. See `docs/DECISIONS.md` D-028 and D-032.
 
 ---
 
 ## 7. Versioning
 
 `MSP-Version: 0.1` header on every request. The platform supports the current major version and one previous. Breaking changes increment the major version.
+
+The header carries `major.minor`; the path carries the major only, so `MSP-Version: 0.1` is served at `/msp/v0/`. "Current major and one previous" is a statement about the major component. A request whose major falls outside the supported range gets `unsupported_version`; an unrecognised **minor** within a supported major is accepted, because minor versions are additive by definition and a station built against 0.1 must keep working when the platform speaks 0.2. A missing header is `unsupported_version` — sending it is one line of client code, and requiring it is what makes deprecation possible later.
 
 ---
 
@@ -302,20 +400,28 @@ POST /msp/v0/observations
 GET  /msp/v0/time           → server time, for clock offset estimation
 ```
 
+`GET /msp/v0/time` takes no body and returns one field:
+
+```json
+{ "server_time": "2026-08-14T09:31:02Z" }
+```
+
+**It is unauthenticated.** A station that has lost its token still needs to establish clock offset before re-registering, and the response contains nothing that is not already public. It touches no database and is the cheapest endpoint in the system.
+
 Four endpoints is deliberate. A protocol a student can implement on a microcontroller in an afternoon is more likely to be adopted than a complete one.
 
 ---
 
 ## 9. Open questions
 
-Still to be resolved before this draft is signed off. Resolutions are recorded in `docs/DECISIONS.md`, not here.
+**None remain.** O-1 through O-4 were resolved on 2026-08-02; the resolutions are recorded in `docs/DECISIONS.md` and written into the text above.
 
-| | Question | Note |
+| | Question | Resolution |
 |---|---|---|
-| **O-1** | Product upload inline or pre-signed URL? Inline is simpler for constrained clients; pre-signed scales better. | **Resolve together with the `products` table design** in `docs/DATA-MODEL.md` — neither can be settled alone, and deciding them separately is how they end up incompatible. |
-| **O-2** | Push assignments, or is heartbeat polling sufficient? | Polling is simpler and works behind NAT, which most stations are. Currently leaning polling; §4.2's cap of 8 already assumes it. |
-| **O-3** | How should a station report a *partial* horizon obstruction it already knows about, without pre-empting the platform's learned profile? | |
-| **O-4** | Should `doppler_samples` be capped in count, or transmitted as a compressed curve fit? | |
+| **O-1** | Product upload inline or pre-signed URL? | Metadata only in 0.x; pre-signed PUT off the MSP path when the `products` table lands. Inline cannot fit under a body size a microcontroller can buffer — §4.4, D-029 |
+| **O-2** | Push assignments, or is heartbeat polling sufficient? | Polling, for all of 0.x. Push needs an inbound port or a persistent socket; most stations have neither — §4.2, D-030 |
+| **O-3** | How should a station report a partial horizon obstruction it already knows about? | Optional `horizon_mask` per capability, combined as `max(declared, learned)` so a declaration constrains scheduling but never becomes training data — §4.1, D-031 |
+| **O-4** | Cap `doppler_samples`, or transmit a compressed curve fit? | Capped at 512 by count. The samples are the raw measurement; fitting at ingest destroys the residual the analysis needs — §4.4, D-032 |
 
 **Resolved since the first draft**, and now written into the text above:
 
@@ -326,7 +432,19 @@ Still to be resolved before this draft is signed off. Resolutions are recorded i
 | `simulated` placement ambiguous | Required and top-level in `register` | §4.1, §5, D-005 |
 | Registration unauthenticated | Invite token, issued out of band | §3, §4.1, D-006 |
 | `assignments` array unbounded | Capped at 8 per response | §4.2, D-007 |
+| No field carried the clock offset §4.2 asked for | `clock_offset_s` and `clock_uncertainty_s` on the heartbeat | §4.2, D-016 |
+| `not_attempted` wrongly included "declined" | Declines never produce an observation | §4.4, D-016 |
+| Observation acknowledgement undefined | Three-field ack with `superseded` | §4.4, D-016 |
+| `GET /msp/v0/time` response undefined | `{ "server_time": … }`, unauthenticated | §8, D-016 |
+| Header `0.1` against path `/v0/` unexplained | Header is `major.minor`, path is major | §7, D-016 |
+| "Replaces rather than duplicates" contradicted the append-only observation store | "Supersedes"; identical on the wire | §6, D-015 |
+| A lost register response consumed the invite and left the station with no token | `registration_key`; retrying the same invite with the same key rotates rather than fails | §4.1, D-023 |
+| §6 told a station to re-register on `401`, which §3's single-use invite made impossible | `401` stops and alerts; the operator issues a replacement invite | §6, D-024 |
+| Offset sign was implied by a formula and never named | `clock_offset = platform clock − station clock` | §4.2, D-025 |
+| Delivery horizon, redelivery and expiry were undefined | Two-hour horizon, held assignments redelivered, expiry after `end_at` | §4.2, D-026 |
+| The acknowledgement's `observation_id` had no definition | Derived from assignment and revision, so a retry returns the same id | §4.4, D-027 |
+| `listening.mode` was in the message and nowhere else; no size limits existed | `mode` stored; body, `health` and Doppler caps | §4.2, §6, D-028 |
 
 ---
 
-*Draft. To be reviewed jointly by all three team members before Phase 1 implementation begins, since every module depends on it. That review has not yet happened.*
+*Version 0.1, frozen 2026-08-01 by the decision log rather than by a review meeting, and completed on 2026-08-02 when D-023 through D-032 closed the last undefined recovery paths and the four open questions. Every module depends on this document; changes go through a `spec(msp):` pull request with a `D-` entry behind them.*

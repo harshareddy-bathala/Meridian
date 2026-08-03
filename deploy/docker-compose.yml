@@ -1,0 +1,155 @@
+# Meridian platform.
+#
+#   cp deploy/.env.example .env && docker compose -f deploy/docker-compose.yml up
+#
+# Bringing the whole platform up on a clean machine in under ten minutes is a hard
+# requirement, not an aspiration. Profiles are how that survives contact with a
+# Raspberry Pi on college wifi: the default `up` starts only what is needed to
+# serve the platform. Metrics, the tunnel and the simulator are opt-in.
+#
+#   --profile metrics   Prometheus + Grafana
+#   --profile public    Cloudflare Tunnel (needs CLOUDFLARE_TUNNEL_TOKEN)
+#   --profile sim       a simulated station
+
+name: meridian
+
+services:
+  db:
+    image: timescale/timescaledb:2.29.0-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-meridian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-meridian}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # -h 127.0.0.1 forces the check over TCP. During initdb the entrypoint runs
+      # a temporary server that listens on a Unix socket only, so a plain
+      # `pg_isready` reports healthy while TCP is still refused — and every
+      # dependent service then starts too early and dies.
+      test:
+        ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-meridian} -d ${POSTGRES_DB:-meridian}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    # Not published by default. Nothing outside this network needs the database,
+    # and a Postgres port on a public host is an invitation.
+    expose:
+      - "5432"
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The same value the api service gets. meridian.config adds the +psycopg
+      # driver suffix SQLAlchemy needs and strips it for psycopg, so one variable
+      # serves both — see docs/DECISIONS.md D-033.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+    command: ["alembic", "-c", "deploy/alembic.ini", "upgrade", "head"]
+    restart: "no"
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+      API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
+      TOKEN_HASH_PEPPER: ${TOKEN_HASH_PEPPER:-change-me}
+      REGISTRATION_INVITE_TOKEN: ${REGISTRATION_INVITE_TOKEN:-change-me}
+      REGISTRATION_RECOVERY_WINDOW_S: ${REGISTRATION_RECOVERY_WINDOW_S:-3600}
+      HEARTBEAT_INTERVAL_S: ${HEARTBEAT_INTERVAL_S:-30}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      TUNNEL_HOSTNAME: ${TUNNEL_HOSTNAME:-}
+      # Derived from the tunnel token, not set by hand. `--profile public` starts
+      # the tunnel whenever CLOUDFLARE_TUNNEL_TOKEN is set, and it will do that
+      # with TUNNEL_HOSTNAME and PUBLIC_BASE_URL both left at their development
+      # values — at which point the platform is reachable from the internet and
+      # meridian.config's placeholder check has nothing to fire on. Tying the flag
+      # to the one variable the tunnel cannot run without closes that gap without
+      # asking anyone to remember a second one.
+      MERIDIAN_PUBLIC: ${CLOUDFLARE_TUNNEL_TOKEN:+1}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  tunnel:
+    # Outbound-only over 443: no static IP, no inbound port, and no firewall
+    # exception to request from college IT — which is the actual constraint SC-6
+    # runs into. TLS terminates at the edge, so the origin stays plain HTTP
+    # inside this network, which MSP §3 already anticipates.
+    profiles: ["public"]
+    image: cloudflare/cloudflared:2026.7.3
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+
+  prometheus:
+    profiles: ["metrics"]
+    image: prom/prometheus:v3.13.2
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    expose:
+      - "9090"
+
+  grafana:
+    profiles: ["metrics"]
+    image: grafana/grafana:13.1.1
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+
+  simulator:
+    profiles: ["sim"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      MERIDIAN_BASE_URL: http://api:8000
+      REGISTRATION_INVITE_TOKEN: ${REGISTRATION_INVITE_TOKEN:-change-me}
+      SIMULATOR_SEED: ${SIMULATOR_SEED:-4471}
+      SIMULATOR_STATION_COUNT: ${SIMULATOR_STATION_COUNT:-1}
+    command:
+      - python
+      - -m
+      - meridian_sim.station
+    # `no` while the module is a shell (Stage 10 implements it). Restarting a
+    # container whose command reports "not implemented" and exits just produces
+    # the same message every few seconds forever. This becomes `unless-stopped`
+    # when there is a heartbeat loop worth keeping alive.
+    restart: "no"
+
+volumes:
+  db-data:
+  prometheus-data:
+  grafana-data:

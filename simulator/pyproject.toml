@@ -1,0 +1,20 @@
+[project]
+name = "meridian-sim"
+version = "0.1.0"
+description = "Virtual stations speaking real MSP over the real network stack. Not a mock."
+requires-python = ">=3.11,<3.12"
+license = { text = "Apache-2.0" }
+
+# Built on meridian-client, because ARCHITECTURE.md says the simulator is a
+# client implementation and not a mock. Sharing the transport is what makes that
+# true rather than aspirational.
+dependencies = [
+    "meridian-client",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meridian_sim"]

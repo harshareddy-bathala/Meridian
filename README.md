@@ -31,6 +31,7 @@ Not yet started: prediction models, scheduler, reliability layer, hardware.
 | `docs/DECISIONS.md` | Decisions taken during implementation, and why |
 | `docs/GLOSSARY.md` | Domain terms |
 | `docs/PROJECT.md` | The full project document — problem, method, phases, budget |
+| `docs/GIT-WORKFLOW.md` | Commit, branch and review rules |
 | `CLAUDE.md` | Context for AI coding assistants |
 | `ATTRIBUTION.md` | Log of ideas read from other projects |
 
@@ -41,20 +42,59 @@ Not yet started: prediction models, scheduler, reliability layer, hardware.
 ```bash
 git clone <repo> && cd meridian
 cp deploy/.env.example .env
-docker compose up
+docker compose -f deploy/docker-compose.yml up -d --build
+curl http://localhost:8000/healthz
 ```
 
-Platform on `:8000`, dashboard on `:3000`, Grafana on `:3001`.
+Platform on `:8000`. The database is deliberately not published — nothing outside the compose network needs it.
 
-Bringing the whole platform up on a clean machine in under ten minutes is a hard requirement, not an aspiration. If it takes longer, that is a bug.
+Optional profiles: `--profile metrics` for Prometheus and Grafana on `:3001`, `--profile sim` for a simulated station, `--profile public` for the tunnel.
+
+Bringing the whole platform up on a clean machine in under ten minutes is a hard requirement, not an aspiration. If it takes longer, that is a bug. Measured: about five minutes cold on a laptop including image pulls and the image build, twenty seconds warm. On a Pi, pull a prebuilt image rather than building on the device.
+
+## Development
+
+```bash
+uv sync --dev
+uv run ruff check . && uv run ruff format --check . && uv lock --check
+uv run mypy platform/src client/src simulator/src
+uv run pytest -m "not integration and not e2e and not msp_conformance"
+```
+
+Tests are organised by what they need to run, one directory per marker:
+
+| Command | Needs | Populated |
+|---|---|---|
+| `uv run pytest -m "not integration and not e2e and not msp_conformance"` | nothing | yes |
+| `uv run pytest -m integration` | TimescaleDB | yes |
+| `uv run pytest -m msp_conformance` | the API | **not yet** — Stage 8 |
+| `uv run pytest -m e2e` | the full compose stack | **not yet** — Stage 10 |
+
+The last two directories exist with their markers wired and no tests in them, so those two commands currently select nothing and pytest exits `5`. That is the expected state until the endpoints they exercise are built — the directories are there first so the marker wiring is settled before anyone writes a conformance test, rather than being invented alongside one.
+
+Integration tests need a real TimescaleDB — never SQLite. The schema uses hypertables, arrays, `CHECK` constraints and generated columns, so a suite that passes on SQLite says nothing about what runs on the Pi.
+
+```bash
+docker run -d --name meridian-test -p 5433:5432 \
+    -e POSTGRES_USER=meridian -e POSTGRES_PASSWORD=meridian \
+    -e POSTGRES_DB=meridian_test timescale/timescaledb:2.29.0-pg16
+
+# One DATABASE_URL serves both Alembic and psycopg — meridian.config adds and
+# strips the +psycopg driver suffix as each needs it. See docs/DECISIONS.md D-033.
+export DATABASE_URL=postgresql://meridian:meridian@localhost:5433/meridian_test
+uv run alembic -c deploy/alembic.ini upgrade head
+uv run pytest -m integration
+```
 
 ---
 
 ## Running a simulated station
 
 ```bash
-python -m simulator.station --count 1 --seed 4471
+uv run python -m meridian_sim.station --count 1 --seed 4471
 ```
+
+*(A shell today — it parses its arguments and reports which stage implements it. See `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 10.)*
 
 Simulated stations speak real MSP to the real platform. They are indistinguishable from physical stations at the protocol level — and labelled as simulated in every record, response and display.
 

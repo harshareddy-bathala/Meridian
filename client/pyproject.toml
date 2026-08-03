@@ -1,0 +1,21 @@
+[project]
+name = "meridian-client"
+version = "0.1.0"
+description = "Reference MSP station client. Speaks the protocol; knows nothing about the database."
+requires-python = ">=3.11,<3.12"
+license = { text = "Apache-2.0" }
+
+# httpx only. This dependency list is load-bearing: ARCHITECTURE.md says the
+# station client knows nothing about the database, and the absence of psycopg
+# and fastapi here is what enforces it at install time. Adding either is a
+# boundary violation that a reviewer would have to catch by hand.
+dependencies = [
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meridian_client"]

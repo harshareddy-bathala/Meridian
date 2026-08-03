@@ -88,22 +88,28 @@ meridian/
 │   ├── DECISIONS.md      decisions taken during implementation
 │   ├── GLOSSARY.md
 │   └── PROJECT.md        the full project document
-├── platform/
-│   ├── orbit/            propagation, element sets, uncertainty
-│   ├── prediction/       features, models, calibration
-│   ├── scheduler/        optimiser, policies, baselines
-│   ├── registry/         station registration and health
-│   ├── observations/     ingest, store, dedup
-│   ├── reliability/      SLI computation, budget, chaos
-│   └── api/              public + MSP endpoints
-├── client/               reference station client
+├── platform/             distribution: meridian
+│   └── src/meridian/
+│       ├── orbit/        propagation, element sets, uncertainty
+│       ├── prediction/   features, models, calibration
+│       ├── scheduler/    optimiser, policies, baselines
+│       ├── registry/     station registration and health
+│       ├── observations/ ingest, store, dedup
+│       ├── reliability/  SLI computation, budget, chaos
+│       ├── store/        SQL access layer
+│       └── api/          public + MSP endpoints
+├── client/               distribution: meridian-client
+│   └── src/meridian_client/     reference station client
+├── simulator/            distribution: meridian-sim
+│   └── src/meridian_sim/        virtual stations speaking MSP
 ├── firmware/             Arduino rotator controller
-├── simulator/            virtual stations speaking MSP
 ├── dashboard/            web front end
 ├── ingest/               external archive adapters (optional path)
 ├── analysis/             notebooks and evaluation scripts
-└── deploy/               compose files, config, dashboards
+└── deploy/               compose files, migrations, config, dashboards
 ```
+
+**Three Python distributions, `src/` layout, per D-012.** `platform/` is a distribution root, not an import package — **never create `platform/__init__.py`**. `platform` is a stdlib module name, and shadowing it produces `AttributeError`s from inside third-party libraries at import time. The client and simulator are separate distributions so the reference client installs on a Pi without `fastapi` or `psycopg`, which enforces "the station client knows nothing about the database" at install time rather than at review time.
 
 ---
 

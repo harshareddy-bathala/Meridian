@@ -1,0 +1,114 @@
+[project]
+name = "meridian-workspace"
+version = "0.1.0"
+description = "Workspace root. The distributions are platform/, client/ and simulator/."
+requires-python = ">=3.11,<3.12"
+
+[tool.uv.workspace]
+members = ["platform", "client", "simulator"]
+
+[tool.uv.sources]
+meridian = { workspace = true }
+meridian-client = { workspace = true }
+meridian-sim = { workspace = true }
+
+[dependency-groups]
+dev = [
+    # The three distributions, installed editable so tests import them without a
+    # rebuild. They are listed here rather than as project dependencies because
+    # the root is a workspace container and ships nothing itself.
+    "meridian",
+    "meridian-client",
+    "meridian-sim",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "httpx>=0.27",
+]
+
+# Python is pinned to 3.11 deliberately. Raspberry Pi OS bookworm ships 3.11 and
+# the platform runs on the Pi's NVMe. Developing on 3.12 and deploying on 3.11 is
+# a week-15 surprise.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["platform/src", "client/src", "simulator/src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "DTZ", "RUF", "T20", "TID"]
+
+# RUF002 flags σ, − and – in docstrings as ambiguous unicode. Here they are correct
+# domain notation — "1σ" is how uncertainty is written throughout docs/ and the
+# report, and rewriting it as "1o" would be wrong. Code is unaffected; this rule
+# only ever fires on prose.
+ignore = ["RUF002"]
+
+# DTZ is not optional here. It bans naive datetime construction, and DATA-MODEL.md
+# says "All timestamps UTC, no exceptions" — the linter enforces the convention so
+# a reviewer does not have to. T20 bans stray print().
+
+[tool.ruff.format]
+# Code blocks inside docs/ are illustrative, not compilable: elliptical protocol
+# bodies, partial SQL, snippets showing one field of a message. Formatting them
+# to the same rules as source produces churn that fights the author and makes a
+# specification harder to read, so the formatter leaves prose alone. The linter
+# still runs everywhere.
+exclude = ["*.md"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["T20"]
+# ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
+# The ban below is global; this is the one module exempt from it, so the boundary
+# is checked by CI rather than remembered by a reviewer.
+"platform/src/meridian/orbit/**" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"sgp4".msg = "Only meridian.orbit may import propagation libraries (ARCHITECTURE.md rule 2)."
+"skyfield".msg = "Only meridian.orbit may import propagation libraries (ARCHITECTURE.md rule 2)."
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+warn_return_any = true
+disallow_any_generics = true
+mypy_path = ["platform/src", "client/src", "simulator/src"]
+
+[[tool.mypy.overrides]]
+module = ["sgp4.*", "skyfield.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+strict = false
+
+[tool.pytest.ini_options]
+# --import-mode=importlib so two test files may share a basename across
+# directories. Under the default "prepend" mode, tests/unit/test_store.py and
+# tests/integration/test_store.py collide at collection with "import file
+# mismatch" and the whole run is interrupted — and with four directories holding
+# tests for the same modules, that collision is a matter of time. importlib also
+# stops pytest mutating sys.path, which matters in a src/ layout where the
+# installed distributions are what should be imported.
+addopts = "-q --strict-markers --import-mode=importlib"
+testpaths = ["tests"]
+# One directory per marker, and each directory's conftest applies its own marker
+# via `pytestmark` — so a new test file cannot forget to declare what it needs
+# and leak a compose bring-up into the unit run.
+#
+#   uv run pytest -m "not integration and not e2e"   fast, no services
+#   uv run pytest -m integration                     needs TimescaleDB
+#   uv run pytest -m msp_conformance                 needs the API
+#   uv run pytest -m e2e                             needs the compose stack
+markers = [
+    "integration: needs a running TimescaleDB",
+    "msp_conformance: asserts exact MSP wire shapes against golden fixtures",
+    "e2e: needs the full compose stack",
+]
+
+[tool.coverage.report]
+# Report only. No threshold gate in Phase 1 — a coverage floor this early
+# produces tests written for the floor.
+show_missing = true

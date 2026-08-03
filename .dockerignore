@@ -1,0 +1,61 @@
+# What never goes into a build context.
+#
+# Without this file the context is the whole repository — including .venv, .git
+# and three tool caches. That is a slow upload on every build, a cache
+# invalidation on every unrelated file change, and a .venv full of host-platform
+# wheels sitting next to the one uv is about to create for linux/arm64.
+#
+# Deliberately NOT ignored: uv.lock and the three pyproject.toml files. The
+# Dockerfile copies them first, on purpose, so a source-only change does not
+# re-resolve dependencies.
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Virtual environments — host-platform wheels, useless and large
+.venv/
+venv/
+
+# Python build artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Tool caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets. deploy/.env.example is tracked but nothing needs it inside an image,
+# and .env must never be baked into a layer.
+.env
+*.env
+
+# Not needed at runtime. The image serves the platform; it does not read the
+# specification or run the suite.
+docs/
+tests/
+analysis/
+*.md
+!README.md
+
+# Editors and OS
+.vscode/
+.idea/
+.cursor/
+.DS_Store
+Thumbs.db
+
+# Data — nothing in the observation lineage belongs in an image
+data/
+products/
+snapshots/
+*.db
+*.sqlite3

@@ -165,16 +165,481 @@ SC-6 is restored to `EVALUATION.md`. It is the one criterion that is pass/fail r
 
 ---
 
+## D-012 — Three distributions, `src/` layout, and `platform` is never an import package
+
+**2026-08-01 · accepted**
+
+**`platform` is a Python standard library module name.** If `platform/` becomes an import package — which happens by default under a flat layout, under `pytest`'s rootdir insertion, and under any `python -m` from the repository root — then `import platform` resolves to ours instead of the stdlib. The stdlib module is imported during interpreter and package startup by `sysconfig`, `setuptools`, `pip`, `uvicorn` and others. The failure is not a clean `ModuleNotFoundError`; it is an `AttributeError` raised from inside a third-party package at import time, with a traceback pointing nowhere near our code.
+
+The fix is a `src/` layout, where the directory name and the import name are deliberately different:
+
+```
+pyproject.toml              uv workspace root, all shared tool config
+platform/pyproject.toml     distribution: meridian
+platform/src/meridian/      orbit, prediction, scheduler, registry,
+                            observations, reliability, api, store
+client/pyproject.toml       distribution: meridian-client
+client/src/meridian_client/
+simulator/pyproject.toml    distribution: meridian-sim
+simulator/src/meridian_sim/
+```
+
+`platform/` stays exactly where `ARCHITECTURE.md` and `CLAUDE.md` put it, and every module keeps its documented name. It is now a *distribution root* rather than a package — no `__init__.py`, never on `sys.path`, so it can never shadow anything. The only documentation change is the `src/meridian/` level inside it, which `CLAUDE.md`'s layout is updated to show. `ARCHITECTURE.md` refers to modules as `platform/orbit` and so on without describing the file tree, so it needs no edit.
+
+**Three distributions rather than one**, because the reference station client must `pip install` on a Raspberry Pi without dragging in `psycopg`, `fastapi` and `sqlalchemy`. Extras can only add dependencies, never remove them, so one distribution cannot deliver this. The split also enforces `ARCHITECTURE.md`'s "the station client knows nothing about the database" **at install time** — an import of `meridian.store` from `meridian_client` fails when the package is built, not when a reviewer happens to notice. A boundary a reviewer can forget to check is a boundary that erodes.
+
+Cost: `README.md`'s `python -m simulator.station` becomes `python -m meridian_sim.station`. A top-level import package called `simulator` is the same class of mistake as `platform`, just less likely to detonate.
+
+*Rejected:* renaming the directory to `meridian/` with a flat layout. It solves the shadowing but needs an edit to the architecture tree in two documents, and it does not give the client its own dependency closure.
+
+---
+
+## D-013 — Schema mechanics: keys, enums, and `simulated` coverage
+
+**2026-08-01 · accepted**
+
+`DATA-MODEL.md` gives column tuples but no types, no keys and no nullability, so the migrations could not be written from it. Settling the mechanics here rather than discovering them one table at a time:
+
+**Surrogate primary keys.** Every table gets `id bigint generated always as identity primary key`. `DATA-MODEL.md` referenced `assignments.pass_id` and `passes.element_set_id` without ever giving those tables a key to reference.
+
+**Hypertable keys include the partition column.** TimescaleDB requires the partitioning column to be part of any unique or primary key on a hypertable. So `observations`, `heartbeats` and `noise_measurements` are keyed `(id, <partition column>)`. This is a constraint of the storage engine, not a modelling choice, and it is why the natural-looking `primary key (id)` will not work there.
+
+**Enums are `text` with `CHECK` constraints**, not Postgres `enum` types. Adding a value to a Postgres enum cannot be done inside a transaction in the general case, and Rule 9 of `GIT-WORKFLOW.md` forbids editing a merged migration — so every future enum change would be an awkward migration. A `CHECK` constraint is dropped and recreated in one transaction.
+
+**`simulated` extends to `passes`, `assignments` and `heartbeats`.** The convention in `DATA-MODEL.md` says the flag belongs on "every table that can hold simulated data" and `ARCHITECTURE.md` rule 4 says it propagates to "every derived record", but only three tables were named. A pass computed for a simulated station, an assignment issued to one, and its heartbeats are all simulated records. Without the flag on `passes` and `assignments`, no dashboard query can honour the rule that simulated and measured data are never aggregated together.
+
+**The value is always copied from the station's registry record, never read from the payload.** MSP §3 says station-submitted data is untrusted, and provenance is the last field to take on trust. A CI test asserts that no row disagrees with its station.
+
+**Never partition a hypertable on a client-supplied timestamp.** `heartbeats` partitions on `received_at` (platform clock), not `sent_at`. A station with a dead RTC reporting `sent_at: 1970-01-01` would otherwise create a 1970 chunk, and every compression and retention policy would then do the wrong thing to it forever. `observations` partitions on `started_at` because analysis needs it, but ingest rejects anything outside `[now − 30 days, now + 1 hour]` as `malformed` — MSP §3 already requires treating station input as untrusted and `ARCHITECTURE.md` puts validation in the API layer, so this is exactly where it belongs.
+
+**Naming: the derived registry conclusion is `stations.liveness`, not `stations.health`.** Three different things were heading for the same name — the station's *reported* `state` enum (MSP §4.2), the `health` *object* it sends alongside it, and the platform's *derived* conclusion about whether the station is alive. `CLAUDE.md` says keep naming minimal and unambiguous; three meanings for one word is the opposite. Reported enum stays `state`, the reported object stays `health`, the derived column is `liveness`.
+
+**Liveness thresholds come from SC-5.** `stale` after 60 s (two missed heartbeats), `offline` after 90 s (three). Ninety is not arbitrary: SC-5 requires detecting an injected node failure within 90 s, so the success criterion sets the threshold rather than the other way round, and the Phase 3 SLI aligns with it for free.
+
+---
+
+## D-014 — `held_assignments` is stored as an array column on `heartbeats`
+
+**2026-08-01 · accepted**
+
+D-003 makes `held_assignments` the entire decline mechanism and D-008 derives every `assignments.state` transition from reconciling it. The `heartbeats` table in `DATA-MODEL.md` had no column for it — the mechanism the protocol rests on had nowhere to land.
+
+```sql
+held_assignments text[] not null default '{}'
+```
+
+An array column rather than a `heartbeat_held_assignments` join table. The heartbeat is a point-in-time statement of holdings, always read whole and never queried by element, so a join table would add a second write per heartbeat and buy nothing. At a 30-second interval across fifty simulated stations that write volume is not free.
+
+`not null default '{}'` is load-bearing. MSP §4.2 states that an empty list is meaningful and "must be sent as `[]`, not omitted" — a `NULL` here would silently turn "the station holds nothing" into "the station said nothing", and those have opposite reconciliation outcomes.
+
+---
+
+## D-015 — Observations are append-only; a resubmission supersedes
+
+**2026-08-01 · accepted**
+
+Two documents specified incompatible ingest semantics. `DATA-MODEL.md` said observations are "immutable once written. Corrections are new rows referencing the original." `MSP-SPEC.md` §6 said the platform "must be idempotent on `assignment_id` — a resubmitted observation **replaces** rather than duplicates." Replace and append-only cannot both be true, and neither document provided a column to carry the lineage either way.
+
+**Resolved in favour of append-only**, with lineage carried by a `revision` counter rather than a self-referencing id. The natural key is `(assignment_id, revision)`: a resubmission appends `revision + 1` and the highest revision is the current one.
+
+A pointer column (`supersedes_id references observations(id)`) was the first shape considered and is rejected on modelling grounds, not technical ones. `revision` orders the lineage explicitly rather than leaving it to be reconstructed by walking a chain; it gives the MSP §4.4 acknowledgement something meaningful to return; and `(assignment_id, revision)` has to exist as the primary key regardless, so a pointer would be a second mechanism describing the same relationship.
+
+*Correction, verified against TimescaleDB 2.29 on 2026-08-01:* an earlier draft of this entry rejected the pointer on the grounds that nothing can hold a foreign key pointing at a hypertable. **That is false on current TimescaleDB** — such a foreign key both creates and enforces. It was true before 2.11. The decision is unchanged; the reasoning above is the real one.
+
+A resubmission is also checked against `content_sha256` over the canonical body: a byte-identical resubmission — exactly the queued-retry case MSP §6 describes — returns the existing revision and writes nothing. Only a *changed* resubmission appends.
+
+```sql
+create view observations_current as
+select distinct on (assignment_id) *
+from observations
+order by assignment_id, revision desc;
+```
+
+`MSP-SPEC.md` §6 is amended to say "supersedes rather than duplicates". **The client-visible behaviour is unchanged** — a station that resubmits still sees one current observation and no duplicate — so this is a wording change at the protocol level and a real change only inside the platform.
+
+Append-only wins because the observation store is the system of record for every reliability figure in the project. An overwrite silently destroys the evidence that a station reported something different the first time, and "we overwrote it" is not an answer in a viva. It also preserves the distinction between `started_at` and `submitted_at` that MSP §6 relies on to record submission delay for queued observations.
+
+---
+
+## D-016 — MSP 0.1 amendments
+
+**2026-08-01 · accepted**
+
+Four gaps found while preparing the implementation. All four are additive or clarifying; none breaks a client written against the current text.
+
+**Add `clock_offset_s` *and* `clock_uncertainty_s` to the heartbeat body (§4.2).** `DATA-MODEL.md` has `heartbeats.clock_offset_s` and §4.2 only said stations "should report their offset in the next heartbeat" without providing a field to report it in. But `EVALUATION.md` §6.1 needs **two** numbers, not one: "stations synchronise time via NTP and report clock offset in heartbeats. **Timing error smaller than the reported clock uncertainty is discarded.**" That reported clock *uncertainty* exists in no message and no table anywhere in the corpus, so §6.1's discard rule was unimplementable as written.
+
+Both are optional top-level `float|null`, in seconds. `null` means unknown and must never be conflated with `0.0` — a station claiming perfect clock accuracy and a station that cannot measure its own are opposite cases. The estimator is specified in the text as `offset = server_time − (t_send + t_recv) / 2`, because if each implementer derives their own the aggregate measurement is meaningless. Without both fields SC-3 cannot be measured.
+
+**Strike "declined" from `not_attempted` (§4.4).** The table read "Station never began — declined, offline, or unhealthy". That contradicts §4.2, §4.3, D-003, D-008 and `DATA-MODEL.md`, all of which state that a decline is `assignments.state = 'expired'` and **never produces an observation row at all**. Since D-010 names MSP §4.4 as the authority for this enum, the authority document was the one carrying the wrong word. Now reads "Station never began — offline or unhealthy."
+
+**Define the observation ack body.** §2's diagram showed an ack; §4.4 never specified it. Per D-004's two-field discipline for errors, the success body is equally flat:
+
+```json
+{ "observation_id": "ob_9c21", "assignment_id": "as_44b2", "superseded": false }
+```
+
+`superseded` tells a client that resubmitted after a queued reconnection that the platform already had an earlier report — useful for its logs, ignorable by a microcontroller.
+
+**Define `GET /msp/v0/time`.** Response `{ "server_time": "2026-08-14T09:31:02Z" }`. **Unauthenticated** — a station that has lost its token still needs to establish clock offset before re-registering, and the response contains nothing sensitive.
+
+**Version parsing.** `MSP-Version: 0.1` is parsed as `major.minor`; the path carries only the major (`/msp/v0/`). "Current major and one previous" is a statement about the major component. A request whose major does not match a supported version gets `unsupported_version`; an unrecognised minor within a supported major is accepted, because minor versions are additive by definition.
+
+---
+
+## D-017 — Station bearer tokens are opaque secrets, stored hashed
+
+**2026-08-01 · accepted**
+
+`DATA-MODEL.md` stores a "token hash" on `stations`. `deploy/.env.example` declares `TOKEN_SECRET`, which "signs station bearer tokens". Those are two different designs — hashed opaque tokens and signed tokens — and only one can be built.
+
+**Opaque tokens.** 32 bytes from `secrets.token_urlsafe`, stored as a SHA-256 hash, compared in constant time. `TOKEN_SECRET` is removed from `deploy/.env.example`.
+
+The advantage of a signed token is validation without a database read. That advantage does not exist here: `platform/registry` is "the authority on whether a station was listening at a given moment" and must load the station row on every heartbeat anyway to update health state and last-heartbeat age. So signing buys no round trip and adds a signing-key rotation problem, on a platform whose entire point is running unattended.
+
+Opaque tokens are also revocable immediately by deleting a row, which matters more on a publicly reachable endpoint than statelessness does. Note that "stateless server" in MSP §1 means no per-session state between requests, not no database — the platform is a database-backed service either way.
+
+---
+
+## D-018 — Phase 1 builds 8 of the 13 tables
+
+**2026-08-01 · accepted**
+
+Built now: `stations`, `station_capabilities`, `satellites`, `element_sets`, `passes`, `assignments`, `observations`, `heartbeats`. These are exactly what the Phase 1 exit criterion needs — a station registers, heartbeats, holds an assignment against a computed pass, and reports an observation.
+
+Deferred, with reasons:
+
+- **`products`** — blocked on O-1, which is unresolved and which MSP §9 says must be settled together with this table. Rule 9 makes a wrong migration permanent, so the table waits for the decision rather than guessing at it. Instead, the observation endpoint **validates the `products` array and stores it verbatim** in `observations.products_json jsonb`, so nothing a station sends is lost while the transfer mechanism stays open. Phase 1 produces no products anyway — the simulator generates no waterfalls and there is no receiver until Phase 4, and a transfer protocol frozen before a real station exists will be frozen wrong.
+- **`noise_measurements`, `interference_profiles`** (D-009) — the source data comes from a physical receiver doing survey sweeps. There is no receiver until Phase 4.
+- **`horizon_profiles`** — derived from observation outcome history, of which there is none yet. Phase 2, with the prediction module that consumes it.
+
+`satellites.transmitters` is `jsonb` for now rather than a normalised table. `DATA-MODEL.md` describes "known transmitters (frequency, mode, polarisation)" without giving a structure, and nothing in Phase 1 queries across transmitters — the assignment message reads one centre frequency and mode. It is normalised when the scheduler needs to select on it.
+
+---
+
+## D-019 — Migrations are raw SQL applied by Alembic
+
+**2026-08-01 · accepted**
+
+Migration files are hand-written SQL. Alembic supplies revision ordering and the applied-revision table; each revision is a thin wrapper that executes its `.sql` file.
+
+Declarative SQLAlchemy models with autogenerated migrations were the obvious alternative and are rejected on two grounds. First, autogenerate cannot model what this schema actually needs — `create_hypertable`, compression policies, retention policies and the derived views are all Timescale-specific SQL it would emit as opaque `op.execute` blocks anyway, so the "generated" migration is hand-written for the parts that matter and machine-written for the parts that do not. Second, `GIT-WORKFLOW.md` Rule 10 says nothing gets committed that its author cannot explain line by line, and an autogenerated migration is precisely the artefact nobody on a three-person team can walk a reviewer through.
+
+Raw SQL also keeps `create_hypertable` and the `CHECK` constraints from D-013 readable in the file where they take effect, which matters when the schema is the thing being defended.
+
+---
+
+## D-020 — Invite tokens are rows in a table, not a configuration value
+
+**2026-08-01 · accepted**
+
+MSP §4.1 requires that an invite token is **consumed** by a successful registration, and that a reused one returns `403 invalid_invite`. `deploy/.env.example` provided a single static `REGISTRATION_INVITE_TOKEN`.
+
+A static environment variable cannot be consumed, cannot be revoked, cannot be issued per operator, and — the part that matters — **cannot admit a second station**. Either the platform rejects every registration after the first, or the token is not single-use and D-006 is not implemented. As written, the mechanism that D-006 calls the defensible alternative to an unauthenticated write endpoint could not work at all.
+
+```sql
+invite_tokens (token_sha256 primary key, label, created_at,
+               expires_at, consumed_at, consumed_by_station_id)
+```
+
+plus a `meridian invite create` command. `REGISTRATION_INVITE_TOKEN` is kept but redefined: on an empty database it seeds exactly one invite row, so `docker compose up` still yields a platform a station can register against without an extra manual step — which the ten-minute bring-up requirement needs.
+
+This blocks registration outright, so it lands before D-006 can be said to be implemented at all. Phase 3's fifty simulated stations need fifty invites; there was no mechanism to issue them.
+
+---
+
+## D-021 — `assignments` carries its own window, and transmitters are a table
+
+**2026-08-01 · accepted**
+
+`assignments` could not produce the §4.3 assignment message. Three fields had no column — `centre_freq_hz`, `mode`, `timing_uncertainty_s` — and two more were being taken from the wrong place.
+
+**`start_at` and `end_at` are columns on `assignments`, not the pass's `aos`/`los`.** They are not the same thing. `GIT-WORKFLOW.md`'s own worked example describes widening an assignment window by `timing_uncertainty_s` precisely because a station recording at exactly the predicted AOS starts after the pass has already begun. The documentation described a column the schema did not have. D-008 compounds it: `expired` is defined as being set "after `end_at`", against a table with no `end_at`.
+
+**`satellites`' "known transmitters" becomes a child table** `satellite_transmitters(satellite_id, centre_freq_hz, mode, polarisation, bandwidth_hz, active, source)`, not the `jsonb` column first proposed in D-018. The scheduler must join transmitters against capability frequency ranges — `freq_min_hz <= centre_freq_hz <= freq_max_hz` — and that predicate is not indexable inside a JSON blob. `active` also carries the silent-satellite status `DATA-MODEL.md` asks `satellites` to track, which `EVALUATION.md` §5 needs.
+
+*Supersedes the `satellites.transmitters jsonb` part of D-018; the rest of D-018 stands.*
+
+---
+
+## D-022 — Phase 1 expires assignments only after `end_at`; reissue is Phase 2
+
+**2026-08-01 · accepted**
+
+MSP §4.2's reconciliation table says that when an assignment was issued, is absent from `held_assignments`, and its window is **still ahead**, the platform should "reissue elsewhere or mark `expired`". D-008's state machine has no arc for that. There is no state meaning "we took it back and gave it to another station", so a reissued assignment either lingers as `issued` forever or receives an `expired` that misreports when it happened.
+
+**Phase 1 does not reissue.** An assignment expires only after `end_at`, exactly as D-008 defines it. Reissue, and whatever state it needs — `revoked` is the obvious candidate — is a Phase 2 decision that arrives with the scheduler.
+
+This is the smaller change and Phase 1 has one station, so there is nowhere to reissue *to*. Recording it because the gap is real and a reader comparing MSP §4.2 against D-008 will otherwise find the contradiction and assume it was missed.
+
+---
+
+## D-023 — Registration recovery: a client-generated registration key
+
+**2026-08-02 · accepted**
+
+The registration response carries the only copy of the bearer token. If the database commit succeeds and the response is then lost — a dropped connection, a timeout, a client crash between receiving bytes and writing them to disk — the invite is consumed and the station has no credential. Nothing in the protocol recovered from that.
+
+**The client generates a `registration_key` and sends it in the register body.** 32 bytes from `secrets.token_urlsafe`, persisted by the client *before* the request is sent. The platform stores `sha256(pepper ‖ key)` on the station row, never the key.
+
+```
+invite unconsumed              → create station, store key hash, return a new token
+invite consumed, key matches   → same station_id, mint and return a NEW token
+invite consumed, key differs   → 403 invalid_invite
+```
+
+Recovery is permitted only while `stations.last_heartbeat_at is null` **and** `now() - registered_at <= REGISTRATION_RECOVERY_WINDOW_S` (default 3600). **Both, not either.** A station that has heartbeat has a working token by definition; a station that never heartbeat but registered a month ago would otherwise leave its consumed invite live indefinitely, which is the thing the window exists to prevent. Requiring both is what stops a leaked invite from rotating credentials at will.
+
+*Amended by D-034*, which corrects an `or` here to an `and` — the two clauses were written as alternatives and described in the same paragraph as a single window, which are not the same rule — and which defines the separate path for a station past the window. This entry stands otherwise.
+
+The property this buys is that **`register` becomes idempotent from the client's side**, which is the actual requirement. Retrying is safe, no plaintext token is ever stored, and the invite is never consumed twice.
+
+*Rejected:* an operator-issued replacement invite. Zero implementation cost, but it leaves an orphaned station row per incident, needs a human in the loop for a failure mode caused by a dropped packet, and does not survive Phase 3's fifty simulated stations registering unattended.
+
+*Rejected:* a short-lived recovery secret returned alongside the token. It travels in the same response that was lost, so it does not address the stated failure — it moves it one level down and adds an endpoint.
+
+*Rejected:* making the field optional to keep the change additive. That leaves the platform with two registration paths, one recoverable and one not, and the unrecoverable one is the default a hurried implementer picks. Generating 32 random bytes is within reach of every station that can speak the protocol at all.
+
+**On the version.** A new *required* field is a major-version change under MSP §7. It is not treated as one here because between the 0.1 freeze on 2026-08-01 and this entry, not one endpoint had been implemented and no client existed to break — the specification was frozen by a decision log, not by a deployment. Recorded explicitly rather than glossed, because it is the kind of exemption that gets claimed twice if it is not written down as being claimed once.
+
+---
+
+## D-024 — A `401` does not mean re-register
+
+**2026-08-02 · accepted**
+
+MSP §6 said "a station that receives `401` re-registers". §3 says an invite is used once and never again. A station holding a revoked token has no invite to present, so the instruction was unfollowable.
+
+**`401` means stop, log, and surface to the operator.** The reference client does not re-register and does not retry with the same token. Recovery is the operator issuing a replacement invite, which the station presents together with **its existing `registration_key`**, rotating its credential rather than creating a second station row for the same physical installation.
+
+*The mechanism is D-034, not D-023.* This entry originally pointed at D-023's flow, which cannot serve it: a replacement invite is unconsumed, so D-023 reads it as a new registration and creates a duplicate station. D-034 binds the replacement invite to a `station_id` so it resolves to the right row.
+
+The client must not loop here. A station retrying a revoked token every thirty seconds against a publicly reachable endpoint is a denial of service the network inflicts on itself, and with fifty simulated stations it is a denial of service with a multiplier.
+
+---
+
+## D-025 — Clock offset sign, named once
+
+**2026-08-02 · accepted**
+
+```
+clock_offset = platform clock − station clock
+```
+
+This is already what MSP §4.2's estimator computes — `offset = server_time − (t_send + t_recv) / 2` — but the convention was never named, only implied by a formula. Naming it matters because the same quantity is written in five places: the client that estimates it, the column that stores it, the timing analysis that consumes it, the tests, and the report. A sign flip in any one of them is silent, survives review, and inverts a published figure.
+
+**A station whose clock runs fast reports a negative offset.** That sentence is the test case.
+
+`null` continues to mean unknown and is never `0.0` (D-016). `clock_uncertainty_s` is unsigned — it is a 1σ magnitude, not an interval.
+
+---
+
+## D-026 — Assignment delivery policy
+
+**2026-08-02 · accepted**
+
+MSP §4.2 defined the reconciliation table but not the delivery policy behind it, leaving six questions that would each have been answered differently by whoever wrote the endpoint first.
+
+| Question | Answer |
+|---|---|
+| How far ahead are assignments returned? | `start_at <= now + 2 h` |
+| Are held assignments redelivered? | **Yes**, while in-horizon and not yet `reported` |
+| How does a lost heartbeat response recover? | It does not need to — redelivery covers it |
+| More than 8 due? | ~~The 8 with the earliest `start_at`; the rest follow (D-007)~~ — **superseded by D-035**: more than 8 eligible is forbidden, not paginated |
+| When does an assignment expire? | `now > end_at` and state is `issued` or `held` |
+| When is it eligible for reissue? | Never in Phase 1 (D-022) |
+| Does Phase 2 add `revoked`? | Yes, with the scheduler — not now |
+
+*Amended by D-035.* The horizon above is stated as a bound on `start_at` alone, which excludes an assignment already under way and so contradicts the redelivery rule two rows above it. D-035 restates the eligibility predicate and resolves the cap.
+
+**Redelivery is the load-bearing choice.** It makes the heartbeat idempotent in the same way D-003 made the decline idempotent: a lost response is not lost work, because the next heartbeat thirty seconds later carries the same assignments. The alternative — deliver once, then track per-station delivery receipts — needs an acknowledgement the protocol does not have and a table to hold it, to solve a problem that redelivery solves for free. The client deduplicates by `assignment_id`, which it must do anyway.
+
+Two hours is roughly one and a quarter LEO orbits: far enough ahead that a station is never idle waiting for work, near enough that a station holding an assignment has current element sets for it, and small enough that eight slots are rarely the binding constraint.
+
+---
+
+## D-027 — `observation_id` is derived, not allocated
+
+**2026-08-02 · accepted**
+
+MSP §4.4's acknowledgement returns an `observation_id`. The table's key is `(assignment_id, revision, started_at)` (D-013, D-015) and carries no public identifier, so the acknowledgement had nothing to put in the field.
+
+```sql
+observation_id text generated always as (
+    'ob_' || substr(encode(sha256(convert_to(
+        assignment_id || ':' || revision::text, 'UTF8')), 'hex'), 1, 12)
+) stored
+```
+
+**Derived rather than allocated.** An idempotent retry — the queued-reconnection case of MSP §6 — must return the *same* `observation_id` as the original submission. A derived id has that property by construction; a random one requires reading the existing row back before answering, on the exact path D-015 optimised for writing nothing. It is also regenerable from a dataset snapshot, which `CLAUDE.md` rule 8 requires of every number in a report.
+
+`generated … stored` rather than computed in Python, so the relationship is enforced by the database and cannot drift between the ingest path and the public API, and so the column is indexable for the Stage 11 read endpoints. Twelve hex characters is 48 bits — collision-free across any observation volume this network will produce, and short enough to read aloud in a viva.
+
+*Rejected:* `ob_<assignment_id>_<revision>`. It is derived and stable too, but it publishes the internal key structure in a public identifier, so the format can never change without breaking clients that parsed it.
+
+---
+
+## D-028 — Heartbeat completeness and request size limits
+
+**2026-08-02 · accepted**
+
+Four gaps found while tracing MSP §4.2 against the `heartbeats` table.
+
+**`listening_mode` is stored.** MSP §4.2's listening block carries `mode`; the table stored the assignment, satellite and frequency and dropped it. `Registry.was_listening()` is the sole authority on what counts as a confirmed miss, and a station tuned to the right frequency running the wrong demodulator did not observe the pass. The column joins the existing all-or-nothing `heartbeat_listening_complete` CHECK — a partial listening block cannot support the assertion the block exists to make.
+
+**`simulated` is stored on `heartbeats`.** D-013 already ruled that the flag extends to heartbeats; the table did not have it. Copied from the station's registry record, never read from the payload.
+
+**The health object is capped at 4 KiB** serialised; above that the heartbeat is `malformed`. `health` is opaque diagnostic JSON stored verbatim, written every thirty seconds by every station. Fifty stations at an unbounded object size is a storage exhaustion with no attacker required — just one station with a verbose error array and a loop.
+
+**Request bodies are capped:** 64 KiB for `register`, `heartbeat` and `time`; 256 KiB for `observations`, which carries the Doppler array (D-032). Enforced as middleware, ahead of JSON parsing, so an oversized body is rejected before it is allocated.
+
+---
+
+## D-029 — O-1 resolved: products are metadata in MSP 0.x; transfer is a pre-signed PUT
+
+**2026-08-02 · accepted**
+
+Phases 1 and 2 store the `products` array verbatim as submitted — `kind`, `uri`, `sha256`, optional `frames` — in `observations.products_json`, exactly as D-018 routes around it. **No transfer mechanism is defined in MSP 0.x.** A station that has nowhere to put a product omits the array, which stays valid.
+
+The *direction* is settled now, because D-018 says the `products` table cannot be designed until it is: **pre-signed PUT to object storage**, not inline upload.
+
+Inline was the simpler option for a constrained client and is rejected on arithmetic. A waterfall PNG for a fifteen-minute pass is single-digit megabytes; base64 inflates it by a third; D-028 caps an observation body at 256 KiB. Raising the cap to fit a product would mean sizing every request buffer in the system for the largest artefact any station might ever produce, on a protocol whose first design constraint is a microcontroller with kilobytes of RAM. Pre-signed URLs keep the bulk transfer off the MSP path entirely, and a station that cannot do a plain HTTP PUT to a URL it was handed is a station that cannot speak MSP either.
+
+O-1 is closed. The `products` table is designed against this at Stage 19, when a receiver exists to produce a product.
+
+---
+
+## D-030 — O-2 resolved: polling, for all of MSP 0.x
+
+**2026-08-02 · accepted**
+
+Heartbeat polling. Confirmed rather than "leaning", and not revisited within the 0.x line.
+
+Most stations are behind NAT, and a push channel needs either an inbound port — which is the exact constraint SC-6 and the tunnel exist to work around — or a persistent outbound socket held open indefinitely, which a microcontroller with no TLS library and kilobytes of RAM cannot do. D-007's cap of 8 already assumes polling and would be meaningless without it.
+
+A thirty-second poll interval against an 8-to-15-minute pass is a delivery latency of at most one heartbeat on work that begins minutes later. There is no problem here for push to solve.
+
+---
+
+## D-031 — O-3 resolved: a declared horizon mask, kept distinct from the learned one
+
+**2026-08-02 · accepted**
+
+A capability may carry an optional azimuth-resolved obstruction it already knows about:
+
+```json
+"horizon_mask": [ { "az_deg": 0, "min_el_deg": 25 }, { "az_deg": 90, "min_el_deg": 8 } ]
+```
+
+Stored as `station_capabilities.horizon_mask_json jsonb not null default '[]'`. Optional and additive, so no client written against MSP 0.1 breaks.
+
+**Declared and learned never merge into one number.** The Phase 2 `horizon_profiles` table carries `source in ('declared', 'learned')`, and the scheduler takes `max(declared, learned)` per azimuth bin. A declaration therefore constrains scheduling immediately — which is the operator's legitimate need, they can see the building — but never overwrites a measurement and never appears in a learned profile's training data. That separation is what "without pre-empting the learned profile" has to mean; storing the declaration into the same column the model writes would make the model's own output an input to itself.
+
+The flat list is deliberately coarse. A station that knows its horizon to a degree is unusual; a station that knows there is a building to the north is normal.
+
+---
+
+## D-032 — O-4 resolved: `doppler_samples` capped at 512 by count
+
+**2026-08-02 · accepted**
+
+Capped by count. More than 512 samples in one observation is `malformed`.
+
+512 samples across a fifteen-minute pass is one every 1.75 seconds — well beyond what any receiver in this project produces, and beyond what is useful, since the Doppler curve is smooth on that timescale. At roughly 50 bytes per sample it is about 25 KiB, comfortably inside D-028's 256 KiB observation body.
+
+*Rejected:* transmitting a compressed curve fit. The samples are the **raw measurement**. Fitting at ingest bakes a model into the system of record, and the residual between the samples and any model is precisely what Stage 22's orbit-uncertainty report needs to look at. A curve fit also moves work onto the constrained client to save bytes that D-028's cap says we have.
+
+---
+
+## D-033 — `DATABASE_URL` is one value; the driver prefix is normalised, not configured
+
+**2026-08-02 · accepted**
+
+`deploy/docker-compose.yml` gave the `migrate` service `postgresql+psycopg://…` and the `api` service `postgresql://…` — the same variable name holding two different values, because SQLAlchemy needs the driver prefix and `psycopg.connect` rejects it. CI has one `DATABASE_URL` and therefore could serve only one of the two, which is why the CI job could not apply migrations before running the tests that require them.
+
+`meridian.config` normalises instead:
+
+```python
+def libpq_url(url: str) -> str:      # strips "+psycopg" — for psycopg.connect
+def sqlalchemy_url(url: str) -> str: # adds "+psycopg"   — for alembic
+```
+
+`deploy/migrations/env.py` imports `sqlalchemy_url` rather than rebuilding the URL from `POSTGRES_*` a second time. Alembic ships as a dependency of the `meridian` distribution, so the import direction is one that already exists.
+
+*Rejected:* two environment variables, `DATABASE_URL` and `ALEMBIC_DATABASE_URL`. Two names for one connection is how a staging database gets migrated while a production one is queried, and nothing ever detects it.
+
+---
+
+## D-034 — A replacement invite is bound to a station; recovery and rotation are different rules
+
+**2026-08-03 · accepted**
+
+D-024 sends a station that received `401` to "an operator-issued replacement invite presented with its existing `registration_key`", and says that rotates the credential through D-023. It cannot. D-023 defines two cases and this is neither:
+
+```
+invite unconsumed            → create a station
+invite consumed, key matches → recover that station
+```
+
+A replacement invite is **unconsumed**, and the register body carries no `station_id`. Following the specification as written creates a second station row for one physical installation — precisely the outcome D-024 says it exists to avoid. The recovery path also cannot serve it: a station that has been running long enough to have its token revoked has heartbeat, and has been registered for longer than the recovery window.
+
+**`invite_tokens` gains `issued_for_station_id`, nullable.** An unbound invite (`null`) admits a new station, exactly as before. A **bound** invite names an existing station and admits only that one:
+
+```
+bound invite, key matches the named station → same station_id, mint a NEW token
+bound invite, key differs                   → 403 invalid_invite
+```
+
+A bound invite is exempt from D-023's recovery window. That is not a loosening: the window's whole purpose is to require authorisation for a rotation that is not a dropped-packet retry, and an operator issuing an invite against a named station *is* that authorisation, given explicitly instead of inferred from a clock.
+
+**The two flows stay separate because they answer different questions.** D-023 recovers from a lost response, unattended, within an hour, and must work for fifty simulated stations registering at once with no human present. D-034 rotates a compromised or revoked credential, is rare, and should require a human — the operator has to decide the station is who it claims to be. Collapsing them into one rule is what produced the contradiction: a single window cannot be both short enough to contain a dropped packet and long enough to cover a revocation six months later.
+
+`meridian invite create --for-station st_7fa3c1` issues one. The column is a foreign key to `stations`, so an invite naming a station that does not exist cannot be created.
+
+*Rejected:* a separate `POST /msp/v0/rotate` endpoint. It is the cleaner factoring on paper, but MSP has four endpoints on purpose (§8) and this adds a fifth that every conforming implementation must carry to handle an event most stations never see. Registration already accepts an invite and a key and already returns a token; a bound invite reuses that shape without adding a line to a microcontroller client.
+
+*Rejected:* letting the station send its `station_id` in the register body and matching on `registration_key` alone. That makes the key a permanent password rather than a one-time recovery secret, and a key leaked once is then a credential rotation available to anyone forever, with no operator in the loop and nothing to revoke.
+
+---
+
+## D-035 — Assignment delivery eligibility, and why the cap is an invariant rather than a queue
+
+**2026-08-03 · accepted**
+
+Two defects in D-026's delivery policy, both of which would have shipped as written.
+
+**The horizon excluded work in progress.** D-026 bounds the response by `start_at within [now, now + 2 h]` while promising redelivery "until it is reported or its window has passed". Those disagree the moment a window opens: at `start_at + 1 s` the assignment fails the `start_at >= now` test and vanishes from the response, so a station that rebooted mid-pass is told it has nothing to do. The predicate is now:
+
+```
+state in ('issued', 'held')  and  end_at >= now  and  start_at <= now + 2 h
+```
+
+Bounded below by `end_at` and above by `start_at`. The two-hour reasoning in D-026 is unchanged; only which column it applies to.
+
+**The cap of 8 starves.** D-007 caps the response at 8 and D-026 says "the rest follow" on subsequent heartbeats. That is true of a queue that drains, and false here: D-026 also redelivers held assignments, so the earliest 8 are returned again on every heartbeat and a ninth is never in the response at all. It is not delayed by 30 seconds; it is delivered only if one of the 8 ahead of it disappears first, which for non-overlapping passes usually happens and for overlapping ones may not. "The rest follow" was inherited from a deliver-once model that D-026 had already replaced.
+
+**More than 8 eligible for one station is forbidden, not paginated.** The platform logs a warning and delivers the earliest 8; the invariant belongs to whoever creates assignments — a human in Phase 1, the scheduler in Phase 2.
+
+This is the honest fix for Phase 1. Real pagination needs per-assignment delivery state, which is the acknowledgement table D-026 explicitly declined to build, to solve a problem Phase 1 cannot yet have: one station, a two-hour horizon, and 8–15-minute passes give at most a handful of eligible assignments, and nothing in Phase 1 creates them automatically. Building the machinery now would mean designing it against a scheduler that does not exist. Recording it as an invariant with a warning means the day it is violated, the log says so.
+
+*Rejected:* raising the cap. 8 is a buffer size a microcontroller commits to at compile time (D-007). Any finite cap has this property; raising it moves the starvation point without removing it.
+
+*Rejected:* `order by (last_delivered_at nulls first, start_at)` with a delivery timestamp on `assignments`. It does fix starvation, and it is where Phase 2 should go. It is one column and one write per heartbeat per assignment — a write on the hot path, against a table Phase 1 has no automated writer for, to prevent a state Phase 1 cannot reach. Deferred with the scheduler, not rejected on the merits.
+
+---
+
 ## Open
 
-Carried from `MSP-SPEC.md` §9, to be resolved before the MSP 0.1 freeze.
+All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 
-| | Question | Note |
+| | Question | Resolution |
 |---|---|---|
-| **O-1** | Product upload inline or pre-signed URL? | Blocks the `products` table design — resolve these two together, not separately |
-| **O-2** | Push assignments or is heartbeat polling sufficient? | Polling works behind NAT, which most stations are. Leaning polling; D-007 assumes it |
-| **O-3** | How does a station report a horizon obstruction it already knows about, without pre-empting the learned profile? | |
-| **O-4** | Cap `doppler_samples` by count, or transmit as a compressed curve fit? | |
+| **O-1** | Product upload inline or pre-signed URL? | D-029 — metadata only in 0.x; pre-signed PUT when the table lands |
+| **O-2** | Push assignments or is heartbeat polling sufficient? | D-030 — polling, for all of 0.x |
+| **O-3** | How does a station report a horizon obstruction it already knows about? | D-031 — optional `horizon_mask`, kept distinct from the learned profile |
+| **O-4** | Cap `doppler_samples` by count, or transmit a compressed curve fit? | D-032 — capped at 512 by count |
+
+**Still unrecorded.** `GIT-WORKFLOW.md` Rule 10 asks the team to decide whether AI-assisted commits are marked, and to record the answer here. That is a team policy question rather than a technical one and is not settled by this pass. It still needs an entry.
 
 ---
 
@@ -194,6 +659,52 @@ Carried from `MSP-SPEC.md` §9, to be resolved before the MSP 0.1 freeze.
 | D-010 `outcome` enum pinned to MSP §4.4 | `DATA-MODEL.md` |
 | D-011 SC-6 restored | `EVALUATION.md` §1 |
 
-**The specification is still a draft.** The joint review by all three team members that `MSP-SPEC.md` requires before Phase 1 implementation has not taken place. These decisions were prepared *for* that review, not ratified by it — the document becomes 0.1 final when the review signs it off, and any of this can change before then.
+**Landed 2026-08-01**, preparing Phase 1 implementation.
 
-O-1 through O-4 in `MSP-SPEC.md` §9 remain open.
+| Decision | Applied to |
+|---|---|
+| D-012 three distributions, `src/` layout | — (tooling; layout in the docs is unchanged) |
+| D-013 keys, enums, partitioning, `liveness`, `simulated` coverage | `DATA-MODEL.md` |
+| D-014 `held_assignments` array column | `DATA-MODEL.md` |
+| D-015 append-only observations, `supersedes_id` | `DATA-MODEL.md`, `MSP-SPEC.md` §6 |
+| D-016 MSP 0.1 amendments | `MSP-SPEC.md` §4.2, §4.4, §7, §8 |
+| D-017 opaque hashed tokens | `DATA-MODEL.md`, `deploy/.env.example` |
+| D-018 Phase 1 table subset | `DATA-MODEL.md` |
+| D-019 raw SQL under Alembic | — (tooling) |
+| D-020 `invite_tokens` table | `DATA-MODEL.md`, `deploy/.env.example` |
+| D-021 assignment window columns, `satellite_transmitters` | `DATA-MODEL.md` |
+| D-022 no reissue in Phase 1 | `DATA-MODEL.md` |
+
+**Landed 2026-08-02**, closing the Stage 0 specification gaps in `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+
+| Decision | Applied to |
+|---|---|
+| D-023 registration key and credential rotation | `MSP-SPEC.md` §4.1, §6; `0002_stations.sql`; `deploy/.env.example` |
+| D-024 `401` does not mean re-register | `MSP-SPEC.md` §6 |
+| D-025 clock offset sign named | `MSP-SPEC.md` §4.2; `tests/unit/test_clock_offset_convention.py` |
+| D-026 assignment delivery policy | `MSP-SPEC.md` §4.2 |
+| D-027 derived `observation_id` | `MSP-SPEC.md` §4.4; `DATA-MODEL.md`; `0005_observations.sql` |
+| D-028 heartbeat completeness and size limits | `MSP-SPEC.md` §4.2, §6; `DATA-MODEL.md`; `0006_heartbeats.sql` |
+| D-029 O-1 products transfer | `MSP-SPEC.md` §4.4, §9 |
+| D-030 O-2 polling | `MSP-SPEC.md` §9 |
+| D-031 O-3 declared horizon mask | `MSP-SPEC.md` §4.1, §9; `DATA-MODEL.md`; `0002_stations.sql` |
+| D-032 O-4 Doppler sample cap | `MSP-SPEC.md` §4.4, §9 |
+| D-033 one `DATABASE_URL` | `meridian/config.py`, `deploy/migrations/env.py`, `docker-compose.yml`, CI |
+
+**Landed 2026-08-03**, closing the contradictions a review found in the Stage 0 record.
+
+| Decision | Applied to |
+|---|---|
+| D-034 bound replacement invites | `MSP-SPEC.md` §4.1, §6; `DATA-MODEL.md`; `0002_stations.sql` |
+| D-035 delivery eligibility and the cap | `MSP-SPEC.md` §4.2 |
+| D-023 amendment — `and`, not `or` | `MSP-SPEC.md` §4.1; `DATA-MODEL.md`; `meridian/config.py`; `deploy/.env.example` |
+| D-024 amendment — points at D-034 | `MSP-SPEC.md` §6 |
+| D-026 amendment — superseded rows marked | — (this file) |
+
+**Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
+
+**On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
+
+This is a deliberate trade — a written decision log is more durable evidence than a meeting nobody minuted, and Phase 1 has a hard week-15 downstream gate. It is recorded here rather than quietly dropped, because the requirement is written into the specification and anyone reading the repository can see it.
+
+**On amending accepted entries.** D-023, D-024 and D-026 are amended above rather than rewritten. An entry records what was decided and why at the time it was decided; editing that away leaves a log that has never been wrong, which is not evidence of anything. The amendment notes say what the original got wrong and point at the entry that supersedes it, so a reader following a cross-reference from the specification arrives at the current rule either way.

@@ -122,9 +122,20 @@ timing_error = actual_first_detection - predicted_acquisition_of_signal
 
 Regress the magnitude of this error against element-set age at the time of the pass, segmented by orbital regime.
 
+**The two terms are on different clocks and must be reconciled before they are subtracted.** `actual_first_detection` is `observations.first_detection_at`, stamped by the *station*. `predicted_acquisition_of_signal` is computed by the *platform*. The convention is fixed by `docs/DECISIONS.md` D-025:
+
+```
+clock_offset = platform clock − station clock
+
+corrected_first_detection = first_detection_at + clock_offset_s
+timing_error = corrected_first_detection − predicted_acquisition_of_signal
+```
+
+A station whose clock runs fast reports a negative `clock_offset_s`, so the correction moves its timestamp earlier. Getting this sign wrong does not raise anything: every number keeps a plausible magnitude and the published relationship between timing error and element-set age simply inverts. That is why the convention is named in one place and referenced from the others rather than restated.
+
 **Why this is the primary method:** it needs only an accurate clock. It is robust to receiver oscillator drift, needs no frequency calibration, and directly demonstrates the effect we claim. It works on every observation, including from microcontroller stations.
 
-Requirement: stations synchronise time via NTP and report clock offset in heartbeats. Timing error smaller than the reported clock uncertainty is discarded.
+Requirement: stations synchronise time via NTP and report `clock_offset_s` and `clock_uncertainty_s` in heartbeats (MSP §4.2). Timing error smaller than the reported clock uncertainty is discarded. An observation whose station reported `clock_offset_s: null` — meaning unknown, never `0.0` — is excluded from this measurement rather than assumed synchronised.
 
 ### 6.2 Secondary — Doppler orbit determination
 
