@@ -1,0 +1,19 @@
+/*
+  Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), browsing-topics=()
+  Cross-Origin-Opener-Policy: same-origin
+
+# No 'unsafe-inline' anywhere, which is why index.html carries no inline
+# <style>, <script> or style="" attribute. The page's claim to make no
+# third-party requests is enforced here rather than asserted.
+
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/*.svg
+  Cache-Control: public, max-age=604800
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate

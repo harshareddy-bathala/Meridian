@@ -67,7 +67,18 @@ We use Conventional Commits. The format is:
 
 ### Scopes
 
-Use the module name: `orbit`, `prediction`, `scheduler`, `registry`, `observations`, `reliability`, `api`, `client`, `simulator`, `dashboard`, `firmware`, `ingest`, `deploy`, `docs`, `msp`.
+Use the module name: `orbit`, `prediction`, `scheduler`, `registry`, `observations`, `reliability`, `api`, `client`, `simulator`, `dashboard`, `site`, `firmware`, `ingest`, `deploy`, `docs`, `msp`, `repo`.
+
+Two of these are easy to confuse:
+
+| Scope | Use for |
+|---|---|
+| `site` | The static page at **meridian.org.in** — `site/`. Marketing and description, no live data, deployed to Cloudflare Pages. |
+| `dashboard` | The live dashboard on `dash.meridian.org.in` — stations, passes, reliability. Reads the observation store, tunnelled from the station. |
+
+They are separate surfaces on purpose; see D-036. A change to the public page is `site`, never `dashboard`.
+
+**This list is enforced.** The `conventions` job in CI checks every commit subject on a PR against it, so a scope that is not here fails the build rather than being quietly accepted.
 
 ### Subject line
 
@@ -83,6 +94,7 @@ fix(registry): reject heartbeats with a stale token instead of 500ing
 test(orbit): add TEME to topocentric fixtures from known ISS passes
 spec(msp): add held_assignments to heartbeat per D-003
 docs(evaluation): record completeness-ratio threshold and rationale
+feat(site): draw the orbit ground track on the landing page globe
 ```
 
 **Bad:**

@@ -59,6 +59,8 @@ exclude = ["*.md"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]
+# This standalone image generator reports the files it writes to the operator.
+"site/tools/make-images.py" = ["T201"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
 # The ban below is global; this is the one module exempt from it, so the boundary
 # is checked by CI rather than remembered by a reviewer.

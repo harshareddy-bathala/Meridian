@@ -628,6 +628,33 @@ This is the honest fix for Phase 1. Real pagination needs per-assignment deliver
 
 ---
 
+## D-036 — The public site and the dashboard are two surfaces, not one
+
+**2026-08-04 · accepted**
+
+`meridian.org.in` was registered. The obvious move is to point it at the platform and call that the public site, which would quietly conflate two things with different jobs and different availability requirements.
+
+**Decision.** Two surfaces, deployed independently:
+
+| Surface | Content | Serves from | Source |
+|---|---|---|---|
+| `meridian.org.in` | a static page describing the project | Cloudflare Pages | `site/` |
+| `dash.meridian.org.in` | the live dashboard — stations, passes, reliability | cloudflared tunnel → the Pi | `dashboard/` |
+
+The separation is about what each is allowed to depend on. The dashboard is a view onto the observation store and is therefore only up when the platform is up — that is correct, and SC-6 is stated against it: "a virtual station is visible on the public site from outside the college network" is satisfied by the tunnelled dashboard, not by `site/`. The description of the project has no such dependency and must not acquire one. A page that explains what Meridian is should not go dark because a Raspberry Pi on a roof lost power, and during Phase 1 that Pi does not exist at all.
+
+`site/` is therefore plain HTML, CSS and vanilla JS with no build step and no npm — the whole directory is what gets served. This is deliberately not a stack decision. `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` asks for the dashboard's front end to be chosen and recorded; that question stays open, and nothing here constrains the answer. Choosing a framework for a page with one heading and one link would have prejudged it.
+
+The zone is on Cloudflare rather than the registrar because the apex is needed for Pages and `dash.` is needed for the tunnel that `deploy/docker-compose.yml` already defines. One zone, both surfaces.
+
+*Rejected:* serving the landing page from FastAPI as a static route. One deployment, one domain, no Pages account — and it makes the project's public description a runtime dependency of the station being alive. That trades the independence the project claims for the convenience of one fewer moving part.
+
+*Rejected:* GitHub Pages. Free and adequate for the static page, but it cannot host the tunnel subdomains, so the zone ends up split across two providers with the apex on the weaker one.
+
+*Rejected:* `www.meridian.org.in` as canonical. The apex is what people will type and what goes in the report. `www` redirects to it.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

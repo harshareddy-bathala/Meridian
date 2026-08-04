@@ -39,6 +39,9 @@ Libraries used as dependencies rather than reimplemented. Not attribution in the
 | SatDump | GPL-3.0 | Decoding (invoked as a separate process) |
 | FastAPI, SQLAlchemy, scikit-learn, NumPy, SciPy | MIT / BSD | Platform and modelling |
 | Prometheus, Grafana | Apache-2.0 / AGPL-3.0 | Metrics and dashboards |
+| IBM Plex Sans, IBM Plex Mono | SIL OFL-1.1 | Typography on the public site |
+
+**Note on the fonts.** IBM Plex is the one dependency **vendored into this repository** rather than installed: three latin-subset `.woff2` files in `site/fonts/`, unmodified, taken from the `@ibm/plex-sans` and `@ibm/plex-mono` distributions on 2026-08-04. The site self-hosts them because it makes no third-party requests at runtime — a property its `Content-Security-Policy` enforces rather than asserts, and one a font CDN would break. OFL-1.1 permits redistribution provided the licence travels with the files and the Reserved Font Name is not applied to modified versions; `site/fonts/OFL.txt` ships alongside them and the files are bit-identical to upstream. No font was renamed, subsetted further or otherwise altered by us.
 
 **Note on process boundaries.** GPL-licensed decoders are invoked as separate processes over defined interfaces, not linked into our code. This keeps our licensing decision independent.
 

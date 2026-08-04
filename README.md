@@ -18,6 +18,8 @@ Done when a virtual station is visible on the public site from outside the colle
 
 Not yet started: prediction models, scheduler, reliability layer, hardware.
 
+[**meridian.org.in**](https://meridian.org.in) — a static page describing the project, in `site/`. It is deliberately not the dashboard: the exit criterion above is met by the live dashboard on `dash.meridian.org.in`, tunnelled from the station, which is a separate surface with a separate uptime story. See D-036.
+
 ---
 
 ## What's here
@@ -34,6 +36,7 @@ Not yet started: prediction models, scheduler, reliability layer, hardware.
 | `docs/GIT-WORKFLOW.md` | Commit, branch and review rules |
 | `CLAUDE.md` | Context for AI coding assistants |
 | `ATTRIBUTION.md` | Log of ideas read from other projects |
+| `site/` | The static page at `meridian.org.in`. No build step — the directory is what gets served. |
 
 ---
 

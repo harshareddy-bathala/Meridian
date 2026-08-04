@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Meridian</title>
+  <!-- The globe's limb and one meridian in orthographic projection: an ellipse
+       whose vertical radius is the sphere's and whose horizontal radius is its
+       foreshortening. Same geometry the page's canvas draws.
+       Two strokes, no fill, no accent — it has to survive 16px. -->
+  <style>
+    :root { color: #08090D }
+    @media (prefers-color-scheme: dark) { :root { color: #E8E6E1 } }
+  </style>
+  <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="4"/>
+  <path d="M 32 10 A 10.5 22 0 0 0 32 54" fill="none" stroke="currentColor"
+        stroke-width="3.5" stroke-linecap="round"/>
+</svg>
