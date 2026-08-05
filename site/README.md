@@ -37,7 +37,11 @@ Above **1180px**, `.doc` becomes a three-track grid — prose, an elastic spacer
 
 **`position: sticky` works only because the body is `overflow-x: clip`, not `hidden`.** `hidden` would make the body a scroll container and pin the rail in place with no error anywhere. If that property is ever changed, the rail stops sticking.
 
-**The rail canvas draws exactly once** — on load, and again only on `themechange` and `resize`. No `requestAnimationFrame`. That is what keeps TBT at 0 ms and the four document pages at Performance 100; do not turn it into a loop without re-running Lighthouse. It skips drawing entirely when `offsetParent` is null, which is how it stays out of the way below the breakpoint.
+**Below 1180px the rail costs nothing at all.** `orbit.js` is a **dynamic** `import()` behind `matchMedia('(min-width: 1180px)')`, together with the settled-moment search and the scroll-spy. A phone loading a document page makes zero requests for it. It was a static import with a `modulepreload` hint, so every phone fetched and parsed 12 KB and ran a 2 400-iteration search to feed a canvas that `display: none` was going to hide — the `offsetParent` guard only ever stopped the drawing. Deferred, not deleted: crossing the breakpoint activates both.
+
+**Never add `<link rel="modulepreload" href="/orbit.js">` to a document page.** It defeats the whole arrangement. `verify_site.py` fails the build if it reappears there, and fails if it goes missing from `index.html`, where `main.js` imports statically and genuinely needs it.
+
+**The rail canvas draws exactly once** — on load, and again only on `themechange` and `resize`. No `requestAnimationFrame`. That is what keeps TBT at 0 ms and the four document pages at Performance 100; do not turn it into a loop without re-running Lighthouse.
 
 The moment it draws is *searched*, not hard-coded: the longest visible link over one globe revolution, with the satellite above twice the horizon mask and both endpoints on the near hemisphere. The comment in `rail.js` lists the three obvious alternatives and what each of them draws wrong.
 
@@ -122,7 +126,17 @@ Two behaviours that are requirements, not niceties:
 - `prefers-reduced-motion: reduce` renders one static settled frame and never starts the loop.
 - Click, tap, `Escape` or any key skips the intro.
 
-**The front page has no Lighthouse Performance score, on purpose.** Content is at `opacity: 0` until 4200 ms, so no LCP candidate is recorded inside Lighthouse's trace window and the category returns null rather than a low number. This is D-038, and it is a decision, not a regression — do not "fix" it without reading that entry. The four subpages score 100 in all four categories.
+### The intro is opt-in, and that is the important part
+
+`theme.js` adds `intro` to the root element before the first paint, and takes it away again after 900 ms unless `main.js` has added `intro-ready` from its first painted frame. **The 4.2 s delay only applies when the globe is actually running.**
+
+It used to be unconditional, with JS able only to cancel it — so a `main.js` that was blocked, stale or broken produced the full blank wait *and* no globe. Test the failure, not the success: block `/main.js` in DevTools and reload, then block `/orbit.js`. Content must be immediate in both cases. If you change any of this, that is the check that matters.
+
+The gate is keyed off `data-intro` on `<html>`, which only the home page carries. `theme.js` is not a module and must never become one — a module defers, and deferring it reintroduces both the theme flash and this gate arriving after paint.
+
+**`visibility: hidden` is in the reveal keyframe on purpose.** `opacity: 0` leaves an element hit-tested, focusable and in the accessibility tree, so the invisible header and links responded to hover and click for the whole intro. With `fill-mode: both` the `from` state holds through the delay and `visibility` steps to visible on the animation's first frame, so it costs nothing visually. Do not remove it.
+
+**On the front page's Lighthouse Performance score.** It reports 100. **That is not a speed result and must not be quoted as one.** Real LCP, measured with a `PerformanceObserver`, is **4 400 ms** — the `.lede`, exactly as designed. Lighthouse's simulator models when the element's resources are ready and does not model an animation delay, so it returns 0.4 s. FCP, which is real, is 108 ms and comes from the canvas. D-038 recorded this as null; D-041 explains why the number appeared and why it means nothing. The four subpages score 100 in all four categories on desktop and 99 on mobile, and those are real.
 
 ## Regenerating the images
 
@@ -142,6 +156,26 @@ The mark is drawn by one `mark()` function shared by every output, built from th
 `@view-transition { navigation: auto; }` in `style.css`. Cross-document transitions need **both** pages to opt in; every page loads this stylesheet, so every page does. Chrome and Edge cross-fade; Firefox and Safari navigate normally, which is what the site did before and needs no fallback.
 
 Reduced motion cancels it on the pseudo-elements, not with `@view-transition { navigation: none }` inside the media query. The nested form is newer and less certainly supported; the pseudo-element form is unambiguously valid. Confirmed by reading the parsed `CSSViewTransitionRule` back out of `document.styleSheets` rather than by assuming the at-rule survived parsing — an unrecognised at-rule is dropped silently.
+
+## Three Cloudflare settings that edit this site
+
+The repository is not the last word on what visitors receive. Three dashboard settings rewrite it, and all three have caused a real bug. Check them after any Cloudflare change:
+
+| Setting | Must be | Why |
+|---|---|---|
+| Caching → Configuration → **Browser Cache TTL** | `Respect Existing Headers` | At its default it overrode `_headers` and served CSS and JS with `max-age=14400` while HTML stayed at `max-age=0`. Filenames are not fingerprinted, so every deploy opened a **four-hour window where returning visitors ran new HTML against old CSS** — which renders every element added since the last release as an unstyled browser default. That is the "broken blue links" bug, and no amount of CSS fixes it. |
+| Scrape Shield → **Email Address Obfuscation** | Off | Rewrites `mailto:` into `/cdn-cgi/l/email-protection#…`, shows `[email protected]`, and needs an injected script to decode. Blocked script, permanently hidden address. |
+| **Web Analytics** | Off | Injects `static.cloudflareinsights.com/beacon.min.js`, which the CSP blocks. Console error on every load, no analytics collected. Do not "fix" it by adding the host to `script-src`. |
+| Speed → Optimization → **Rocket Loader** | Off | Rewrites script tags and would break the ES modules outright. Currently off; check it stays that way. |
+
+```
+curl -sI https://meridian.org.in/style.css | grep -i cache-control   # max-age=0
+curl -s  https://meridian.org.in/about/ | grep -c cdn-cgi            # 0
+```
+
+and load any page with the console open — it must be clean.
+
+**Purge Everything after each deploy** until the TTL setting is confirmed.
 
 ## Deploying
 

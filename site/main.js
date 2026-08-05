@@ -55,14 +55,42 @@ let nextPassAt = -Infinity;
 
 /* ------------------------------------------------------------------ canvas -- */
 
+const root = document.documentElement;
 const canvas = document.getElementById('scene');
-const ctx = canvas.getContext('2d', { alpha: false });
+
+/* getContext can return null — a browser with canvas disabled, a hardened
+   privacy mode, a device out of memory. Reading .setTransform off null throws
+   at module scope and takes the whole file with it, which used to leave the
+   page mid-intro with nothing to finish it. */
+const ctx = canvas && canvas.getContext ? canvas.getContext('2d', { alpha: false }) : null;
+
 let W = 0, H = 0;
+
+/* Once the first frame is on screen, the intro is real and the gate in
+   theme.js can stand down. Until this fires, that gate is on a 900 ms fuse. */
+let painted = false;
+function markPainted() {
+  if (painted) return;
+  painted = true;
+  root.classList.add('intro-ready');
+}
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);   // capped at 2
-  W = window.innerWidth;
-  H = window.innerHeight;
+
+  /* Measure the canvas, not the window.
+     #scene is position: fixed; inset: 0, so CSS sizes it to the *layout*
+     viewport. window.innerHeight is the *visual* viewport. On a phone those
+     differ by the height of the browser chrome, so sizing the backing store
+     from the window built a scene for ~660 CSS px and let CSS stretch it
+     across ~780 — about 18% of vertical distortion — while layout()'s H * 0.21
+     term recomputed the radius from the wrong number every time the URL bar
+     slid in or out. That is the globe that "becomes small". The element's own
+     box is the thing being painted into, so it is the thing to ask. */
+  const box = canvas.getBoundingClientRect();
+  W = Math.round(box.width)  || window.innerWidth;
+  H = Math.round(box.height) || window.innerHeight;
+
   canvas.width  = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -266,6 +294,7 @@ function draw(t) {
   drawStationMarker(sx, sy, aMarker, !hidden(here));
 
   if (!introDone && t > SETTLE_MS + 1200) markIntroDone();
+  markPainted();
 }
 
 /* -------------------------------------------------------------------- loop -- */
@@ -307,12 +336,28 @@ function stop() {
 /* Click, tap, Escape or any key jumps to the settled state. Modifier keys on
    their own are ignored: holding Shift to type, or Alt to reach a menu, is not
    a request to skip anything. */
+/* A tap that skips the intro must not also press whatever it revealed.
+ *
+ * skip() runs on pointerdown; the click that completes the same gesture lands
+ * after the content has become visible, so without this a single tap during
+ * the intro could skip it *and* follow a link. Armed only by a pointer skip,
+ * fired at most once, and in the capture phase so it runs before the anchor. */
+let swallowNextClick = false;
+
+window.addEventListener('click', (event) => {
+  if (!swallowNextClick) return;
+  swallowNextClick = false;
+  event.preventDefault();
+  event.stopPropagation();
+}, { capture: true });
+
 function skip(event) {
   if (event && event.type === 'keydown') {
     const k = event.key;
     if (k === 'Shift' || k === 'Control' || k === 'Alt' || k === 'Meta') return;
   }
   if (clock >= SETTLE_MS) return;
+  if (event && event.type === 'pointerdown') swallowNextClick = true;
   clock = SETTLE_MS;
   markIntroDone();
   draw(clock);
@@ -329,24 +374,50 @@ function applyMotionPreference() {
   }
 }
 
-window.addEventListener('resize', resize, { passive: true });
-window.addEventListener('keydown', skip);
-window.addEventListener('pointerdown', skip, { passive: true });
-reducedMotion.addEventListener('change', applyMotionPreference);
+function bind() {
+  window.addEventListener('resize', resize, { passive: true });
 
-/* theme.js dispatches this after it has swapped data-theme, so the computed
-   values are already the new theme's by the time this reads them. Redrawn
-   immediately rather than waiting for the next frame, because under reduced
-   motion there is no next frame. */
-document.addEventListener('themechange', () => {
-  COLOUR = readPalette();
-  draw(clock);
-});
+  /* Mobile browsers do not agree on which of these fires when the URL bar
+     slides. Chrome on Android often changes the visual viewport without a
+     window resize; iOS Safari does the reverse on rotation. Listening to both
+     and letting resize() re-measure is cheaper than guessing. */
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resize, { passive: true });
+  }
 
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) stop();
-  else if (!reducedMotion.matches) start();
-});
+  window.addEventListener('keydown', skip);
+  window.addEventListener('pointerdown', skip, { passive: true });
+  reducedMotion.addEventListener('change', applyMotionPreference);
 
-resize();
-applyMotionPreference();
+  /* theme.js dispatches this after it has swapped data-theme, so the computed
+     values are already the new theme's by the time this reads them. Redrawn
+     immediately rather than waiting for the next frame, because under reduced
+     motion there is no next frame. */
+  document.addEventListener('themechange', () => {
+    COLOUR = readPalette();
+    draw(clock);
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stop();
+    else if (!reducedMotion.matches) start();
+  });
+
+  resize();
+  applyMotionPreference();
+}
+
+/* The intro is decoration. Nothing below is allowed to cost anyone the page.
+   If there is no context, or anything here throws, drop the gate theme.js put
+   up and let the content through — the visitor loses a globe, not a site. */
+if (!ctx) {
+  root.classList.remove('intro');
+} else {
+  try {
+    bind();
+  } catch (error) {
+    root.classList.remove('intro');
+    stop();
+    console.error('Meridian: intro disabled —', error);
+  }
+}

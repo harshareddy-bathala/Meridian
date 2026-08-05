@@ -13,15 +13,38 @@
  * 2. Nothing here is required to read the page. The contents links are plain
  *    anchors and work with this file blocked; the canvas is decorative and
  *    aria-hidden. This only ever adds.
+ *
+ * 3. Below 1180px it costs nothing. Both features are hidden there — the
+ *    canvas by display: none, the contents highlight by the list having
+ *    scrolled off the top of the page — so neither is set up. The orbit maths
+ *    is 12 KB and is fetched by dynamic import only once the rail is real.
+ *    It used to be a static import with a modulepreload hint, so every phone
+ *    downloaded and parsed it, then ran a 2400-iteration search, to feed a
+ *    canvas it was never going to show. See D-041.
  */
 
-import {
-  TAU, DEG, STATION, STATION_VEC, HORIZON_MASK,
-  readPalette, rgba,
-  makeProjection, hidden, GRATICULE,
-  spinAt, satAt, elevation, SATS,
-  orbitPath, strokeLines,
-} from './orbit.js';
+/* The rail's breakpoint, and the same number as in style.css. The two have to
+   agree: this decides whether the work happens, that decides whether anyone
+   would see it. */
+const WIDE = window.matchMedia('(min-width: 1180px)');
+
+/* Bound once ./orbit.js has been imported, which is why these are `let` and
+   not an import list. Everything below reads them only from inside a function
+   that cannot run before loadOrbit() has resolved. */
+let STATION, STATION_VEC, HORIZON_MASK, readPalette, rgba, makeProjection,
+    hidden, GRATICULE, spinAt, satAt, elevation, SATS, orbitPath, strokeLines;
+
+const TAU = Math.PI * 2;
+
+async function loadOrbit() {
+  ({
+    STATION, STATION_VEC, HORIZON_MASK,
+    readPalette, rgba,
+    makeProjection, hidden, GRATICULE,
+    spinAt, satAt, elevation, SATS,
+    orbitPath, strokeLines,
+  } = await import('./orbit.js'));
+}
 
 /* ---------------------------------------------------------------- contents --
  * Highlights the section currently being read. The observer fires on the
@@ -77,8 +100,12 @@ function contents() {
  */
 
 const SCENE_PX = 168;          // CSS pixels; the panel is 15.5rem at most
-const CAM_LAT = 18 * DEG;      // the home page's settled camera
-const CAM_LON_OFFSET = 25 * DEG;
+
+/* Written out rather than taken from orbit.js, so the camera constants do not
+   depend on a module that may not have loaded yet. */
+const DEG_TO_RAD = Math.PI / 180;
+const CAM_LAT = 18 * DEG_TO_RAD;        // the home page's settled camera
+const CAM_LON_OFFSET = 25 * DEG_TO_RAD;
 
 /* The moment to draw. Searched, not chosen — the link line is the whole point
  * of the picture and three obvious ways of picking a time all produce a bad
@@ -98,7 +125,8 @@ const CAM_LON_OFFSET = 25 * DEG;
  * carry the legend that would otherwise explain the colour.
  *
  * Done in normalised units, so the answer does not depend on the canvas size.
- * About 2400 iterations, once, at module load.
+ * About 2400 iterations, once — and now only on a viewport wide enough to show
+ * the result, which is the point of the change in D-041.
  */
 function findSettledMoment() {
   let bestT = 0, bestLen = -1;
@@ -119,7 +147,9 @@ function findSettledMoment() {
   }
   return bestT;
 }
-const T = findSettledMoment();
+
+/* Set by activate(), once the orbit module is in hand. */
+let T = 0;
 
 function drawScene(canvas) {
   /* display:none below the rail's breakpoint. Nothing to draw, and
@@ -192,22 +222,49 @@ function drawScene(canvas) {
   ctx.globalAlpha = 1;
 }
 
-/* -------------------------------------------------------------------- init -- */
+/* -------------------------------------------------------------------- init --
+ * Nothing runs until the rail is actually on screen. A phone loading a
+ * document page fetches this file, evaluates the definitions above, finds the
+ * viewport too narrow and stops — no orbit.js request, no search, no observer.
+ *
+ * Deferred, not deleted: a desktop window dragged across the breakpoint, or a
+ * tablet rotated into landscape, gets both on the way past.
+ */
 
-contents();
+let started = false;
 
-const scene = document.querySelector('.rail-scene');
-if (scene) {
+async function activate() {
+  if (started || !WIDE.matches) return;
+  started = true;
+
+  contents();
+
+  const scene = document.querySelector('.rail-scene');
+  if (!scene || !scene.getContext) return;
+
+  try {
+    await loadOrbit();
+  } catch (error) {
+    /* A decorative canvas is not worth a broken page. The contents list above
+       is already working and does not depend on this. */
+    console.error('Meridian: rail scene unavailable —', error);
+    return;
+  }
+
+  T = findSettledMoment();
+
   const redraw = () => drawScene(scene);
   redraw();
   document.addEventListener('themechange', redraw);
 
-  /* Only the width matters, and it changes at the rail's breakpoint. Coalesced
-     so a drag across the breakpoint does not redraw on every intermediate
-     pixel. */
+  /* Only the width matters. Coalesced so a drag across the breakpoint does not
+     redraw on every intermediate pixel. */
   let pending = 0;
   window.addEventListener('resize', () => {
     clearTimeout(pending);
     pending = setTimeout(redraw, 120);
   }, { passive: true });
 }
+
+WIDE.addEventListener('change', activate);
+activate();

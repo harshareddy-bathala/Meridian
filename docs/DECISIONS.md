@@ -766,6 +766,46 @@ The moment it draws is searched, not chosen — over one globe revolution, the l
 
 ---
 
+## D-041 — The intro stops being load-bearing, and three Cloudflare settings stop editing the site
+
+**2026-08-05 · accepted** · *amends D-037, D-038*
+
+The site went live and behaved differently on every browser: native-blue links in places, a globe that shrank or vanished on phones, and in Brave no globe at all — the 4.2 s elapsed and the text appeared over nothing. Invisible links responded to hover and click throughout the intro.
+
+**Two of those were not defects in this repository.** They were Cloudflare settings rewriting what it ships, and they are recorded here because the next person to see the symptom will look in the code first, as we did.
+
+| Setting | What it did |
+|---|---|
+| **Browser Cache TTL = 4 hours** | overrode `_headers`, which says `max-age=0, must-revalidate`. Live responses returned `max-age=14400` for CSS and JS while HTML correctly returned `max-age=0`, because HTML is `cf-cache-status: DYNAMIC` and escapes the rule. Every deploy therefore had a four-hour window in which returning visitors ran **new HTML against old CSS**. |
+| **Email Address Obfuscation** | rewrote `mailto:hello@meridian.org.in` into `/cdn-cgi/l/email-protection#…`, replaced the visible address with `[email protected]`, and injected a decode script. When that script is blocked the address never decodes. |
+| **Web Analytics** | injected `static.cloudflareinsights.com/beacon.min.js`, which the CSP blocks — a console error on every page load, and no analytics collected either way. |
+
+**The blue links had exactly one cause and it was the cache.** The proof is in which elements were unstyled. The previous stylesheet contains `.wordmark .lede .cta .meta .legend` and does not contain `.skip .brand .nav .doc .standfirst .eyebrow .prose .rail .toc .colophon-wide .theme-toggle`. Every element that rendered as a browser default was in the second list and every element that rendered correctly was in the first — including, decisively, a correctly letter-spaced `.wordmark` span inside a browser-blue `.brand` anchor. Rendering the live site at 390 px with an empty profile found **0 of 79 links** in default blue. No stylesheet change was needed or made.
+
+**The intro's failure mode was the inverse of what its comment claimed.** `style.css` said the reveal was done in CSS "so the content appears even if main.js fails to load or is blocked", with JS only able to cancel it. In fact the 4.2 s delay ran unconditionally, and a `main.js` that never ran also never added `.intro-done` — so a blocked or mismatched script produced the full blank wait *and* no globe. Strictly worse than having no intro.
+
+**Decision.** The delay is opt-in. `theme.js` — already render-blocking, already on every page — adds `intro` to the root element before the first paint, but only when the document asks with `data-intro`, reduced motion is off, and a 2D context can be created. It then removes it again after 900 ms unless `main.js` has added `intro-ready` from its first painted frame. `main.js` guards `getContext` returning null and drops the gate on any exception.
+
+The animation itself is unchanged — same phases, same 4.2 s, same composition. Only the default changed. Verified by blocking `/main.js` and `/orbit.js` in turn: content is immediate in both cases, where it previously waited the full delay and then showed nothing.
+
+**`opacity: 0` is not hidden.** The reveal left the masthead, copy, calls to action and footer transparent but fully hit-tested, focusable and in the accessibility tree for 4.2 s — the cursor turned into a pointer over links that were not on screen, and a tap both skipped the intro and followed the link underneath. Adding `visibility: hidden` to the `from` keyframe fixes all of it: with `fill-mode: both` that state holds through the delay, and `visibility` steps to visible on the animation's first frame, so nothing about the appearance changes. A one-shot capturing `click` handler, armed only by a pointer skip, covers the gesture that straddles the transition.
+
+**The globe was being stretched, not resized.** `#scene` is `position: fixed; inset: 0`, so CSS sizes it to the *layout* viewport; `resize()` built the backing store from `window.innerWidth/innerHeight`, the *visual* viewport. On a phone those differ by the height of the browser chrome, so a scene drawn for ~660 CSS px was stretched by CSS across ~780 — about 18 % of vertical distortion — while `layout()`'s `H * 0.21` recomputed the radius from the wrong number every time the URL bar moved. Measuring `canvas.getBoundingClientRect()` instead fixes the distortion and the resizing together, and changes no constant in the animation. A `visualViewport` listener joins the `window` one, since mobile browsers do not agree on which fires.
+
+**The rail stopped charging phones for what it hides.** Below 1180 px the canvas is `display: none` and the contents highlight is invisible, but `rail.js` statically imported `orbit.js` — 12 KB, preloaded — ran a 2 400-iteration search at module top level, and set up an `IntersectionObserver` that fired on every scroll. The `offsetParent` guard only stopped the drawing. `orbit.js` is now a dynamic `import()` behind a `matchMedia('(min-width: 1180px)')` gate, along with the search and the observer, and the `modulepreload` hint is gone from the four document pages. Deferred rather than deleted: crossing the breakpoint still activates both. Verified: a 390 px document page makes **zero** requests for `orbit.js`; at 1440 px it makes exactly one.
+
+**On the home page's Lighthouse score.** D-038 recorded Performance as null (`NO_LCP`) and treated that as the accepted cost of the intro. It now reports **100**, and that is *not* evidence the page got faster. Measured with a `PerformanceObserver`, the real LCP is still **4 400 ms** — the `.lede`, exactly as designed. What changed is that `visibility: hidden` gives the element a clean entry into the render tree at 4.2 s, so a candidate exists where `opacity: 0` had produced none; Lighthouse's Lantern simulator then models the element's resource-readiness and ignores the animation delay, and returns 0.4 s. The score is a modelling artifact. **Do not cite it as a speed result.** FCP, which is real, is 108 ms and comes from the canvas.
+
+**Footer copy.** "Non-profit · Receive only — the station never transmits" is gone from the bar, which now reads `© 2026 Meridian · Apache-2.0`; the brand line drops "non-profit" too. The claim survives once, on `/about/`, where it is explained rather than asserted. "Receive only" remains on `/architecture/` as one of the six rules — a footer is the wrong place to repeat a technical constraint on every page. The home colophon gains the contact address, which is the only place on that page it can go without breaking the one-screen rule.
+
+*Rejected:* content-first, with the globe fading in behind it. The better architecture, and the one that would make the score honest — but the intro is the site's whole first impression and the instruction was explicit that it not change.
+
+*Rejected:* fingerprinting the assets so mixed releases become impossible regardless of cache rules. It is the belt-and-braces answer and it needs a build step, which D-036 rules out. Respecting the headers already shipped achieves the same thing with a dashboard toggle.
+
+*Rejected:* adding `static.cloudflareinsights.com` to `script-src` to make the injected beacon work. That would trade an enforced guarantee for a broken one to enable analytics nobody asked for.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -852,6 +892,10 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-039 hairline and body-copy contrast raised | `site/style.css`, `site/README.md` |
 | D-040 document rail, module split, transitions | `site/orbit.js`, `site/rail.js`, `site/style.css`, `site/main.js`, all pages |
 | D-040 wide footer, contact address | all pages, `site/.well-known/security.txt` |
+| D-041 intro gate inverted, `visibility` fix | `site/theme.js`, `site/main.js`, `site/style.css`, `site/index.html` |
+| D-041 canvas sized from its own box | `site/main.js` |
+| D-041 rail deferred behind its breakpoint | `site/rail.js`, `site/{architecture,protocol,docs,about}/index.html` |
+| D-041 footer copy, three Cloudflare settings | all pages; dashboard, not this repository |
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
 

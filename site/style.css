@@ -122,7 +122,15 @@ html { background: var(--bg); }
 
 body {
   margin: 0;
+  /* 100vh first: svh is Safari 15.4+ and Chrome 108+, and a browser that does
+     not know the unit drops the whole declaration rather than falling back. */
+  min-height: 100vh;
   min-height: 100svh;
+
+  /* clip, not hidden: hidden makes the body a scroll container, which silently
+     stops position: sticky working on the document rail. clip is Safari 16+;
+     older Safari simply loses the guard, which is a cosmetic risk, whereas
+     using hidden as the fallback would break the rail on every browser. */
   overflow-x: clip;
   background: var(--bg);
   color: var(--ink);
@@ -159,6 +167,7 @@ body {
 .page {
   position: relative;
   z-index: 1;
+  min-height: 100vh;
   min-height: 100svh;
   padding: var(--pad);
   display: grid;
@@ -861,27 +870,43 @@ body {
 .swatch-trace  { background: var(--trace); }
 
 /* --------------------------------------------------------------- reveal --
-   Home page only, and done in CSS rather than JS deliberately: the content
-   then appears even if main.js fails to load or is blocked. JS only ever
-   cancels it (.intro-done), never causes it.                               */
+   Home page only. The content waits 4.2 s while the globe resolves.
+
+   This is opt-in, and that matters more than it looks. It used to be
+   unconditional, with JS able only to cancel it — which meant that when
+   main.js could not run, the visitor waited the full delay at a blank page
+   and then got no globe either. theme.js now adds `intro` before the first
+   paint and takes it away again unless main.js confirms it is painting, so
+   the failure mode is "no globe" rather than "no page". See D-041.
+
+   The timing, the stagger and the easing are untouched.
+
+   visibility, not just opacity: an element at opacity 0 is still hit-tested,
+   still focusable and still in the accessibility tree, so the invisible
+   header and links responded to hover and click for the whole 4.2 s — the
+   cursor turned into a pointer over things that were not on screen yet. With
+   fill-mode: both the `from` state applies throughout the delay, and
+   visibility steps to visible on the animation's first frame, so this costs
+   nothing visually: the content was already fully transparent.             */
 
 @keyframes reveal {
-  from { opacity: 0; transform: translateY(0.75rem); }
-  to   { opacity: 1; transform: none; }
+  from { opacity: 0; transform: translateY(0.75rem); visibility: hidden; }
+  to   { opacity: 1; transform: none; visibility: visible; }
 }
 
-.reveal {
+:root.intro .reveal {
   animation: reveal var(--reveal-dur) var(--ease-out) var(--reveal-at) both;
 }
 
-.masthead.reveal      { animation-delay: var(--reveal-at); }
-.content .lede        { animation-delay: calc(var(--reveal-at) + 120ms); }
-.content .body        { animation-delay: calc(var(--reveal-at) + 240ms); }
-.content .cta-row     { animation-delay: calc(var(--reveal-at) + 360ms); }
-.colophon.reveal      { animation-delay: calc(var(--reveal-at) + 480ms); }
+:root.intro .masthead.reveal  { animation-delay: var(--reveal-at); }
+:root.intro .content .lede    { animation-delay: calc(var(--reveal-at) + 120ms); }
+:root.intro .content .body    { animation-delay: calc(var(--reveal-at) + 240ms); }
+:root.intro .content .cta-row { animation-delay: calc(var(--reveal-at) + 360ms); }
+:root.intro .colophon.reveal  { animation-delay: calc(var(--reveal-at) + 480ms); }
 
-/* Intro skipped, or never ran. Content is simply present. */
-.intro-done .reveal { animation: none; }
+/* Intro skipped, or never ran. Content is simply present. Same specificity as
+   the rules above and later in the file, which is what lets it win. */
+:root.intro-done .reveal { animation: none; }
 
 /* ------------------------------------------------------------- 404 sweep --
    An antenna searching and not finding, which is what the page is about. The
@@ -984,6 +1009,22 @@ body {
   .nav { order: 3; flex-basis: 100%; gap: 0.5rem 1.25rem; }
   .theme-slot { order: 2; }
   .prose table { min-width: 20rem; }
+}
+
+/* The layer diagram and the wide tables scroll inside themselves. On a phone
+   that was invisible: the content simply stopped at the edge of the screen
+   with nothing to say it continued. A soft right edge reads as "there is more
+   this way" without adding a line of instructions to every table.
+
+   Only below the width where they actually overflow — the diagram has a
+   40rem floor and the tables 20rem, so above this they fit and a fade would
+   be decoration over nothing. */
+@media (max-width: 720px) {
+  .diagram-scroll,
+  .table-scroll {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+  }
 }
 
 @media (min-width: 1800px) {
