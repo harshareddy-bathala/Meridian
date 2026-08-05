@@ -1,19 +1,55 @@
 /*
-  Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Permissions-Policy: geolocation=(), camera=(), microphone=(), browsing-topics=()
   Cross-Origin-Opener-Policy: same-origin
 
-# No 'unsafe-inline' anywhere, which is why index.html carries no inline
-# <style>, <script> or style="" attribute. The page's claim to make no
+# No 'unsafe-inline' anywhere, which is why no page carries an inline <style>,
+# an inline <script> or a style="" attribute. The site's claim to make no
 # third-party requests is enforced here rather than asserted.
+#
+# manifest-src is stated explicitly: it falls back to default-src, and
+# 'none' would block /site.webmanifest.
+#
+# object-src is already covered by default-src 'none'. It is named anyway
+# because Lighthouse's CSP audit looks for it by name.
+#
+# JSON-LD lives in <script type="application/ld+json"> blocks. Those are data
+# blocks, never prepared as script, so script-src does not apply to them —
+# verify in the console that no page reports a violation.
+#
+# HSTS without 'preload'. includeSubDomains covers dash.meridian.org.in, which
+# is HTTPS-only through the tunnel. Submitting to the browser preload list is
+# a separate and effectively irreversible step, and is not done here.
 
 /fonts/*
   Cache-Control: public, max-age=31536000, immutable
 
+/brand/*
+  Cache-Control: public, max-age=604800
+
+/*.png
+  Cache-Control: public, max-age=604800
+
 /*.svg
   Cache-Control: public, max-age=604800
 
+/*.ico
+  Cache-Control: public, max-age=604800
+
+# CSS and JS are not content-hashed, so they must never be immutable — a
+# deploy would strand every returning visitor on the previous build. Revalidate
+# instead: the files are small and an unchanged one costs a 304.
+/*.css
+  Cache-Control: public, max-age=0, must-revalidate
+
+/*.js
+  Cache-Control: public, max-age=0, must-revalidate
+
 /index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/*/
   Cache-Control: public, max-age=0, must-revalidate

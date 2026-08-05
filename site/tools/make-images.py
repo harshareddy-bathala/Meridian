@@ -1,5 +1,11 @@
 """Generate the site's raster images.
 
+Three groups, selectable with --what:
+
+  og      the social card, og-image.png
+  icons   favicon.ico, apple-touch-icon.png, and the web manifest's icons
+  brand   site/brand/ — the marketing exports, including the profile picture
+
 The globe is a real orthographic projection of a 15-degree graticule with a
 98-degree inclined circular orbit at 800 km — the same model as site/main.js,
 not an illustration of it. The station sits at 12.9716 N, 77.5946 E and the
@@ -13,6 +19,7 @@ so there is no second copy of the fonts anywhere).
 
 from __future__ import annotations
 
+import argparse
 import math
 from pathlib import Path
 
@@ -20,6 +27,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 SITE = Path(__file__).resolve().parent.parent
 FONTS = SITE / "fonts"
+BRAND = SITE / "brand"
 
 W, H = 1200, 630
 SS = 3  # supersampling; Pillow's draw primitives are not antialiased
@@ -29,6 +37,10 @@ INK = (232, 230, 225)
 MUTED = (110, 116, 128)
 RULE = (30, 34, 41)
 SIGNAL = (107, 184, 138)
+
+# The light theme's ground and ink, for exports that will sit on a light page.
+PAPER = (250, 249, 247)
+INK_DARK = (20, 22, 27)
 
 DEG = math.pi / 180
 TAU = math.tau
@@ -197,17 +209,7 @@ def write_png() -> Path:
 
     # the mark: limb plus one meridian, same construction as favicon.svg
     mx, my, mr = 80 + 32 * 0.62, 78 + 32 * 0.62, 22 * 0.62
-    dr.ellipse(
-        [s(mx - mr), s(my - mr), s(mx + mr), s(my + mr)], outline=INK, width=round(4 * 0.62 * SS)
-    )
-    arx, ary = 10.5 * 0.62, 22 * 0.62
-    dr.arc(
-        [s(mx - arx), s(my - ary), s(mx + arx), s(my + ary)],
-        90,
-        270,
-        fill=INK,
-        width=round(3.5 * 0.62 * SS),
-    )
+    mark(dr, s(mx), s(my), mr * SS, INK)
 
     sans = lambda px, w="Regular": ImageFont.truetype(  # noqa: E731
         str(FONTS / f"IBMPlexSans-{w}.woff2"), round(px * SS)
@@ -238,26 +240,167 @@ def write_png() -> Path:
     return out
 
 
-def write_touch_icon(size: int = 180) -> Path:
-    """iOS does not accept an SVG favicon, so the mark is rasterised once."""
-    img = Image.new("RGB", (size * SS, size * SS), BG)
-    dr = ImageDraw.Draw(img)
-    c, r = size * SS / 2, size * SS * 0.30
-    dr.ellipse([c - r, c - r, c + r, c + r], outline=INK, width=round(r * 4 / 22))
-    rx = r * 10.5 / 22
-    dr.arc([c - rx, c - r, c + rx, c + r], 90, 270, fill=INK, width=round(r * 3.5 / 22))
+def mark(dr, cx: float, cy: float, r: float, colour) -> None:
+    """The limb and one meridian — the same two strokes as favicon.svg, at any
+    size. Stroke weights are proportions of the 64-unit viewBox the SVG uses,
+    so the raster and the vector stay the same drawing.
 
-    out = SITE / "apple-touch-icon.png"
-    img.resize((size, size), Image.LANCZOS).save(out, optimize=True)
+    Coordinates are device pixels: supersample before calling, not after.
+    """
+    dr.ellipse(
+        [cx - r, cy - r, cx + r, cy + r], outline=colour, width=max(1, round(r * 4 / 22))
+    )
+    # The SVG's "A 10.5 22" arc is the left half of an ellipse about the same
+    # centre. In Pillow, 0 degrees is 3 o'clock and angles run clockwise, so
+    # 90 to 270 traces bottom to top the long way round — the left half.
+    rx = r * 10.5 / 22
+    dr.arc([cx - rx, cy - r, cx + rx, cy + r], 90, 270, fill=colour, width=max(1, round(r * 3.5 / 22)))
+
+
+def render_mark(px: int, ink, ground, frac: float = 0.62):
+    """One square mark at `px`, rendered at 2x and downsampled.
+
+    `frac` is the mark's outer diameter as a fraction of the frame. 0.62 is
+    chosen so a circular avatar crop — which cuts to the inscribed circle —
+    never touches the limb, while the mark still carries weight at 40px.
+
+    `ground` of None gives a transparent PNG.
+    """
+    # 3x where it is affordable — Pillow's arc and ellipse are not antialiased,
+    # and a small icon is where that shows. At 2048 a 3x buffer is 150 MB for
+    # a gain nothing can see, so the large exports settle for 2x.
+    ss = px * (3 if px <= 600 else 2)
+    if ground is None:
+        img = Image.new("RGBA", (ss, ss), (0, 0, 0, 0))
+        colour = ink + (255,)
+    else:
+        img = Image.new("RGB", (ss, ss), ground)
+        colour = ink
+    mark(ImageDraw.Draw(img), ss / 2, ss / 2, ss * frac / 2, colour)
+    return img.resize((px, px), Image.LANCZOS)
+
+
+def write_icons() -> list[Path]:
+    """The favicon fallback, the iOS icon, and the manifest's icons.
+
+    favicon.svg already handles every modern browser and inverts itself with
+    prefers-color-scheme; this .ico exists for the ones that ignore it. It is
+    the dark-ground variant, which stays legible on a light tab strip as well.
+    """
+    out = []
+
+    master = render_mark(256, INK, BG, frac=0.60)
+    ico = SITE / "favicon.ico"
+    master.save(ico, format="ICO", sizes=[(16, 16), (32, 32), (48, 48)])
+    out.append(ico)
+
+    touch = SITE / "apple-touch-icon.png"
+    render_mark(180, INK, BG, frac=0.60).save(touch, optimize=True)
+    out.append(touch)
+
+    for size in (192, 512):
+        p = SITE / f"icon-{size}.png"
+        render_mark(size, INK, BG, frac=0.60).save(p, optimize=True)
+        out.append(p)
+
+    # Maskable icons may be cropped to a circle 80% of the frame across, so
+    # everything that must survive has to sit inside the middle 80%. At 0.44
+    # the mark clears that with room to spare and still fills the badge.
+    p = SITE / "icon-512-maskable.png"
+    render_mark(512, INK, BG, frac=0.44).save(p, optimize=True)
+    out.append(p)
+
+    return out
+
+
+def write_touch_icon() -> Path:
+    """Kept as a name because it is what the rest of the world calls it."""
+    return write_icons()[1]
+
+
+def write_lockup(px_w: int, ink, ground) -> Image.Image:
+    """Mark and wordmark on one horizontal line, for banners and headers.
+
+    The lockup is measured and then centred rather than positioned by eye:
+    the wordmark is tracked out by 0.38em, so its width is not something you
+    can guess from the point size and a guess overruns the canvas.
+    """
+    ss = 2
+    px_h = round(px_w * 0.25)
+    w, h = px_w * ss, px_h * ss
+    img = Image.new("RGB", (w, h), ground)
+    dr = ImageDraw.Draw(img)
+
+    r = h * 0.26
+    size = round(r * 0.80)
+    font = ImageFont.truetype(str(FONTS / "IBMPlexSans-Medium.woff2"), size)
+    spacing = size * 0.38
+    text_w = sum(font.getlength(c) + spacing for c in "MERIDIAN") - spacing
+    gap = r * 1.5
+
+    x0 = (w - (2 * r + gap + text_w)) / 2
+    mark(dr, x0 + r, h / 2, r, ink)
+    tracked(dr, (x0 + 2 * r + gap, h / 2 + size * 0.36), "MERIDIAN", font, ink, spacing)
+
+    return img.resize((px_w, px_h), Image.LANCZOS)
+
+
+def write_brand() -> list[Path]:
+    """site/brand/ — the marketing exports.
+
+    PNG throughout. The mark is two hairline strokes on flat ground, which is
+    the worst case for JPEG: no alpha, and visible ringing around the strokes
+    at the sizes an avatar is actually displayed at. A PNG of a two-stroke
+    vector is small anyway. One JPEG ships for the rare upload form that
+    refuses PNG, and it is not the file to reach for otherwise.
+    """
+    BRAND.mkdir(exist_ok=True)
+    out = []
+
+    variants = (
+        ("light", INK, None),        # transparent, for dark backgrounds
+        ("dark", INK_DARK, None),    # transparent, for light backgrounds
+        ("onblack", INK, BG),        # the profile picture
+        ("onpaper", INK_DARK, PAPER),
+    )
+
+    for name, ink, ground in variants:
+        master = render_mark(2048, ink, ground)
+        for size in (2048, 1024, 512):
+            img = master if size == 2048 else master.resize((size, size), Image.LANCZOS)
+            p = BRAND / f"meridian-mark-{name}-{size}.png"
+            img.save(p, optimize=True)
+            out.append(p)
+
+    jpg = BRAND / "meridian-mark-onblack-2048.jpg"
+    render_mark(2048, INK, BG).save(jpg, quality=92, optimize=True, subsampling=0)
+    out.append(jpg)
+
+    for name, ink, ground in (("onblack", INK, BG), ("onpaper", INK_DARK, PAPER)):
+        p = BRAND / f"meridian-lockup-{name}-2048.png"
+        write_lockup(2048, ink, ground).save(p, optimize=True)
+        out.append(p)
+
     return out
 
 
 if __name__ == "__main__":
-    outputs = (write_png(), write_touch_icon())
-    print(
-        f"orbit raan {math.degrees(RAAN):6.1f} deg   elevation "
-        f"{math.degrees(PEAK_EL):5.1f} deg   link is "
-        f"{'above' if PEAK_EL > 5 * DEG else 'below'} the horizon"
-    )
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--what", choices=["all", "og", "icons", "brand"], default="all")
+    what = ap.parse_args().what
+
+    outputs: list[Path] = []
+    if what in ("all", "og"):
+        outputs.append(write_png())
+        print(
+            f"orbit raan {math.degrees(RAAN):6.1f} deg   elevation "
+            f"{math.degrees(PEAK_EL):5.1f} deg   link is "
+            f"{'above' if PEAK_EL > 5 * DEG else 'below'} the horizon"
+        )
+    if what in ("all", "icons"):
+        outputs += write_icons()
+    if what in ("all", "brand"):
+        outputs += write_brand()
+
     for p in outputs:
         print(f"{p.relative_to(SITE.parent)}  {p.stat().st_size / 1024:.1f} KB")

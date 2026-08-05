@@ -1,6 +1,7 @@
 /* Meridian — meridian.org.in
-   Single committed theme. This is an instrument panel, not a document:
-   there is no light mode, by choice. */
+   Two themes. The instrument-panel dark is still the identity; light exists
+   because a document people are asked to read in daylight should not force
+   them into a dark room. See docs/DECISIONS.md D-037. */
 
 /* ---------------------------------------------------------------- fonts --
    IBM Plex, latin-1 subset, self-hosted. No CDN, no Google Fonts, no
@@ -23,37 +24,101 @@
   font-weight: 400; font-style: normal; font-display: swap;
 }
 
-/* --------------------------------------------------------------- tokens -- */
+/* --------------------------------------------------------------- tokens --
+   Theme-independent first, then the two palettes.
+
+   Every text pair below clears WCAG AA (4.5:1); the ratios are tabulated in
+   site/README.md. Three of them did not before this file gained a second theme:
+   --muted was 4.24:1 against the dark background, .legend dd was painted in
+   --rule, a hairline colour, at about 1.3:1, and --alert sat at 4.19:1.
+
+   --rule and --wire are the two non-text colours and are held to a different
+   bar: a hairline has to be *seen*, which the standard does not require of a
+   decorative divider. Both were about 1.25:1 and were invisible on anything
+   that is not an OLED panel. See D-039.                                     */
 
 :root {
-  --bg:      #08090D;
-  --surface: #101319;
-  --rule:    #1E2229;
-  --ink:     #E8E6E1;   /* warm off-white, never pure white */
-  --muted:   #6E7480;
-
-  /* Semantic, not decorative. These three appear on link lines in the
-     animation and in the legend that explains them. Nowhere else. */
-  --signal:  #6BB88A;   /* above horizon — link acquired */
-  --alert:   #B8544F;   /* below horizon — no link */
-  --trace:   #C99A4E;   /* predicted / next pass */
-
   --sans: "IBM Plex Sans", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
 
   --pad: clamp(1.5rem, 4vw, 4rem);
 
-  /* Content reveal. SETTLE_MS in main.js must match --reveal-at. */
+  /* Content reveal. SETTLE_MS in main.js must match --reveal-at.
+     Home page only — a document page that waits four seconds to appear is
+     just a slow document page. */
   --reveal-at: 4200ms;
   --reveal-dur: 600ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Light is the bare :root so that a visitor with JS disabled and no dark
+   system preference gets a sane page. The media query below supplies dark on
+   that same no-JS path; the [data-theme] rules outrank both by specificity,
+   which is how theme.js wins whenever it has run. */
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg:      #FAF9F7;   /* warm paper, never pure white */
+  --surface: #F2F0EB;
+  --rule:    #C9C2B6;   /* 1.68:1 — a hairline that is actually there */
+  --wire:    #BFB8AB;   /* 1.87:1 — graticule and orbit paths on canvas */
+  --ink:     #14161B;
+  --ink-dim: #43474F;
+  --muted:   #5A6069;
+
+  --signal:  #2E7D51;
+  --alert:   #A8332E;
+  --trace:   #8A6320;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --bg:      #08090D;
+    --surface: #101319;
+    --rule:    #333944;
+    --wire:    #1E2229;
+    --ink:     #E8E6E1;   /* warm off-white, never pure white */
+    --ink-dim: #A9A6A0;
+    --muted:   #787E8A;
+
+    --signal:  #6BB88A;
+    --alert:   #C4635C;
+    --trace:   #C99A4E;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:      #08090D;
+  --surface: #101319;
+  /* --rule and --wire are no longer the same value. They were, and that was a
+     coincidence rather than a decision: a divider between blocks of text and a
+     wireframe stroke on a dark canvas do not want the same weight. The rule
+     lifts to 1.71:1 so it can be seen; the wire stays where it is, because the
+     globe reads correctly at 1.25:1 against black. */
+  --rule:    #333944;
+  --wire:    #1E2229;
+  --ink:     #E8E6E1;
+  --ink-dim: #A9A6A0;
+  --muted:   #787E8A;
+
+  /* Semantic, not decorative. These three appear on link lines in the
+     animation and in the legend that explains them. Nowhere else. */
+  --signal:  #6BB88A;   /* above horizon — link acquired */
+  --alert:   #C4635C;   /* below horizon — no link. 5.01:1; was 4.19 */
+  --trace:   #C99A4E;   /* predicted / next pass */
 }
 
 /* ---------------------------------------------------------------- reset -- */
 
 *, *::before, *::after { box-sizing: border-box; }
 
-html { background: var(--bg); color-scheme: dark; }
+html { background: var(--bg); }
 
 body {
   margin: 0;
@@ -67,9 +132,13 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* The theme toggle sets display on itself, which would otherwise beat the
+   user-agent [hidden] rule and show a control that does nothing without JS. */
+[hidden] { display: none !important; }
+
 /* --------------------------------------------------------------- canvas --
-   Fixed behind everything. The globe's centre and radius are computed in
-   main.js, which is what lets it bleed off the top-right edge.            */
+   Home page only. Fixed behind everything. The globe's centre and radius are
+   computed in main.js, which is what lets it bleed off the top-right edge.  */
 
 #scene {
   position: fixed;
@@ -82,7 +151,10 @@ body {
 
 /* --------------------------------------------------------------- layout --
    Asymmetric on purpose. Masthead top-left, content anchored lower-left,
-   colophon along the bottom. Nothing is centred.                          */
+   colophon along the bottom. Nothing is centred.
+
+   min-height, never height: the home page is one screen on any ordinary
+   viewport, but a landscape phone is not obliged to clip its own footer.   */
 
 .page {
   position: relative;
@@ -102,21 +174,51 @@ body {
 
 .page > *, .colophon > *, .content > * { min-width: 0; }
 
+/* Document pages stack from the top and are as tall as they need to be. */
+.page-doc { grid-template-rows: auto auto auto; gap: clamp(2rem, 5vh, 3.5rem); }
+
 /* Hairline rules divide. No boxes, no cards, no borders around content. */
 .masthead  { border-bottom: 1px solid var(--rule); padding-bottom: 1.25rem; }
 .colophon  { border-top:    1px solid var(--rule); padding-top:    1.25rem; }
 
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  padding: 0.6rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  text-decoration: none;
+  z-index: 10;
+}
+.skip:focus { left: var(--pad); top: var(--pad); }
+
+/* ------------------------------------------------------------- masthead -- */
+
 .masthead {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 0.85rem 1.5rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
   gap: 0.75rem;
+  margin-right: auto;
+  color: var(--ink);
+  text-decoration: none;
 }
 
 .mark {
   width: 1.5rem;
   height: 1.5rem;
   flex: none;
-  color: var(--ink);
+  color: currentColor;
 }
 
 .wordmark {
@@ -129,7 +231,64 @@ body {
   line-height: 1;
 }
 
-/* ------------------------------------------------------------- content -- */
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.nav a {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-decoration: none;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid transparent;
+  transition: color 180ms var(--ease-out), border-color 180ms var(--ease-out);
+}
+
+.nav a:hover,
+.nav a:focus-visible { color: var(--ink); }
+.nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--rule); }
+
+/* The slot holds its size whether or not the button inside it is shown, so
+   theme.js revealing the button on DOMContentLoaded shifts no layout. */
+.theme-slot {
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 180ms var(--ease-out);
+}
+.theme-toggle:hover,
+.theme-toggle:focus-visible { color: var(--ink); }
+.theme-toggle svg { width: 1rem; height: 1rem; display: block; }
+
+/* Show the icon of the theme the button would switch *to*. theme.js always
+   sets data-theme before it unhides the button, so there is no third state. */
+:root[data-theme="dark"] .icon-to-dark,
+:root[data-theme="light"] .icon-to-light { display: none; }
+
+/* ------------------------------------------------------------- content --
+   The home page. One screen, bottom-anchored.                              */
 
 .content {
   align-self: end;
@@ -142,6 +301,7 @@ body {
 .content p { margin: 0; }
 
 .lede {
+  margin: 0;
   font-size: clamp(1.75rem, 3.6vw, 2.75rem);
   font-weight: 400;
   line-height: 1.12;
@@ -150,14 +310,25 @@ body {
   max-width: 22ch;
 }
 
+/* --ink-dim, not --muted. --muted is the metadata colour — nav, timestamps,
+   tracked uppercase mono — and it clears AA at 4.88:1, but prose set in it
+   reads as washed out no matter what the ratio says. Everything on the site
+   that is meant to be *read* is --ink-dim; everything that is meant to be
+   glanced at is --muted. See D-039. */
 .body {
   font-size: clamp(0.9375rem, 1.1vw, 1.0625rem);
   line-height: 1.65;
-  color: var(--muted);
+  color: var(--ink-dim);
   max-width: min(44ch, 100%);
 }
 
-/* The single call to action. A link, drawn as a link — no button, no fill. */
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 2rem;
+}
+
+/* Calls to action. Links, drawn as links — no button, no fill. */
 .cta {
   display: inline-flex;
   align-items: baseline;
@@ -175,12 +346,383 @@ body {
 .cta:hover,
 .cta:focus-visible { border-bottom-color: var(--ink); }
 
+.cta-quiet { color: var(--muted); }
+.cta-quiet:hover,
+.cta-quiet:focus-visible { color: var(--ink); }
+
 .cta .arrow { transition: transform 220ms var(--ease-out); }
 .cta:hover .arrow { transform: translateX(0.25em); }
 
 :focus-visible {
   outline: 1px solid var(--ink);
   outline-offset: 5px;
+}
+
+/* ----------------------------------------------------------------- doc --
+   Subpages. No canvas, no reveal, no intro: they are documents and they are
+   allowed to simply be there.                                              */
+
+.doc { max-width: 46rem; }
+
+.eyebrow {
+  margin: 0 0 0.9rem;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.doc > h1 {
+  margin: 0;
+  font-size: clamp(1.875rem, 4vw, 2.75rem);
+  font-weight: 400;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+/* Full ink. It was --ink-dim, which stopped distinguishing it from the body
+   copy once that moved to --ink-dim too; the size step alone is not enough of
+   a hierarchy for a deck. */
+.standfirst {
+  margin: 1.25rem 0 0;
+  font-size: clamp(1.0625rem, 1.5vw, 1.25rem);
+  line-height: 1.5;
+  color: var(--ink);
+  max-width: 52ch;
+  text-wrap: pretty;
+}
+
+/* ---------------------------------------------------------------- prose --
+   Same discipline as the rest: hairlines divide, nothing is boxed.         */
+
+.prose { margin-top: clamp(2.5rem, 6vh, 4rem); }
+
+.prose > * + * { margin-top: 1.15rem; }
+
+.prose h2 {
+  margin: clamp(2.5rem, 5vh, 3.5rem) 0 0;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--rule);
+  font-size: clamp(1.1875rem, 1.9vw, 1.4375rem);
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+}
+
+/* .prose already carries the space above the first section; the h2's own
+   top margin on top of it opened a 120px hole under every standfirst. */
+.prose > h2:first-child { margin-top: 0; }
+
+.prose h3 {
+  margin: 2rem 0 0;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.prose h3 code { font-size: inherit; }
+
+.prose p,
+.prose li {
+  font-size: clamp(0.9375rem, 1.05vw, 1rem);
+  line-height: 1.68;
+  color: var(--ink-dim);
+  max-width: 68ch;
+}
+
+.prose strong { color: var(--ink); font-weight: 500; }
+
+.prose ul, .prose ol { padding-left: 1.15rem; }
+.prose li + li { margin-top: 0.5rem; }
+/* A marker is text. It was --rule, which is the same mistake .legend dd made. */
+.prose li::marker { color: var(--muted); }
+
+.prose a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 0.22em;
+  transition: text-decoration-color 180ms var(--ease-out);
+}
+.prose a:hover,
+.prose a:focus-visible { text-decoration-color: var(--ink); }
+
+.prose code {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  color: var(--ink-dim);
+}
+
+.prose pre {
+  margin-top: 1.25rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--surface);
+  border-left: 1px solid var(--rule);
+  overflow-x: auto;          /* wide blocks scroll themselves, never the page */
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--ink-dim);
+  -webkit-overflow-scrolling: touch;
+}
+.prose pre code { font-size: inherit; color: inherit; }
+
+/* A definition list is what the glossary and the module index actually are. */
+.prose dl { margin: 1.5rem 0 0; }
+.prose dt {
+  margin-top: 1.25rem;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.prose dd {
+  margin: 0.4rem 0 0;
+  font-size: clamp(0.9375rem, 1.05vw, 1rem);
+  line-height: 1.68;
+  color: var(--ink-dim);
+  max-width: 68ch;
+}
+
+.table-scroll { overflow-x: auto; margin-top: 1.25rem; }
+
+.prose table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 28rem;
+  font-size: 0.875rem;
+}
+.prose th, .prose td {
+  padding: 0.6rem 1rem 0.6rem 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-dim);
+  line-height: 1.55;
+}
+.prose th {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* The layer diagram. Painted from the theme tokens, so one file serves both.
+
+   It scrolls inside its own container rather than scaling down with the
+   viewport: an SVG that fits a 320px screen has 5px labels on it, which is a
+   diagram nobody can read pretending to be a responsive one. */
+.diagram-scroll {
+  margin-top: 1.75rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.diagram {
+  display: block;
+  width: 100%;
+  min-width: 40rem;
+  height: auto;
+}
+.diagram text {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  fill: var(--ink);
+}
+.diagram .d-label { fill: var(--ink-dim); font-size: 9.5px; }
+
+/* --muted, not --rule. This diagram is needed to understand the page, which
+   puts it under the 3:1 bar for graphical objects rather than the "decorative
+   divider" exemption a hairline rule enjoys. --rule at 1.71:1 would not clear
+   it; --muted is 4.88:1 dark and 6.03:1 light. */
+.diagram .d-box { fill: none; stroke: var(--muted); stroke-width: 1; }
+.diagram .d-line { stroke: var(--muted); stroke-width: 1; fill: none; }
+.diagram .d-optional { stroke-dasharray: 3 3; }
+
+/* The document index: one hairline-separated row per entry, not a card grid. */
+.index { margin-top: clamp(2rem, 5vh, 3rem); }
+
+.index-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.35rem;
+  padding: 1.35rem 0;
+  border-top: 1px solid var(--rule);
+}
+.index-row:last-child { border-bottom: 1px solid var(--rule); }
+
+.index-row h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.index-row h2 a { color: var(--ink); text-decoration: none; }
+.index-row h2 a:hover,
+.index-row h2 a:focus-visible { text-decoration: underline; text-underline-offset: 0.22em; }
+
+.index-row p {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--ink-dim);
+  max-width: 68ch;
+}
+
+.index-row .where {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* ---------------------------------------------------------------- rail --
+   The document rail. Above 1180px it is a sticky column to the right of the
+   prose; below, it falls back into normal flow between the standfirst and the
+   body as a two-column list of links.
+
+   There is one contents list, not two. The obvious alternative — ship a
+   <details> and force it open on wide screens — needs ::details-content to do
+   the forcing, which is too new to rely on, and a duplicated list is a list
+   that can disagree with itself. */
+
+.rail {
+  margin-top: clamp(2rem, 4vh, 2.75rem);
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule);
+}
+
+/* The documents hub carries the panel but no contents list — it is an index,
+   and an index of an index is furniture. With nothing but the panel in it,
+   which is itself hidden on narrow screens, the whole rail goes. */
+.rail-quiet { display: none; }
+
+.rail-h {
+  margin: 0 0 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.toc ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  columns: 2;
+  column-gap: 2rem;
+}
+
+.toc li { margin: 0; break-inside: avoid; }
+
+.toc a {
+  display: block;
+  padding: 0.3rem 0;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 180ms var(--ease-out);
+}
+.toc a:hover,
+.toc a:focus-visible { color: var(--ink); }
+
+/* The section being read. Marked with colour and a leading rule rather than
+   with weight, so the line does not reflow as you scroll. */
+.toc a[aria-current="true"] { color: var(--ink); }
+
+.rail-scene {
+  display: block;
+  width: 100%;
+  max-width: 10rem;
+  aspect-ratio: 1;
+  height: auto;
+}
+
+.rail-status,
+.rail-note,
+.rail-src {
+  margin: 0.75rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  letter-spacing: 0.1em;
+}
+
+.rail-status { text-transform: uppercase; letter-spacing: 0.16em; color: var(--ink-dim); }
+.rail-note   { color: var(--muted); letter-spacing: 0.04em; text-transform: none; }
+
+.rail-src {
+  display: inline-block;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 0.15rem;
+}
+.rail-src:hover,
+.rail-src:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
+
+/* The panel is decoration and costs vertical space that a phone does not have
+   to spare. Hidden, not shrunk — and rail.js checks offsetParent, so nothing
+   is drawn into a canvas that is not on screen. */
+.rail-panel { display: none; margin-top: 1.75rem; }
+
+@media (min-width: 1180px) {
+  .doc {
+    max-width: none;
+    display: grid;
+    /* Three tracks, and the middle one is empty. Two capped columns would
+       leave the rail floating with 300px of nothing to its right; an elastic
+       spacer instead anchors the prose to the left margin and the rail to the
+       right, which is where the theme toggle sits in the masthead directly
+       above it. 46rem is the measure the prose had before the rail existed
+       and does not change — only the empty space is being spent. */
+    grid-template-columns: minmax(0, 46rem) 1fr minmax(12rem, 16rem);
+    column-gap: clamp(2.5rem, 4vw, 4rem);
+    align-items: start;
+  }
+
+  .doc-head, .prose, .index { grid-column: 1; }
+
+  .rail {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    position: sticky;
+    /* Sticky works here because the body is overflow-x: clip, not hidden.
+       hidden would make the body a scroll container and silently pin this. */
+    top: var(--pad);
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+    /* Never taller than the viewport, or the bottom of a long contents list
+       becomes unreachable. */
+    max-height: calc(100svh - var(--pad) * 2);
+    overflow-y: auto;
+  }
+
+  .rail-quiet { display: block; }
+  .rail-panel { display: block; }
+
+  .toc ol {
+    columns: 1;
+    border-left: 1px solid var(--rule);
+  }
+  .toc a {
+    padding: 0.32rem 0 0.32rem 0.9rem;
+    margin-left: -1px;
+    border-left: 1px solid transparent;
+    transition: color 180ms var(--ease-out), border-color 180ms var(--ease-out);
+  }
+  .toc a[aria-current="true"] { border-left-color: var(--ink); }
 }
 
 /* ------------------------------------------------------------ colophon -- */
@@ -204,6 +746,85 @@ body {
 
 .meta { margin: 0; }
 .meta .dot { color: var(--rule); padding-inline: 0.35em; }
+.meta a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--rule); }
+.meta a:hover,
+.meta a:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
+
+/* ------------------------------------------------------- colophon, wide --
+   The document pages' footer. It was the masthead nav a second time, which
+   is four links repeated for no reason; a footer earns its height by being a
+   sitemap — the things the top nav has no room for. The home page keeps the
+   single-line colophon above, because it is one screen and this is not. */
+
+.colophon-wide {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) repeat(3, minmax(0, 1fr));
+  gap: 2.5rem clamp(1.5rem, 3vw, 3rem);
+  align-items: start;
+}
+
+.foot-brand .brand { margin-right: 0; }
+
+.foot-line {
+  margin: 1rem 0 0;
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+  max-width: 30ch;
+}
+.foot-line a { color: var(--ink-dim); text-decoration: none; border-bottom: 1px solid var(--rule); }
+.foot-line a:hover,
+.foot-line a:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
+
+.foot-h {
+  margin: 0 0 0.9rem;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.foot-col ul { margin: 0; padding: 0; list-style: none; }
+.foot-col li + li { margin-top: 0.5rem; }
+
+.foot-col a {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 180ms var(--ease-out);
+}
+.foot-col a:hover,
+.foot-col a:focus-visible { color: var(--ink); }
+
+.foot-bar {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .colophon-wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .foot-brand { grid-column: 1 / -1; }
+}
+
+@media (max-width: 480px) {
+  .colophon-wide { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
+  .foot-brand { grid-column: auto; }
+}
 
 /* The legend is the key to the animation's colours, and the only place on
    the page besides the canvas where those three colours appear. */
@@ -222,10 +843,11 @@ body {
 .legend dt,
 .legend dd { margin: 0; }
 
-.legend dd { color: var(--rule); }
+/* Was --rule, a hairline colour, at about 1.3:1 — text that could not be
+   read at all. Both roles are now real text colours. */
+.legend dt { display: flex; align-items: center; gap: 0.55rem; color: var(--ink-dim); }
+.legend dd { color: var(--muted); }
 .legend dd::before { content: "— "; }
-
-.legend dt { display: flex; align-items: center; gap: 0.55rem; color: var(--muted); }
 
 /* Drawn as a 1px line, because that is exactly what it labels. */
 .swatch {
@@ -239,9 +861,9 @@ body {
 .swatch-trace  { background: var(--trace); }
 
 /* --------------------------------------------------------------- reveal --
-   Done in CSS, not JS, deliberately: the content then appears even if
-   main.js fails to load or is blocked. JS only ever cancels it (.intro-done),
-   never causes it.                                                         */
+   Home page only, and done in CSS rather than JS deliberately: the content
+   then appears even if main.js fails to load or is blocked. JS only ever
+   cancels it (.intro-done), never causes it.                               */
 
 @keyframes reveal {
   from { opacity: 0; transform: translateY(0.75rem); }
@@ -252,14 +874,86 @@ body {
   animation: reveal var(--reveal-dur) var(--ease-out) var(--reveal-at) both;
 }
 
-.masthead        { animation-delay: var(--reveal-at); }
-.content .lede   { animation-delay: calc(var(--reveal-at) + 120ms); }
-.content .body   { animation-delay: calc(var(--reveal-at) + 240ms); }
-.content p:last-child { animation-delay: calc(var(--reveal-at) + 360ms); }
-.colophon        { animation-delay: calc(var(--reveal-at) + 480ms); }
+.masthead.reveal      { animation-delay: var(--reveal-at); }
+.content .lede        { animation-delay: calc(var(--reveal-at) + 120ms); }
+.content .body        { animation-delay: calc(var(--reveal-at) + 240ms); }
+.content .cta-row     { animation-delay: calc(var(--reveal-at) + 360ms); }
+.colophon.reveal      { animation-delay: calc(var(--reveal-at) + 480ms); }
 
 /* Intro skipped, or never ran. Content is simply present. */
 .intro-done .reveal { animation: none; }
+
+/* ------------------------------------------------------------- 404 sweep --
+   An antenna searching and not finding, which is what the page is about. The
+   arm turns; the arc is the sector already swept and never closes.
+
+   CSS only. The home page's canvas is a scene worth 8 KB of JavaScript; a
+   404 is not, and this costs nothing beyond the rules below.               */
+
+.sweep {
+  display: block;
+  width: clamp(7rem, 22vw, 10.5rem);
+  height: auto;
+  margin-bottom: 2rem;
+  overflow: visible;
+}
+
+.sweep-limb  { fill: none; stroke: var(--rule); stroke-width: 1; }
+.sweep-ring  { fill: none; stroke: var(--wire); stroke-width: 1; }
+.sweep-stn   { fill: none; stroke: var(--muted); stroke-width: 1; }
+
+.sweep-arm {
+  stroke: var(--muted);
+  stroke-width: 1;
+  /* view-box, so transform-origin resolves in the 120-unit coordinate system
+     rather than against the line's own zero-width bounding box. */
+  transform-box: view-box;
+  transform-origin: 60px 60px;
+  animation: sweep-turn 4s linear infinite;
+}
+
+.sweep-arc {
+  fill: none;
+  stroke: var(--trace);
+  stroke-width: 1;
+  stroke-linecap: round;
+  /* 2π × 46 = 289. Dashing the circle by its own circumference and animating
+     the offset draws it on behind the arm; the last quarter fades it out, so
+     the sweep never quite closes. */
+  stroke-dasharray: 289;
+  stroke-dashoffset: 289;
+  animation: sweep-trace 4s linear infinite;
+}
+
+@keyframes sweep-turn {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* dashoffset runs 289 → 0 across the whole cycle, so the trace's head sits
+   exactly under the arm at every moment. Only the opacity has its own shape:
+   in quickly, out at the end, which is what hides the reset. */
+@keyframes sweep-trace {
+  0%   { stroke-dashoffset: 289; opacity: 0; }
+  8%   { opacity: 0.85; }
+  85%  { opacity: 0.85; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+/* --------------------------------------------------- page transitions --
+   Cross-document, so moving between two documents cross-fades instead of
+   cutting. Both pages have to opt in; every page loads this stylesheet, so
+   every page does.
+
+   Chrome and Edge animate it. Firefox and Safari navigate normally, which is
+   the behaviour the site had before and needs no fallback. Nothing here is
+   load-bearing: it is 220ms of polish that costs no JavaScript, no request
+   and no bytes worth measuring.                                           */
+
+@view-transition { navigation: auto; }
+
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: 220ms; }
 
 /* ---------------------------------------------------------- responsive --
    Below this width the globe sits above the content at reduced scale
@@ -268,18 +962,28 @@ body {
 @media (max-width: 840px) {
   .page { gap: clamp(2rem, 5vh, 3rem); }
   .lede { max-width: 20ch; }
-  .colophon { flex-direction: column; align-items: flex-start; gap: 1.25rem; }
+  /* :not(.colophon-wide) because this rule sits after the wide footer's own
+     and would otherwise reset its gap — equal specificity, later in source. */
+  .colophon:not(.colophon-wide) { flex-direction: column; align-items: flex-start; gap: 1.25rem; }
 
   /* Tracked uppercase mono is what runs out of room first. At 360px the
      content box is 312px, and at the wide setting the metadata line measures
      343px and a legend row with its gloss about 350px. Tightened here they
      come to 295px and 245px. Measured, not guessed. */
-  .meta, .legend { font-size: 0.625rem; letter-spacing: 0.1em; }
+  .meta, .legend, .nav { font-size: 0.625rem; letter-spacing: 0.1em; }
   .meta .dot { padding-inline: 0.2em; }
 
   /* The gloss on each legend label is what goes: the colour and the label
      already carry the meaning, and keeping it is what breaks 312px. */
   .legend dd { display: none; }
+}
+
+/* The nav needs its own line before the brand and the toggle start colliding
+   with it. Ordered so the toggle stays on the masthead's first row. */
+@media (max-width: 640px) {
+  .nav { order: 3; flex-basis: 100%; gap: 0.5rem 1.25rem; }
+  .theme-slot { order: 2; }
+  .prose table { min-width: 20rem; }
 }
 
 @media (min-width: 1800px) {
@@ -292,5 +996,16 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .reveal { animation: none; }
-  .cta, .cta .arrow { transition: none; }
+  .cta, .cta .arrow, .nav a, .theme-toggle, .prose a,
+  .toc a, .foot-col a, .rail-src { transition: none; }
+
+  /* The 404's acquisition sweep stops where it stands. */
+  .sweep-arm, .sweep-arc { animation: none; }
+
+  /* Cancelled on the pseudo-elements rather than with
+     @view-transition { navigation: none } inside this query: the nested form
+     is newer and less certain, and this one is unambiguously valid. */
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation: none !important; }
 }

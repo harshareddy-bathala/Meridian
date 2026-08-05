@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Documentation — Meridian Ground Station Platform</title>
+<meta name="description" content="Specifications and design documents for Meridian: the MSP protocol, system architecture, data model, evaluation methodology, glossary and decision log.">
+<link rel="canonical" href="https://meridian.org.in/docs/">
+
+<meta name="theme-color" content="#08090D" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#FAF9F7" media="(prefers-color-scheme: light)">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://meridian.org.in/docs/">
+<meta property="og:site_name" content="Meridian">
+<meta property="og:locale" content="en">
+<meta property="og:title" content="Documentation — Meridian Ground Station Platform">
+<meta property="og:description" content="The MSP protocol, system architecture, data model, evaluation methodology, glossary and decision log.">
+<meta property="og:image" content="https://meridian.org.in/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Meridian wordmark over a wireframe globe with a satellite link line.">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Documentation — Meridian Ground Station Platform">
+<meta name="twitter:description" content="The MSP protocol, system architecture, data model, evaluation methodology, glossary and decision log.">
+<meta name="twitter:image" content="https://meridian.org.in/og-image.png">
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+
+<link rel="preload" href="/fonts/IBMPlexSans-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+
+<link rel="modulepreload" href="/orbit.js">
+
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/style.css">
+<script src="/rail.js" type="module"></script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "CollectionPage",
+      "name": "Documentation — Meridian Ground Station Platform",
+      "description": "Specifications and design documents for Meridian: the MSP protocol, system architecture, data model, evaluation methodology, glossary and decision log.",
+      "url": "https://meridian.org.in/docs/",
+      "inLanguage": "en",
+      "publisher": { "@id": "https://meridian.org.in/#organization" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Meridian", "item": "https://meridian.org.in/" },
+        { "@type": "ListItem", "position": 2, "name": "Docs", "item": "https://meridian.org.in/docs/" }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+
+<body>
+
+<a class="skip" href="#content">Skip to content</a>
+
+<div class="page page-doc">
+
+  <header class="masthead">
+    <a class="brand" href="/" aria-label="Meridian — home">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="4"/>
+        <path d="M 32 10 A 10.5 22 0 0 0 32 54" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+      </svg>
+      <span class="wordmark">Meridian</span>
+    </a>
+
+    <nav class="nav" aria-label="Primary">
+      <a href="/architecture/">Architecture</a>
+      <a href="/protocol/">Protocol</a>
+      <a href="/docs/" aria-current="page">Docs</a>
+      <a href="/about/">About</a>
+    </nav>
+
+    <div class="theme-slot">
+      <button id="theme-toggle" class="theme-toggle" type="button" hidden aria-label="Switch theme">
+        <svg class="icon-to-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="4.25"/>
+          <path d="M12 1.75v2.5M12 19.75v2.5M4.22 4.22l1.77 1.77M18.01 18.01l1.77 1.77M1.75 12h2.5M19.75 12h2.5M4.22 19.78l1.77-1.77M18.01 5.99l1.77-1.77" stroke-linecap="round"/>
+        </svg>
+        <svg class="icon-to-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+          <path d="M20.5 14.75A8.75 8.75 0 0 1 9.25 3.5a8.75 8.75 0 1 0 11.25 11.25Z" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="doc" id="content">
+    <div class="doc-head">
+      <p class="eyebrow">Documentation</p>
+      <h1>Everything is specified before it is built, and the specifications are public.</h1>
+      <p class="standfirst">These are the documents the software is written against. They live in the
+      repository so that the version you are reading is the version being implemented — a specification
+      kept somewhere else is a specification that quietly stops being true.</p>
+    </div>
+
+    <aside class="rail rail-quiet">
+      <div class="rail-panel">
+        <canvas class="rail-scene" aria-hidden="true"></canvas>
+        <p class="rail-status">Phase 1 · Foundations</p>
+        <p class="rail-note">Every document below is version-controlled with the code.</p>
+        <a class="rail-src" href="https://github.com/harshareddy-bathala/Meridian/tree/main/docs">All specifications ↗</a>
+      </div>
+    </aside>
+
+    <div class="index">
+
+      <article class="index-row">
+        <p class="where">Protocol · v0.1 · frozen</p>
+        <h2><a href="/protocol/">Meridian Station Protocol (MSP)</a></h2>
+        <p>How a receiving station joins the network, declares what it can do, reports its state,
+        receives work and returns results. Four endpoints, JSON bodies, implementable on a
+        microcontroller. Includes the registration and recovery flow, the heartbeat and its
+        <code>listening</code> block, assignment delivery, the observation outcomes, error codes and
+        the versioning rules. <a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">Full
+        specification on GitHub</a>.</p>
+      </article>
+
+      <article class="index-row">
+        <p class="where">Design</p>
+        <h2><a href="/architecture/">Architecture</a></h2>
+        <p>The six platform modules and what each one is allowed to depend on, the protocol boundary
+        beneath them, the independence test, and the rules that keep simulated data distinguishable
+        from measured data.
+        <a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/ARCHITECTURE.md">Source
+        document on GitHub</a>.</p>
+      </article>
+
+      <article class="index-row">
+        <p class="where">Design</p>
+        <h2><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/DATA-MODEL.md">Data model</a></h2>
+        <p>The PostgreSQL and TimescaleDB schema — core tables, keys, enumerations, hypertables and
+        derived views. Observations are time-series data and are stored as such. Records are immutable
+        once written; corrections are additive, so the earlier report survives as part of the
+        record.</p>
+      </article>
+
+      <article class="index-row">
+        <p class="where">Method</p>
+        <h2><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/EVALUATION.md">Evaluation methodology</a></h2>
+        <p>What is claimed, how each claim is tested, and what would falsify it. Covers the four model
+        configurations that get reported, selection bias and the completeness ratio, the
+        silent-satellite confound, temporal splits, and why calibration is treated as more important
+        than accuracy. Written before the models, deliberately.</p>
+      </article>
+
+      <article class="index-row">
+        <p class="where">Reference</p>
+        <h2><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/GLOSSARY.md">Glossary</a></h2>
+        <p>Definitions across five domains: orbits and passes, coordinate frames, radio and the
+        station, protocol and platform, evaluation. Start here if a term on any other page is doing
+        more work than it looks like it is.</p>
+      </article>
+
+      <article class="index-row">
+        <p class="where">Record · append-only</p>
+        <h2><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/DECISIONS.md">Decision log</a></h2>
+        <p>Every non-obvious decision, with its date, its status, and the alternatives that were
+        rejected and why. Entries are amended rather than rewritten when they turn out to be wrong,
+        because a log that has never been wrong is not evidence of anything.</p>
+      </article>
+
+      <article class="index-row">
+        <p class="where">Record</p>
+        <h2><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/ATTRIBUTION.md">Attribution</a></h2>
+        <p>What was learned from reading other projects, and what was written independently as a
+        result. One line per item: the date, what was read, what was written, and the licence of the
+        source. No source is copied from a copyleft project into this one.</p>
+      </article>
+
+    </div>
+
+    <div class="prose">
+      <h2>Reading order</h2>
+      <p>If you are evaluating whether to implement a station, read
+      <a href="/protocol/">the protocol</a> and stop. Nothing else is required to build one.</p>
+      <p>If you are evaluating the system, read
+      <a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/EVALUATION.md">the
+      evaluation methodology</a> first and the architecture second. The methodology states what is
+      being claimed; everything else is machinery for producing evidence about those claims.</p>
+    </div>
+  </main>
+
+  <footer class="colophon colophon-wide">
+    <div class="foot-brand">
+      <a class="brand" href="/" aria-label="Meridian — home">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+          <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="4"/>
+          <path d="M 32 10 A 10.5 22 0 0 0 32 54" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+        </svg>
+        <span class="wordmark">Meridian</span>
+      </a>
+      <p class="foot-line">A non-profit building open scheduling, monitoring and measured reliability
+      for satellite ground stations.</p>
+      <p class="foot-line"><a href="mailto:hello@meridian.org.in">hello@meridian.org.in</a></p>
+    </div>
+
+    <nav class="foot-col" aria-label="Project">
+      <p class="foot-h">Project</p>
+      <ul>
+        <li><a href="/architecture/">Architecture</a></li>
+        <li><a href="/protocol/">Protocol</a></li>
+        <li><a href="/about/">About</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="Documentation">
+      <p class="foot-h">Documentation</p>
+      <ul>
+        <li><a href="/docs/">All documents</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">MSP specification</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/DATA-MODEL.md">Data model</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/EVALUATION.md">Evaluation method</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="Source">
+      <p class="foot-h">Source</p>
+      <ul>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian">GitHub</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/ATTRIBUTION.md">Attribution</a></li>
+      </ul>
+    </nav>
+
+    <p class="foot-bar">© 2026 Meridian <span class="dot" aria-hidden="true">·</span> Non-profit
+    <span class="dot" aria-hidden="true">·</span> Receive only — the station never transmits.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

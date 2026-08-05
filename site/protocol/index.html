@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>MSP — An Open Protocol for Satellite Ground Stations</title>
+<meta name="description" content="The Meridian Station Protocol lets any receiving station join a scheduling network: four endpoints, JSON bodies, implementable on a microcontroller.">
+<link rel="canonical" href="https://meridian.org.in/protocol/">
+
+<meta name="theme-color" content="#08090D" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#FAF9F7" media="(prefers-color-scheme: light)">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://meridian.org.in/protocol/">
+<meta property="og:site_name" content="Meridian">
+<meta property="og:locale" content="en">
+<meta property="og:title" content="MSP — An Open Protocol for Satellite Ground Stations">
+<meta property="og:description" content="Four endpoints, JSON bodies, implementable on a microcontroller. How a receiving station joins a scheduling network, declares what it can do, and reports what it heard.">
+<meta property="og:image" content="https://meridian.org.in/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Meridian wordmark over a wireframe globe with a satellite link line.">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="MSP — An Open Protocol for Satellite Ground Stations">
+<meta name="twitter:description" content="Four endpoints, JSON bodies, implementable on a microcontroller. Version 0.1, open and free to implement.">
+<meta name="twitter:image" content="https://meridian.org.in/og-image.png">
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+
+<link rel="preload" href="/fonts/IBMPlexSans-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+
+<link rel="modulepreload" href="/orbit.js">
+
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/style.css">
+<script src="/rail.js" type="module"></script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "MSP — the Meridian Station Protocol",
+      "description": "An open protocol for satellite ground stations to join a scheduling network. Four endpoints, JSON bodies, implementable on a microcontroller.",
+      "url": "https://meridian.org.in/protocol/",
+      "inLanguage": "en",
+      "author": { "@id": "https://meridian.org.in/#organization" },
+      "publisher": { "@id": "https://meridian.org.in/#organization" },
+      "about": ["ground station protocol", "satellite ground stations", "open protocol"],
+      "proficiencyLevel": "Expert"
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Meridian", "item": "https://meridian.org.in/" },
+        { "@type": "ListItem", "position": 2, "name": "Protocol", "item": "https://meridian.org.in/protocol/" }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+
+<body>
+
+<a class="skip" href="#content">Skip to content</a>
+
+<div class="page page-doc">
+
+  <header class="masthead">
+    <a class="brand" href="/" aria-label="Meridian — home">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="4"/>
+        <path d="M 32 10 A 10.5 22 0 0 0 32 54" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+      </svg>
+      <span class="wordmark">Meridian</span>
+    </a>
+
+    <nav class="nav" aria-label="Primary">
+      <a href="/architecture/">Architecture</a>
+      <a href="/protocol/" aria-current="page">Protocol</a>
+      <a href="/docs/">Docs</a>
+      <a href="/about/">About</a>
+    </nav>
+
+    <div class="theme-slot">
+      <button id="theme-toggle" class="theme-toggle" type="button" hidden aria-label="Switch theme">
+        <svg class="icon-to-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="4.25"/>
+          <path d="M12 1.75v2.5M12 19.75v2.5M4.22 4.22l1.77 1.77M18.01 18.01l1.77 1.77M1.75 12h2.5M19.75 12h2.5M4.22 19.78l1.77-1.77M18.01 5.99l1.77-1.77" stroke-linecap="round"/>
+        </svg>
+        <svg class="icon-to-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+          <path d="M20.5 14.75A8.75 8.75 0 0 1 9.25 3.5a8.75 8.75 0 1 0 11.25 11.25Z" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="doc" id="content">
+    <div class="doc-head">
+      <p class="eyebrow">MSP · Version 0.1</p>
+      <h1>An open protocol for satellite ground stations.</h1>
+      <p class="standfirst">MSP defines how a receiving station joins a network, declares what it can do,
+      reports its state, receives work, and returns results. Four endpoints, JSON bodies, and a design
+      constraint that shapes everything else: it has to be implementable on a microcontroller.</p>
+    </div>
+
+    <aside class="rail">
+      <nav class="toc" aria-labelledby="rail-toc-h">
+        <p class="rail-h" id="rail-toc-h">On this page</p>
+        <ol>
+          <li><a href="#design-constraints">Design constraints</a></li>
+          <li><a href="#model">The model</a></li>
+          <li><a href="#reference-binding">The reference binding</a></li>
+          <li><a href="#registering">Registering</a></li>
+          <li><a href="#heartbeat-field-matters-most">The heartbeat</a></li>
+          <li><a href="#assignments">Assignments</a></li>
+          <li><a href="#observations-including-ones-found">Observations</a></li>
+          <li><a href="#simulated-stations-declare-themselves">Simulated stations</a></li>
+          <li><a href="#errors">Errors</a></li>
+          <li><a href="#versioning">Versioning</a></li>
+          <li><a href="#status">Status</a></li>
+        </ol>
+      </nav>
+
+      <div class="rail-panel">
+        <canvas class="rail-scene" aria-hidden="true"></canvas>
+        <p class="rail-status">MSP 0.1 · Frozen</p>
+        <p class="rail-note">The specification is the contract. This page is not.</p>
+        <a class="rail-src" href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">Canonical spec ↗</a>
+      </div>
+    </aside>
+
+
+    <div class="prose">
+
+      <p>The protocol is open and free to implement. A station does not have to run our software, or
+      any particular software, to take part — it has to speak MSP. That is the point of specifying it
+      separately from the platform that happens to serve it.</p>
+
+      <h2 id="design-constraints">Design constraints</h2>
+
+      <p>In priority order, because they conflict and the order is how the conflicts get settled:</p>
+
+      <ol>
+        <li><strong>Implementable on a microcontroller.</strong> A station with no operating system,
+        kilobytes of RAM and no TLS library must be able to speak it. This constraint drives every
+        other decision — it is why the error body is two flat strings, why assignment responses are
+        capped at a fixed count a client can size its buffer for at compile time, and why there are
+        four endpoints rather than fourteen.</li>
+        <li><strong>Stateless server, resumable client.</strong> A station that loses power mid-pass
+        and reboots must rejoin without anyone intervening.</li>
+        <li><strong>Listening state is explicit.</strong> The network must be able to distinguish
+        <em>heard nothing</em> from <em>was not listening</em>. This is not optional; it is the
+        difference between a valid reliability metric and a meaningless one.</li>
+        <li><strong>Transport-agnostic semantics.</strong> HTTP is the reference binding. The message
+        semantics do not depend on it.</li>
+      </ol>
+
+      <p>Signal processing, decoding, antenna control and how a station chooses to fulfil an
+      assignment are all out of scope. MSP says <em>what</em> to receive and <em>when</em>, never
+      <em>how</em>.</p>
+
+      <h2 id="model">The model</h2>
+
+      <dl>
+        <dt>station</dt>
+        <dd>An independently operated receiving installation with a stable identity, a fixed location
+        and declared capabilities.</dd>
+
+        <dt>capability</dt>
+        <dd>What a station can receive: frequency ranges, modulations, polarisation, whether it can
+        track, and its usable elevation floor.</dd>
+
+        <dt>assignment</dt>
+        <dd>An instruction to attempt reception of one satellite over one time window.</dd>
+
+        <dt>observation</dt>
+        <dd>The report of an attempt — including attempts that produced nothing, which are as
+        informative as the ones that succeeded.</dd>
+
+        <dt>heartbeat</dt>
+        <dd>A periodic statement of liveness and current state.</dd>
+      </dl>
+
+<pre><code>station                                    platform
+   │                                          │
+   │──── register ───────────────────────────▶│   once, on first join
+   │◀─── station_id + token ──────────────────│
+   │                                          │
+   │──── heartbeat ──────────────────────────▶│   every 30 s
+   │◀─── assignments (0..n) ──────────────────│
+   │                                          │
+   │   [executes assignment]                  │
+   │                                          │
+   │──── observation ────────────────────────▶│   after each attempt
+   │◀─── ack ─────────────────────────────────│</code></pre>
+
+      <h2 id="reference-binding">The reference binding</h2>
+
+      <p>HTTP/1.1, JSON bodies, four endpoints:</p>
+
+<pre><code>POST /msp/v0/register
+POST /msp/v0/heartbeat      → assignments
+POST /msp/v0/observations
+GET  /msp/v0/time           → server time, for clock offset estimation</code></pre>
+
+      <p>Four is deliberate. A protocol a student can implement on a microcontroller in an afternoon
+      is more likely to be adopted than a complete one. <code>GET /msp/v0/time</code> is
+      unauthenticated: a station that has lost its token still needs to establish its clock offset
+      before it can re-register, and the response contains nothing that is not already public.</p>
+
+      <h2 id="registering">Registering</h2>
+
+      <p>Registration requires an invite token, issued out of band by the operator. It is not open —
+      an unauthenticated write endpoint on a publicly reachable platform is not defensible, and the
+      network has no scale problem that open registration would solve. Relaxing this later is a policy
+      change at one endpoint, not a protocol change.</p>
+
+<pre><code>{
+  "invite_token": "…",
+  "registration_key": "…",
+  "name": "nec-rooftop-01",
+  "operator": "NTTF NEC",
+  "location": { "lat": 12.9716, "lon": 77.5946, "alt_m": 920 },
+  "simulated": false,
+  "capabilities": [
+    {
+      "band": "vhf",
+      "freq_min_hz": 136000000,
+      "freq_max_hz": 138000000,
+      "modes": ["lrpt", "fsk", "afsk"],
+      "polarisation": "rhcp",
+      "tracking": true,
+      "min_elevation_deg": 10
+    }
+  ],
+  "client": { "impl": "meridian-reference", "version": "0.1.0" }
+}</code></pre>
+
+      <p>The station generates <code>registration_key</code> once, persists it locally
+      <em>before</em> sending the request, and the platform stores only its hash. It exists for one
+      specific failure: the platform commits the registration, the response is lost in flight, and the
+      station is left holding a consumed invite and no token. Presenting the same invite with the same
+      key then returns the same station and a newly minted token, so retrying is safe. The same invite
+      with a different key is rejected — that is a second station trying to use a spent invite.</p>
+
+      <h2 id="heartbeat-field-matters-most">The heartbeat, and the field that matters most</h2>
+
+      <p>Every thirty seconds a station states what it is doing. The response carries any assignments
+      due.</p>
+
+<pre><code>{
+  "station_id": "st_7fa3c1",
+  "sent_at": "2026-08-14T09:31:02Z",
+  "state": "listening",
+  "held_assignments": ["as_44b2", "as_44b9"],
+  "listening": {
+    "assignment_id": "as_44b2",
+    "satellite_id": "norad:57166",
+    "centre_freq_hz": 137900000,
+    "mode": "lrpt"
+  },
+  "clock_offset_s": 0.184,
+  "clock_uncertainty_s": 0.05,
+  "health": { "uptime_s": 84213, "disk_free_pct": 62, "errors": [] }
+}</code></pre>
+
+      <p><strong>The <code>listening</code> block is the most important field in this protocol.</strong>
+      Without it, an absence of observations is ambiguous. With it, the platform can assert that a
+      station was tuned to a specific frequency, for a specific target, at a specific time, and heard
+      nothing — which is a real measurement rather than a gap in the record.</p>
+
+      <p>All four of its fields are stored, <code>mode</code> included: a station tuned to the right
+      frequency running the wrong demodulator did not observe the pass, and that has to be
+      distinguishable from a miss. The block is all-or-nothing, because a partial block cannot support
+      the assertion it exists to make.</p>
+
+      <p><strong>There is no decline message.</strong> A decline is absence from
+      <code>held_assignments</code>. The heartbeat states current holdings rather than announcing a
+      transition, which makes it idempotent and self-healing — a lost message is not a lost decline,
+      because the next heartbeat carries the same truth thirty seconds later. It also covers cases an
+      explicit decline never would: a station that rebooted and lost its assignments reports
+      identically to one that refused them, and the platform's correct response is the same either
+      way.</p>
+
+      <p>Clock offset is reported against a convention stated once for the whole network —
+      <code>clock_offset = platform clock − station clock</code>, so a station whose clock runs fast
+      reports a negative offset. It is named explicitly rather than left implied by a formula because
+      the same quantity is written by the client, stored in a column, consumed by the timing analysis
+      and printed in a report, and a sign flip in any one of those is silent, survives review, and
+      inverts a published figure. <code>null</code> means unknown and is never the same as
+      <code>0.0</code>: a station claiming a perfect clock and a station that cannot measure its own
+      are opposite cases.</p>
+
+      <h2 id="assignments">Assignments</h2>
+
+<pre><code>{
+  "assignment_id": "as_44b2",
+  "satellite_id": "norad:57166",
+  "start_at": "2026-08-14T09:41:20Z",
+  "end_at": "2026-08-14T09:52:07Z",
+  "centre_freq_hz": 137900000,
+  "mode": "lrpt",
+  "expected_max_elevation_deg": 61.4,
+  "predicted_yield": 0.91,
+  "element_set": { "epoch": "2026-08-14T02:11:00Z", "line1": "1 …", "line2": "2 …" },
+  "timing_uncertainty_s": 4.2,
+  "priority": 1.0
+}</code></pre>
+
+      <p>The element set is carried inline. A microcontroller station cannot be expected to fetch and
+      cache orbital data independently, and carrying it guarantees that platform and station propagate
+      from identical inputs — which is what makes any subsequent timing-error measurement mean
+      something. <code>timing_uncertainty_s</code> is the platform's stated confidence in the window
+      edges; a station should widen its recording window accordingly rather than trusting the
+      boundaries exactly.</p>
+
+      <p>An assignment the station already holds is returned again on every heartbeat until it is
+      reported or its window has passed. Delivery is not once-only, so a lost response is not lost
+      work. Clients deduplicate by <code>assignment_id</code>.</p>
+
+      <h2 id="observations-including-ones-found">Observations, including the ones that found nothing</h2>
+
+      <p>A station reports after every attempt, failures included. The <code>outcome</code> field
+      carries five values, and the distinctions between them are the whole point:</p>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Value</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>decoded</code></td><td>Signal received and successfully decoded</td></tr>
+            <tr><td><code>signal_no_decode</code></td><td>Signal present, decoding failed</td></tr>
+            <tr><td><code>no_signal</code></td><td>Station verifiably listening, nothing detected</td></tr>
+            <tr><td><code>aborted</code></td><td>Station started but could not complete</td></tr>
+            <tr><td><code>not_attempted</code></td><td>Station never began — offline or unhealthy</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong><code>no_signal</code> and <code>not_attempted</code> must never be conflated.</strong>
+      The first is data — a measurement that the sky was quiet. The second is an operational failure.
+      Neither of them is a decline: a declined assignment produces no observation at all.</p>
+
+      <p>The observation also carries <code>first_detection_at</code>, which is what makes
+      pass-timing-error measurement possible. The difference between it and the predicted acquisition
+      time, plotted against element-set age, is the primary measurement of orbital data quality.</p>
+
+      <h2 id="simulated-stations-declare-themselves">Simulated stations declare themselves</h2>
+
+      <p>A station declares whether it is simulated at registration. <code>simulated</code> is
+      required and top-level — never nested, never omitted, never inferred. A simulated station also
+      sends a run id and a seed, which together are what make a run reproducible.</p>
+
+      <p>The platform <strong>must</strong> propagate this flag to every derived record, every API
+      response and every dashboard element, and simulated observations must never be aggregated with
+      measured ones in any reported figure. This is a protocol-level requirement rather than a
+      platform convention, because the integrity of every result depends on it.</p>
+
+      <h2 id="errors">Errors</h2>
+
+      <p>Standard HTTP status semantics. Every error response carries this body and no other shape:</p>
+
+<pre><code>{ "error": "invalid_invite", "message": "Invite token has already been used." }</code></pre>
+
+      <p>Two flat string fields. No nesting, no arrays, no optional members — a microcontroller client
+      can extract both with a substring scan and never needs a JSON tree walker, which is the entire
+      reason for the shape. <code>error</code> is a stable machine-readable code and the only field a
+      client may branch on; <code>message</code> is human text for logs and must never be parsed.</p>
+
+      <p>Two behaviours matter more than the code table. A station that receives <code>401</code>
+      stops, logs, and surfaces the failure to its operator — it does not re-register and does not
+      retry on a thirty-second loop, which would be a denial of service a network inflicts on itself.
+      And a station that cannot reach the platform <strong>continues executing the assignments it
+      already holds</strong>, queueing observations for later submission. Reception is never blocked
+      on connectivity.</p>
+
+      <h2 id="versioning">Versioning</h2>
+
+      <p>An <code>MSP-Version</code> header on every request carries <code>major.minor</code>; the
+      path carries the major only, so <code>MSP-Version: 0.1</code> is served at
+      <code>/msp/v0/</code>. The platform supports the current major version and one previous. An
+      unrecognised minor within a supported major is accepted, because minor versions are additive by
+      definition and a station built against 0.1 must keep working when the platform speaks 0.2.</p>
+
+      <h2 id="status">Status</h2>
+
+      <p>MSP is frozen at version 0.1. All four questions left open in the first draft have been
+      resolved and written into the text. The specification is the authoritative document; this page
+      is an introduction to it.</p>
+
+      <p><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">Read the
+      full MSP 0.1 specification on GitHub</a>, or see <a href="/architecture/">the architecture</a>
+      for what sits on the other side of this boundary.</p>
+
+    </div>
+  </main>
+
+  <footer class="colophon colophon-wide">
+    <div class="foot-brand">
+      <a class="brand" href="/" aria-label="Meridian — home">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+          <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="4"/>
+          <path d="M 32 10 A 10.5 22 0 0 0 32 54" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+        </svg>
+        <span class="wordmark">Meridian</span>
+      </a>
+      <p class="foot-line">A non-profit building open scheduling, monitoring and measured reliability
+      for satellite ground stations.</p>
+      <p class="foot-line"><a href="mailto:hello@meridian.org.in">hello@meridian.org.in</a></p>
+    </div>
+
+    <nav class="foot-col" aria-label="Project">
+      <p class="foot-h">Project</p>
+      <ul>
+        <li><a href="/architecture/">Architecture</a></li>
+        <li><a href="/protocol/">Protocol</a></li>
+        <li><a href="/about/">About</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="Documentation">
+      <p class="foot-h">Documentation</p>
+      <ul>
+        <li><a href="/docs/">All documents</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">MSP specification</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/DATA-MODEL.md">Data model</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/EVALUATION.md">Evaluation method</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="Source">
+      <p class="foot-h">Source</p>
+      <ul>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian">GitHub</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/ATTRIBUTION.md">Attribution</a></li>
+      </ul>
+    </nav>
+
+    <p class="foot-bar">© 2026 Meridian <span class="dot" aria-hidden="true">·</span> Non-profit
+    <span class="dot" aria-hidden="true">·</span> Receive only — the station never transmits.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

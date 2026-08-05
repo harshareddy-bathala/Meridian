@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Architecture — Meridian Ground Station Platform</title>
+<meta name="description" content="How Meridian is built: the orbit, prediction, scheduler, registry, observation and reliability modules, and the independence test the design has to pass.">
+<link rel="canonical" href="https://meridian.org.in/architecture/">
+
+<meta name="theme-color" content="#08090D" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#FAF9F7" media="(prefers-color-scheme: light)">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://meridian.org.in/architecture/">
+<meta property="og:site_name" content="Meridian">
+<meta property="og:locale" content="en">
+<meta property="og:title" content="Architecture — Meridian Ground Station Platform">
+<meta property="og:description" content="The orbit, prediction, scheduler, registry, observation and reliability modules, the MSP protocol boundary, and the independence test the design has to pass.">
+<meta property="og:image" content="https://meridian.org.in/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Meridian wordmark over a wireframe globe with a satellite link line.">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Architecture — Meridian Ground Station Platform">
+<meta name="twitter:description" content="The modules, the protocol boundary, and the independence test the design has to pass.">
+<meta name="twitter:image" content="https://meridian.org.in/og-image.png">
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+
+<link rel="preload" href="/fonts/IBMPlexSans-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="modulepreload" href="/orbit.js">
+
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/style.css">
+<script src="/rail.js" type="module"></script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Architecture — Meridian Ground Station Platform",
+      "description": "The orbit, prediction, scheduler, registry, observation and reliability modules, the MSP protocol boundary, and the independence test the design has to pass.",
+      "url": "https://meridian.org.in/architecture/",
+      "inLanguage": "en",
+      "author": { "@id": "https://meridian.org.in/#organization" },
+      "publisher": { "@id": "https://meridian.org.in/#organization" },
+      "about": ["satellite ground stations", "ground station scheduling", "software architecture"]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Meridian", "item": "https://meridian.org.in/" },
+        { "@type": "ListItem", "position": 2, "name": "Architecture", "item": "https://meridian.org.in/architecture/" }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+
+<body>
+
+<a class="skip" href="#content">Skip to content</a>
+
+<div class="page page-doc">
+
+  <header class="masthead">
+    <a class="brand" href="/" aria-label="Meridian — home">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="4"/>
+        <path d="M 32 10 A 10.5 22 0 0 0 32 54" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+      </svg>
+      <span class="wordmark">Meridian</span>
+    </a>
+
+    <nav class="nav" aria-label="Primary">
+      <a href="/architecture/" aria-current="page">Architecture</a>
+      <a href="/protocol/">Protocol</a>
+      <a href="/docs/">Docs</a>
+      <a href="/about/">About</a>
+    </nav>
+
+    <div class="theme-slot">
+      <button id="theme-toggle" class="theme-toggle" type="button" hidden aria-label="Switch theme">
+        <svg class="icon-to-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="4.25"/>
+          <path d="M12 1.75v2.5M12 19.75v2.5M4.22 4.22l1.77 1.77M18.01 18.01l1.77 1.77M1.75 12h2.5M19.75 12h2.5M4.22 19.78l1.77-1.77M18.01 5.99l1.77-1.77" stroke-linecap="round"/>
+        </svg>
+        <svg class="icon-to-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+          <path d="M20.5 14.75A8.75 8.75 0 0 1 9.25 3.5a8.75 8.75 0 1 0 11.25 11.25Z" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="doc" id="content">
+    <div class="doc-head">
+      <p class="eyebrow">Architecture</p>
+      <h1>Six modules, one protocol boundary, and a rule about what may depend on what.</h1>
+      <p class="standfirst">Meridian decides which satellite passes are worth receiving, schedules them,
+      monitors the stations doing the work, and reports measured reliability. The parts that do this are
+      kept deliberately separate, because the boundaries are what make the claims checkable.</p>
+    </div>
+
+    <aside class="rail">
+      <nav class="toc" aria-labelledby="rail-toc-h">
+        <p class="rail-h" id="rail-toc-h">On this page</p>
+        <ol>
+          <li><a href="#layers">Layers</a></li>
+          <li><a href="#modules">Modules</a></li>
+          <li><a href="#rules">The rules</a></li>
+          <li><a href="#absence-not-miss">Absence is not a miss</a></li>
+          <li><a href="#honesty-rules">Honesty rules</a></li>
+          <li><a href="#deployment">Deployment</a></li>
+        </ol>
+      </nav>
+
+      <div class="rail-panel">
+        <canvas class="rail-scene" aria-hidden="true"></canvas>
+        <p class="rail-status">Phase 1 · Foundations</p>
+        <p class="rail-note">Pre-launch. No measured results yet.</p>
+        <a class="rail-src" href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/ARCHITECTURE.md">Canonical spec ↗</a>
+      </div>
+    </aside>
+
+    <div class="prose">
+
+      <h2 id="layers">Layers</h2>
+
+      <div class="diagram-scroll">
+        <svg class="diagram" viewBox="0 0 640 415" role="img" aria-labelledby="diagram-title diagram-desc">
+          <title id="diagram-title">Meridian layer diagram</title>
+          <desc id="diagram-desc">Anyone, anywhere reaches the dashboard and public API, which sits on
+          the platform. The platform contains orbit feeding prediction feeding scheduler, plus the
+          observation store, registry and reliability modules. External archives connect to the
+          platform by an optional, data-only path. Below the platform, the Meridian Station Protocol
+          connects three kinds of station: station 001 on a Pi with an SDR, a microcontroller station,
+          and fifty simulated stations, labelled as simulated.</desc>
+
+          <text x="280" y="16" text-anchor="middle">ANYONE, ANYWHERE</text>
+          <path class="d-line" d="M280 24 V44"/>
+
+          <rect class="d-box" x="120" y="44" width="320" height="34"/>
+          <text x="280" y="66" text-anchor="middle">DASHBOARD + PUBLIC API</text>
+
+          <path class="d-line" d="M280 78 V100"/>
+
+          <rect class="d-box" x="40" y="100" width="480" height="150"/>
+          <text class="d-label" x="54" y="120">PLATFORM</text>
+
+          <rect class="d-box" x="70" y="140" width="95" height="28"/>
+          <text x="117" y="158" text-anchor="middle">orbit</text>
+          <path class="d-line" d="M165 154 H195"/>
+
+          <rect class="d-box" x="195" y="140" width="115" height="28"/>
+          <text x="252" y="158" text-anchor="middle">prediction</text>
+          <path class="d-line" d="M310 154 H340"/>
+
+          <rect class="d-box" x="340" y="140" width="105" height="28"/>
+          <text x="392" y="158" text-anchor="middle">scheduler</text>
+
+          <rect class="d-box" x="70" y="195" width="170" height="28"/>
+          <text x="155" y="213" text-anchor="middle">observation store</text>
+
+          <rect class="d-box" x="255" y="195" width="95" height="28"/>
+          <text x="302" y="213" text-anchor="middle">registry</text>
+
+          <rect class="d-box" x="365" y="195" width="110" height="28"/>
+          <text x="420" y="213" text-anchor="middle">reliability</text>
+
+          <rect class="d-box d-optional" x="545" y="145" width="88" height="60"/>
+          <text class="d-label" x="589" y="167" text-anchor="middle">external</text>
+          <text class="d-label" x="589" y="180" text-anchor="middle">archives</text>
+          <text class="d-label" x="589" y="196" text-anchor="middle">data only</text>
+          <path class="d-line d-optional" d="M545 175 H520"/>
+
+          <path class="d-line" d="M280 250 V275"/>
+
+          <rect class="d-box" x="120" y="275" width="320" height="34"/>
+          <text x="280" y="297" text-anchor="middle">MERIDIAN STATION PROTOCOL</text>
+
+          <path class="d-line" d="M280 309 V332 M110 332 H450 M110 332 V350 M280 332 V350 M450 332 V350"/>
+
+          <rect class="d-box" x="40" y="350" width="140" height="52"/>
+          <text x="110" y="373" text-anchor="middle">Station 001</text>
+          <text class="d-label" x="110" y="390" text-anchor="middle">Pi + SDR</text>
+
+          <rect class="d-box" x="210" y="350" width="140" height="52"/>
+          <text x="280" y="373" text-anchor="middle">Microcontroller</text>
+          <text class="d-label" x="280" y="390" text-anchor="middle">station</text>
+
+          <rect class="d-box" x="380" y="350" width="140" height="52"/>
+          <text x="450" y="373" text-anchor="middle">50 simulated</text>
+          <text class="d-label" x="450" y="390" text-anchor="middle">labelled as such</text>
+        </svg>
+      </div>
+
+      <p><strong>The independence test.</strong> Remove every dashed element and the system still
+      schedules, receives, decodes, monitors and reports. External archives are a source of training
+      data, never a runtime dependency — if every external service went offline permanently tomorrow,
+      Meridian would still work using our own stations alone.</p>
+
+      <h2 id="modules">Modules</h2>
+
+      <dl>
+        <dt>orbit</dt>
+        <dd>Propagation, element-set archive, uncertainty model. It owns the boundary to the
+        propagation libraries — no other module imports them, so a propagator change never ripples
+        outward. Provides pass windows for a location and capability, look angles over time, the
+        expected Doppler curve, and position uncertainty for a given element-set age. Coordinate
+        frames are where silent bugs live: the frame SGP4 outputs is not an Earth-fixed frame and is
+        not a topocentric one, so every conversion is deliberate and tested against known passes.</dd>
+
+        <dt>prediction</dt>
+        <dd>Feature extraction, yield model, horizon inference, calibration. Provides the probability
+        of a successful decode for a given station and pass, a learned per-azimuth horizon profile,
+        and calibration metrics. It degrades to geometry alone for a station with no history, and it
+        knows nothing about the protocol or about HTTP.</dd>
+
+        <dt>scheduler</dt>
+        <dd>Constrained optimisation over candidate passes. It consumes predictions and does not read
+        the observation store directly. It enforces non-overlap including slew and settling time,
+        per-station capability limits, and operator priority weights. The reasoning behind each
+        assignment is a first-class output rather than something reconstructed later, because the
+        dashboard has to show <em>why</em> a pass was chosen or skipped.</dd>
+
+        <dt>registry</dt>
+        <dd>Station registration, capabilities, tokens, health state, last-heartbeat age. It is the
+        authority on whether a station was listening at a given moment, which is what every
+        reliability metric ultimately rests on.</dd>
+
+        <dt>observations</dt>
+        <dd>Ingest, normalisation, deduplication — the system of record. Records are immutable once
+        written and corrections are additive. Every record carries provenance, and the
+        <code>simulated</code> flag propagates from registration through to every derived record and
+        every API response.</dd>
+
+        <dt>reliability</dt>
+        <dd>Service level indicators, objectives, the irrecoverable-loss budget, and failure
+        injection. This module owns one definition that the whole project depends on, described
+        below.</dd>
+      </dl>
+
+      <h2 id="rules">The rules</h2>
+
+      <ol>
+        <li>Module boundaries are firm. Cross-module access goes through interfaces, not database
+        queries.</li>
+        <li>Only the orbit module imports propagation libraries.</li>
+        <li>Only the reliability module decides what counts as a miss.</li>
+        <li>The <code>simulated</code> flag propagates from registration to every derived record and
+        every API response.</li>
+        <li>The station client never assumes connectivity. Reception is never blocked on the platform
+        being reachable.</li>
+        <li>No transmit code paths anywhere. Stations receive; they do not transmit.</li>
+      </ol>
+
+      <h2 id="absence-not-miss">Absence is not a miss</h2>
+
+      <p>A station that reported no data has not necessarily missed anything. It is counted as having
+      missed a pass only when the registry confirms it was listening, on the right frequency, for the
+      right target. Silence from a station that was switched off is not a failure to receive; it is an
+      absence of evidence, and recording it as a miss would quietly corrupt every reliability figure
+      built on top of it.</p>
+
+      <p>This distinction is load-bearing, so it is encoded in exactly one place and never duplicated.</p>
+
+      <h2 id="honesty-rules">Honesty rules</h2>
+
+      <p>Three constraints exist because a reliability platform that overstates itself is worth
+      nothing:</p>
+
+      <ul>
+        <li><strong>Simulated data is labelled as simulated at every layer</strong> — database column,
+        API field, dashboard badge, report. A simulated result presented as a measured one would
+        destroy the credibility of every other number.</li>
+        <li><strong>Evaluation uses temporal splits only.</strong> Shuffling time-series observation
+        data into training and test sets leaks the future into the past and produces a model that
+        looks excellent and predicts nothing.</li>
+        <li><strong>Every number in a report is regenerable</strong> from a dataset snapshot, a
+        configuration file and a seed.</li>
+      </ul>
+
+      <h2 id="deployment">Deployment</h2>
+
+      <p>Everything runs under Docker Compose, with PostgreSQL and TimescaleDB on the station
+      computer's own storage — observations are time-series data and are stored as such. Public access
+      is via a secure tunnel, so no static IP is required and the platform works from behind a
+      restrictive network.</p>
+
+      <p><code>docker compose up</code> on a clean machine must produce a working platform in under ten
+      minutes. That is a requirement, not an aspiration.</p>
+
+      <p><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/ARCHITECTURE.md">Read
+      the full architecture document on GitHub</a>, or see <a href="/protocol/">the protocol</a> for
+      how stations connect.</p>
+
+    </div>
+  </main>
+
+  <footer class="colophon colophon-wide">
+    <div class="foot-brand">
+      <a class="brand" href="/" aria-label="Meridian — home">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+          <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="4"/>
+          <path d="M 32 10 A 10.5 22 0 0 0 32 54" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+        </svg>
+        <span class="wordmark">Meridian</span>
+      </a>
+      <p class="foot-line">A non-profit building open scheduling, monitoring and measured reliability
+      for satellite ground stations.</p>
+      <p class="foot-line"><a href="mailto:hello@meridian.org.in">hello@meridian.org.in</a></p>
+    </div>
+
+    <nav class="foot-col" aria-label="Project">
+      <p class="foot-h">Project</p>
+      <ul>
+        <li><a href="/architecture/">Architecture</a></li>
+        <li><a href="/protocol/">Protocol</a></li>
+        <li><a href="/about/">About</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="Documentation">
+      <p class="foot-h">Documentation</p>
+      <ul>
+        <li><a href="/docs/">All documents</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">MSP specification</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/DATA-MODEL.md">Data model</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/EVALUATION.md">Evaluation method</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="Source">
+      <p class="foot-h">Source</p>
+      <ul>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian">GitHub</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/ATTRIBUTION.md">Attribution</a></li>
+      </ul>
+    </nav>
+
+    <p class="foot-bar">© 2026 Meridian <span class="dot" aria-hidden="true">·</span> Non-profit
+    <span class="dot" aria-hidden="true">·</span> Receive only — the station never transmits.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

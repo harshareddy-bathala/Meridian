@@ -18,7 +18,9 @@ Done when a virtual station is visible on the public site from outside the colle
 
 Not yet started: prediction models, scheduler, reliability layer, hardware.
 
-[**meridian.org.in**](https://meridian.org.in) — a static page describing the project, in `site/`. It is deliberately not the dashboard: the exit criterion above is met by the live dashboard on `dash.meridian.org.in`, tunnelled from the station, which is a separate surface with a separate uptime story. See D-036.
+[**meridian.org.in**](https://meridian.org.in) — the static public site, in `site/`: the front page plus the architecture, protocol, documentation and about pages. It is deliberately not the dashboard: the exit criterion above is met by the live dashboard on `dash.meridian.org.in`, tunnelled from the station, which is a separate surface with a separate uptime story. See D-036, D-037 and D-038 for the two-theme system and the move to five pages, and D-039 and D-040 for the contrast pass and the document rail.
+
+Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](https://github.com/harshareddy-bathala/Meridian/issues) and [discussions](https://github.com/harshareddy-bathala/Meridian/discussions) for anything technical.
 
 ---
 
@@ -36,7 +38,8 @@ Not yet started: prediction models, scheduler, reliability layer, hardware.
 | `docs/GIT-WORKFLOW.md` | Commit, branch and review rules |
 | `CLAUDE.md` | Context for AI coding assistants |
 | `ATTRIBUTION.md` | Log of ideas read from other projects |
-| `site/` | The static page at `meridian.org.in`. No build step — the directory is what gets served. |
+| `site/` | The static site at `meridian.org.in`. No build step — the directory is what gets served. |
+| `site/brand/` | Logo exports for marketing. Generated; see `site/brand/README.md`. |
 
 ---
 

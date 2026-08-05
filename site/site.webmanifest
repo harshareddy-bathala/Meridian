@@ -1,0 +1,15 @@
+{
+  "name": "Meridian — satellite ground station scheduling",
+  "short_name": "Meridian",
+  "description": "Predictive scheduling and measured reliability for satellite ground stations, with an open station protocol.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "minimal-ui",
+  "background_color": "#08090D",
+  "theme_color": "#08090D",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

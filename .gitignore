@@ -38,3 +38,7 @@ Thumbs.db
 .vscode/
 .idea/
 .cursor/
+
+# Scratch from site verification runs — browser profiles, HARs, Lighthouse
+# JSON. Regenerable, and none of it is evidence of anything on its own.
+.site-review/

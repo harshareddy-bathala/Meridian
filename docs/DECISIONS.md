@@ -655,6 +655,117 @@ The zone is on Cloudflare rather than the registrar because the apex is needed f
 
 ---
 
+## D-037 — The public site has two themes
+
+**2026-08-05 · accepted**
+
+`site/style.css` opened with a statement that there is no light mode, by choice: *"This is an instrument panel, not a document."* That was true of a page with one heading and one link. It stopped being true when the site acquired documentation.
+
+The instrument-panel reading still holds for the front page — a globe on near-black, one screen, nothing to read at length. It does not hold for four pages of specification prose, which people read in daylight, on borrowed screens, and beside other documents. A single committed dark theme was a defensible position for a business card and is an imposition on a reference text.
+
+**Decision.** Two themes. `prefers-color-scheme` decides by default; a toggle in the masthead overrides it and persists in `localStorage`.
+
+The mechanism is constrained by the CSP. `_headers` allows no `unsafe-inline`, which rules out the usual three-line inline script that sets the theme before first paint — and without something running before first paint, every visitor whose stored preference differs from their system setting sees a flash of the wrong theme. The resolution is `site/theme.js`: an external file, loaded in `<head>` **without `defer`**, so it blocks parsing exactly long enough to set `data-theme` on the root element. One extra same-origin request of about 400 bytes, and the no-`unsafe-inline` posture is untouched.
+
+**The canvas now reads its palette from CSS.** `main.js` held its own copy of the seven colours as RGB triplets. A second theme would have made that fourteen values in two places — plus the swatches in the footer legend, which claim to explain what the colours on the canvas mean. `readPalette()` pulls them from the computed custom properties instead, and `theme.js` dispatches a `themechange` event that triggers a re-read. `site/tools/make-images.py` keeps its own constants; it is a build-time tool with no DOM to read from.
+
+**Two contrast failures were fixed on the way.** `--muted` against `--bg` measured **4.24:1**, under the 4.5:1 WCAG AA requires for the 15 px body text it was used for; it is now `#787E8A` at 4.88:1. `.legend dd` was painted in `--rule`, a hairline colour, at about **1.3:1** — text that could not be read at all. Both were pre-existing, and neither was found by looking at the page. They were found by computing the ratios. The full table for both themes is in `site/README.md`.
+
+*Amended by D-039*, which raises the hairline and body-text values again after the two themes were seen side by side.
+
+*Rejected:* system preference only, with no toggle. Half the code and no flash to worry about, but a visitor whose operating system is dark can never see the light theme, and nothing signals that the site has one.
+
+*Rejected:* relaxing the CSP to allow an inline theme script. It is the ordinary solution and it would work. It also means `script-src` gains `unsafe-inline`, or a nonce a static host cannot generate, and the claim that the site makes no third-party requests stops being enforced by a header and becomes a promise. A 400-byte file is cheaper than that.
+
+---
+
+## D-038 — The public site is five pages, and what it does not say
+
+**2026-08-05 · accepted**
+
+`site/` was one page. It is now `/`, `/architecture/`, `/protocol/`, `/docs/`, `/about/` and a 404, sharing a masthead, nav and footer.
+
+**The front page stays one non-scrolling screen.** No sections below the fold. The globe and the single screen are the whole impression, and putting a scrolling marketing page underneath would have spent that to gain content the subpages carry better. It gains nav, a tightened paragraph, two links and a real footer. Nothing else.
+
+**Documentation on the site is editorial, not mirrored.** `/architecture/` and `/protocol/` are written for a reader arriving cold. They are not renderings of `docs/ARCHITECTURE.md` and `docs/MSP-SPEC.md`, and they link to those as the authoritative text. The alternative was a Markdown build step producing committed HTML, which would keep site and specification in exact agreement — and D-036 committed `site/` to no build step and no npm, on the grounds that choosing a stack for a page with one heading would prejudge the dashboard's. Five hand-written pages do not change that calculation. The risk accepted is that an editorial page drifts from the document it summarises; the mitigation is that it summarises rather than restates, so drift surfaces as staleness rather than as contradiction.
+
+**Positioning.** The site presents Meridian as a non-profit effort building open ground-station software and an open protocol. It does not describe its origin. That is recorded here rather than left implicit, because the repository says otherwise in `CLAUDE.md` and `docs/PROJECT.md` — both public, and both one GitHub link away from the site. The constraint applied instead is that nothing on the site is false: status is stated as pre-launch, no station count is invented, and no simulated figure is presented as measured. That is the same rule the platform is built under.
+
+**The home page has no Lighthouse Performance score, and this is a choice.** Content sits at `opacity: 0` until `--reveal-at: 4200ms`, so Chrome records no LCP candidate inside Lighthouse's trace window and the Performance category returns null rather than a low number. Real-world LCP would be about 4.8 s. Accessibility, Best Practices and SEO are 100 on every page, and the four subpages — which carry no canvas and no reveal — score 100 in all four categories with an LCP of 0.4 s.
+
+Two fixes were on the table and both were declined: exempting the `<h1>` alone from the reveal, which would have put LCP at 0.2 s while leaving the canvas sequence entirely untouched, and shortening the sequence to about 1.8 s. The four-stage intro at its current pace was judged worth more than a score on the one page whose job is an impression rather than information. It is recorded so that it reads as a decision rather than an oversight.
+
+*Rejected:* a Markdown build step under `site/tools/`. Deferred rather than rejected on the merits — it becomes the right answer the moment the site needs to carry a specification verbatim.
+
+*Rejected:* a `_redirects` file for the `www` → apex redirect. Cloudflare Pages matches `_redirects` on path only and documents domain-level redirects as unsupported, so the host-based form never fires, and the path-only form `/* → https://meridian.org.in/:splat` would put the apex into a redirect loop. The redirect stays the dashboard Redirect Rule D-036 already specified, and `site/README.md` now records why a file cannot replace it.
+
+---
+
+## D-039 — Hairlines are for seeing, not for passing
+
+**2026-08-05 · accepted** · *amends D-037*
+
+D-037 checked every **text** pair against WCAG AA and fixed the two that failed. It did not check the pairs that are not text, because the standard does not ask it to: a purely decorative divider is exempt from the 3:1 contrast requirement for user-interface components.
+
+Seen on a real screen, that exemption turned out to be the wrong thing to lean on. `--rule` measured **1.25:1** on the dark background and **1.36:1** on the light one, and the canvas wire on paper was **1.47:1**. A rule that a reader has to hunt for is not a subtle rule; it is a rule that is not there, and the pages read as a wall of unstructured text on any panel without OLED-grade blacks. Passing an audit and being legible are different questions and only one of them was asked.
+
+**Decision.** Raise the non-text values in both themes, to a target of roughly 1.7:1 — enough that a divider is unambiguously present, low enough that it stays a hairline rather than becoming a box.
+
+| Token | Theme | From | To | Ratio |
+|---|---|---|---|---|
+| `--rule` | dark | `#1E2229` | `#333944` | 1.25 → **1.71:1** |
+| `--rule` | light | `#DCD7CE` | `#C9C2B6` | 1.36 → **1.68:1** |
+| `--wire` | light | `#D5CFC4` | `#BFB8AB` | 1.47 → **1.87:1** |
+| `--alert` | dark | `#B8544F` | `#C4635C` | 4.19 → **5.01:1** |
+
+**`--rule` and `--wire` are no longer the same value in the dark theme.** They were, and that was a coincidence rather than a decision — a divider between blocks of prose and a wireframe stroke on a near-black canvas do not want the same weight. The wire stays at 1.25:1 because the globe reads correctly there; only the rule moves.
+
+**`--alert` is fixed rather than caveated.** D-037 left it at 4.19:1 with a note in `site/README.md` saying it is never used as text. A colour that has to be documented as unusable is worse than a colour that is usable, and the fix was four characters.
+
+**Body copy moved off `--muted` onto `--ink-dim`** — 4.88:1 → **8.20:1** dark, 6.03:1 → **8.86:1** light. `--muted` clears AA and prose set in it still reads as washed out, which is the gap between the threshold and the thing the threshold is a proxy for. The rule now is that `--muted` is for text that is *glanced at* — nav, metadata, tracked uppercase mono — and `--ink-dim` is for text that is *read*. `.standfirst` moves up to `--ink` to keep the deck distinct from the body it now shares a colour with.
+
+The layer diagram's strokes moved from `--rule` to `--muted` for a different reason: a diagram needed to understand the page is a graphical object under WCAG 1.4.11 and owes 3:1, which `--rule` does not clear at any of these values.
+
+*Rejected:* raising `--rule` far enough to clear 3:1 as well. At that weight the hairlines stop dividing and start boxing, which is the thing `site/style.css` has said not to do since the first commit. 1.7:1 is a judgement, not a threshold, and it is written down here so the next person knows it was chosen rather than defaulted to.
+
+---
+
+## D-040 — The document pages get a rail, and the footer stops repeating the nav
+
+**2026-08-05 · accepted**
+
+Three problems with the five-page site as D-038 shipped it, all visible only once it was on a real screen at a real width.
+
+**The measure left 40% of a wide viewport empty.** `.doc` is capped at `46rem`, correctly — a 68-character line is the measure prose wants and widening it would be a regression. But the cap was applied inside a single-column grid, so on a 1440px display the entire right-hand third was blank.
+
+**Decision.** A sticky rail in that space: a contents list that tracks the heading being read, and a still frame of the same globe the front page animates. Three grid tracks, the middle one an elastic spacer, so the prose stays on the left margin and the rail lands on the right — under the theme toggle, which is what the masthead already puts there.
+
+**One contents list, not two.** Above 1180px it is the rail; below, it falls back into normal flow as a two-column list of links. The obvious alternative — ship a `<details>` and force it open on wide screens — needs `::details-content` to do the forcing, which is too new to depend on, and a duplicated list is a list that can disagree with itself. The `<h2>` ids and the contents entries are generated from one pass over the same headings for the same reason, and `verify_site.py` now fails the build if a fragment points at nothing.
+
+**`main.js` split into `orbit.js` + `main.js`.** The rail needed the projection, the graticule, the orbit model and the elevation test. Copying seventy lines would have put two orthographic projections in one directory that could drift apart while both claiming to draw the same sky. `orbit.js` is an ES module holding the maths; `main.js` keeps the intro choreography and imports it; `rail.js` imports the same. `script-src 'self'` covers modules and `modulepreload` alike, so the CSP is untouched. Both entry points gain `type="module"`, which is also what removes the now-redundant `defer`.
+
+**The rail canvas draws once.** No `requestAnimationFrame`, no loop, redraw only on `themechange` and `resize`. The four document pages score 100 on Lighthouse Performance and an animation competing with the prose beside it would have risked that for decoration. Measured after the change: still 100/100/100/100, TBT 0 ms.
+
+The moment it draws is searched, not chosen — over one globe revolution, the longest *visible* link with the satellite comfortably above the mask and both endpoints on the near hemisphere. Picking the peak of the pass gives an 11px line, and picking a fixed elevation lands on moments where the satellite is behind the Earth. The line is green because the elevation test says so, exactly as on the front page, which matters because this page does not carry the legend that would otherwise explain the colour.
+
+**The footer was the masthead nav a second time.** Four links repeated for no reason. It is now a sitemap — the documents, the source, the licence, the attribution, and the contact address — which is content the top nav has no room for. The front page keeps its single-line colophon; it is one screen and this is not.
+
+**Page transitions are four lines of CSS.** `@view-transition { navigation: auto; }` cross-fades between two documents in Chrome and Edge; Firefox and Safari navigate normally, which is the behaviour the site had already. No JavaScript, no request. Reduced motion cancels it on the pseudo-elements rather than with `@view-transition { navigation: none }` inside a media query — the nested form is newer and less certainly supported, and the pseudo-element form is unambiguously valid. Verified by reading the parsed rule back out of `document.styleSheets`, not by assuming.
+
+**The 404 gained an acquisition sweep** — an arm that turns and a trace that never closes — in CSS on an inline SVG. The front page's canvas is a scene worth 8 KB of JavaScript; a 404 is not.
+
+**There is now a contact address.** `hello@meridian.org.in`, on `/about/`, in the footer, and as `contactPoint` in the `Organization` JSON-LD, plus a `.well-known/security.txt`. **It depends on Cloudflare Email Routing being configured** — free, forward-only, and not yet done at the time of writing. A published address that bounces is worse than no address, so this is a pre-deploy blocker and is recorded as one in `site/README.md`.
+
+`nonprofitStatus` is deliberately not set in the structured data. Its values assert a specific legal registration; non-profit stays a prose claim.
+
+*Rejected:* a WebGL globe in the rail. It is what "3D" usually means and it would need either a CDN, which the CSP forbids outright, or a vendored copy of a library — roughly 600 KB and an `ATTRIBUTION.md` entry — to decorate the margin of a document. `main.js` already computes a real orthographic projection of a real 98° orbit in no dependencies at all; the rail draws that.
+
+*Rejected:* a loading screen. The site paints in 0.4 s; an overlay that covers it and dismisses on load would add latency to every navigation and cost the four document pages their Performance score, to simulate the slowness it appears to be hiding.
+
+*Rejected:* centring the measure to close the gap. `site/style.css` has been asymmetric on purpose since the first commit — masthead top-left, content anchored lower-left, nothing centred. Centring the document column would have fixed the empty space by breaking the alignment with the masthead above it.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -727,6 +838,20 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-023 amendment — `and`, not `or` | `MSP-SPEC.md` §4.1; `DATA-MODEL.md`; `meridian/config.py`; `deploy/.env.example` |
 | D-024 amendment — points at D-034 | `MSP-SPEC.md` §6 |
 | D-026 amendment — superseded rows marked | — (this file) |
+
+**Landed 2026-08-05**, building out the public site.
+
+| Decision | Applied to |
+|---|---|
+| D-037 two themes, palette read from CSS | `site/theme.js`, `site/style.css`, `site/main.js`, `site/README.md` |
+| D-037 contrast fixes (`--muted`, `.legend dd`) | `site/style.css`, `site/README.md` |
+| D-038 five pages, shared shell | `site/index.html`, `site/{architecture,protocol,docs,about}/index.html`, `site/404.html` |
+| D-038 SEO and metadata layer | all pages; `site/robots.txt`, `site/sitemap.xml`, `site/site.webmanifest`, `site/_headers` |
+| D-038 `_redirects` cannot do host matching | `site/README.md` (no file added) |
+| — brand exports for marketing | `site/tools/make-images.py`, `site/brand/` |
+| D-039 hairline and body-copy contrast raised | `site/style.css`, `site/README.md` |
+| D-040 document rail, module split, transitions | `site/orbit.js`, `site/rail.js`, `site/style.css`, `site/main.js`, all pages |
+| D-040 wide footer, contact address | all pages, `site/.well-known/security.txt` |
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
 

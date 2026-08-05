@@ -1,0 +1,14 @@
+# Meridian — meridian.org.in
+#
+# The platform is not yet deployed publicly; this file exists so that anyone
+# who finds something in the site, the published protocol or the repository
+# has somewhere to send it. See https://securitytxt.org/ (RFC 9116).
+#
+# Renew Expires before the date below. An expired security.txt is treated as
+# no security.txt at all.
+
+Contact: mailto:hello@meridian.org.in
+Contact: https://github.com/harshareddy-bathala/Meridian/security/advisories/new
+Expires: 2027-08-05T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://meridian.org.in/.well-known/security.txt
