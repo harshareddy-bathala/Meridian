@@ -2,13 +2,26 @@
   Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
   Referrer-Policy: no-referrer
-  Permissions-Policy: geolocation=(), camera=(), microphone=(), browsing-topics=()
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), browsing-topics=(), payment=(), usb=(), serial=(), bluetooth=(), midi=(), display-capture=(), fullscreen=()
   Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-site
 
 # No 'unsafe-inline' anywhere, which is why no page carries an inline <style>,
 # an inline <script> or a style="" attribute. The site's claim to make no
 # third-party requests is enforced here rather than asserted.
+#
+# X-Frame-Options duplicates frame-ancestors for agents that predate CSP
+# level 2. Where both are understood, frame-ancestors wins and they agree.
+#
+# Permissions-Policy names features this site will never use rather than only
+# the three that are commonly listed. It costs one header line and it means a
+# future page cannot quietly acquire one of them.
+#
+# Cross-Origin-Resource-Policy: Cloudflare Pages serves every asset with
+# Access-Control-Allow-Origin: *, which this narrows — the fonts, the CSS and
+# the scripts are for this site, and nothing is meant to embed them.
 #
 # manifest-src is stated explicitly: it falls back to default-src, and
 # 'none' would block /site.webmanifest.
@@ -39,9 +52,23 @@
 /*.ico
   Cache-Control: public, max-age=604800
 
-# CSS and JS are not content-hashed, so they must never be immutable — a
-# deploy would strand every returning visitor on the previous build. Revalidate
-# instead: the files are small and an unchanged one costs a 304.
+# CSS and JS are referenced with a ?v=<content hash> stamp, applied by
+# tools/stamp_assets.py and checked in CI, so a URL only ever names one set of
+# bytes and a cache cannot produce a hybrid of two builds.
+#
+# They still revalidate rather than going immutable. The stamp makes immutable
+# *safe*, not necessary, and these files are small enough that an unchanged one
+# costs a 304 — whereas an immutable header on an unstamped URL, which is what
+# this would be if the stamper ever silently stopped running, is unrecoverable
+# without renaming the file.
+#
+# THIS FILE IS NOT AUTHORITATIVE ON ITS OWN. Cloudflare's zone-level Browser
+# Cache TTL overrides Cache-Control unless it is set to "Respect Existing
+# Headers"; while it was not, these two lines were rewritten to max-age=14400
+# at the edge and a phone rendered current HTML against four-hour-old CSS.
+# Verify after any deploy that changes caching:
+#
+#   curl -sSI https://meridian.org.in/style.css | grep -i cache-control
 /*.css
   Cache-Control: public, max-age=0, must-revalidate
 

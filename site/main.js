@@ -20,7 +20,7 @@ import {
   makeProjection, hidden, GRATICULE,
   spinAt, satAt, elevation, SATS, findNextPass,
   orbitPath, groundTrack, strokeLines,
-} from './orbit.js';
+} from './orbit.js?v=847a79e8';
 
 /* ------------------------------------------------------------------ phases --
  * All intro timing lives here, in milliseconds from first paint. Every phase

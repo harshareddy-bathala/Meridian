@@ -806,6 +806,64 @@ The animation itself is unchanged — same phases, same 4.2 s, same composition.
 
 ---
 
+## D-042 — Asset URLs carry a content hash, and the site's invariants are enforced rather than written down
+
+**2026-08-06 · accepted** · *reverses a rejection in D-041*
+
+D-041 rejected fingerprinting the assets: *"It is the belt-and-braces answer and it needs a build step, which D-036 rules out. Respecting the headers already shipped achieves the same thing with a dashboard toggle."*
+
+**The dashboard toggle was recorded as the remedy and was never applied.** Measured against the live site the day after D-041 was written:
+
+```
+$ curl -sSI https://meridian.org.in/style.css | grep -i cache-control
+Cache-Control: public, max-age=14400, must-revalidate
+
+$ curl -sS https://meridian.org.in/ | grep -c __cf_email__
+1
+$ curl -sS https://meridian.org.in/ | grep -c cloudflareinsights
+1
+```
+
+All three settings in D-041's table are still in force. The four-hour window is still open, the contact address still renders as `[email protected]` in any browser that blocks the decode script, and the analytics beacon is still injected and still blocked by the CSP on every page load.
+
+The same symptom was reported again from a phone and a desktop the same day, and the same evidence identified it: the rules missing from the phone's rendering were exactly the set added in `334d4e5`, and the rules that survived were exactly the set present at `2d7372a`.
+
+**Decision.** Keep asking for the dashboard changes, but stop depending on them. Every reference to a stylesheet or a script carries `?v=<first 8 hex of SHA-256 of the file>`, applied by `site/tools/stamp_assets.py`. A URL now names one set of bytes, so no cache — Cloudflare's, a browser's, a corporate proxy's — can pair one build's HTML with another's CSS, whatever `Cache-Control` says by the time it arrives.
+
+**This does not add a build step, and D-036 still holds.** The stamped files are committed; `site/` is still exactly what is deployed, with no transformation between the repository and the origin. The stamper is a source-editing tool in the same category as `make-images.py`, which has generated committed artefacts in this directory since the site existed. CI runs `--check` and fails if the committed stamps do not match the committed files, which is what makes the guarantee real rather than a habit.
+
+`orbit.js` is stamped into `main.js` and `rail.js` before their own hashes are taken — otherwise stamping changes the files whose hashes were just computed — and `index.html`'s `modulepreload` carries the same stamp as the import, or the preload and the import are two URLs and the file is fetched twice.
+
+**`verify_site.py` did not exist.** `site/README.md` stated that it fails the build on a broken `href="#…"` and on a `modulepreload` for `orbit.js` appearing on a document page. There was no such file and no CI job for the site at all. It exists now, and checks five things, each corresponding to a claim the README makes: fragment links resolve, the `modulepreload` rule holds, the sitemap matches the pages that exist, nothing relies on inline CSS or JS the CSP forbids, and **every anchor sits in a context the stylesheet actually colours**.
+
+That last check exists because the bug it catches shipped. `.foot-bar` styled the wide footer's bottom bar and nothing styled the anchor inside it, so the licence link was drawn in user-agent blue on all five document pages — a genuine stylesheet defect, distinct from the cache problem D-041 analysed, and reported alongside it. The check derives the styled contexts from `style.css` itself, counting only rules that set `color`: `.nav a` appears twice in that file, once with a colour and once inside the reduced-motion query with nothing but `transition: none`, and counting the second is what would let a stylesheet that had lost the first still pass.
+
+**The check was written twice, because the first version passed a page that was visibly broken.** It reduced each anchor to the *set* of class names above it and asked whether any of them appeared in a rule that styled a link. On `/docs/`, `.index-row h2 a` styles the title of each row — so `index-row` was in the set, and the two "…on GitHub" links in the rows' `<p>` descriptions were declared fine while rendering in browser blue. A set of class names cannot distinguish `.index-row a` from `.index-row h2 a`; the intermediate element is the whole difference.
+
+It now records each anchor's full ancestor chain, tag and classes in document order, and matches selectors against it properly: the subject unit must match the anchor, and the units before it must match ancestors in order. Combinators are read loosely — `>` as descendant, pseudo-classes and attribute tests dropped — always in the direction that risks missing a problem rather than inventing one, since a check that cries wolf gets switched off. Verified by deleting each of the fourteen link rules in turn and confirming the count of reported anchors matches the markup. `.cta-quiet` is the one that correctly reports nothing: it is a modifier on an element that already carries `.cta`, and removing it dims no link that was not already coloured.
+
+The lesson is the general one. **An enforcement check that has never failed is not evidence of anything.** Both versions of this one passed on a clean tree; only deliberately breaking the stylesheet distinguished them.
+
+**The home page shows a globe without JavaScript.** D-041 made the intro fallible, so a blocked `main.js` no longer costs the visitor the page — but it still cost them the picture, and the canvas stayed empty. The settled frame now ships as inline SVG generated by `make-images.py` from the same projection, graticule and elevation test that draw the social card, so there is no second copy of the geometry. It is hidden by `theme.js`'s `intro` class before the first paint when the animation is going to run, and by `main.js`'s `intro-ready` under reduced motion; it returns when the 900 ms fuse fires, which is the case it exists for. It costs about 3.3 KB gzipped and no request.
+
+Inline rather than `<img src>`: an external SVG document cannot read the page's theme custom properties, so it could not follow the masthead's toggle.
+
+**The heading leaves the reveal, and the intro keeps everything else.** D-041 measured the home page's real LCP at 4 400 ms and accepted it, recording that content-first was the better architecture but that the instruction not to change the intro was explicit. That instruction was given before search visibility was a requirement; it is now one, and 4.4 s is a failing Core Web Vital on the single page that has to rank — with the additional risk that Google's renderer samples the heading while it is still `visibility: hidden` and treats it as hidden text.
+
+The `<h1>` therefore carries no `reveal` class and paints with the canvas at about 110 ms. **Nothing else changed:** the same 4.2 s, the same phases, the same stagger on the masthead, body copy, calls to action and footer, the same easing. The intro's opening is now a title card over the close-up rather than an empty frame, which is a smaller change to the first impression than the alternatives D-041 weighed. `site/README.md` records why the class must not be put back, because nothing will fail if it is — the page will just stop ranking.
+
+**Also fixed, from the same pass.** `text-size-adjust: 100%`, without which iOS Safari inflates the prose column on rotation. A 24 px floor on the nav, footer and rail link targets, which were 17 px and failed WCAG 2.2 Target Size (Minimum); the nav also stops shrinking to 10 px below 840 px, a size it was given to solve a width problem that belongs to the metadata line, not to it. `.legend dd` is visually hidden on narrow screens instead of `display: none`, so a screen reader still hears the key it no longer has room to show. The `.cta` arrow's hover transform moves behind `@media (hover: hover)`, because a touch screen synthesises hover on tap and leaves the glyph permanently nudged. A print stylesheet, because the document pages are specifications and specifications get printed.
+
+`ruff check` and `ruff format --check` were both failing on `main` — two findings in `make-images.py`, unrelated to any of the above. Fixed in passing.
+
+*Rejected:* going `immutable` on CSS and JS now that the URLs are content-addressed. It is safe and it is not necessary; these files are small enough that revalidation costs a 304, and `immutable` on an unstamped URL — which is what this becomes if the stamper ever silently stops running — cannot be recovered from without renaming the file.
+
+*Rejected:* obfuscating the contact address ourselves so Cloudflare's rewriter finds nothing to match. It fixes the symptom by adopting the technique that caused it, and the honest fix is one dashboard toggle.
+
+*Not fixed here, because it is not in this repository:* `www.meridian.org.in` returns 200 and serves a full duplicate of the site. The canonical tags point at the apex, which mitigates it; a 301 redirect rule is the fix. The `Report-To` and `NEL` headers Cloudflare injects also make every visitor's browser report to `a.nel.cloudflare.com`, which cannot be turned off on the free plan — `site/README.md` now says so rather than claiming the site makes no third-party requests.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -896,6 +954,19 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-041 canvas sized from its own box | `site/main.js` |
 | D-041 rail deferred behind its breakpoint | `site/rail.js`, `site/{architecture,protocol,docs,about}/index.html` |
 | D-041 footer copy, three Cloudflare settings | all pages; dashboard, not this repository |
+
+**Landed 2026-08-06**, after the site was reported broken again from a real phone and a real desktop.
+
+| Decision | Applied to |
+|---|---|
+| D-042 `?v=<hash>` on every CSS and JS reference | `site/tools/stamp_assets.py`, all pages, `site/main.js`, `site/rail.js` |
+| D-042 `verify_site.py` and the CI `site` job | `site/tools/verify_site.py`, `.github/workflows/ci.yml`, `pyproject.toml` |
+| D-042 `.foot-bar a` — the unstyled licence link | `site/style.css` |
+| D-042 still globe for the no-JavaScript path | `site/tools/make-images.py`, `site/index.html`, `site/style.css` |
+| D-042 `<h1>` out of the reveal, LCP 4 400 ms → ~110 ms | `site/index.html`, `site/style.css`, `site/README.md` |
+| D-042 mobile and accessibility fixes, print sheet | `site/style.css` |
+| D-042 header hardening | `site/_headers` |
+| D-042 the three Cloudflare settings, still outstanding | dashboard, not this repository |
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
 

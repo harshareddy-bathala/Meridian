@@ -1,10 +1,13 @@
 """Generate the site's raster images.
 
-Three groups, selectable with --what:
+Four groups, selectable with --what:
 
   og      the social card, og-image.png
   icons   favicon.ico, apple-touch-icon.png, and the web manifest's icons
   brand   site/brand/ — the marketing exports, including the profile picture
+  globe   the still globe, spliced into index.html as inline SVG. This is the
+          one output that is not an image file: it is the picture the home page
+          shows when main.js cannot run.
 
 The globe is a real orthographic projection of a 15-degree graticule with a
 98-degree inclined circular orbit at 800 km — the same model as site/main.js,
@@ -23,7 +26,15 @@ import argparse
 import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+# Optional, and deliberately so. Every raster output needs Pillow; the still
+# globe is SVG and needs nothing but this file. CI checks that the block spliced
+# into index.html is current, and it should not have to install an imaging
+# library to do it — so a missing Pillow is an error only for the outputs that
+# actually use it, raised by require_pillow() below.
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ModuleNotFoundError:
+    Image = ImageDraw = ImageFont = None
 
 SITE = Path(__file__).resolve().parent.parent
 FONTS = SITE / "fonts"
@@ -79,8 +90,15 @@ def screen(h: float, v: float):
     return CX + h * R, CY - v * R
 
 
-def runs(lines, *, near: bool):
-    """Split polylines into contiguous runs on one side of the limb."""
+def runs(lines, *, near: bool, to_screen=screen):
+    """Split polylines into contiguous runs on one side of the limb.
+
+    `to_screen` maps a projected (h, v) pair to output coordinates. It defaults
+    to the card's own frame; the SVG still globe passes its own, because that
+    drawing is 200 units square and this one is 1200 by 630. Everything before
+    the mapping — the projection and the limb test — is shared, which is the
+    point: there is one orthographic projection in this file, not two.
+    """
     out = []
     for pts in lines:
         run = []
@@ -91,18 +109,26 @@ def runs(lines, *, near: bool):
                     out.append(run)
                 run = []
                 continue
-            run.append(screen(h, v))
+            run.append(to_screen(h, v))
         if len(run) > 1:
             out.append(run)
     return out
 
 
-def graticule():
+def graticule(step_deg: int = 3):
+    """A 15-degree graticule, sampled every `step_deg` along each line.
+
+    The sampling step is a straight trade of file size against how polygonal
+    the curves look. A chord subtending `step_deg` on a circle of radius R
+    departs from it by R(1 - cos(step_deg / 2)): at 3 degrees and 268 px that
+    is 0.09 px, and at 15 degrees and 86 px it is 0.74 px. The card is a raster
+    and can afford 3; the SVG ships inside index.html and cannot.
+    """
     lines = []
     for lon in range(-180, 180, 15):
-        lines.append([ll(lat * DEG, lon * DEG) for lat in range(-90, 91, 3)])
+        lines.append([ll(lat * DEG, lon * DEG) for lat in range(-90, 91, step_deg)])
     for lat in range(-75, 76, 15):
-        lines.append([ll(lat * DEG, lon * DEG) for lon in range(-180, 181, 3)])
+        lines.append([ll(lat * DEG, lon * DEG) for lon in range(-180, 181, step_deg)])
     return lines
 
 
@@ -167,6 +193,15 @@ META_RIGHT = "LAUNCHING 2026 · APACHE-2.0"
 # -------------------------------------------------------------------- PNG --
 
 
+def require_pillow() -> None:
+    """Guard every raster entry point. `--what globe` never reaches this."""
+    if Image is None:
+        raise SystemExit(
+            "Pillow is not installed. Every output except `--what globe` needs it:\n"
+            "    pip install Pillow"
+        )
+
+
 def blend(fg, a: float):
     """Flatten an alpha against the background. Nothing here overlaps enough
     for real compositing to be worth the cost."""
@@ -186,6 +221,7 @@ def tracked(draw, xy, text, font, fill, spacing, anchor="ls"):
 
 
 def write_png() -> Path:
+    require_pillow()
     img = Image.new("RGB", (W * SS, H * SS), BG)
     dr = ImageDraw.Draw(img)
     s = lambda v: v * SS  # noqa: E731
@@ -240,6 +276,103 @@ def write_png() -> Path:
     return out
 
 
+# ------------------------------------------------------- the still globe --
+#
+# index.html carries a <canvas> that main.js animates. When main.js does not
+# run — scripts blocked, a shield in the way, an ES module that fails to link,
+# a browser with no 2D context — that canvas stays empty and the page loses its
+# only picture. This writes the settled frame as an inline SVG that sits behind
+# the canvas and is hidden by CSS the instant main.js reports a painted frame.
+#
+# It draws the same moment as the social card above, from the same projection
+# and the same orbit search, so the two pictures agree.
+#
+# Inline, not an <img src>. An external SVG document cannot read the page's
+# theme custom properties, so it could not follow the masthead's theme toggle;
+# every stroke here is coloured by a CSS rule in style.css instead.
+
+SVG_BOX = 200.0  # viewBox units, square
+SVG_R = 86.0  # globe radius in those units. The orbit sits at 1.1256 R,
+# which reaches 96.8 of the 100 available — it fits, just.
+
+FENCE_OPEN = "<!-- globe-still: generated by tools/make-images.py -->"
+FENCE_CLOSE = "<!-- /globe-still -->"
+
+
+def svg_screen(h: float, v: float):
+    """Projected (h, v) to viewBox coordinates. v is up, SVG's y is down."""
+    return SVG_BOX / 2 + h * SVG_R, SVG_BOX / 2 - v * SVG_R
+
+
+def path_d(polylines) -> str:
+    """SVG path data for a set of runs, one moveto per run.
+
+    Coordinates are rounded to one decimal — 0.1 of a 200-unit box is a
+    twentieth of a pixel at the size this is ever drawn — and the pairs after
+    the first take SVG's implicit-lineto form, which is what keeps the whole
+    graticule inside index.html rather than beside it.
+    """
+    parts = []
+    for run in polylines:
+        head, *tail = run
+        pairs = " ".join(f"{x:.1f} {y:.1f}" for x, y in tail)
+        parts.append(f"M{head[0]:.1f} {head[1]:.1f}L{pairs}")
+    return "".join(parts)
+
+
+def globe_svg_markup() -> str:
+    """The still globe, as one <svg> element. Pure — no files are touched."""
+    grat = graticule(step_deg=15)
+    ring = [orbit(RAAN, steps=180)]
+    to = svg_screen
+
+    stx, sty = svg_screen(_sh, _sv)
+    ptx, pty = svg_screen(_ph, _pv)
+
+    return (
+        f'<svg class="scene-still" viewBox="0 0 {SVG_BOX:.0f} {SVG_BOX:.0f}" '
+        'aria-hidden="true" focusable="false">'
+        f'<path class="gs-wire gs-back" d="{path_d(runs(grat, near=False, to_screen=to))}"/>'
+        f'<path class="gs-wire" d="{path_d(runs(grat, near=True, to_screen=to))}"/>'
+        f'<circle class="gs-limb" cx="{SVG_BOX / 2:.0f}" cy="{SVG_BOX / 2:.0f}" r="{SVG_R:.0f}"/>'
+        f'<path class="gs-wire gs-back" d="{path_d(runs(ring, near=False, to_screen=to))}"/>'
+        f'<path class="gs-orbit" d="{path_d(runs(ring, near=True, to_screen=to))}"/>'
+        f'<line class="gs-link" x1="{stx:.1f}" y1="{sty:.1f}" x2="{ptx:.1f}" y2="{pty:.1f}"/>'
+        # Radii in viewBox units, so the markers scale with the globe. The
+        # canvas keeps them at a constant 2.5 px because it animates through a
+        # 26x zoom and a marker that grew with it would swamp the close-up;
+        # a still has no zoom, and a dot that does not scale is a dot that is
+        # too small on a desktop and too large on a phone. 1.1 units is 2.5 px
+        # at the desktop radius, which is where the two agree.
+        f'<circle class="gs-sat" cx="{ptx:.1f}" cy="{pty:.1f}" r="1.1"/>'
+        f'<circle class="gs-station" cx="{stx:.1f}" cy="{sty:.1f}" r="1.3"/>'
+        "</svg>"
+    )
+
+
+def write_globe_svg() -> Path:
+    """Splice the still globe into index.html between its two fence comments.
+
+    Idempotent: re-running replaces the block rather than adding a second one,
+    so `make-images.py` twice in a row leaves the file byte-identical.
+    """
+    page = SITE / "index.html"
+    text = page.read_text(encoding="utf-8")
+
+    start = text.find(FENCE_OPEN)
+    end = text.find(FENCE_CLOSE)
+    if start < 0 or end < 0 or end < start:
+        raise SystemExit(
+            f"{page}: expected the fence comments\n  {FENCE_OPEN}\n  {FENCE_CLOSE}\n"
+            "The still globe is generated into that block; without it there is "
+            "nowhere to write."
+        )
+
+    body = f"{FENCE_OPEN}\n{globe_svg_markup()}\n"
+    page.write_text(text[:start] + body + text[end:], encoding="utf-8", newline="\n")
+    return page
+
+
 def mark(dr, cx: float, cy: float, r: float, colour) -> None:
     """The limb and one meridian — the same two strokes as favicon.svg, at any
     size. Stroke weights are proportions of the 64-unit viewBox the SVG uses,
@@ -247,14 +380,14 @@ def mark(dr, cx: float, cy: float, r: float, colour) -> None:
 
     Coordinates are device pixels: supersample before calling, not after.
     """
-    dr.ellipse(
-        [cx - r, cy - r, cx + r, cy + r], outline=colour, width=max(1, round(r * 4 / 22))
-    )
+    dr.ellipse([cx - r, cy - r, cx + r, cy + r], outline=colour, width=max(1, round(r * 4 / 22)))
     # The SVG's "A 10.5 22" arc is the left half of an ellipse about the same
     # centre. In Pillow, 0 degrees is 3 o'clock and angles run clockwise, so
     # 90 to 270 traces bottom to top the long way round — the left half.
     rx = r * 10.5 / 22
-    dr.arc([cx - rx, cy - r, cx + rx, cy + r], 90, 270, fill=colour, width=max(1, round(r * 3.5 / 22)))
+    dr.arc(
+        [cx - rx, cy - r, cx + rx, cy + r], 90, 270, fill=colour, width=max(1, round(r * 3.5 / 22))
+    )
 
 
 def render_mark(px: int, ink, ground, frac: float = 0.62):
@@ -266,13 +399,14 @@ def render_mark(px: int, ink, ground, frac: float = 0.62):
 
     `ground` of None gives a transparent PNG.
     """
+    require_pillow()
     # 3x where it is affordable — Pillow's arc and ellipse are not antialiased,
     # and a small icon is where that shows. At 2048 a 3x buffer is 150 MB for
     # a gain nothing can see, so the large exports settle for 2x.
     ss = px * (3 if px <= 600 else 2)
     if ground is None:
         img = Image.new("RGBA", (ss, ss), (0, 0, 0, 0))
-        colour = ink + (255,)
+        colour = (*ink, 255)
     else:
         img = Image.new("RGB", (ss, ss), ground)
         colour = ink
@@ -325,6 +459,7 @@ def write_lockup(px_w: int, ink, ground) -> Image.Image:
     the wordmark is tracked out by 0.38em, so its width is not something you
     can guess from the point size and a guess overruns the canvas.
     """
+    require_pillow()
     ss = 2
     px_h = round(px_w * 0.25)
     w, h = px_w * ss, px_h * ss
@@ -358,9 +493,9 @@ def write_brand() -> list[Path]:
     out = []
 
     variants = (
-        ("light", INK, None),        # transparent, for dark backgrounds
-        ("dark", INK_DARK, None),    # transparent, for light backgrounds
-        ("onblack", INK, BG),        # the profile picture
+        ("light", INK, None),  # transparent, for dark backgrounds
+        ("dark", INK_DARK, None),  # transparent, for light backgrounds
+        ("onblack", INK, BG),  # the profile picture
         ("onpaper", INK_DARK, PAPER),
     )
 
@@ -386,10 +521,12 @@ def write_brand() -> list[Path]:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--what", choices=["all", "og", "icons", "brand"], default="all")
+    ap.add_argument("--what", choices=["all", "og", "icons", "brand", "globe"], default="all")
     what = ap.parse_args().what
 
     outputs: list[Path] = []
+    if what in ("all", "globe"):
+        outputs.append(write_globe_svg())
     if what in ("all", "og"):
         outputs.append(write_png())
         print(

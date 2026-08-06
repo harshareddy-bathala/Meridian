@@ -43,7 +43,7 @@ async function loadOrbit() {
     makeProjection, hidden, GRATICULE,
     spinAt, satAt, elevation, SATS,
     orbitPath, strokeLines,
-  } = await import('./orbit.js'));
+  } = await import('./orbit.js?v=847a79e8'));
 }
 
 /* ---------------------------------------------------------------- contents --

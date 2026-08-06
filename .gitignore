@@ -43,3 +43,7 @@ Thumbs.db
 # JSON. Regenerable, and none of it is evidence of anything on its own.
 .site-review/
 CLAUDE.local.md
+# Browser captures used as evidence while diagnosing a rendering bug. Kept
+# locally; the reasoning they support is written down in docs/DECISIONS.md,
+# which is the part that has to survive.
+screenshots/

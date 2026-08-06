@@ -33,6 +33,33 @@ jobs:
         # with an obvious fix.
         run: uv lock --check
 
+  site:
+    # The static site had no CI at all, and site/README.md documented rules that
+    # nothing enforced. Both scripts are stdlib-only and need no dependencies —
+    # setup-python, not setup-uv, because neither imports anything the project
+    # installs and a lockfile sync here would only be waiting.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Asset stamps are current
+        # /style.css and /main.js are referenced with a ?v=<content hash>, so a
+        # cache can never pair one build's HTML with another's CSS. That is not
+        # a hypothetical: a phone rendered current HTML against four-hour-old
+        # CSS and every link on the page fell back to the user-agent blue.
+        # A stale stamp here means the guarantee is not in effect.
+        run: python site/tools/stamp_assets.py --check
+
+      - name: Site invariants hold
+        # Fragment links resolve, orbit.js is preloaded only where it is
+        # imported statically, the sitemap matches the pages that exist, every
+        # anchor sits in a context the stylesheet actually colours, and nothing
+        # relies on inline CSS or JS that the CSP forbids.
+        run: python site/tools/verify_site.py
+
   types:
     runs-on: ubuntu-latest
     steps:

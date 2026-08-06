@@ -118,7 +118,17 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
-html { background: var(--bg); }
+html {
+  background: var(--bg);
+
+  /* iOS Safari inflates the text of any block it decides is too narrow to
+     read, which it does to the prose column the moment a phone is turned to
+     landscape. The result is one paragraph at a larger size than the one above
+     it. This is the documented opt-out; 100% means "size text as authored",
+     not "stop the user zooming" — pinch zoom is untouched. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
 
 body {
   margin: 0;
@@ -156,6 +166,91 @@ body {
   z-index: 0;
   pointer-events: none;
 }
+
+/* ---------------------------------------------------------- still globe --
+   The picture the home page shows when main.js does not run. The markup is
+   generated into index.html by tools/make-images.py; only its placement and
+   its colours are here.
+
+   These numbers mirror layout() in main.js and have to keep mirroring it:
+   centre at 82%/22% of the viewport with radius min(24vw, 40vh), and 52%/21%
+   with min(38vw, 21vh) below the 840px breakpoint. #scene is fixed and inset
+   to zero, so its box *is* the layout viewport — which is what vw and vh
+   measure, and why the two can be written in different units and still land in
+   the same place.
+
+   The 2.3256 factor is the viewBox over the globe: the drawing is 200 units
+   square and the globe's radius within it is 86, so the element has to be
+   200/86 times the radius to put the limb where the canvas puts it.          */
+
+.scene-still {
+  position: fixed;
+  left: 82%;
+  top: 22%;
+  transform: translate(-50%, -50%);
+  width: calc(2.3256 * min(24vw, 40vh));
+  height: calc(2.3256 * min(24vw, 40vh));
+  z-index: 0;
+  display: block;
+  pointer-events: none;
+}
+
+@media (max-width: 839px) {
+  .scene-still {
+    left: 52%;
+    top: 21%;
+    width: calc(2.3256 * min(38vw, 21vh));
+    height: calc(2.3256 * min(38vw, 21vh));
+  }
+}
+
+/* Two classes, and both are needed.
+
+   theme.js adds `intro` before the first paint whenever it has decided the
+   animation is going to run, so on a working home page the still is never
+   drawn at all — without this the visitor would see the settled globe for the
+   ~200 ms before main.js paints, and then watch it cut to the close-up.
+
+   main.js adds `intro-ready` on its first painted frame, which is the path
+   that matters under prefers-reduced-motion: theme.js skips the gate there, so
+   `intro` is never set and this is what takes the still away.
+
+   The failure case is the one both of them leave alone. If main.js does not
+   report in, theme.js removes `intro` again on its 900 ms fuse and
+   `intro-ready` never arrives — so the still comes back, which is the whole
+   reason it exists. */
+:root.intro .scene-still,
+:root.intro-ready .scene-still { display: none; }
+
+/* non-scaling-stroke, because the element is scaled to the viewport and a
+   hairline that scales with it is not a hairline. The canvas draws every one
+   of these at lineWidth 1 at any size; this is how an SVG says the same.
+
+   Every selector below is scoped to .scene-still so they all carry the same
+   specificity and source order decides, which is the only thing keeping
+   .gs-back's dimming and .gs-sat's fill from being overruled by the shared
+   rule above them. */
+.scene-still .gs-limb,
+.scene-still .gs-wire,
+.scene-still .gs-orbit,
+.scene-still .gs-link,
+.scene-still .gs-station {
+  fill: none;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.scene-still .gs-limb  { stroke: var(--muted); stroke-opacity: 0.55; }
+.scene-still .gs-wire  { stroke: var(--wire); }
+.scene-still .gs-orbit { stroke: var(--wire); }
+.scene-still .gs-back  { stroke-opacity: 0.35; }  /* far side, dimmed not culled */
+.scene-still .gs-link  { stroke: var(--signal); stroke-opacity: 0.95; }
+
+/* The satellite is above the station's horizon at the moment drawn, which is
+   what the search in make-images.py guarantees and what makes --signal the
+   correct colour here rather than a decorative one. */
+.scene-still .gs-sat     { fill: var(--signal); stroke: none; }
+.scene-still .gs-station { stroke: var(--ink); }
 
 /* --------------------------------------------------------------- layout --
    Asymmetric on purpose. Masthead top-left, content anchored lower-left,
@@ -246,7 +341,17 @@ body {
   gap: 0.5rem 1.5rem;
 }
 
+/* min-height, and inline-flex to centre the text inside it: tracked mono at
+   this size draws a box about 17px tall, which is under the 24×24 CSS px floor
+   of WCAG 2.2 Target Size (Minimum) and is what Lighthouse's tap-target audit
+   measures. The nav is the one place on the site where several small targets
+   sit in a row, so it is the one that has to be sized deliberately. The same
+   floor is applied to .foot-col a and .rail-src below; .prose a and .meta a
+   are links inside a sentence and take the standard's inline exception. */
 .nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
   font-family: var(--mono);
   font-size: 0.6875rem;
   letter-spacing: 0.14em;
@@ -341,6 +446,7 @@ body {
 .cta {
   display: inline-flex;
   align-items: baseline;
+  min-height: 1.5rem;          /* the 24px floor — see .nav a */
   gap: 0.6em;
   font-family: var(--mono);
   font-size: 0.75rem;
@@ -359,8 +465,16 @@ body {
 .cta-quiet:hover,
 .cta-quiet:focus-visible { color: var(--ink); }
 
-.cta .arrow { transition: transform 220ms var(--ease-out); }
-.cta:hover .arrow { transform: translateX(0.25em); }
+/* Guarded, unlike the colour hovers elsewhere in this file. A touch screen has
+   no hover: it synthesises one on tap and leaves it applied until something
+   else is tapped, so an unguarded transform leaves the arrow permanently
+   nudged 0.25em to the right of where it was drawn. A colour that stays put
+   reads as "this is the thing you last touched" and does no harm; a shifted
+   glyph reads as a rendering fault. */
+@media (hover: hover) {
+  .cta .arrow { transition: transform 220ms var(--ease-out); }
+  .cta:hover .arrow { transform: translateX(0.25em); }
+}
 
 :focus-visible {
   outline: 1px solid var(--ink);
@@ -583,6 +697,22 @@ body {
   max-width: 68ch;
 }
 
+/* The row's description is a sentence, and the link at the end of it — "Full
+   specification on GitHub" — is a link inside a sentence. So it takes the
+   .prose treatment, not the heading's: full ink against the dimmer body copy,
+   underlined in the hairline colour, the underline darkening on hover.
+   `.index-row h2 a` above styles only the title, which left these two drawn in
+   the user-agent blue on the documents page. */
+.index-row p a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 0.22em;
+  transition: text-decoration-color 180ms var(--ease-out);
+}
+.index-row p a:hover,
+.index-row p a:focus-visible { text-decoration-color: var(--ink); }
+
 .index-row .where {
   font-family: var(--mono);
   font-size: 0.6875rem;
@@ -669,7 +799,9 @@ body {
 .rail-note   { color: var(--muted); letter-spacing: 0.04em; text-transform: none; }
 
 .rail-src {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;          /* the 24px floor — see .nav a */
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.14em;
@@ -801,6 +933,9 @@ body {
 .foot-col li + li { margin-top: 0.5rem; }
 
 .foot-col a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;          /* the 24px floor — see .nav a */
   font-family: var(--sans);
   font-size: 0.8125rem;
   line-height: 1.5;
@@ -824,6 +959,16 @@ body {
   text-transform: uppercase;
   color: var(--muted);
 }
+
+/* This bar carried no anchor rule at all, so the licence link at the foot of
+   all five document pages fell through to the user-agent link colour and was
+   drawn in browser blue, underlined, in the middle of a monospaced grey line.
+   The wide footer is the home page colophon's second form, so it takes the
+   same treatment .meta does rather than a third one of its own. */
+.foot-bar .dot { color: var(--rule); padding-inline: 0.35em; }
+.foot-bar a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--rule); }
+.foot-bar a:hover,
+.foot-bar a:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
 
 @media (max-width: 900px) {
   .colophon-wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -898,8 +1043,14 @@ body {
   animation: reveal var(--reveal-dur) var(--ease-out) var(--reveal-at) both;
 }
 
+/* The heading is not in this list, and its absence is the point. It carries no
+   `reveal` class at all: it is the home page's largest contentful paint, and
+   holding it behind the delay made LCP 4 400 ms — a failing Core Web Vital on
+   the page that most needs to rank, and a heading Google's renderer may sample
+   while it is still `visibility: hidden`. It paints with the canvas instead, at
+   about 110 ms, and everything below still waits out the globe. The stagger
+   keeps its shape; it simply starts one element later. See D-042. */
 :root.intro .masthead.reveal  { animation-delay: var(--reveal-at); }
-:root.intro .content .lede    { animation-delay: calc(var(--reveal-at) + 120ms); }
 :root.intro .content .body    { animation-delay: calc(var(--reveal-at) + 240ms); }
 :root.intro .content .cta-row { animation-delay: calc(var(--reveal-at) + 360ms); }
 :root.intro .colophon.reveal  { animation-delay: calc(var(--reveal-at) + 480ms); }
@@ -995,12 +1146,43 @@ body {
      content box is 312px, and at the wide setting the metadata line measures
      343px and a legend row with its gloss about 350px. Tightened here they
      come to 295px and 245px. Measured, not guessed. */
-  .meta, .legend, .nav { font-size: 0.625rem; letter-spacing: 0.1em; }
+  .meta, .legend { font-size: 0.625rem; letter-spacing: 0.1em; }
   .meta .dot { padding-inline: 0.2em; }
 
+  /* The nav is not measured with them any more. Those two are single lines
+     that have to fit 312px intact; the nav takes its own row below 640px and
+     wraps freely above it, so it was being shrunk to 10px to solve a problem
+     it does not have — and 10px of tracked uppercase mono is the smallest
+     type on the site, on a phone, on the one control people use to navigate.
+     It keeps 11px and only tightens its tracking. */
+  .nav { letter-spacing: 0.1em; }
+
   /* The gloss on each legend label is what goes: the colour and the label
-     already carry the meaning, and keeping it is what breaks 312px. */
-  .legend dd { display: none; }
+     already carry the meaning, and keeping it is what breaks 312px.
+
+     Hidden from the screen only. display: none took it out of the
+     accessibility tree as well, which is the wrong trade — the gloss is
+     dropped because 312px has no room for it, not because it stopped being
+     the definition of the term beside it. A screen reader has no width
+     problem and should still hear "above horizon, link acquired".
+
+     clip is the legacy form and clip-path the current one; both are declared
+     because Safari below 16 honours only the first. */
+  .legend dd {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* The em dash separates two things that are now visually adjacent to
+     nothing, and a screen reader would announce it as punctuation. */
+  .legend dd::before { content: ""; }
 }
 
 /* The nav needs its own line before the brand and the toggle start colliding
@@ -1049,4 +1231,41 @@ body {
   ::view-transition-group(*),
   ::view-transition-old(*),
   ::view-transition-new(*) { animation: none !important; }
+}
+
+/* ------------------------------------------------------------------ print --
+   The four document pages are specifications, and specifications get printed
+   and marked up. On paper the site's furniture is all cost: the canvas is a
+   full-page block of ink, the rail is a contents list for a scroll position
+   that no longer exists, and a link styled as a hairline underline is
+   indistinguishable from a hairline.
+
+   Colour is not forced to black. `print-color-adjust` is left alone so the
+   browser's own "background graphics off" behaviour applies, which is what a
+   reader expects from the print dialog they just used. */
+
+@media print {
+  #scene,
+  .scene-still,
+  .skip,
+  .theme-slot,
+  .rail,
+  .legend { display: none; }
+
+  .page { min-height: 0; padding: 0; gap: 1.5rem; }
+  .doc { max-width: none; display: block; }
+
+  /* An underline is invisible next to every other hairline on the page, and a
+     reader holding paper cannot follow a link they cannot see the target of.
+     Spell it out once, after the text, in brackets. */
+  .prose a::after { content: " [" attr(href) "]"; font-size: 0.8em; word-break: break-all; }
+  .prose a[href^="#"]::after { content: ""; }
+
+  /* Wide blocks scroll on screen and have nowhere to scroll to on paper. */
+  .diagram { min-width: 0; }
+  .prose table { min-width: 0; }
+  .prose pre { white-space: pre-wrap; word-break: break-word; }
+
+  .prose h2, .prose h3 { break-after: avoid; }
+  .prose pre, .prose table, .diagram-scroll { break-inside: avoid; }
 }

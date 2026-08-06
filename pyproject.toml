@@ -59,8 +59,13 @@ exclude = ["*.md"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]
-# This standalone image generator reports the files it writes to the operator.
+# The site tools are operator-facing command line scripts, not library code:
+# make-images.py reports the files it writes, stamp_assets.py reports what it
+# restamped, and verify_site.py reports every invariant that failed. print is
+# their output, which is the one place T201 is describing correct behaviour.
 "site/tools/make-images.py" = ["T201"]
+"site/tools/stamp_assets.py" = ["T201"]
+"site/tools/verify_site.py" = ["T201"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
 # The ban below is global; this is the one module exempt from it, so the boundary
 # is checked by CI rather than remembered by a reviewer.
