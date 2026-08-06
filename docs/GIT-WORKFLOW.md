@@ -216,7 +216,9 @@ We use AI coding assistants and we are not hiding it. Two things follow:
 
 **Never commit code you cannot explain.** This is the only rule that matters here. If you cannot walk a teammate through it line by line, it does not get committed, no matter how well it works. You will be asked about arbitrary lines in the viva, and "the AI wrote that part" is the one answer that cannot be recovered from.
 
-**Decide as a team whether to mark AI-assisted commits**, and record the decision in `docs/DECISIONS.md` rather than letting it happen by default. There are reasonable arguments both ways: `Co-Authored-By` trailers are transparent but would appear on nearly every commit and add little signal. What matters more is that the answer is consistent and deliberate, and that `ATTRIBUTION.md` — which covers ideas taken from other projects — is kept scrupulously either way.
+**AI-assisted commits carry a `Co-Authored-By` trailer.** Decided in `docs/DECISIONS.md` D-043, which records the argument both ways — trailers are transparent but appear on nearly every commit and add little signal — and why the answer went the way it did. It applies from D-043 forward; commits already on `main` are left as they are rather than rewritten.
+
+This is provenance, not comprehension. Marking a commit does not license committing something you cannot walk a reviewer through, and `ATTRIBUTION.md` — which covers ideas taken from other projects — is a separate obligation kept scrupulously either way.
 
 ---
 
