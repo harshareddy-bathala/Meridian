@@ -32,22 +32,65 @@ dev = [
 # a week-15 surprise.
 
 [tool.ruff]
-line-length = 100
+# 88 and the rule selection below are CLAUDE.local.md section 9, verbatim. That
+# section calls itself enforcement — "Aspirational standards decay. These are wired
+# into CI" — and until D-044 it was not wired into anything. See D-044 for what was
+# added, what was kept, and why each of the four deviations exists.
+line-length = 88
 target-version = "py311"
 src = ["platform/src", "client/src", "simulator/src"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "DTZ", "RUF", "T20", "TID"]
+select = [
+    # CLAUDE.local.md section 9. Roughly: D and ANN make section 5's docstring and
+    # units-on-every-argument rules checkable; C90 and PL make section 2's size
+    # limits checkable; N, RET, ARG, TRY, PTH and ERA cover sections 3, 4 and 7.
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # import sorting
+    "N",        # naming conventions
+    "D",        # docstrings — pydocstyle
+    "ANN",      # type annotations required
+    "C90",      # mccabe complexity
+    "PL",       # pylint: too many args/branches/statements
+    "SIM",      # simplification
+    "RET",      # return statement hygiene
+    "ARG",      # unused arguments
+    "TRY",      # exception handling
+    "PTH",      # pathlib over os.path
+    "ERA",      # no commented-out code
+    # Kept from the ruleset this replaced. Section 9 does not list these, and
+    # dropping them to match it exactly would have un-enforced two *hard* project
+    # rules — so the ruleset is the union rather than the substitution.
+    "DTZ",      # bans naive datetime. CLAUDE.local.md section 6: "a naive
+                # datetime anywhere is a bug", DATA-MODEL.md: "all timestamps
+                # UTC, no exceptions".
+    "TID",      # carries the banned-import rule below, which is the only
+                # mechanical enforcement of ARCHITECTURE.md rule 2.
+    "T20",      # bans stray print(), so CLI output is a deliberate exemption.
+    "UP", "B", "RUF",
+]
 
-# RUF002 flags σ, − and – in docstrings as ambiguous unicode. Here they are correct
-# domain notation — "1σ" is how uncertainty is written throughout docs/ and the
-# report, and rewriting it as "1o" would be wrong. Code is unaffected; this rule
-# only ever fires on prose.
-ignore = ["RUF002"]
-
-# DTZ is not optional here. It bans naive datetime construction, and DATA-MODEL.md
-# says "All timestamps UTC, no exceptions" — the linter enforces the convention so
-# a reviewer does not have to. T20 bans stray print().
+ignore = [
+    # RUF001 and RUF002 flag σ, − and – as ambiguous unicode — the first in
+    # string literals, the second in docstrings. Here they are correct domain
+    # notation: "1σ" is how uncertainty is written throughout docs/ and the
+    # report, and rewriting it as "1o" would be wrong. Both are needed because an
+    # *attribute* docstring is a bare string expression rather than a docstring,
+    # so it is RUF001 that fires on `ClockEstimate.uncertainty_s`. Neither rule
+    # ever fires on code.
+    "RUF001",
+    "RUF002",
+    # TRY003 bans long messages at the raise site, directing them into the
+    # exception class instead. config.py's refusal reads "Refusing to start:
+    # TOKEN_HASH_PEPPER still set to 'change-me' while the platform is publicly
+    # reachable. Generate each with: openssl rand -hex 32" — the name of the
+    # variable, the reason, and the command that fixes it. Moving that into a
+    # class hierarchy would satisfy the rule and cost the operator the one thing
+    # that makes the refusal actionable at 2 a.m. CLAUDE.local.md section 5 is
+    # explicit that text which helps the reader beats structure that hides it.
+    "TRY003",
+]
 
 [tool.ruff.format]
 # Code blocks inside docs/ are illustrative, not compilable: elliptical protocol
@@ -57,19 +100,60 @@ ignore = ["RUF002"]
 # still runs everywhere.
 exclude = ["*.md"]
 
+[tool.ruff.lint.mccabe]
+max-complexity = 8
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-branches = 8
+max-statements = 30
+max-returns = 4
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["T20"]
+# A test's name is its docstring — `test_a_placeholder_password_inside_database_url_is_caught`
+# says more than a summary line would, and D103 on every test function is exactly
+# the noise CLAUDE.local.md section 5 warns trains readers to skip docstrings. The
+# tests that need explaining have full docstrings anyway; the rule would only force
+# them onto the ones that do not. ANN for the same reason on fixtures.
+#
+# PLR2004 goes too: `assert settings.heartbeat_interval_s == 30` is the assertion.
+# Lifting 30 into a named constant would mean the test asserts the constant equals
+# itself, which is the classic way a test stops testing anything.
+#
+# PLC0415 goes because several tests import *inside* the test body on purpose —
+# tests/unit/test_layout.py imports `meridian` late to prove the src/ layout keeps
+# `platform` off sys.path (D-012), and moving that import to the top would test the
+# opposite of what it asserts.
+"tests/**" = ["T20", "D", "ANN", "PLR2004", "PLC0415"]
 # The site tools are operator-facing command line scripts, not library code:
 # make-images.py reports the files it writes, stamp_assets.py reports what it
 # restamped, and verify_site.py reports every invariant that failed. print is
 # their output, which is the one place T201 is describing correct behaviour.
-"site/tools/make-images.py" = ["T201"]
-"site/tools/stamp_assets.py" = ["T201"]
-"site/tools/verify_site.py" = ["T201"]
+#
+# D, ANN, PLR and C90 join it for the same reason. make-images.py is a drawing
+# script built from small nested helpers (`project`, `screen`, `graticule`) whose
+# meaning is local to the twenty lines around them, and whose "magic values" are
+# the geometry itself; verify_site.py's complexity sits in one HTMLParser callback
+# that the stdlib's interface shape dictates. These are stdlib-only build tools
+# producing committed artefacts, not the code an outside contributor arrives to
+# read — and CLAUDE.local.md section 9 scopes its own module-length check to
+# `platform client simulator`, so the size and complexity families are scoped the
+# same way here. E501 is deliberately *not* ignored: long lines are still fixed.
+"site/tools/make-images.py" = ["T201", "D", "ANN", "PLR", "C90"]
+"site/tools/stamp_assets.py" = ["T201", "D", "ANN", "PLR", "C90"]
+"site/tools/verify_site.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
 # The ban below is global; this is the one module exempt from it, so the boundary
 # is checked by CI rather than remembered by a reviewer.
 "platform/src/meridian/orbit/**" = ["TID251"]
+# Alembic fixes the shape of a revision file: module-level `revision`,
+# `down_revision`, and an `upgrade`/`downgrade` pair it calls by name. The
+# docstrings are present; D103 fires on the two functions in every one of the six
+# files, where a summary line can only restate the file name it already carries.
+"deploy/migrations/versions/*.py" = ["D103"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "sgp4".msg = "Only meridian.orbit may import propagation libraries (ARCHITECTURE.md rule 2)."
@@ -81,6 +165,13 @@ strict = true
 warn_unused_ignores = true
 warn_return_any = true
 disallow_any_generics = true
+# Both from CLAUDE.local.md section 9. disallow_any_explicit is the stricter of
+# the two and the one with teeth: `strict` already bans *implicit* Any, but an
+# explicit `dict[str, Any]` sails through it, and a response body typed that way
+# is a body whose shape nothing checks. warn_unreachable catches the guard clause
+# that can no longer fire after the condition above it changed.
+disallow_any_explicit = true
+warn_unreachable = true
 mypy_path = ["platform/src", "client/src", "simulator/src"]
 
 [[tool.mypy.overrides]]

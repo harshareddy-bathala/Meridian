@@ -27,5 +27,6 @@ def not_supported() -> None:
     that has never been run and therefore lies about being tested.
     """
     raise NotImplementedError(
-        "Migrations are forward-only. Fix forward with a new migration (GIT-WORKFLOW.md rule 9)."
+        "Migrations are forward-only. Fix forward with a new migration "
+        "(GIT-WORKFLOW.md rule 9)."
     )

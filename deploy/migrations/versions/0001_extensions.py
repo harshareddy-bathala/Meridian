@@ -1,4 +1,4 @@
-"""0001_extensions
+"""Revision 0001 - the timescaledb and pgcrypto extensions.
 
 Applies sql/0001_extensions.sql. See deploy/migrations/_sql.py.
 """

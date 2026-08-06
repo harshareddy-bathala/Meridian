@@ -18,6 +18,7 @@ __all__ = [
     "ElementSet",
     "GroundSite",
     "LookAngle",
+    "PassSearch",
     "PassWindow",
     "TimingUncertainty",
     "require_utc",
@@ -75,7 +76,9 @@ class ElementSet:
         Element-set age is a first-class feature everywhere in this project — it
         is the proxy for prediction error that SC-3 is measured against.
         """
-        return (require_utc(at, "at") - require_utc(self.epoch, "epoch")).total_seconds()
+        return (
+            require_utc(at, "at") - require_utc(self.epoch, "epoch")
+        ).total_seconds()
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +91,40 @@ class LookAngle:
     range_km: float
     range_rate_km_s: float
     """Positive means receding. Doppler shift is derived from this."""
+
+
+@dataclass(frozen=True, slots=True)
+class PassSearch:
+    """One request for the passes visible from a site over an interval.
+
+    A dataclass rather than six positional arguments, because six is past the
+    limit at which a call site stops being readable — ``pass_windows(es, site,
+    a, b, 10.0, 30.0)`` gives a reader no way to tell which float is which, and
+    the two floats here are exactly the pair that must not be swapped.
+    """
+
+    element_set: ElementSet
+    site: GroundSite
+    start: datetime
+    end: datetime
+
+    min_elevation_deg: float = 0.0
+    """The elevation floor to search against, carried into every window found.
+
+    Zero means the geometric horizon, which is the right default for a
+    completeness denominator: a pass excluded here is not merely unscheduled, it
+    is absent from the denominator forever and the ratio silently improves.
+    """
+
+    coarse_step_s: float = 30.0
+    """Sampling interval for the initial horizon-crossing bracket.
+
+    **A correctness parameter, not a performance knob.** A step longer than the
+    shortest pass steps over it entirely, and the pass is not found late — it is
+    not found at all. A LEO pass at the elevation floor can run under two
+    minutes, so 30 s brackets it with room to spare; raising this to save time
+    trades away low passes without saying so.
+    """
 
 
 @dataclass(frozen=True, slots=True)

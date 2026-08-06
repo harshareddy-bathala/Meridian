@@ -43,11 +43,15 @@ def test_every_declared_console_script_imports() -> None:
 
     for distribution in ("platform", "client", "simulator"):
         pyproject = REPO_ROOT / distribution / "pyproject.toml"
-        scripts = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"].get("scripts", {})
+        scripts = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"].get(
+            "scripts", {}
+        )
         for name, target in scripts.items():
             module_name, _, attribute = target.partition(":")
             module = importlib.import_module(module_name)
-            assert callable(getattr(module, attribute)), f"{name} -> {target} is not callable"
+            assert callable(getattr(module, attribute)), (
+                f"{name} -> {target} is not callable"
+            )
 
 
 def test_meridian_version_succeeds() -> None:
@@ -64,7 +68,14 @@ def test_meridian_version_succeeds() -> None:
     [
         ["invite", "create", "--label", "nec"],
         ["invite", "list"],
-        ["passes", "generate", "--from", "2026-08-02T00:00:00Z", "--to", "2026-08-03T00:00:00Z"],
+        [
+            "passes",
+            "generate",
+            "--from",
+            "2026-08-02T00:00:00Z",
+            "--to",
+            "2026-08-03T00:00:00Z",
+        ],
         ["serve"],
     ],
 )

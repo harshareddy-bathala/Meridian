@@ -1,4 +1,4 @@
-"""0003_satellites
+"""Revision 0003 - satellites, their transmitters and the element-set archive.
 
 Applies sql/0003_satellites.sql. See deploy/migrations/_sql.py.
 """

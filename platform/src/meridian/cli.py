@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from meridian import __version__
 
@@ -29,13 +30,60 @@ EXIT_NOT_IMPLEMENTED = 2
 """Distinct from 1. A caller can tell "this command does not work yet" from
 "this command ran and failed", which matters once these are wired into scripts."""
 
+NEEDS_ACTION = frozenset({"invite", "passes"})
+"""Subcommands that are a noun and mean nothing without a verb after them.
 
-def _pending(command: str, stage: str, gate: str) -> int:
+``meridian serve`` is complete on its own; ``meridian invite`` is not, and printing
+that subparser's help is more useful than reporting the whole group as pending.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class _Pending:
+    """Which stage builds a subcommand, and what that stage delivers."""
+
+    stage: str
+    gate: str
+
+
+PENDING: dict[str, _Pending] = {
+    "invite": _Pending(
+        stage="Stage 4.2 — invite CLI",
+        gate=(
+            "one-time invites generated with `secrets`, stored hashed, "
+            "displayed in plaintext exactly once"
+        ),
+    ),
+    "passes": _Pending(
+        stage="Stage 7 — pass generation",
+        gate=(
+            "reproducible pass windows from a local element set, with no "
+            "external service on the path"
+        ),
+    ),
+    "serve": _Pending(
+        stage="Stage 12 — deployment and monitoring",
+        gate=(
+            "a supervised server with logging and signal handling; the API "
+            "itself already runs — use `uvicorn meridian.api.app:app`"
+        ),
+    ),
+}
+"""Every subcommand, and the stage that replaces its shell with real work.
+
+A table rather than a ``match`` with one arm per command. The arms were identical
+apart from two strings, so the branching carried no information — and each arm was
+a separate ``return``, which is how a dispatch function with nothing to decide ends
+up over the four-return limit in CLAUDE.local.md section 2.
+"""
+
+
+def _pending(command: str, pending: _Pending) -> int:
     """Report that ``command`` is not built yet, and say what will build it."""
     print(  # noqa: T201 — this is a CLI; stdout is the interface
         f"meridian {command}: not implemented yet.\n"
-        f"  Arrives in: {stage}\n"
-        f"  Which delivers: {gate}\n"
+        f"  Arrives in: {pending.stage}\n"
+        f"  Which delivers: {pending.gate}\n"
         f"  Roadmap: docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md",
         file=sys.stderr,
     )
@@ -47,7 +95,9 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="meridian",
         description="Control platform for satellite ground stations.",
     )
-    parser.add_argument("--version", action="version", version=f"meridian {__version__}")
+    parser.add_argument(
+        "--version", action="version", version=f"meridian {__version__}"
+    )
     subcommands = parser.add_subparsers(dest="command", metavar="<command>")
 
     invite = subcommands.add_parser(
@@ -60,7 +110,9 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     invite_actions = invite.add_subparsers(dest="action", metavar="<action>")
-    create = invite_actions.add_parser("create", help="issue one invite and print it once")
+    create = invite_actions.add_parser(
+        "create", help="issue one invite and print it once"
+    )
     create.add_argument("--label", required=True, help="who this invite is for")
     create.add_argument("--expires-in-days", type=int, default=None)
     create.add_argument(
@@ -79,7 +131,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     passes = subcommands.add_parser("passes", help="generate pass windows")
     passes_actions = passes.add_subparsers(dest="action", metavar="<action>")
-    generate = passes_actions.add_parser("generate", help="compute passes over a horizon")
+    generate = passes_actions.add_parser(
+        "generate", help="compute passes over a horizon"
+    )
     generate.add_argument("--from", dest="start", required=True, help="ISO-8601 UTC")
     generate.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
 
@@ -93,39 +147,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.command is None:
+    pending = PENDING.get(args.command)
+    if pending is None:  # no subcommand, or one argparse already rejected
         parser.print_help(sys.stderr)
         return EXIT_NOT_IMPLEMENTED
 
     action = getattr(args, "action", None)
-    if action is None and args.command in {"invite", "passes"}:
+    if action is None and args.command in NEEDS_ACTION:
         parser.parse_args([args.command, "--help"])  # exits
 
-    match (args.command, action):
-        case ("invite", _):
-            return _pending(
-                f"invite {action}",
-                "Stage 4.2 — invite CLI",
-                "one-time invites generated with `secrets`, stored hashed, "
-                "displayed in plaintext exactly once",
-            )
-        case ("passes", _):
-            return _pending(
-                f"passes {action}",
-                "Stage 7 — pass generation",
-                "reproducible pass windows from a local element set, with no "
-                "external service on the path",
-            )
-        case ("serve", _):
-            return _pending(
-                "serve",
-                "Stage 3 — shared MSP infrastructure",
-                "the API with versioning, errors and metrics in place; until "
-                "then run `uvicorn meridian.api.app:app`",
-            )
-        case _:  # pragma: no cover — argparse rejects unknown commands first
-            parser.print_help(sys.stderr)
-            return EXIT_NOT_IMPLEMENTED
+    command = f"{args.command} {action}" if action else args.command
+    return _pending(command, pending)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -21,6 +21,7 @@ from meridian.orbit.types import (
     ElementSet,
     GroundSite,
     LookAngle,
+    PassSearch,
     PassWindow,
     TimingUncertainty,
 )
@@ -36,23 +37,23 @@ class OrbitService(Protocol):
     registry, scheduler and pass-generation job code against it directly.
     """
 
-    def pass_windows(
-        self,
-        element_set: ElementSet,
-        site: GroundSite,
-        start: datetime,
-        end: datetime,
-        *,
-        min_elevation_deg: float = 0.0,
-        coarse_step_s: float = 30.0,
-    ) -> list[PassWindow]:
-        """Every pass visible from ``site`` in ``[start, end)``.
+    def pass_windows(self, search: PassSearch) -> list[PassWindow]:
+        """Every pass matching ``search``, in ascending order of acquisition.
 
         Implementations step coarsely to bracket each horizon crossing, then
-        refine by bisection. ``coarse_step_s`` is exposed because it is a
-        correctness parameter, not a performance knob: a step longer than the
-        shortest pass steps over it entirely, and a low-elevation pass missed
-        here is missing from the completeness denominator forever.
+        refine by bisection. The search parameters that make that correct — the
+        elevation floor and the coarse step — live on
+        :class:`~meridian.orbit.types.PassSearch` with the reasoning attached to
+        each, rather than as bare floats at the call site.
+
+        Args:
+            search: What to propagate, from where, over which interval, and
+                against which elevation floor.
+
+        Returns:
+            One :class:`~meridian.orbit.types.PassWindow` per pass, each carrying
+            the floor it was computed against so two searches run at different
+            floors can never be compared as though they were the same.
         """
         ...
 
@@ -86,7 +87,9 @@ class OrbitService(Protocol):
         """
         ...
 
-    def timing_uncertainty(self, element_set: ElementSet, at: datetime) -> TimingUncertainty:
+    def timing_uncertainty(
+        self, element_set: ElementSet, at: datetime
+    ) -> TimingUncertainty:
         """1σ confidence in a pass boundary predicted from ``element_set``.
 
         Phase 1 returns a documented prior — never ``0.0``, which would claim
@@ -99,7 +102,9 @@ class OrbitService(Protocol):
         """
         ...
 
-    def element_set_divergence(self, a: ElementSet, b: ElementSet, at: datetime) -> float:
+    def element_set_divergence(
+        self, a: ElementSet, b: ElementSet, at: datetime
+    ) -> float:
         """Position difference in km between two element sets for the same object.
 
         Propagated to a common time ``at``. This is the raw measurement behind the

@@ -47,9 +47,13 @@ def scratch_database(database_url: str) -> Iterator[str]:
         base, _, _ = database_url.rpartition("/")
         yield f"{base}/{name}"
     finally:
-        with psycopg.connect(database_url, autocommit=True) as admin, admin.cursor() as cur:
+        with (
+            psycopg.connect(database_url, autocommit=True) as admin,
+            admin.cursor() as cur,
+        ):
             cur.execute(
-                "select pg_terminate_backend(pid) from pg_stat_activity where datname = %s",
+                "select pg_terminate_backend(pid) from pg_stat_activity "
+                "where datname = %s",
                 (name,),
             )
             cur.execute(f'drop database if exists "{name}"')
@@ -133,15 +137,20 @@ def test_generated_observation_id_matches_the_documented_formula(
         return f"ob_{digest[:12]}"
 
     with psycopg.connect(scratch_database) as conn, conn.cursor() as cur:
-        cur.execute("insert into satellites (satellite_id, name) values (%s, %s)", ("norad:1", "T"))
+        cur.execute(
+            "insert into satellites (satellite_id, name) values (%s, %s)",
+            ("norad:1", "T"),
+        )
         cur.execute(
             "insert into stations (station_id, name, operator, lat_deg, lon_deg, alt_m,"
-            " token_sha256, registration_key_sha256) values (%s, %s, %s, 0, 0, 0, %s, %s)",
+            " token_sha256, registration_key_sha256)"
+            " values (%s, %s, %s, 0, 0, 0, %s, %s)",
             ("st_1", "T", "tests", bytes(32), bytes(32)),
         )
         for revision in (1, 2):
             cur.execute(
-                "insert into observations (assignment_id, revision, started_at, ended_at,"
+                "insert into observations (assignment_id, revision, started_at,"
+                " ended_at,"
                 " station_id, satellite_id, outcome, content_sha256)"
                 " values (%s, %s, now(), now(), %s, %s, %s, %s)",
                 ("as_44b2", revision, "st_1", "norad:1", "no_signal", bytes(32)),

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 
 import psycopg
 from fastapi import FastAPI, Response
@@ -42,7 +41,12 @@ def _database_ok(settings: Settings) -> bool:
         with psycopg.connect(url, connect_timeout=2) as conn, conn.cursor() as cur:
             cur.execute("select 1")
             return cur.fetchone() is not None
-    except Exception:
+    except (psycopg.Error, OSError):
+        # psycopg.Error covers refused connections, authentication failures and
+        # timeouts; OSError covers the DNS and socket failures underneath it. A
+        # bare `except Exception` would also swallow a TypeError in this
+        # function, and a health check reporting "database unreachable" because
+        # our own code is broken hides the outage it exists to surface.
         return False
 
 
@@ -69,7 +73,10 @@ def create_app() -> FastAPI:
         """
         settings: Settings = app.state.settings
         database_ok = _database_ok(settings)
-        body: dict[str, Any] = {
+        # dict[str, str], not dict[str, Any]. All three values are strings, and a
+        # response body typed Any is a body whose shape nothing checks — which is
+        # the case mypy's disallow_any_explicit exists to catch (D-044).
+        body: dict[str, str] = {
             "status": "ok" if database_ok else "degraded",
             "version": __version__,
             "database": "ok" if database_ok else "unreachable",

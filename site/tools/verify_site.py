@@ -166,7 +166,11 @@ def parse_selector(selector: str) -> list[Unit]:
     missing a problem rather than inventing one. style.css uses `>` in three
     places and none of them target an anchor.
     """
-    return [parse_unit(part) for part in re.split(r"\s*[>+~]\s*|\s+", selector.strip()) if part]
+    return [
+        parse_unit(part)
+        for part in re.split(r"\s*[>+~]\s*|\s+", selector.strip())
+        if part
+    ]
 
 
 def unit_matches(unit: Unit, element: Element) -> bool:
@@ -249,18 +253,26 @@ def check_sitemap() -> list[str]:
     """The sitemap lists exactly the indexed pages, and no noindex page."""
     text = (SITE / "sitemap.xml").read_text(encoding="utf-8")
     listed = set(re.findall(r"<loc>https://meridian\.org\.in(/[^<]*)</loc>", text))
-    expected = {"/" if p == "index.html" else "/" + p.removesuffix("index.html") for p in INDEXED}
+    expected = {
+        "/" if p == "index.html" else "/" + p.removesuffix("index.html")
+        for p in INDEXED
+    }
 
     problems = [
-        f"sitemap.xml: {url} is listed but is not an indexed page" for url in listed - expected
+        f"sitemap.xml: {url} is listed but is not an indexed page"
+        for url in listed - expected
     ]
-    problems += [f"sitemap.xml: {url} exists but is not listed" for url in expected - listed]
+    problems += [
+        f"sitemap.xml: {url} exists but is not listed" for url in expected - listed
+    ]
     return problems
 
 
 def describe(chain: list[Element]) -> str:
     """An anchor's ancestor chain, as something readable in an error."""
-    return " > ".join(tag + "".join("." + c for c in sorted(classes)) for tag, classes in chain)
+    return " > ".join(
+        tag + "".join("." + c for c in sorted(classes)) for tag, classes in chain
+    )
 
 
 def check_link_styling(pages: dict[str, Page], css: str) -> list[str]:

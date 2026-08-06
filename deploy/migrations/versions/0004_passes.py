@@ -1,4 +1,4 @@
-"""0004_passes
+"""Revision 0004 - computed passes and the assignments issued against them.
 
 Applies sql/0004_passes.sql. See deploy/migrations/_sql.py.
 """

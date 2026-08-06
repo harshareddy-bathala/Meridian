@@ -66,13 +66,17 @@ def test_a_fast_station_clock_reports_a_negative_offset() -> None:
     trip, so the midpoint is the station's clock exactly.
     """
     station_now = BASE + timedelta(seconds=5)
-    offset = estimate_offset(sent_at=station_now, received_at=station_now, server_time=BASE)
+    offset = estimate_offset(
+        sent_at=station_now, received_at=station_now, server_time=BASE
+    )
     assert offset == pytest.approx(-5.0)
 
 
 def test_a_slow_station_clock_reports_a_positive_offset() -> None:
     station_now = BASE - timedelta(seconds=5)
-    offset = estimate_offset(sent_at=station_now, received_at=station_now, server_time=BASE)
+    offset = estimate_offset(
+        sent_at=station_now, received_at=station_now, server_time=BASE
+    )
     assert offset == pytest.approx(+5.0)
 
 

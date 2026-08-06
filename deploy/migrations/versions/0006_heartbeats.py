@@ -1,4 +1,4 @@
-"""0006_heartbeats
+"""Revision 0006 - the heartbeats hypertable.
 
 Applies sql/0006_heartbeats.sql. See deploy/migrations/_sql.py.
 """
