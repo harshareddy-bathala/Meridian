@@ -20,7 +20,9 @@ import pytest
 psycopg = pytest.importorskip("psycopg")
 
 from meridian.store.invites import (  # noqa: E402 — after importorskip
+    consume_invite,
     create_invite,
+    find_invite_by_hash,
     generate_invite_token,
     list_invites,
     revoke_invite,
@@ -120,6 +122,57 @@ def test_a_consumed_invite_is_not_revocable(rollback: Any) -> None:
         )
 
     assert revoke_invite(rollback, label="unit-test-consumed") == 0
+
+
+def test_find_invite_by_hash_round_trips_a_created_invite(rollback: Any) -> None:
+    _, token_sha256 = generate_invite_token()
+    with rollback.cursor() as cur:
+        cur.execute(
+            "insert into invite_tokens (token_sha256, label) values (%s, %s)",
+            (token_sha256, "hash-lookup"),
+        )
+
+    invite = find_invite_by_hash(rollback, token_sha256)
+    assert invite is not None
+    assert invite.label == "hash-lookup"
+
+
+def test_find_invite_by_hash_returns_none_for_an_unknown_hash(rollback: Any) -> None:
+    _, token_sha256 = generate_invite_token()
+    assert find_invite_by_hash(rollback, token_sha256) is None
+
+
+def test_consume_invite_succeeds_once_and_fails_the_second_time(rollback: Any) -> None:
+    """The race guard: the same call two requests racing to register would make."""
+    _, token_sha256 = generate_invite_token()
+    with rollback.cursor() as cur:
+        cur.execute(
+            "insert into stations (station_id, name, operator, lat_deg, lon_deg,"
+            " alt_m, token_sha256, registration_key_sha256)"
+            " values (%s, %s, %s, %s, %s, %s, %s, %s)",
+            ("st_consume_test", "Test", "tests", 0.0, 0.0, 0.0, ZERO_HASH, ZERO_HASH),
+        )
+        cur.execute(
+            "insert into invite_tokens (token_sha256, label) values (%s, %s)",
+            (token_sha256, "consume-test"),
+        )
+
+    assert (
+        consume_invite(
+            rollback, token_sha256=token_sha256, station_id="st_consume_test"
+        )
+        is True
+    )
+    assert (
+        consume_invite(
+            rollback, token_sha256=token_sha256, station_id="st_consume_test"
+        )
+        is False
+    )
+
+    invite = find_invite_by_hash(rollback, token_sha256)
+    assert invite is not None
+    assert invite.consumed_by_station_id == "st_consume_test"
 
 
 @pytest.fixture

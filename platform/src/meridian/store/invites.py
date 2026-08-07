@@ -1,10 +1,11 @@
 """Invite tokens — the SQL access layer behind ``meridian invite`` and registration.
 
 Reads and writes ``invite_tokens`` (``deploy/migrations/sql/0002_stations.sql``).
-This module makes no decision about whether an invite *should* exist; it only
-persists and retrieves rows. Issuing one is a CLI action today
-(``meridian.cli``) and will also be an operator action from the dashboard
-later; consuming one is Stage 4.3's registration endpoint.
+This module makes no decision about whether an invite *should* exist or be
+consumed; it only persists and retrieves rows. Issuing one is a CLI action
+today (``meridian.cli``) and will also be an operator action from the
+dashboard later. Consuming one is called from Stage 4.3's registration
+service, which decides whether MSP §4.1's recovery table permits it.
 
 Reference: docs/DECISIONS.md D-020 (invites are rows, not a config value) and
 D-034 (bound invites for credential rotation).
@@ -23,8 +24,10 @@ from psycopg.rows import class_row
 __all__ = [
     "Connection",
     "Invite",
+    "consume_invite",
     "create_invite",
     "expiry_from_days",
+    "find_invite_by_hash",
     "generate_invite_token",
     "list_invites",
     "revoke_invite",
@@ -128,6 +131,54 @@ def list_invites(conn: Connection) -> list[Invite]:
             """
         )
         return cur.fetchall()
+
+
+def find_invite_by_hash(conn: Connection, token_sha256: bytes) -> Invite | None:
+    """The invite a presented ``invite_token`` hashes to, or ``None``.
+
+    Reuses :class:`Invite` unchanged — its fields (``expires_at``,
+    ``consumed_at``, ``consumed_by_station_id``, ``issued_for_station_id``)
+    are exactly MSP §4.1's recovery-table inputs, and a station-facing
+    lookup has no more business returning a hash than an operator-facing
+    ``list_invites`` does.
+    """
+    with conn.cursor(row_factory=class_row(Invite)) as cur:
+        cur.execute(
+            """
+            select label, created_at, expires_at, consumed_at,
+                   consumed_by_station_id, issued_for_station_id
+            from invite_tokens
+            where token_sha256 = %s
+            """,
+            (token_sha256,),
+        )
+        return cur.fetchone()
+
+
+def consume_invite(conn: Connection, *, token_sha256: bytes, station_id: str) -> bool:
+    """Mark one invite consumed by ``station_id``, unless something already did.
+
+    ``where consumed_at is null`` is the whole race guard: two registration
+    requests racing to consume the same invite cannot both succeed, because
+    only the first ``update`` matches a row. The second sees ``rowcount ==
+    0`` and must treat that as ``invalid_invite``, exactly as it would for an
+    invite that was never valid — MSP §3 does not let a client distinguish
+    the two.
+
+    Returns:
+        Whether this call was the one that consumed it.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            update invite_tokens
+            set consumed_at = now(), consumed_by_station_id = %s
+            where token_sha256 = %s
+              and consumed_at is null
+            """,
+            (station_id, token_sha256),
+        )
+        return cur.rowcount > 0
 
 
 def revoke_invite(conn: Connection, *, label: str) -> int:
