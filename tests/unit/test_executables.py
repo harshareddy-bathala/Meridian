@@ -66,8 +66,6 @@ def test_meridian_version_succeeds() -> None:
 @pytest.mark.parametrize(
     "args",
     [
-        ["invite", "create", "--label", "nec"],
-        ["invite", "list"],
         [
             "passes",
             "generate",
@@ -89,6 +87,34 @@ def test_unimplemented_subcommands_report_instead_of_raising(args: list[str]) ->
     assert result.returncode == 2
     assert "not implemented yet" in result.stderr
     assert "Stage" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_invite_create_without_a_database_fails_cleanly() -> None:
+    """`invite` is real (Stage 4.2) — its own error path belongs in this file,
+    since the success path needs a database and lives in
+    tests/integration/test_store_invites.py instead.
+
+    ``DATABASE_URL`` is overridden rather than left to whatever the developer's
+    shell happens to export, so this stays a `unit` test that never depends on
+    what is or isn't reachable outside it. Port 1 is reserved and nothing
+    listens on it — the same address ``test_pool.py`` uses for the same reason.
+    """
+    import os
+
+    env = {
+        **os.environ,
+        "DATABASE_URL": "postgresql://meridian:meridian@127.0.0.1:1/meridian",
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "meridian.cli", "invite", "create", "--label", "x"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+    )
+    assert result.returncode == 1
     assert "Traceback" not in result.stderr
 
 

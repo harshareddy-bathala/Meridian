@@ -6,20 +6,44 @@ module is thin by rule — it wires things together and owns no decisions.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import psycopg
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from psycopg import Connection
+from psycopg_pool import ConnectionPool
 
 from meridian import __version__
 from meridian.api.errors import install_error_handlers
 from meridian.api.msp import router as msp_router
-from meridian.config import load_settings
-from meridian.store.pool import is_database_reachable, open_pool
+from meridian.config import Settings, load_settings
+from meridian.store.invites import seed_bootstrap_invite
+from meridian.store.pool import POOL_TIMEOUT_S, is_database_reachable, open_pool
 
 __all__ = ["create_app"]
+
+_log = logging.getLogger(__name__)
+
+
+def _seed_bootstrap_invite(
+    pool: ConnectionPool[Connection[tuple[object, ...]]], settings: Settings
+) -> None:
+    """Best-effort D-020 seeding: one invite from ``REGISTRATION_INVITE_TOKEN``.
+
+    A database that is not reachable yet must not crash startup — the pool
+    already opens without waiting (see :func:`open_pool`), and ``/healthz``
+    exists to surface exactly this degradation. The next restart, and every
+    heartbeat of ``/healthz`` in between, tries again.
+    """
+    try:
+        with pool.connection(timeout=POOL_TIMEOUT_S) as conn:
+            seed_bootstrap_invite(conn, token=settings.registration_invite_token)
+    except (psycopg.Error, OSError):
+        _log.warning("could not seed the bootstrap invite; will retry on next startup")
 
 
 @asynccontextmanager
@@ -34,6 +58,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # connect, an authentication round trip and a teardown on the endpoint the
     # tunnel polls most often.
     app.state.pool = open_pool(settings)
+    _seed_bootstrap_invite(app.state.pool, settings)
     try:
         yield
     finally:
