@@ -864,6 +864,168 @@ The `<h1>` therefore carries no `reveal` class and paints with the canvas at abo
 
 ---
 
+## D-043 — AI-assisted commits carry a trailer, from here forward
+
+**2026-08-06 · accepted**
+
+`GIT-WORKFLOW.md` Rule 10 asks the team to decide whether AI-assisted commits are
+marked, and to record the answer here rather than letting it happen by default.
+Every previous pass through this file noted the question as still open. It is the
+last Stage 0 item outstanding.
+
+**Commits made with AI assistance carry a `Co-Authored-By` trailer.** Rule 10's
+own argument against — that the trailer would appear on nearly every commit and add
+little signal — is accepted as true and is not treated as decisive. The trailer is
+cheap, it is machine-readable, and its absence on a project that says in its own
+workflow document that it uses AI assistants would read as a gap rather than as a
+choice. A signal that is usually present is still the signal; the one that matters
+is the commit that does *not* carry it.
+
+**Existing history is not rewritten.** The trailer applies from this entry forward.
+Rewriting the eight commits already on `main` would change every SHA for a
+bookkeeping change, and the trailers added would be a reconstruction from memory
+rather than a record made at the time — which is the same objection this file
+raises against editing an accepted decision instead of amending it.
+
+**The load-bearing rule is unchanged, and it is not this one.** Rule 10's first
+paragraph — never commit code you cannot explain line by line — is what the viva
+actually tests. A trailer is provenance, not comprehension, and marking a commit
+does not license committing something its author cannot walk a reviewer through.
+
+`ATTRIBUTION.md` is unaffected. It covers ideas taken from reading another
+project's source, which is a different question with a different answer, and it
+continues to be kept in the same commit as the work it describes.
+
+---
+
+## D-044 — Section 9 of `CLAUDE.local.md` was never in force
+
+**2026-08-06 · accepted**
+
+`CLAUDE.local.md` §9 specifies an exact ruff and mypy configuration under the
+heading *"Aspirational standards decay. These are wired into CI."* The committed
+`pyproject.toml` configured something else, and had since the repository was
+scaffolded:
+
+| | §9 asks for | was configured | consequence |
+|---|---|---|---|
+| `line-length` | 88 | 100 | — |
+| `D` | required | absent | §5's docstring rules unchecked |
+| `ANN` | required | absent | §5.2's units-on-every-argument unchecked |
+| `C90` | max-complexity 8 | absent | §2's complexity limit unchecked |
+| `PL` | 5 args / 8 branches / 30 statements / 4 returns | absent | §2's size limits unchecked |
+| `N` `W` `RET` `ARG` `TRY` `PTH` `ERA` | required | absent | §3, §4 and §7 unchecked |
+| mypy | `disallow_any_explicit`, `warn_unreachable` | neither | an explicit `Any` passed `strict` |
+| module ≤ 400 lines | a CI step | absent | the one limit ruff cannot express |
+
+Turning it on produced 77 findings. None was a defect in running code — they are
+long lines, missing docstrings and two real size violations — which is the point:
+the rules had never been applied, so nothing had ever been written against them.
+This is D-042's lesson arriving a second time. **An enforcement check that has
+never failed is not evidence of anything**, and one that was never wired in is not
+even a check.
+
+**The ruleset is the union, not the substitution.** §9's list does not include
+`DTZ`, `TID`, `T20`, `UP`, `B` or `RUF`, all of which were already configured, and
+adopting §9 verbatim would have *removed* the only mechanical enforcement of two
+hard project rules: `DTZ` bans the naive `datetime` that §6 and `DATA-MODEL.md`
+both forbid, and `TID` carries the banned-import rule that keeps `sgp4` and
+`skyfield` inside `meridian.orbit` per `ARCHITECTURE.md` rule 2. A standards
+document that is a floor is useful; treating it as a ceiling would have made the
+codebase less checked, not more.
+
+**Four deviations, each recorded in `pyproject.toml` beside the ignore:**
+
+| Ignore | Scope | Reason |
+|---|---|---|
+| `RUF002` | global | pre-existing. `σ` and `−` in docstrings are correct domain notation |
+| `TRY003` | global | `config.py`'s refusal names the variable, the reason, and `openssl rand -hex 32`. Moving that into an exception class satisfies the rule and costs the operator the thing that makes it actionable |
+| `D` `ANN` `PLR2004` `PLC0415` | `tests/**` | a test's name is its docstring; `assert heartbeat_interval_s == 30` *is* the assertion, and lifting 30 into a constant makes the test assert the constant equals itself; `test_layout.py` imports late on purpose, to prove the `src/` layout keeps `platform` off `sys.path` (D-012) |
+| `D` `ANN` `PLR` `C90` `T201` | `site/tools/**` | stdlib-only build scripts producing committed artefacts. §9 scopes its own module-length check to `platform client simulator`, so the size and complexity families are scoped the same way. `E501` is deliberately **not** ignored |
+
+**Two findings were real and were fixed rather than ignored.**
+`InsecureConfiguration` becomes `InsecureConfigurationError` (`N818`).
+`OrbitService.pass_windows` took six arguments against §2's cap of five and now
+takes a `PassSearch` dataclass — which also gave the elevation floor and the coarse
+step somewhere to carry their reasoning, instead of arriving at a call site as two
+indistinguishable floats. `api/app.py`'s health body drops `dict[str, Any]` for
+`dict[str, str]`, and its `except Exception` narrows to `(psycopg.Error, OSError)`
+so a `TypeError` in our own code can no longer be reported to an operator as
+"database unreachable".
+
+**The module-length check is a CI step, and it was verified by breaking it.** §9's
+own snippet ends `| grep -q . && exit 1 || exit 0`, whose trailing `|| exit 0`
+returns success when nothing matches *and* when something does. The version in
+`ci.yml` is a plain loop, and it was confirmed to fail by appending 300 lines to
+`config.py` and confirming a non-zero exit, then restoring the file. Nothing in the
+tree exceeds 400 lines today; `config.py` at 233 is the longest.
+
+*Rejected:* adopting §9 verbatim, `DTZ` and `TID` included in the loss. Exact
+compliance with the document at the cost of un-enforcing `ARCHITECTURE.md` rule 2
+is the letter defeating the purpose.
+
+*Rejected:* leaving `line-length` at 100 and recording a deviation. The reformat
+cost 11 files and 22 lines — measured before deciding — which is not a price worth
+a permanent divergence from the written standard.
+
+---
+
+## D-045 — Clock uncertainty is floored at the clock's own resolution
+
+**2026-08-06 · accepted** · *implements D-016*
+
+D-016 and `MSP-SPEC.md` §4.2 say `clock_uncertainty_s` may be `null` for unknown
+but must never be `0.0`, because a station claiming perfect clock accuracy and a
+station that cannot measure its own are opposite cases. The estimator computes
+`uncertainty = RTT / 2`, which satisfies that — right up until the round trip
+measures as zero.
+
+**It does.** Running the reference client against `GET /msp/v0/time` on localhost:
+
+```
+#1  offset=-0.00041s  uncertainty=0.00000s  rtt=0.00000s
+#4  offset=-0.00032s  uncertainty=0.00000s  rtt=0.00000s
+```
+
+`datetime.now()` resolves to **15.625 ms on Windows**. A localhost round trip
+finishes inside one tick, `received_at - sent_at` is exactly zero, and the station
+reports the one value the specification forbids. Not an edge case: it was four
+measurements out of six on the first machine it ran on, and it is the normal case
+for a station colocated with the platform — which is what the Pi will be.
+
+**Decision.** The uncertainty is `max(RTT / 2, CLOCK_RESOLUTION_S)`, where the
+resolution is read from `time.get_clock_info("time").resolution` rather than
+assumed. Half the round trip is the *network* bound on the estimate; the clock's
+resolution is the *instrument* bound; the honest figure is whichever is larger. A
+measurement cannot be more certain than the clock that made it.
+
+This is load-bearing rather than cosmetic. `EVALUATION.md` §6.1 discards timing
+error smaller than the reported clock uncertainty. A station reporting `0.0`
+discards nothing, so every timing error it produces — including the ones that are
+pure clock noise — is kept and attributed to element-set age, which is the SC-3
+figure.
+
+Read from the platform rather than hard-coded because the number is genuinely
+different per host: about 15.6 ms on Windows, about 1 ns on Linux. On the Pi the
+round trip will dominate and the floor will never bind, which is correct — the
+floor exists for the case where it does.
+
+*Rejected:* measuring the round trip with `perf_counter`, whose resolution here is
+100 ns. It would make the RTT accurate and is the right instrument for a duration,
+but the offset needs wall-clock instants either way, and mixing two clocks in one
+estimate means the uncertainty no longer describes the clock the offset was
+measured against. The floor is the smaller and more honest change.
+
+*Rejected:* reporting `null` when the round trip measures zero. Defensible on the
+letter of D-016 — the uncertainty genuinely is unknown at that resolution — but it
+throws away a real bound. The station does know its uncertainty is no worse than
+one clock tick.
+
+**Found by running the client against the endpoint, not by reading the code.** Both
+were written against D-016 and both looked correct.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -875,7 +1037,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | **O-3** | How does a station report a horizon obstruction it already knows about? | D-031 — optional `horizon_mask`, kept distinct from the learned profile |
 | **O-4** | Cap `doppler_samples` by count, or transmit a compressed curve fit? | D-032 — capped at 512 by count |
 
-**Still unrecorded.** `GIT-WORKFLOW.md` Rule 10 asks the team to decide whether AI-assisted commits are marked, and to record the answer here. That is a team policy question rather than a technical one and is not settled by this pass. It still needs an entry.
+**Nothing is now unrecorded.** `GIT-WORKFLOW.md` Rule 10's question — whether AI-assisted commits are marked — was carried as outstanding through every previous pass and is settled by **D-043**: a `Co-Authored-By` trailer from that entry forward, with existing history left alone. That was the last Stage 0 item.
 
 ---
 
@@ -967,6 +1129,23 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-042 mobile and accessibility fixes, print sheet | `site/style.css` |
 | D-042 header hardening | `site/_headers` |
 | D-042 the three Cloudflare settings, still outstanding | dashboard, not this repository |
+
+**Landed 2026-08-06**, closing the last Stage 0 item and putting Stage 1's enforcement into force.
+
+| Decision | Applied to |
+|---|---|
+| D-043 AI-assisted commits carry a trailer | `docs/GIT-WORKFLOW.md` rule 10 (question closed); no code |
+| D-044 the section 9 ruleset, unioned with `DTZ`/`TID` | `pyproject.toml` |
+| D-044 four documented deviations | `pyproject.toml` per-file-ignores |
+| D-044 `InsecureConfiguration` → `InsecureConfigurationError` | `meridian/config.py`, `tests/unit/test_config.py` |
+| D-044 `pass_windows` takes `PassSearch` | `meridian/orbit/{types.py,service.py,__init__.py}` |
+| D-044 `dict[str, str]` and a narrowed `except` | `meridian/api/app.py` |
+| D-044 module-length check, verified by breaking it | `.github/workflows/ci.yml` |
+| — one psycopg pool in the lifespan (roadmap Stage 2) | `meridian/store/pool.py`, `meridian/api/app.py`, `tests/integration/test_pool.py` |
+| — MSP version parsing and the §6 error shape (Stage 3) | `meridian/api/{versioning.py,errors.py}` |
+| — `GET /msp/v0/time` (Stage 4.1) | `meridian/api/msp.py`, `tests/msp_conformance/` |
+| — client transport and clock estimator (Stage 4.1) | `meridian_client/{transport.py,clock.py}` |
+| D-045 clock uncertainty floored at clock resolution | `meridian_client/clock.py`, `tests/unit/test_clock_offset_convention.py` |
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
 

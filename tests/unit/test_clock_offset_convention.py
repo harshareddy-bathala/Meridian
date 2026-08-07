@@ -1,10 +1,5 @@
 """D-025: the clock offset sign, pinned by a worked example.
 
-There is no code to test yet — the estimator lands with the client at Stage 4.
-What this file pins is the *convention*, so that when the estimator is written it
-is written against an assertion rather than against whichever sign the author
-happened to picture.
-
     clock_offset = platform clock − station clock
 
 A station whose clock runs fast reports a NEGATIVE offset.
@@ -13,6 +8,14 @@ This is worth a test file of its own because a sign error here is invisible.
 Nothing crashes, no constraint fires, every number still has plausible
 magnitude — and `docs/EVALUATION.md` §6.1's timing-error figure comes out
 inverted, in a report, in a viva.
+
+**These assertions predate the code they now check.** The file was written at
+Stage 0 against a local copy of the estimator, so that the convention was fixed
+before an implementation could be written to whichever sign its author happened to
+picture. At Stage 4.1 the estimator moved into `meridian_client.clock`, exactly as
+the original file said it would, and the local copy was deleted — so what runs here
+is the real one. The assertions are unchanged, which is the point: they were the
+specification, and now they are the test.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from meridian.orbit import require_utc
+from meridian_client.clock import CLOCK_RESOLUTION_S, estimate_clock_offset
 
 
 def estimate_offset(
@@ -29,31 +32,14 @@ def estimate_offset(
     received_at: datetime,
     server_time: datetime,
 ) -> float:
-    """MSP §4.2's estimator, written once so the convention has a referent.
-
-    ``offset = server_time − (t_send + t_recv) / 2``
-
-    The midpoint of the station's own send and receive instants is its best
-    estimate of what its clock read when the platform stamped the response, so
-    the difference is the platform's clock minus the station's.
-
-    Moves into ``meridian_client`` at Stage 4.1. It lives here until then because
-    the convention needs to be pinned before an implementation can be checked
-    against it, not after.
-    """
-    require_utc(sent_at, "sent_at")
-    require_utc(received_at, "received_at")
-    require_utc(server_time, "server_time")
-    if received_at < sent_at:
-        raise ValueError("received_at precedes sent_at")
-
-    midpoint = sent_at + (received_at - sent_at) / 2
-    return (server_time - midpoint).total_seconds()
+    """The offset alone, so the assertions below read as they always did."""
+    return estimate_clock_offset(sent_at, received_at, server_time).offset_s
 
 
 def uncertainty_floor(sent_at: datetime, received_at: datetime) -> float:
     """Half the round trip. Never zero, because the delay is never known."""
-    return (received_at - sent_at).total_seconds() / 2
+    server_time = sent_at  # irrelevant to the uncertainty, which is RTT-derived
+    return estimate_clock_offset(sent_at, received_at, server_time).uncertainty_s
 
 
 BASE = datetime(2026, 8, 14, 9, 31, 2, tzinfo=UTC)
@@ -66,13 +52,17 @@ def test_a_fast_station_clock_reports_a_negative_offset() -> None:
     trip, so the midpoint is the station's clock exactly.
     """
     station_now = BASE + timedelta(seconds=5)
-    offset = estimate_offset(sent_at=station_now, received_at=station_now, server_time=BASE)
+    offset = estimate_offset(
+        sent_at=station_now, received_at=station_now, server_time=BASE
+    )
     assert offset == pytest.approx(-5.0)
 
 
 def test_a_slow_station_clock_reports_a_positive_offset() -> None:
     station_now = BASE - timedelta(seconds=5)
-    offset = estimate_offset(sent_at=station_now, received_at=station_now, server_time=BASE)
+    offset = estimate_offset(
+        sent_at=station_now, received_at=station_now, server_time=BASE
+    )
     assert offset == pytest.approx(+5.0)
 
 
@@ -100,6 +90,34 @@ def test_uncertainty_is_never_zero_when_the_round_trip_is_not() -> None:
     received = BASE + timedelta(milliseconds=400)
     assert uncertainty_floor(sent, received) == pytest.approx(0.2)
     assert uncertainty_floor(sent, received) > 0.0
+
+
+def test_uncertainty_is_never_zero_when_the_round_trip_measures_zero() -> None:
+    """The case that a coarse clock actually produces, and D-016 forbids.
+
+    Windows resolves `datetime.now()` to about 15.6 ms, so a localhost round trip
+    completes inside one tick and `received_at - sent_at` is *exactly* zero. Half
+    of that is 0.0, and 0.0 is not a small uncertainty — it is a station claiming
+    it knows its clock perfectly, which is the one thing MSP §4.2 says the field
+    must never say. `docs/EVALUATION.md` §6.1 discards timing error smaller than
+    the reported uncertainty, so a zero here silently keeps every error it should
+    have thrown away.
+
+    Found by running the real client against the real endpoint on localhost, not
+    by reading the code.
+    """
+    assert uncertainty_floor(BASE, BASE) > 0.0
+    assert uncertainty_floor(BASE, BASE) == pytest.approx(CLOCK_RESOLUTION_S)
+
+
+def test_the_uncertainty_floor_does_not_inflate_a_real_round_trip() -> None:
+    """The floor is a floor, not a pad. A 400 ms round trip on any clock this
+    project runs on is far above the instrument bound, and must be reported as
+    measured rather than widened."""
+    received = BASE + timedelta(milliseconds=400)
+
+    assert uncertainty_floor(BASE, received) == pytest.approx(0.2)
+    assert CLOCK_RESOLUTION_S < 0.2  # the premise of the assertion above
 
 
 def test_naive_timestamps_are_refused() -> None:

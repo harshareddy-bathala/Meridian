@@ -1,4 +1,4 @@
-"""0002_stations
+"""Revision 0002 - invite tokens, stations and station capabilities.
 
 Applies sql/0002_stations.sql. See deploy/migrations/_sql.py.
 """

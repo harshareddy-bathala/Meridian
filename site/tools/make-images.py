@@ -136,7 +136,11 @@ def sat_at(raan: float, u: float):
     ci, si = math.cos(INCL), math.sin(INCL)
     co, so = math.cos(raan), math.sin(raan)
     cu, su = math.cos(u), math.sin(u)
-    return (R_SAT * (co * cu - so * su * ci), R_SAT * (so * cu + co * su * ci), R_SAT * su * si)
+    return (
+        R_SAT * (co * cu - so * su * ci),
+        R_SAT * (so * cu + co * su * ci),
+        R_SAT * su * si,
+    )
 
 
 def orbit(raan: float, steps: int = 360):
@@ -184,7 +188,11 @@ PTX, PTY = screen(_ph, _pv)
 
 # ------------------------------------------------------------------- text --
 
-COPY_LINES = ["Predictive scheduling", "and reliability for satellite", "ground stations."]
+COPY_LINES = [
+    "Predictive scheduling",
+    "and reliability for satellite",
+    "ground stations.",
+]
 SUBLINE = "A pass lasts minutes and never repeats."
 META_LEFT = "MERIDIAN.ORG.IN"
 META_RIGHT = "LAUNCHING 2026 · APACHE-2.0"
@@ -232,7 +240,11 @@ def write_png() -> Path:
     for run in runs(graticule(), near=True):
         dr.line(poly(run), fill=blend(RULE, 0.95), width=SS)
 
-    dr.ellipse([s(CX - R), s(CY - R), s(CX + R), s(CY + R)], outline=blend(MUTED, 0.55), width=SS)
+    dr.ellipse(
+        [s(CX - R), s(CY - R), s(CX + R), s(CY + R)],
+        outline=blend(MUTED, 0.55),
+        width=SS,
+    )
 
     for run in runs([orbit(RAAN)], near=False):
         dr.line(poly(run), fill=blend(RULE, 0.45), width=SS)
@@ -241,7 +253,11 @@ def write_png() -> Path:
 
     dr.line([(s(STX), s(STY)), (s(PTX), s(PTY))], fill=blend(SIGNAL, 0.9), width=SS)
     dr.ellipse([s(PTX - 4), s(PTY - 4), s(PTX + 4), s(PTY + 4)], fill=SIGNAL)
-    dr.ellipse([s(STX - 4), s(STY - 4), s(STX + 4), s(STY + 4)], outline=INK, width=round(1.5 * SS))
+    dr.ellipse(
+        [s(STX - 4), s(STY - 4), s(STX + 4), s(STY + 4)],
+        outline=INK,
+        width=round(1.5 * SS),
+    )
 
     # the mark: limb plus one meridian, same construction as favicon.svg
     mx, my, mr = 80 + 32 * 0.62, 78 + 32 * 0.62, 22 * 0.62
@@ -265,7 +281,9 @@ def write_png() -> Path:
 
     dr.line([(s(80), s(H - 96)), (s(W - 80), s(H - 96))], fill=RULE, width=SS)
     tracked(dr, (s(80), s(H - 56)), META_LEFT, mono(15), MUTED, 2.4 * SS)
-    tracked(dr, (s(W - 80), s(H - 56)), META_RIGHT, mono(15), MUTED, 2.4 * SS, anchor="rs")
+    tracked(
+        dr, (s(W - 80), s(H - 56)), META_RIGHT, mono(15), MUTED, 2.4 * SS, anchor="rs"
+    )
 
     out = SITE / "og-image.png"
     # Kept as full RGB. A 256-colour palette halves the file but median-cut
@@ -332,12 +350,16 @@ def globe_svg_markup() -> str:
     return (
         f'<svg class="scene-still" viewBox="0 0 {SVG_BOX:.0f} {SVG_BOX:.0f}" '
         'aria-hidden="true" focusable="false">'
-        f'<path class="gs-wire gs-back" d="{path_d(runs(grat, near=False, to_screen=to))}"/>'
+        f'<path class="gs-wire gs-back" '
+        f'd="{path_d(runs(grat, near=False, to_screen=to))}"/>'
         f'<path class="gs-wire" d="{path_d(runs(grat, near=True, to_screen=to))}"/>'
-        f'<circle class="gs-limb" cx="{SVG_BOX / 2:.0f}" cy="{SVG_BOX / 2:.0f}" r="{SVG_R:.0f}"/>'
-        f'<path class="gs-wire gs-back" d="{path_d(runs(ring, near=False, to_screen=to))}"/>'
+        f'<circle class="gs-limb" cx="{SVG_BOX / 2:.0f}" '
+        f'cy="{SVG_BOX / 2:.0f}" r="{SVG_R:.0f}"/>'
+        f'<path class="gs-wire gs-back" '
+        f'd="{path_d(runs(ring, near=False, to_screen=to))}"/>'
         f'<path class="gs-orbit" d="{path_d(runs(ring, near=True, to_screen=to))}"/>'
-        f'<line class="gs-link" x1="{stx:.1f}" y1="{sty:.1f}" x2="{ptx:.1f}" y2="{pty:.1f}"/>'
+        f'<line class="gs-link" x1="{stx:.1f}" y1="{sty:.1f}" '
+        f'x2="{ptx:.1f}" y2="{pty:.1f}"/>'
         # Radii in viewBox units, so the markers scale with the globe. The
         # canvas keeps them at a constant 2.5 px because it animates through a
         # 26x zoom and a marker that grew with it would swamp the close-up;
@@ -380,13 +402,21 @@ def mark(dr, cx: float, cy: float, r: float, colour) -> None:
 
     Coordinates are device pixels: supersample before calling, not after.
     """
-    dr.ellipse([cx - r, cy - r, cx + r, cy + r], outline=colour, width=max(1, round(r * 4 / 22)))
+    dr.ellipse(
+        [cx - r, cy - r, cx + r, cy + r],
+        outline=colour,
+        width=max(1, round(r * 4 / 22)),
+    )
     # The SVG's "A 10.5 22" arc is the left half of an ellipse about the same
     # centre. In Pillow, 0 degrees is 3 o'clock and angles run clockwise, so
     # 90 to 270 traces bottom to top the long way round — the left half.
     rx = r * 10.5 / 22
     dr.arc(
-        [cx - rx, cy - r, cx + rx, cy + r], 90, 270, fill=colour, width=max(1, round(r * 3.5 / 22))
+        [cx - rx, cy - r, cx + rx, cy + r],
+        90,
+        270,
+        fill=colour,
+        width=max(1, round(r * 3.5 / 22)),
     )
 
 
@@ -521,7 +551,9 @@ def write_brand() -> list[Path]:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--what", choices=["all", "og", "icons", "brand", "globe"], default="all")
+    ap.add_argument(
+        "--what", choices=["all", "og", "icons", "brand", "globe"], default="all"
+    )
     what = ap.parse_args().what
 
     outputs: list[Path] = []

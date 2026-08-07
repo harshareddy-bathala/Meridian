@@ -1,4 +1,4 @@
-"""0005_observations
+"""Revision 0005 - the observations hypertable and its current-revision view.
 
 Applies sql/0005_observations.sql. See deploy/migrations/_sql.py.
 """

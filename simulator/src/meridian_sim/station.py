@@ -53,7 +53,9 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="python -m meridian_sim.station",
         description="Run deterministic virtual stations against a Meridian platform.",
     )
-    parser.add_argument("--version", action="version", version=f"meridian-sim {__version__}")
+    parser.add_argument(
+        "--version", action="version", version=f"meridian-sim {__version__}"
+    )
     parser.add_argument(
         "--count",
         type=int,
@@ -71,11 +73,22 @@ def _build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("MERIDIAN_BASE_URL", "").strip() or DEFAULT_BASE_URL,
         help="platform base URL",
     )
-    parser.add_argument("--run-id", default=None, help="simulator run id; generated if omitted")
+    parser.add_argument(
+        "--run-id", default=None, help="simulator run id; generated if omitted"
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Entry point. Returns an exit code rather than calling ``sys.exit``.
+
+    Args:
+        argv: Command line arguments, or ``None`` to read ``sys.argv``.
+
+    Returns:
+        ``1`` for a bad argument, and ``EXIT_NOT_IMPLEMENTED`` otherwise — which
+        is every valid invocation until Stage 10 puts real stations behind it.
+    """
     args = _build_parser().parse_args(argv)
 
     if args.count < 1:

@@ -54,11 +54,17 @@ def rollback(conn: Any) -> Iterator[Callable[..., Any]]:
 
 @pytest.fixture
 def fixtures(rollback: Callable[..., Any]) -> Callable[..., Any]:
-    """The smallest row graph an observation can hang off: one station, one satellite."""
-    rollback("insert into satellites (satellite_id, name) values (%s, %s)", "norad:99999", "Test")
+    """The smallest row graph an observation can hang off:
+    one station, one satellite."""
+    rollback(
+        "insert into satellites (satellite_id, name) values (%s, %s)",
+        "norad:99999",
+        "Test",
+    )
     rollback(
         "insert into stations (station_id, name, operator, lat_deg, lon_deg, alt_m,"
-        " token_sha256, registration_key_sha256) values (%s, %s, %s, %s, %s, %s, %s, %s)",
+        " token_sha256, registration_key_sha256)"
+        " values (%s, %s, %s, %s, %s, %s, %s, %s)",
         "st_fixture",
         "Fixture",
         "tests",
@@ -95,7 +101,12 @@ def test_all_expected_tables_exist(conn) -> None:  # type: ignore[no-untyped-def
     assert expected <= tables
 
     # Deferred, and their absence is deliberate — see D-018.
-    deferred = {"products", "noise_measurements", "horizon_profiles", "interference_profiles"}
+    deferred = {
+        "products",
+        "noise_measurements",
+        "horizon_profiles",
+        "interference_profiles",
+    }
     assert not (deferred & tables)
 
 
@@ -120,7 +131,8 @@ def test_heartbeats_partitions_on_platform_clock(scalar) -> None:  # type: ignor
 
 
 def test_held_assignments_defaults_to_empty_not_null(scalar) -> None:  # type: ignore[no-untyped-def]
-    """MSP §4.2: an empty list is meaningful and must stay distinguishable from absence."""
+    """MSP §4.2: an empty list is meaningful and must stay
+    distinguishable from absence."""
     nullable = scalar(
         "select is_nullable from information_schema.columns "
         "where table_name = 'heartbeats' and column_name = 'held_assignments'"
@@ -141,7 +153,13 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:  # type: igno
             "where column_name = 'simulated' and table_schema = 'public'"
         )
         carrying = {r[0] for r in cur.fetchall()}
-    assert {"stations", "passes", "assignments", "observations", "heartbeats"} <= carrying
+    assert {
+        "stations",
+        "passes",
+        "assignments",
+        "observations",
+        "heartbeats",
+    } <= carrying
 
 
 def test_outcome_enum_is_exactly_the_msp_five(scalar) -> None:  # type: ignore[no-untyped-def]
@@ -160,7 +178,13 @@ def test_outcome_enum_is_exactly_the_msp_five(scalar) -> None:  # type: ignore[n
     assert definition is not None
 
     accepted = set(re.findall(r"'([a-z_]+)'::text", definition))
-    assert accepted == {"decoded", "signal_no_decode", "no_signal", "aborted", "not_attempted"}
+    assert accepted == {
+        "decoded",
+        "signal_no_decode",
+        "no_signal",
+        "aborted",
+        "not_attempted",
+    }
 
 
 def test_a_sixth_outcome_is_rejected(fixtures) -> None:  # type: ignore[no-untyped-def]
@@ -203,12 +227,14 @@ def test_observations_current_returns_the_latest_revision(fixtures) -> None:  # 
         )
 
     both = fixtures(
-        "select revision from observations where assignment_id = %s order by revision", "as_view"
+        "select revision from observations where assignment_id = %s order by revision",
+        "as_view",
     )
     assert [row[0] for row in both] == [1, 2]
 
     current = fixtures(
-        "select revision, outcome from observations_current where assignment_id = %s", "as_view"
+        "select revision, outcome from observations_current where assignment_id = %s",
+        "as_view",
     )
     assert current == [(2, "decoded")]
 
@@ -274,7 +300,8 @@ def test_a_bound_invite_cannot_be_consumed_by_another_station(fixtures) -> None:
     """
     fixtures(
         "insert into stations (station_id, name, operator, lat_deg, lon_deg, alt_m,"
-        " token_sha256, registration_key_sha256) values (%s, %s, %s, %s, %s, %s, %s, %s)",
+        " token_sha256, registration_key_sha256)"
+        " values (%s, %s, %s, %s, %s, %s, %s, %s)",
         "st_other",
         "Other",
         "tests",
@@ -318,14 +345,19 @@ def test_a_bound_invite_is_consumable_by_the_station_it_names(fixtures) -> None:
     )
 
     rows = fixtures(
-        "select consumed_by_station_id from invite_tokens where token_sha256 = %s", ZERO_HASH
+        "select consumed_by_station_id from invite_tokens where token_sha256 = %s",
+        ZERO_HASH,
     )
     assert rows == [("st_fixture",)]
 
 
 def test_an_unbound_invite_still_admits_any_station(fixtures) -> None:  # type: ignore[no-untyped-def]
     """D-020's ordinary invite is unchanged by D-034: null means "any new station"."""
-    fixtures("insert into invite_tokens (token_sha256, label) values (%s, %s)", ZERO_HASH, "seeded")
+    fixtures(
+        "insert into invite_tokens (token_sha256, label) values (%s, %s)",
+        ZERO_HASH,
+        "seeded",
+    )
     fixtures(
         "update invite_tokens set consumed_at = now(), consumed_by_station_id = %s"
         " where token_sha256 = %s",
@@ -350,7 +382,8 @@ def test_declared_horizon_mask_defaults_to_an_empty_array(scalar) -> None:  # ty
     """
     default = scalar(
         "select column_default from information_schema.columns "
-        "where table_name = 'station_capabilities' and column_name = 'horizon_mask_json'"
+        "where table_name = 'station_capabilities'"
+        " and column_name = 'horizon_mask_json'"
     )
     assert default is not None and "[]" in default
 

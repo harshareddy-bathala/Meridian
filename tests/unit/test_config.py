@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from meridian.config import InsecureConfiguration, Settings, load_settings
+from meridian.config import InsecureConfigurationError, Settings, load_settings
 
 REAL_PEPPER = "0f9a" * 16
 REAL_INVITE = "7c31" * 16
@@ -74,8 +74,10 @@ def test_placeholders_are_allowed_on_loopback(monkeypatch: pytest.MonkeyPatch) -
     assert settings.heartbeat_interval_s == 30
 
 
-def test_placeholders_are_refused_on_a_public_address(monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(InsecureConfiguration) as excinfo:
+def test_placeholders_are_refused_on_a_public_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(InsecureConfigurationError) as excinfo:
         _load(monkeypatch, PUBLIC_BASE_URL="https://meridian.example.org")
 
     message = str(excinfo.value)
@@ -84,14 +86,16 @@ def test_placeholders_are_refused_on_a_public_address(monkeypatch: pytest.Monkey
     assert "DATABASE_URL password" in message
 
 
-def test_a_tunnel_hostname_alone_counts_as_public(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_tunnel_hostname_alone_counts_as_public(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The tunnel is what makes the platform reachable, whatever the base URL says.
 
     Without this, a station left with PUBLIC_BASE_URL=localhost and a live tunnel
     would be publicly exposed with placeholder secrets and no complaint — which is
     exactly the SC-6 configuration.
     """
-    with pytest.raises(InsecureConfiguration):
+    with pytest.raises(InsecureConfigurationError):
         _load(
             monkeypatch,
             PUBLIC_BASE_URL="http://localhost:8000",
@@ -99,7 +103,9 @@ def test_a_tunnel_hostname_alone_counts_as_public(monkeypatch: pytest.MonkeyPatc
         )
 
 
-def test_meridian_public_alone_counts_as_public(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_meridian_public_alone_counts_as_public(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """`--profile public` needs no hostname to reach the internet.
 
     ``docker compose --profile public up`` starts cloudflared as soon as
@@ -109,7 +115,7 @@ def test_meridian_public_alone_counts_as_public(monkeypatch: pytest.MonkeyPatch)
     check never ran. Compose derives MERIDIAN_PUBLIC from the tunnel token so the
     one variable the tunnel cannot start without is the one that arms the check.
     """
-    with pytest.raises(InsecureConfiguration):
+    with pytest.raises(InsecureConfigurationError):
         _load(monkeypatch, PUBLIC_BASE_URL="http://localhost:8000", MERIDIAN_PUBLIC="1")
 
 
@@ -123,7 +129,7 @@ def test_a_placeholder_password_inside_database_url_is_caught(
     something the deployment was not using — and a public stack with `change-me`
     in its database URL started without complaint.
     """
-    with pytest.raises(InsecureConfiguration) as excinfo:
+    with pytest.raises(InsecureConfigurationError) as excinfo:
         _load(
             monkeypatch,
             **_secure(DATABASE_URL="postgresql://meridian:change-me@db:5432/meridian"),
@@ -150,7 +156,7 @@ def test_postgres_password_still_covered_when_no_database_url_is_set(
     monkeypatch.setenv("POSTGRES_PASSWORD", "change-me")
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://meridian.example.org")
 
-    with pytest.raises(InsecureConfiguration, match="DATABASE_URL password"):
+    with pytest.raises(InsecureConfigurationError, match="DATABASE_URL password"):
         load_settings()
 
 
@@ -178,5 +184,5 @@ def test_an_unparseable_public_flag_is_refused(monkeypatch: pytest.MonkeyPatch) 
     A misspelling that disables a security check by defaulting to off is the
     failure this whole check exists to avoid.
     """
-    with pytest.raises(InsecureConfiguration, match="MERIDIAN_PUBLIC"):
+    with pytest.raises(InsecureConfigurationError, match="MERIDIAN_PUBLIC"):
         _load(monkeypatch, MERIDIAN_PUBLIC="maybe")

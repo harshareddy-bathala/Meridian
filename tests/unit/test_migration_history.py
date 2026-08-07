@@ -31,7 +31,9 @@ def test_exactly_one_head(script: ScriptDirectory) -> None:
     It is produced by two branches each adding a migration off the same parent,
     which is the normal way a three-person team creates one.
     """
-    assert len(script.get_heads()) == 1, f"expected one head, found {script.get_heads()}"
+    assert len(script.get_heads()) == 1, (
+        f"expected one head, found {script.get_heads()}"
+    )
 
 
 def test_history_is_linear_and_gapless(script: ScriptDirectory) -> None:
@@ -42,7 +44,8 @@ def test_history_is_linear_and_gapless(script: ScriptDirectory) -> None:
 
     for revision in revisions:
         assert not isinstance(revision.down_revision, tuple), (
-            f"{revision.revision} is a merge revision; the history is meant to be linear"
+            f"{revision.revision} is a merge revision;"
+            " the history is meant to be linear"
         )
 
 
@@ -86,7 +89,9 @@ def test_every_revisions_downgrade_is_refused_not_silently_skipped(
             downgrade()
 
 
-def test_every_revisions_upgrade_applies_its_own_sql_file(script: ScriptDirectory) -> None:
+def test_every_revisions_upgrade_applies_its_own_sql_file(
+    script: ScriptDirectory,
+) -> None:
     """A wrapper that applies the wrong file is silent until it runs.
 
     ``upgrade()`` is called against a recording stub rather than a database, so

@@ -8,15 +8,16 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 
-import psycopg
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from meridian import __version__
-from meridian.config import Settings, load_settings
+from meridian.api.errors import install_error_handlers
+from meridian.api.msp import router as msp_router
+from meridian.config import load_settings
+from meridian.store.pool import is_database_reachable, open_pool
 
 __all__ = ["create_app"]
 
@@ -25,25 +26,21 @@ __all__ = ["create_app"]
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Settings are loaded at startup, not import, so a misconfiguration fails
     # loudly with the process rather than silently at first request.
-    app.state.settings = load_settings()
-    yield
+    settings = load_settings()
+    app.state.settings = settings
 
-
-def _database_ok(settings: Settings) -> bool:
-    # Any failure to reach the database is "not ok" — a health check that
-    # propagates the exception is a health check that returns 500 instead of
-    # reporting degradation, which is the opposite of what it is for.
-    #
-    # psycopg_url rather than database_url: one DATABASE_URL serves both this and
-    # Alembic, and libpq rejects the "+psycopg" driver suffix SQLAlchemy needs
-    # (D-033).
-    url = settings.psycopg_url
+    # One pool for the process, opened here and closed on the way out. Before
+    # this the health check opened a fresh connection per request, which is a TCP
+    # connect, an authentication round trip and a teardown on the endpoint the
+    # tunnel polls most often.
+    app.state.pool = open_pool(settings)
     try:
-        with psycopg.connect(url, connect_timeout=2) as conn, conn.cursor() as cur:
-            cur.execute("select 1")
-            return cur.fetchone() is not None
-    except Exception:
-        return False
+        yield
+    finally:
+        # In a finally, so a startup failure further down still returns the
+        # connections rather than leaving backends alive on the Pi until the
+        # server times them out.
+        app.state.pool.close()
 
 
 def create_app() -> FastAPI:
@@ -59,6 +56,11 @@ def create_app() -> FastAPI:
         lifespan=_lifespan,
     )
 
+    # Before the routes, so a failure inside one already leaves in MSP §6's shape
+    # rather than in FastAPI's default 422 or a bare 500.
+    install_error_handlers(app)
+    app.include_router(msp_router)
+
     @app.get("/healthz")
     def healthz() -> JSONResponse:
         """Liveness and dependency check.
@@ -67,9 +69,11 @@ def create_app() -> FastAPI:
         scheduled public-reachability check curls, so it must answer without
         authentication and without depending on any station having registered.
         """
-        settings: Settings = app.state.settings
-        database_ok = _database_ok(settings)
-        body: dict[str, Any] = {
+        database_ok = is_database_reachable(app.state.pool)
+        # dict[str, str], not dict[str, Any]. All three values are strings, and a
+        # response body typed Any is a body whose shape nothing checks — which is
+        # the case mypy's disallow_any_explicit exists to catch (D-044).
+        body: dict[str, str] = {
             "status": "ok" if database_ok else "degraded",
             "version": __version__,
             "database": "ok" if database_ok else "unreachable",

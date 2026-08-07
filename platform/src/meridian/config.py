@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 __all__ = [
-    "InsecureConfiguration",
+    "InsecureConfigurationError",
     "Settings",
     "libpq_url",
     "load_settings",
@@ -26,7 +26,7 @@ _DRIVER = "+psycopg"
 _SCHEMES = ("postgresql", "postgres")
 
 
-class InsecureConfiguration(RuntimeError):
+class InsecureConfigurationError(RuntimeError):
     """Raised when a placeholder secret would be exposed publicly."""
 
 
@@ -95,7 +95,7 @@ class Settings:
 def _split_scheme(url: str) -> tuple[str, str]:
     scheme, separator, rest = url.partition("://")
     if not separator:
-        raise InsecureConfiguration(f"DATABASE_URL is not a URL: {url!r}")
+        raise InsecureConfigurationError(f"DATABASE_URL is not a URL: {url!r}")
     return scheme, rest
 
 
@@ -128,7 +128,9 @@ def sqlalchemy_url(url: str) -> str:
     if "+" in scheme:
         return url
     if scheme not in _SCHEMES:
-        raise InsecureConfiguration(f"DATABASE_URL scheme must be postgresql, got {scheme!r}")
+        raise InsecureConfigurationError(
+            f"DATABASE_URL scheme must be postgresql, got {scheme!r}"
+        )
     return f"{scheme}{_DRIVER}://{rest}"
 
 
@@ -146,7 +148,9 @@ def _bool_env(name: str, default: bool) -> bool:
     if value in _FALSE:
         return False
     accepted = sorted((_TRUE | _FALSE) - {""})
-    raise InsecureConfiguration(f"{name} must be empty or one of {accepted}, got {raw!r}")
+    raise InsecureConfigurationError(
+        f"{name} must be empty or one of {accepted}, got {raw!r}"
+    )
 
 
 def _int_env(name: str, default: int) -> int:
@@ -156,7 +160,9 @@ def _int_env(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError as exc:
-        raise InsecureConfiguration(f"{name} must be an integer, got {raw!r}") from exc
+        raise InsecureConfigurationError(
+            f"{name} must be an integer, got {raw!r}"
+        ) from exc
 
 
 def _database_url() -> str:
@@ -192,7 +198,9 @@ def load_settings(*, env: dict[str, str] | None = None) -> Settings:
         api_port=_int_env("API_PORT", 8000),
         api_log_level=os.environ.get("API_LOG_LEVEL", "info"),
         token_hash_pepper=os.environ.get("TOKEN_HASH_PEPPER", PLACEHOLDER),
-        registration_invite_token=os.environ.get("REGISTRATION_INVITE_TOKEN", PLACEHOLDER),
+        registration_invite_token=os.environ.get(
+            "REGISTRATION_INVITE_TOKEN", PLACEHOLDER
+        ),
         # D-023: how long after registering a station may still recover a lost
         # bearer token by re-presenting its invite and registration key. One hour
         # by default, AND only while no heartbeat has arrived — both conditions.
@@ -223,7 +231,7 @@ def load_settings(*, env: dict[str, str] | None = None) -> Settings:
             if value == PLACEHOLDER
         ]
         if placeholders:
-            raise InsecureConfiguration(
+            raise InsecureConfigurationError(
                 "Refusing to start: "
                 + ", ".join(placeholders)
                 + f" still set to {PLACEHOLDER!r} while the platform is publicly "

@@ -73,10 +73,12 @@ Tests are organised by what they need to run, one directory per marker:
 |---|---|---|
 | `uv run pytest -m "not integration and not e2e and not msp_conformance"` | nothing | yes |
 | `uv run pytest -m integration` | TimescaleDB | yes |
-| `uv run pytest -m msp_conformance` | the API | **not yet** — Stage 8 |
+| `uv run pytest -m msp_conformance` | nothing — it drives the app in-process | yes, from `GET /msp/v0/time` |
 | `uv run pytest -m e2e` | the full compose stack | **not yet** — Stage 10 |
 
-The last two directories exist with their markers wired and no tests in them, so those two commands currently select nothing and pytest exits `5`. That is the expected state until the endpoints they exercise are built — the directories are there first so the marker wiring is settled before anyone writes a conformance test, rather than being invented alongside one.
+`e2e/` exists with its marker wired and no tests in it, so that command currently selects nothing and pytest exits `5`. That is the expected state until there is a stack to drive — the directory is there first so the marker wiring is settled before anyone writes an end-to-end test, rather than being invented alongside one.
+
+Conformance tests assert the **bytes** `docs/MSP-SPEC.md` promises — field names, exact error bodies, status codes, version handling — rather than that an operation works. They are what a third-party station implementation would be tested against, which is why they spell out expected bodies in full instead of computing them from the code under test.
 
 Integration tests need a real TimescaleDB — never SQLite. The schema uses hypertables, arrays, `CHECK` constraints and generated columns, so a suite that passes on SQLite says nothing about what runs on the Pi.
 
