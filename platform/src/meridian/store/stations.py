@@ -1,0 +1,234 @@
+"""Stations and their capabilities — the SQL layer registration is built on.
+
+Reads and writes ``stations`` and ``station_capabilities``
+(``deploy/migrations/sql/0002_stations.sql``). Like ``meridian.store.invites``,
+this module makes no decision about *whether* a station should be created,
+recovered or authenticated — it only persists and retrieves rows. Stage 4.3's
+registry service decides; this module gives it something typed to call.
+
+Both secrets stored here — the bearer token and the registration key — arrive
+already hashed. Hashing them needs ``Settings.token_hash_pepper`` (D-017,
+D-023), which this module has no business reading.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
+
+import psycopg
+from psycopg.rows import class_row, scalar_row
+
+__all__ = [
+    "Capability",
+    "Connection",
+    "NewStation",
+    "StationRecoveryInfo",
+    "find_station_for_recovery",
+    "find_station_id_by_token_hash",
+    "insert_station",
+    "rotate_station_token",
+]
+
+Connection = psycopg.Connection[tuple[object, ...]]
+"""Matches :data:`meridian.store.invites.Connection` — a pooled connection or
+a bare ``psycopg.connect()`` result, whichever the caller has."""
+
+
+@dataclass(frozen=True, slots=True)
+class Capability:
+    """One row of ``station_capabilities``, in insertable form.
+
+    Mirrors the column list 1:1 rather than living in the registry service,
+    the same way ``Invite`` lives in ``store.invites`` rather than in its
+    caller. ``horizon_mask_json`` is pre-serialised JSON text — shaping and
+    validating MSP §4.1's ``horizon_mask`` array is the API layer's Pydantic
+    model, not this module's concern.
+    """
+
+    band: str
+    freq_min_hz: int
+    freq_max_hz: int
+    modes: tuple[str, ...]
+    polarisation: str
+    tracking: bool
+    min_elevation_deg: float
+    horizon_mask_json: str = "[]"
+
+
+@dataclass(frozen=True, slots=True)
+class NewStation:
+    """Everything :func:`insert_station` needs for one ``stations`` row.
+
+    Bundled rather than passed as separate parameters: CLAUDE.local.md caps a
+    function at four parameters (five, hard) and "take a dataclass" beyond
+    that — precedent already set by ``OrbitService.pass_windows`` taking a
+    ``PassSearch`` (D-044) for the same reason.
+    """
+
+    station_id: str
+    name: str
+    operator: str
+    lat_deg: float
+    lon_deg: float
+    alt_m: float
+    token_sha256: bytes
+    registration_key_sha256: bytes
+    simulated: bool
+    simulator_run_id: str | None
+    seed: int | None
+    client_impl: str | None
+    client_version: str | None
+
+
+def insert_station(
+    conn: Connection, station: NewStation, capabilities: Sequence[Capability]
+) -> None:
+    """Create one station and its capabilities, in one transaction.
+
+    Args:
+        conn: An open connection. This function manages its own transaction,
+            which nests as a savepoint when the caller already has one open
+            — see ``store.invites.create_invite`` for the same property,
+            proven by ``tests/integration/test_store_invites.py``'s
+            ``rollback`` fixture.
+        station: The station row to insert.
+        capabilities: One or more capability rows. MSP §4.1 requires at
+            least one; that requirement is validated by the API layer, not
+            enforced here — an empty sequence simply inserts zero rows.
+
+    Raises:
+        psycopg.errors.UniqueViolation: ``station.station_id`` already exists.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into stations
+                (station_id, name, operator, lat_deg, lon_deg, alt_m,
+                 token_sha256, registration_key_sha256, simulated,
+                 simulator_run_id, seed, client_impl, client_version)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                station.station_id,
+                station.name,
+                station.operator,
+                station.lat_deg,
+                station.lon_deg,
+                station.alt_m,
+                station.token_sha256,
+                station.registration_key_sha256,
+                station.simulated,
+                station.simulator_run_id,
+                station.seed,
+                station.client_impl,
+                station.client_version,
+            ),
+        )
+        cur.executemany(
+            """
+            insert into station_capabilities
+                (station_id, band, freq_min_hz, freq_max_hz, modes,
+                 polarisation, tracking, min_elevation_deg, horizon_mask_json)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            """,
+            [
+                (
+                    station.station_id,
+                    cap.band,
+                    cap.freq_min_hz,
+                    cap.freq_max_hz,
+                    list(cap.modes),
+                    cap.polarisation,
+                    cap.tracking,
+                    cap.min_elevation_deg,
+                    cap.horizon_mask_json,
+                )
+                for cap in capabilities
+            ],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class StationRecoveryInfo:
+    """What MSP §4.1's recovery table needs to decide a registration retry.
+
+    ``registration_key_sha256`` answers "does the presented key match".
+    ``registered_at`` and ``last_heartbeat_at`` answer "is this station still
+    inside D-023's recovery window" — a question that only applies to an
+    *unbound* invite; a bound invite (D-034) ignores the window entirely, so
+    the registry service reads these two fields only on that path.
+    """
+
+    registration_key_sha256: bytes
+    registered_at: datetime
+    last_heartbeat_at: datetime | None
+
+
+def find_station_for_recovery(
+    conn: Connection, station_id: str
+) -> StationRecoveryInfo | None:
+    """The fields needed to validate a registration retry against ``station_id``.
+
+    Returns:
+        ``None`` if no such station exists — which should not happen for a
+        ``station_id`` reached via ``invite_tokens.consumed_by_station_id`` or
+        ``issued_for_station_id``, both foreign keys, but the caller decides
+        what that means rather than this function raising.
+    """
+    with conn.cursor(row_factory=class_row(StationRecoveryInfo)) as cur:
+        cur.execute(
+            """
+            select registration_key_sha256, registered_at, last_heartbeat_at
+            from stations
+            where station_id = %s
+            """,
+            (station_id,),
+        )
+        return cur.fetchone()
+
+
+def rotate_station_token(
+    conn: Connection, *, station_id: str, token_sha256: bytes
+) -> None:
+    """Mint a fresh bearer token onto an existing station.
+
+    The "newly minted token" outcome in every recovery row of MSP §4.1's
+    table. Clears ``token_revoked_at`` as well as setting the new hash — a
+    station recovered through a bound invite after a `401` (D-034) is, by
+    that recovery, no longer revoked.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            update stations
+            set token_sha256 = %s, token_issued_at = now(), token_revoked_at = null
+            where station_id = %s
+            """,
+            (token_sha256, station_id),
+        )
+
+
+def find_station_id_by_token_hash(conn: Connection, token_sha256: bytes) -> str | None:
+    """The lookup half of ``Registry.authenticate()``.
+
+    Excludes a revoked or deleted station — MSP §6 defines ``unauthorized``
+    as covering a revoked token, and a deleted station has no valid identity
+    to authenticate as. Deciding what to do with a ``None`` result (which
+    covers "no such token", "revoked" and "deleted" alike, indistinguishably
+    — MSP §3 does not let a client learn which) belongs to the registry
+    service, not this function.
+    """
+    with conn.cursor(row_factory=scalar_row) as cur:
+        cur.execute(
+            """
+            select station_id
+            from stations
+            where token_sha256 = %s
+              and token_revoked_at is null
+              and deleted_at is null
+            """,
+            (token_sha256,),
+        )
+        return cur.fetchone()

@@ -7,9 +7,11 @@ naming a file nobody had written. A declared executable that does not exist is
 worse than an absent one: it is discovered by whoever is trying to use it, at the
 moment they need it.
 
-Every subcommand here is a **shell**. The parser, the arguments and the exit codes
-are real; the work is not. Each one names the stage that implements it, so
-``meridian invite create`` answers a question instead of raising.
+``invite`` is real (Stage 4.2) — it opens its own short-lived connection rather
+than the API's pooled one, because a one-shot process has nothing to pool.
+Every other subcommand here is still a **shell**: the parser, the arguments and
+the exit codes are real; the work is not. Each one names the stage that
+implements it, so a caller gets an answer instead of a traceback.
 
 ``--version`` is real, because the container smoke test uses it to prove the
 distribution installed and imports cleanly.
@@ -21,8 +23,14 @@ import argparse
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
+
+import psycopg
 
 from meridian import __version__
+from meridian.config import load_settings
+from meridian.store import invites
+from meridian.store.pool import CONNECT_TIMEOUT_S
 
 __all__ = ["main"]
 
@@ -30,11 +38,19 @@ EXIT_NOT_IMPLEMENTED = 2
 """Distinct from 1. A caller can tell "this command does not work yet" from
 "this command ran and failed", which matters once these are wired into scripts."""
 
-NEEDS_ACTION = frozenset({"invite", "passes"})
+EXIT_FAILED = 1
+"""A command that is implemented and ran, but could not complete — an
+unreachable database, an unknown ``--for-station``, a ``revoke`` matching
+nothing. Distinct from :data:`EXIT_NOT_IMPLEMENTED` so a script can tell "try
+again" from "this command doesn't exist yet"."""
+
+NEEDS_ACTION = frozenset({"passes"})
 """Subcommands that are a noun and mean nothing without a verb after them.
 
-``meridian serve`` is complete on its own; ``meridian invite`` is not, and printing
-that subparser's help is more useful than reporting the whole group as pending.
+``meridian serve`` is complete on its own; ``meridian passes`` is not, and
+printing that subparser's help is more useful than reporting the whole group
+as pending. ``invite`` needs the same treatment but is handled separately in
+:func:`main`, since it dispatches to real handlers rather than :func:`_pending`.
 """
 
 
@@ -47,13 +63,6 @@ class _Pending:
 
 
 PENDING: dict[str, _Pending] = {
-    "invite": _Pending(
-        stage="Stage 4.2 — invite CLI",
-        gate=(
-            "one-time invites generated with `secrets`, stored hashed, "
-            "displayed in plaintext exactly once"
-        ),
-    ),
     "passes": _Pending(
         stage="Stage 7 — pass generation",
         gate=(
@@ -88,6 +97,84 @@ def _pending(command: str, pending: _Pending) -> int:
         file=sys.stderr,
     )
     return EXIT_NOT_IMPLEMENTED
+
+
+def _run_invite(args: argparse.Namespace) -> int:
+    """Dispatch ``meridian invite <action>`` to its handler.
+
+    Opens one connection for the whole invocation and closes it on the way
+    out, rather than reaching for :mod:`meridian.store.pool` — a CLI
+    invocation is a single short-lived process, so there is nothing here for
+    a pool to amortize.
+    """
+    settings = load_settings()
+    try:
+        conn = psycopg.connect(settings.psycopg_url, connect_timeout=CONNECT_TIMEOUT_S)
+    except (psycopg.Error, OSError) as exc:
+        print(  # noqa: T201 — this is a CLI; stderr is the interface
+            f"meridian invite: cannot reach the database: {exc}", file=sys.stderr
+        )
+        return EXIT_FAILED
+
+    with conn:
+        if args.action == "create":
+            return _invite_create(conn, args)
+        if args.action == "revoke":
+            return _invite_revoke(conn, args)
+        return _invite_list(conn)
+
+
+def _invite_create(conn: invites.Connection, args: argparse.Namespace) -> int:
+    """Handle ``meridian invite create``."""
+    expires_at = invites.expiry_from_days(args.expires_in_days, now=datetime.now(UTC))
+    try:
+        token = invites.create_invite(
+            conn,
+            label=args.label,
+            expires_at=expires_at,
+            issued_for_station_id=args.for_station,
+        )
+    except psycopg.errors.ForeignKeyViolation:
+        print(  # noqa: T201 — this is a CLI; stderr is the interface
+            f"meridian invite create: no such station: {args.for_station}",
+            file=sys.stderr,
+        )
+        return EXIT_FAILED
+    print(f"Invite for {args.label!r}: {token}")  # noqa: T201
+    print(  # noqa: T201
+        "This is shown once. It will not be displayed again.", file=sys.stderr
+    )
+    return 0
+
+
+def _invite_list(conn: invites.Connection) -> int:
+    """Handle ``meridian invite list``."""
+    for invite in invites.list_invites(conn):
+        state = _invite_state(invite)
+        print(f"{invite.label}\t{state}\t{invite.created_at.isoformat()}")  # noqa: T201
+    return 0
+
+
+def _invite_state(invite: invites.Invite) -> str:
+    """One word (or two) describing what can still be done with an invite."""
+    if invite.consumed_at is not None:
+        return f"consumed by {invite.consumed_by_station_id}"
+    if invite.expires_at is not None and invite.expires_at <= datetime.now(UTC):
+        return "expired"
+    return "pending"
+
+
+def _invite_revoke(conn: invites.Connection, args: argparse.Namespace) -> int:
+    """Handle ``meridian invite revoke``."""
+    revoked = invites.revoke_invite(conn, label=args.label)
+    if revoked == 0:
+        print(  # noqa: T201 — this is a CLI; stderr is the interface
+            f"meridian invite revoke: no revocable invite labelled {args.label!r}",
+            file=sys.stderr,
+        )
+        return EXIT_FAILED
+    print(f"Revoked {revoked} invite(s) labelled {args.label!r}.")  # noqa: T201
+    return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -146,6 +233,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Entry point. Returns an exit code rather than calling ``sys.exit``."""
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "invite":
+        if args.action is None:
+            parser.parse_args(["invite", "--help"])  # exits
+        return _run_invite(args)
 
     pending = PENDING.get(args.command)
     if pending is None:  # no subcommand, or one argparse already rejected
