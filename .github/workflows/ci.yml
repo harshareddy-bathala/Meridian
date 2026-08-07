@@ -148,6 +148,15 @@ jobs:
       - name: Integration tests
         run: uv run pytest -m integration
 
+      # This marker was never run anywhere in CI — the exclusion in "Unit
+      # tests" above dropped it and nothing picked it up, so every test in
+      # tests/msp_conformance/ (the /time wire-shape suite, the client/
+      # platform agreement tests) has been dead weight since the marker was
+      # introduced. Same job as Integration tests, not a new one, since it
+      # needs the same migrated database.
+      - name: MSP conformance tests
+        run: uv run pytest -m msp_conformance
+
   image:
     # Build the runtime image and prove the deployment artefact works.
     #
