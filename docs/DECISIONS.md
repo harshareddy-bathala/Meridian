@@ -200,7 +200,11 @@ Cost: `README.md`'s `python -m simulator.station` becomes `python -m meridian_si
 
 `DATA-MODEL.md` gives column tuples but no types, no keys and no nullability, so the migrations could not be written from it. Settling the mechanics here rather than discovering them one table at a time:
 
-**Surrogate primary keys.** Every table gets `id bigint generated always as identity primary key`. `DATA-MODEL.md` referenced `assignments.pass_id` and `passes.element_set_id` without ever giving those tables a key to reference.
+**Surrogate primary keys.** ~~Every table gets `id bigint generated always as identity primary key`.~~ `DATA-MODEL.md` referenced `assignments.pass_id` and `passes.element_set_id` without ever giving those tables a key to reference.
+
+*Amended 2026-08-08 — natural keys where one exists.* The migrations do not implement the rule above and never did, and `DATA-MODEL.md` states the opposite rule while citing this entry for it. Recording the change here rather than leaving the log silently contradicted by the schema it governs.
+
+`stations` is keyed on `station_id`, `satellites` on `satellite_id`, `assignments` on `assignment_id` — identifiers MSP puts on the wire, so a surrogate would have meant every join carrying a second key nobody outside the database can name. `observations` has no `id` column at all: it is keyed `(assignment_id, revision, started_at)`, which D-015's revision lineage requires and the hypertable rule below then extends with the partition column. `passes` and `element_sets`, which have no wire identifier, do take the surrogate. The rule this entry should have stated is *a natural key where the domain supplies one, a surrogate where it does not* — which is what was built.
 
 **Hypertable keys include the partition column.** TimescaleDB requires the partitioning column to be part of any unique or primary key on a hypertable. So `observations`, `heartbeats` and `noise_measurements` are keyed `(id, <partition column>)`. This is a constraint of the storage engine, not a modelling choice, and it is why the natural-looking `primary key (id)` will not work there.
 

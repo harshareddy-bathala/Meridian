@@ -50,6 +50,10 @@ Where silent bugs live. These are not interchangeable, and converting between th
 
 **LRPT — low rate picture transmission** — the digital weather imagery downlink from the Meteor-M series, near 137 MHz. **Our primary reception target.** The older analogue APT service is no longer operating, so guidance written before 2025 is out of date on this point.
 
+**APT — automatic picture transmission** — the older analogue 137 MHz weather imagery service, carried by the NOAA POES satellites. Named here only so that pre-2025 tutorials referring to it can be recognised as out of date; it is not a reception target.
+
+**SNR — signal-to-noise ratio** — signal power against background noise, in decibels. Recorded per observation as `peak_snr_db`. The single most useful measured quality figure for a pass, and a feature in the yield model.
+
 **VHF / UHF** — the two bands the station works in: roughly 137 MHz and 435 MHz respectively.
 
 **QFH — quadrifilar helix** — a fixed omnidirectional antenna suited to 137 MHz weather satellites. No moving parts, sees the whole sky.
@@ -113,3 +117,13 @@ Where silent bugs live. These are not interchangeable, and converting between th
 **Irrecoverable loss budget** — how much permanently lost reception is acceptable before something must be fixed. Resembles a standard error budget, but the accounting differs because the work cannot be retried.
 
 **Absence is not a miss** — a station that reported nothing counts as having missed a pass only if its heartbeat confirms it was listening, on the right frequency, for the right target. Load-bearing for every reliability metric in the system.
+
+**NTP — network time protocol** — how a station synchronises its clock. MSP requires it, but does not trust it: a station also estimates its own offset against `GET /msp/v0/time` and reports that offset with an uncertainty, because a station whose NTP has silently failed is exactly the case the estimate exists to catch.
+
+## Conventional short names in code
+
+Not domain terms, but recorded so the "no abbreviations outside this glossary" rule in `CLAUDE.local.md` §4 is honest in both directions. These are permitted as local variable names only, never as part of a public name.
+
+`conn` connection · `cur` cursor · `exc` a caught exception · `argv` / `args` command-line arguments · `raw` an unparsed string straight from the environment
+
+Unit and frame suffixes carried by names — `_hz`, `_deg`, `_m`, `_km`, `_s`, `_db`, `lat`, `lon`, `alt`, `freq` — are required by §4 rather than exempted by it, and are listed here only so a reader knows they are deliberate.

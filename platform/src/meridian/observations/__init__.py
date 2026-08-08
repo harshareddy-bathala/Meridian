@@ -1,8 +1,19 @@
 """Ingest, normalisation, deduplication — the system of record.
 
-Records are **immutable once written**; corrections are additive, carried by
-``supersedes_id`` (docs/DECISIONS.md D-015). Every record carries provenance and a
-``simulated`` flag propagated from MSP registration.
+Records are **immutable once written**; corrections are additive, carried by a
+``revision`` counter on the natural key ``(assignment_id, revision)``
+(docs/DECISIONS.md D-015). A resubmission appends ``revision + 1`` and the
+highest revision is current. D-015 considered a self-referencing
+``supersedes_id`` pointer first and rejected it: ``revision`` orders the
+lineage explicitly rather than leaving it to be reconstructed by walking a
+chain. Every record carries provenance and a ``simulated`` flag propagated
+from MSP registration — read from the station's row via
+``store.stations.find_station_provenance``, never from the payload (D-048).
+
+This module does not serve HTTP and does not decide what counts as a missed
+pass. The first belongs to ``meridian.api``, the second to
+``meridian.reliability`` — which is the sole authority on absence, and calls
+``Registry.was_listening`` and nothing else to reach it.
 
 ``ingest`` is where five invariants land together, which is why they belong in one
 function with one test file rather than spread across the API layer:

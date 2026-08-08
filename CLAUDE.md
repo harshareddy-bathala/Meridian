@@ -74,6 +74,9 @@ Module boundaries are firm. The scheduler must not read the observation store di
 
 ## Repository layout
 
+Directories marked *(planned)* do not exist yet. Do not create them before the
+stage that needs them — an empty directory reads as work that stalled.
+
 ```
 meridian/
 ├── CLAUDE.md
@@ -86,8 +89,10 @@ meridian/
 │   ├── DATA-MODEL.md
 │   ├── EVALUATION.md
 │   ├── DECISIONS.md      decisions taken during implementation
+│   ├── GIT-WORKFLOW.md   branching, commits, migration rules
 │   ├── GLOSSARY.md
-│   └── PROJECT.md        the full project document
+│   ├── PROJECT.md        the full project document
+│   └── SOFTWARE-IMPLEMENTATION-ROADMAP.md   the staged build order
 ├── platform/             distribution: meridian
 │   └── src/meridian/
 │       ├── orbit/        propagation, element sets, uncertainty
@@ -102,11 +107,13 @@ meridian/
 │   └── src/meridian_client/     reference station client
 ├── simulator/            distribution: meridian-sim
 │   └── src/meridian_sim/        virtual stations speaking MSP
-├── firmware/             Arduino rotator controller
-├── dashboard/            web front end
-├── ingest/               external archive adapters (optional path)
-├── analysis/             notebooks and evaluation scripts
-└── deploy/               compose files, migrations, config, dashboards
+├── tests/                unit, integration, msp_conformance, e2e
+├── site/                 the static public website
+├── deploy/               compose files, migrations, config, dashboards
+├── firmware/             (planned) Arduino rotator controller
+├── dashboard/            (planned) web front end
+├── ingest/               (planned) external archive adapters
+└── analysis/             (planned) notebooks and evaluation scripts
 ```
 
 **Three Python distributions, `src/` layout, per D-012.** `platform/` is a distribution root, not an import package — **never create `platform/__init__.py`**. `platform` is a stdlib module name, and shadowing it produces `AttributeError`s from inside third-party libraries at import time. The client and simulator are separate distributions so the reference client installs on a Pi without `fastapi` or `psycopg`, which enforces "the station client knows nothing about the database" at install time rather than at review time.

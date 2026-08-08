@@ -48,14 +48,14 @@ A satellite's known transmitters, as a child table rather than a column on `sate
 ### `passes`
 Computed pass windows — **not** observations. A pass exists whether or not anyone observed it, which is exactly what the completeness ratio in the evaluation methodology requires.
 
-`(satellite_id, station_id, aos, los, max_elevation, aos_azimuth, los_azimuth, element_set_id, computed_at)`
+`(id, satellite_id, station_id, aos, los, max_elevation_deg, max_elevation_at, min_elevation_deg, aos_azimuth_deg, los_azimuth_deg, element_set_id, computed_at, simulated)`
 
 Note `element_set_id`: which element set produced this prediction, so timing error can be attributed to element-set age.
 
 ### `assignments`
 Scheduler output. Links a pass to a station with a decision record.
 
-`(pass_id, station_id, issued_at, start_at, end_at, centre_freq_hz, mode, timing_uncertainty_s, predicted_yield, priority, decision, reason, model_config, state)`
+`(assignment_id, pass_id, station_id, issued_at, start_at, end_at, centre_freq_hz, mode, timing_uncertainty_s, predicted_yield, priority, decision, reason, model_config, state, simulated)`
 
 `reason` is human-readable and shown on the dashboard. `model_config` records which ablation configuration produced the prediction — required for the evaluation to be reproducible.
 
@@ -124,7 +124,7 @@ This table also carries `products_json`, holding the MSP §4.4 `products` array 
 Partitioned on `started_at`, but ingest rejects a `started_at` outside `[now − 30 days, now + 1 hour]` as `malformed` — a client-supplied timestamp must never be trusted to place a chunk (D-013).
 
 ### `heartbeats` *(hypertable)*
-`(station_id, sent_at, received_at, state, held_assignments, listening_assignment_id, listening_satellite_id, listening_freq_hz, listening_mode, health_json, clock_offset_s, clock_uncertainty_s, simulated)`
+`(id, station_id, sent_at, received_at, state, held_assignments, listening_assignment_id, listening_satellite_id, listening_freq_hz, listening_mode, health_json, clock_offset_s, clock_uncertainty_s, simulated)`
 
 **This table is what allows absence to be interpreted.** Without a heartbeat confirming a station was listening on the right frequency for the right target, a missing observation is meaningless.
 
@@ -169,6 +169,10 @@ Versioned exactly as `horizon_profiles` is, and for the same reason: a predictio
 - **All timestamps UTC**, stored as `timestamptz`. No exceptions, no local time anywhere.
 - **Frequencies in Hz** as `bigint`. Never floats, never MHz.
 - **Angles in degrees** as `double precision`. Azimuth 0–360, elevation −90 to +90.
+  Latitude −90 to +90 and longitude −180 to +180 (ISO 6709) — stated because the
+  azimuth range above is not the longitude range, and `stations.lon_deg` shipped
+  with a 360 upper bound taken from it, so 200° and −160° are currently two
+  storable spellings of the same meridian. Corrected by migration 0007.
 - **`simulated boolean not null default false`** on every table that can hold simulated data — `stations`, `passes`, `assignments`, `observations`, `heartbeats`. Never nullable: an unknown provenance is a bug. Always copied from the station's registry record, never read from a payload.
 - **Satellite identity** is `norad:NNNNN` as text, not a bare integer. Objects without NORAD IDs exist.
 - **Soft delete only.** Nothing in the observation lineage is ever hard-deleted.
@@ -180,7 +184,8 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 - **Where MSP already forces an id to exist, be unique and be stable, it is the primary key** — `stations.station_id`, `assignments.assignment_id`, `satellites.satellite_id`. A second surrogate key beside them buys nothing but joins. Everything else gets `bigint generated always as identity`.
 - **A hypertable's primary key must include its partitioning column.** TimescaleDB requires it — verified against 2.29, which rejects the hypertable outright with *"cannot create a unique index without the column used in partitioning"*. So `observations` is keyed `(assignment_id, revision, started_at)` and `heartbeats` `(id, received_at)`. A constraint of the storage engine, not a modelling preference.
 - **Enums are `text` with a `CHECK` constraint**, not Postgres `enum` types. A `CHECK` is dropped and recreated inside one transaction; altering an `enum` is not, and Rule 9 of `GIT-WORKFLOW.md` forbids editing a merged migration.
-- **`simulated` is copied from the station's registry record, never read from the payload.** MSP §3 says station-submitted data is untrusted, and provenance is the last field to take on trust.
+- **`simulated` is copied from the station's registry record, never read from the payload.** MSP §3 says station-submitted data is untrusted, and provenance is the last field to take on trust. `store.stations.find_station_provenance` is how a caller reads it back (D-048). `element_sets` is the one table that records provenance in `source` instead of a boolean, deliberately — D-049.
+- **The schema is forward-only.** No migration implements `downgrade()`; each raises `NotImplementedError`, and a unit test asserts every revision does so in its own right rather than inheriting a silent `pass`. Rolling back means restoring a backup, not stepping the schema down. This follows from Rule 9 of `GIT-WORKFLOW.md` — a merged migration is history — and is stated here because otherwise a contributor discovers it from a stack trace.
 
 | Column | Values |
 |---|---|

@@ -49,6 +49,53 @@ Libraries used as dependencies rather than reimplemented. Not attribution in the
 
 ## Log
 
+**2026-08-08 — a note on how this log starts.** The four entries below were added
+in one commit, retrospectively, which breaks the first rule above. They are
+recorded rather than quietly skipped because the alternative is worse: an empty
+log sitting beside `platform/src/meridian/store/pool.py`, whose module docstring
+names the page it was written from. The lapse is the honest thing to defend — the
+rule was written in Stage 0 and not carried into the habit of committing, and it
+was an audit rather than review that noticed. From this entry forward the rule
+binds normally: same commit, no exceptions. Nothing in the four was copied; each
+was read, understood and written independently, which is exactly the case this
+file exists to document.
+
 ```
-(entries begin here)
+2026-08-01  Foreign keys and unique indexes against a TimescaleDB hypertable
+            Read: TimescaleDB 2.29 documentation and behaviour, verified by
+                  running it (Apache-2.0 / Timescale License, mixed)
+            Wrote: docs/DECISIONS.md D-015's correction note, and
+                  docs/DATA-MODEL.md's natural-key rule. An earlier draft
+                  rejected a supersedes_id pointer on the grounds that nothing
+                  can hold a foreign key onto a hypertable. That was true
+                  before 2.11 and is false on 2.29, which both creates and
+                  enforces such a key. The decision did not change; the stated
+                  reasoning did, from a false technical claim to the real
+                  modelling argument. The companion finding — that a unique
+                  index still requires the partitioning column, error quoted
+                  verbatim in DATA-MODEL.md — is what forced the natural keys.
+            Copied: none
+
+2026-08-06  psycopg 3 connection pooling
+            Read: psycopg 3 documentation, "Connection pools"
+                  https://www.psycopg.org/psycopg3/docs/advanced/pool.html
+                  (LGPL-3.0 project; documentation read, no source copied)
+            Wrote: platform/src/meridian/store/pool.py — one pool opened in the
+                  FastAPI lifespan, with min/max sizes derived from D-030's poll
+                  interval and fifty stations rather than taken from any example,
+                  and a `configure` hook setting the session time zone to UTC,
+                  which the documentation does not suggest and DATA-MODEL.md
+                  requires. The module docstring carries this citation inline.
+            Copied: none
+
+2026-08-06  Exponential backoff with full jitter
+            Read: AWS Architecture Blog, "Exponential Backoff And Jitter"
+                  (article, no licence attached to the prose; no code taken)
+            Wrote: client/src/meridian_client/transport.py RetryPolicy —
+                  `random.uniform(0, min(cap, base * 2**(n-1)))`. Full jitter
+                  rather than backoff-plus-a-small-random-term, chosen because
+                  it is the variant that decorrelates a fleet, which is the
+                  property that matters at Phase 3's fifty simulated stations
+                  and not the property the article was optimising for.
+            Copied: none
 ```

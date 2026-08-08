@@ -1,7 +1,7 @@
 """Feature extraction, yield model, horizon inference, calibration.
 
-**Phase 2. Stub only** — docs/CLAUDE.md says not to scaffold this beyond an empty
-module with a documented interface.
+**Phase 2. Stub only** — CLAUDE.md (repository root) says not to scaffold this
+beyond an empty module with a documented interface.
 
 When implemented, this module provides:
 

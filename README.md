@@ -36,6 +36,7 @@ Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](http
 | `docs/GLOSSARY.md` | Domain terms |
 | `docs/PROJECT.md` | The full project document — problem, method, phases, budget |
 | `docs/GIT-WORKFLOW.md` | Commit, branch and review rules |
+| `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` | The staged build order, and what each stage's completion gate is |
 | `CLAUDE.md` | Context for AI coding assistants |
 | `ATTRIBUTION.md` | Log of ideas read from other projects |
 | `site/` | The static site at `meridian.org.in`. No build step — the directory is what gets served. |
