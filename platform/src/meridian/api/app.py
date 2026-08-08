@@ -20,6 +20,7 @@ from psycopg_pool import ConnectionPool
 from meridian import __version__
 from meridian.api.errors import install_error_handlers
 from meridian.api.msp import router as msp_router
+from meridian.api.request_limits import RequestSizeLimitMiddleware
 from meridian.config import Settings, load_settings
 from meridian.store.invites import seed_bootstrap_invite
 from meridian.store.pool import POOL_TIMEOUT_S, is_database_reachable, open_pool
@@ -80,6 +81,11 @@ def create_app() -> FastAPI:
         summary="Control platform for satellite ground stations.",
         lifespan=_lifespan,
     )
+
+    # Outermost, so an oversized body is refused before routing, before
+    # validation and before anything allocates it — which is what MSP §6's
+    # "before the body is parsed" and D-028's "ahead of JSON parsing" require.
+    app.add_middleware(RequestSizeLimitMiddleware)
 
     # Before the routes, so a failure inside one already leaves in MSP §6's shape
     # rather than in FastAPI's default 422 or a bare 500.

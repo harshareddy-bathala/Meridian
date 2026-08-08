@@ -288,6 +288,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "sgp4" },
     { name = "skyfield" },
+    { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -300,6 +301,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9" },
     { name = "sgp4", specifier = ">=2.23" },
     { name = "skyfield", specifier = ">=1.49" },
+    { name = "starlette", specifier = ">=0.40" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 

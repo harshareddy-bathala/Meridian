@@ -8,6 +8,11 @@ license = { text = "Apache-2.0" }
 dependencies = [
     "alembic>=1.13",
     "fastapi>=0.115",
+    # Declared although FastAPI already installs it, because we import it
+    # directly: meridian.api.request_limits is pure ASGI middleware and takes
+    # its Scope/Receive/Send types from starlette.types. A package we import is
+    # a package we depend on, whoever else happens to pull it in.
+    "starlette>=0.40",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.9",
     "psycopg[binary,pool]>=3.2",
