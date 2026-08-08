@@ -27,6 +27,11 @@ psycopg = pytest.importorskip("psycopg")
 pytestmark = pytest.mark.integration
 
 ZERO_HASH = bytes(32)
+# A second, distinct hash. `stations.token_sha256` is unique since migration
+# 0007, so any test inserting a second station needs its own value — two
+# stations sharing a bearer token was never meaningful, the schema simply could
+# not say so before.
+OTHER_HASH = bytes([1]) * 32
 
 
 @pytest.fixture
@@ -313,7 +318,7 @@ def test_a_bound_invite_cannot_be_consumed_by_another_station(fixtures) -> None:
         0.0,
         0.0,
         0.0,
-        ZERO_HASH,
+        OTHER_HASH,
         ZERO_HASH,
     )
     fixtures(
@@ -407,3 +412,126 @@ def test_no_plaintext_token_columns_exist(conn) -> None:
         )
         offenders = cur.fetchall()
     assert offenders == []
+
+
+# --- Migration 0007's corrections -------------------------------------------
+#
+# Each of these inserts a row rather than reading pg_constraint. A catalogue
+# query confirms a definition exists; only a write confirms it refuses what it
+# was written to refuse.
+
+
+def test_two_stations_cannot_share_a_bearer_token_hash(fixtures) -> None:
+    """`find_station_id_by_token_hash` uses `fetchone()`.
+
+    Without the unique index a duplicate hash would authenticate as whichever
+    row Postgres returned first — silently, and not necessarily the same one
+    twice.
+    """
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        fixtures(
+            "insert into stations (station_id, name, operator, lat_deg, lon_deg,"
+            " alt_m, token_sha256, registration_key_sha256)"
+            " values (%s, %s, %s, %s, %s, %s, %s, %s)",
+            "st_twin",
+            "Twin",
+            "tests",
+            51.5,
+            -0.1,
+            20.0,
+            ZERO_HASH,  # the hash st_fixture already holds
+            ZERO_HASH,
+        )
+
+
+def _insert_element_set(execute: Any) -> Any:
+    """One element set for the fixture satellite, returning its id."""
+    rows = execute(
+        "insert into element_sets (satellite_id, epoch, line1, line2, source)"
+        " values (%s, now(), %s, %s, 'manual') returning id",
+        "norad:99999",
+        "1 99999U",
+        "2 99999",
+    )
+    return rows[0][0]
+
+
+def _insert_pass(execute: Any, *, max_elevation_deg: float, floor_deg: float) -> None:
+    """One pass window with the two elevations under test."""
+    execute(
+        "insert into passes (satellite_id, station_id, aos, los, max_elevation_deg,"
+        " max_elevation_at, aos_azimuth_deg, los_azimuth_deg, element_set_id,"
+        " min_elevation_deg)"
+        " values (%s, %s, now(), now() + interval '10 minutes', %s,"
+        " now() + interval '5 minutes', 10, 200, %s, %s)",
+        "norad:99999",
+        "st_fixture",
+        max_elevation_deg,
+        _insert_element_set(execute),
+        floor_deg,
+    )
+
+
+def test_a_pass_peaking_below_the_horizon_is_refused(fixtures) -> None:
+    """GLOSSARY.md defines a pass as a period *above* the horizon.
+
+    The original range allowed -40, which describes a satellite that never rose.
+    """
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_pass(fixtures, max_elevation_deg=-40.0, floor_deg=-90.0)
+
+
+def test_a_pass_peaking_below_its_own_floor_is_refused(fixtures) -> None:
+    """A window is the interval where elevation is at or above the floor.
+
+    So the peak over that interval cannot be below it. A row violating this is a
+    propagation or frame-conversion bug, and catching it here is far cheaper
+    than finding it in a reliability figure three stages later.
+    """
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_pass(fixtures, max_elevation_deg=5.0, floor_deg=10.0)
+
+
+def test_a_pass_at_its_floor_is_accepted(fixtures) -> None:
+    """The constraint is `>=`, not `>`: a grazing pass is a real pass."""
+    _insert_pass(fixtures, max_elevation_deg=10.0, floor_deg=10.0)
+
+
+def test_a_transmitter_source_outside_the_enumeration_is_refused(fixtures) -> None:
+    """`element_sets.source` was constrained and this twin was not (D-021)."""
+    with pytest.raises(psycopg.errors.CheckViolation):
+        fixtures(
+            "insert into satellite_transmitters"
+            " (satellite_id, centre_freq_hz, mode, source)"
+            " values (%s, 137100000, 'lrpt', 'satnogs')",
+            "norad:99999",
+        )
+
+
+def test_a_miscased_transmitter_polarisation_is_refused(fixtures) -> None:
+    """'RHCP' is a row that exists and never joins.
+
+    Every query looks for 'rhcp', so an uppercase value reads as missing data
+    rather than as a bug — which is why the constraint matters more than the
+    typo it catches.
+    """
+    with pytest.raises(psycopg.errors.CheckViolation):
+        fixtures(
+            "insert into satellite_transmitters"
+            " (satellite_id, centre_freq_hz, mode, polarisation)"
+            " values (%s, 137100000, 'lrpt', 'RHCP')",
+            "norad:99999",
+        )
+
+
+def test_an_unknown_transmitter_polarisation_stays_storable(fixtures) -> None:
+    """The column is nullable and stays nullable.
+
+    A transmitter whose polarisation nobody has established is a real record,
+    and a CHECK admits anything that is not false — so NULL needs no clause.
+    """
+    fixtures(
+        "insert into satellite_transmitters"
+        " (satellite_id, centre_freq_hz, mode) values (%s, 137100000, 'lrpt')",
+        "norad:99999",
+    )

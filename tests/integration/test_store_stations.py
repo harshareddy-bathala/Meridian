@@ -70,7 +70,7 @@ def sample_station(
         simulated=False,
         simulator_run_id=None,
         seed=None,
-        client_impl="meridian-reference",
+        client_implementation="meridian-reference",
         client_version="0.1.0",
     )
 

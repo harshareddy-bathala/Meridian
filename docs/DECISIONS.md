@@ -1153,6 +1153,26 @@ The trigger to revisit: the first time the platform is reachable from outside th
 
 ---
 
+## D-052 — Longitude is ISO 6709, and migration 0007 rewrites rather than rejects
+
+**2026-08-08 · accepted** · *corrects the schema shipped in 0002, 0003 and 0004*
+
+`stations.lon_deg` shipped with `check (lon_deg between -180 and 360)`. That upper bound is **azimuth's range applied to a longitude** — the two sit three lines apart in `DATA-MODEL.md`'s conventions and the wrong one was copied. Under it, `200` and `-160` are two storable spellings of the same meridian, so two stations at the same place sort, group and subtract as though they were 360 degrees apart. Nothing had noticed because the one registered station is at 77°E.
+
+**Longitude is −180..+180 (ISO 6709).** Corrected in the schema, and mirrored in `api/models/registration.py`'s `Location`, whose `le=360` had the same bound for the same reason.
+
+**Existing rows are rewritten, not rejected.** A `CHECK` is validated against existing rows when it is created, so adding the constraint alone would fail the migration outright on any station stored under the old range — half way through a deployment, which is the worst place to discover it. `0007` runs `update stations set lon_deg = lon_deg - 360 where lon_deg > 180` first. That is lossless: 200E *is* −160, not an approximation of it, so no operator intent is guessed at. `tests/integration/test_migration_lifecycle.py` steps a scratch database to 0006, writes the row the old constraint allowed, then upgrades — because a test that asserted only the constraint would pass against a revision that forgot the rewrite.
+
+### Three smaller judgement calls in the same migration
+
+**`satellite_transmitters.source` is restricted to `('manual', 'simulator')`** — the two values anything can produce today. `element_sets.source` also lists `celestrak` and `spacetrack`, but those publish element sets and not transmitter records, and enumerating a source no code can write would be scaffolding for a design that does not exist. D-021 chose `CHECK` over a Postgres `enum` precisely so that an ingest adapter can widen this in one transactional statement when there is one.
+
+**`passes.max_elevation_deg` is 0..90, and must be at least `min_elevation_deg`.** The original −90..90 allowed a maximum elevation of −40, which is not a pass: `GLOSSARY.md` defines one as a period during which the satellite is *above* the horizon. The pair constraint is the one that makes the two columns interpretable together — a window is the interval where elevation is at or above the floor, so the peak over that interval cannot be below it. A row violating it is a propagation or frame-conversion error, which is the silent class `CLAUDE.md` warns coordinate frames produce, and it is far cheaper to catch on insert than in a reliability figure three stages later.
+
+**`stations.client_impl` is renamed to `client_implementation`.** `CLAUDE.local.md` §4 permits no abbreviation absent from `GLOSSARY.md`, which lists `lat`, `lon`, `alt` and `freq` and does not list `impl`. Renamed at the column and not only in Python, because an attribute called `client_implementation` writing to a column called `client_impl` moves the abbreviation instead of removing it. The MSP wire field stays `client.impl` — it is fixed by §4.1 and is carried by a Pydantic alias, which is the same mechanism now carrying `lat`, `lon`, `az_deg` and `min_el_deg` while the Python identifiers spell themselves out. `populate_by_name` is deliberately left off, so the wire contract stays exactly what the specification prints.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

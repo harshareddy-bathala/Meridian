@@ -72,7 +72,7 @@ def sample_request(
         simulator_run_id=None,
         seed=None,
         capabilities=[SAMPLE_CAPABILITY],
-        client_impl="meridian-reference",
+        client_implementation="meridian-reference",
         client_version="0.1.0",
     )
 

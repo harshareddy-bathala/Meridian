@@ -91,7 +91,7 @@ class RegistrationRequest:
     simulator_run_id: str | None
     seed: int | None
     capabilities: Sequence[Capability]
-    client_impl: str | None
+    client_implementation: str | None
     client_version: str | None
 
 

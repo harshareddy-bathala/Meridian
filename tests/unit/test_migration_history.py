@@ -37,7 +37,11 @@ def test_exactly_one_head(script: ScriptDirectory) -> None:
 
 
 def test_history_is_linear_and_gapless(script: ScriptDirectory) -> None:
-    """0001 → 0006, each pointing at its predecessor, no branches."""
+    """0001 → head, each pointing at its predecessor, no branches.
+
+    The range is derived from what is on disk rather than written down, so a new
+    revision does not need this docstring edited to stay covered.
+    """
     revisions = list(script.walk_revisions())
     identifiers = [revision.revision for revision in reversed(revisions)]
     assert identifiers == [f"{n:04d}" for n in range(1, len(identifiers) + 1)]

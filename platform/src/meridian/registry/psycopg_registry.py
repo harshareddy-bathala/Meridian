@@ -190,7 +190,7 @@ class PsycopgRegistry:
             simulated=request.simulated,
             simulator_run_id=request.simulator_run_id,
             seed=request.seed,
-            client_impl=request.client_impl,
+            client_implementation=request.client_implementation,
             client_version=request.client_version,
         )
         with self._conn.transaction():

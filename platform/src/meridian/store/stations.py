@@ -80,7 +80,7 @@ class NewStation:
     simulated: bool
     simulator_run_id: str | None
     seed: int | None
-    client_impl: str | None
+    client_implementation: str | None
     client_version: str | None
 
 
@@ -109,7 +109,7 @@ def insert_station(
             insert into stations
                 (station_id, name, operator, lat_deg, lon_deg, alt_m,
                  token_sha256, registration_key_sha256, simulated,
-                 simulator_run_id, seed, client_impl, client_version)
+                 simulator_run_id, seed, client_implementation, client_version)
             values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
@@ -124,7 +124,7 @@ def insert_station(
                 station.simulated,
                 station.simulator_run_id,
                 station.seed,
-                station.client_impl,
+                station.client_implementation,
                 station.client_version,
             ),
         )

@@ -171,8 +171,16 @@ Versioned exactly as `horizon_profiles` is, and for the same reason: a predictio
 - **Angles in degrees** as `double precision`. Azimuth 0–360, elevation −90 to +90.
   Latitude −90 to +90 and longitude −180 to +180 (ISO 6709) — stated because the
   azimuth range above is not the longitude range, and `stations.lon_deg` shipped
-  with a 360 upper bound taken from it, so 200° and −160° are currently two
-  storable spellings of the same meridian. Corrected by migration 0007.
+  with a 360 upper bound taken from it, under which 200° and −160° were two
+  storable spellings of the same meridian. Corrected by migration 0007, which
+  rewrites any row stored under the old range before narrowing the `CHECK`
+  (D-052).
+- **A column name spells its words out**, whatever the wire calls the field.
+  `CLAUDE.local.md` §4 permits only the abbreviations in `GLOSSARY.md`, so
+  `stations.client_implementation` is not `client_impl` even though MSP §4.1
+  puts `client.impl` on the wire. The protocol's spelling is carried by a
+  Pydantic alias in `api/models/`, which is the single place the two vocabularies
+  are allowed to meet.
 - **`simulated boolean not null default false`** on every table that can hold simulated data — `stations`, `passes`, `assignments`, `observations`, `heartbeats`. Never nullable: an unknown provenance is a bug. Always copied from the station's registry record, never read from a payload.
 - **Satellite identity** is `norad:NNNNN` as text, not a bare integer. Objects without NORAD IDs exist.
 - **Soft delete only.** Nothing in the observation lineage is ever hard-deleted.
