@@ -7,14 +7,14 @@ prediction should use — it stores every set the platform is ever given and
 retrieves them by satellite and time. Choosing one is the pass-generation job's
 decision, and it is made through :func:`find_element_set_current_at`.
 
-**This table is append-only and nothing here updates or deletes a row.** The
-historical series is what makes uncertainty modelling possible: a prediction's
-error can only be attributed to element-set age if the set that produced it is
-still on disk, unmodified, years later. There is deliberately no
-``update_element_set`` and there will not be one.
+**The table is append-only: this module can insert and read, and that is all.**
+A prediction's error can only be attributed to the age of the element set that
+produced it if that set is still on disk, unmodified, years later — so the
+archive keeps every set it is ever given, including several for one epoch when
+a catalogue publishes a correction.
 
-This module performs no propagation and imports neither ``sgp4`` nor
-``skyfield`` — only ``meridian.orbit`` may (docs/ARCHITECTURE.md rule 2).
+Storage only, no propagation: the sets read back here are handed to
+``meridian.orbit`` to be turned into pass predictions.
 
 Reference: docs/DATA-MODEL.md; docs/DECISIONS.md D-049, D-057.
 """

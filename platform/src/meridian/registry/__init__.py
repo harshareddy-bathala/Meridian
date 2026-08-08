@@ -275,8 +275,9 @@ class Registry(Protocol):
         specific satellite at a specific time, a missing observation means
         nothing — it could be a miss, or a station that was switched off.
 
-        ``meridian.reliability`` calls this and nothing else to decide what
-        counts as a miss. No other module may reimplement the judgement.
+        ``meridian.reliability`` decides what counts as a miss by calling this
+        and nothing else, so the answer to "was the station working?" comes from
+        one place and every reliability figure in the project rests on it.
 
         Four things must hold together, which is the roadmap's Stage 5 list:
         the heartbeat overlaps the window, names the satellite, reports a

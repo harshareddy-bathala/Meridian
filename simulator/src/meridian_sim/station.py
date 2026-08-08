@@ -11,9 +11,10 @@ simulator worth having at all:
 
     meridian-sim → meridian-client → HTTP → platform
 
-It may not import ``meridian.store``, query PostgreSQL, call a platform service
-object, or use an endpoint a real station could not call. A simulator that
-reaches past the protocol tests the platform against itself.
+Every simulated station goes over HTTP through the same client a real one runs,
+using only endpoints a real station could call. That is what makes the simulator
+evidence: a platform tested against a simulator that reached into the database
+directly would only be testing itself.
 """
 
 from __future__ import annotations
