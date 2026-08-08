@@ -170,3 +170,30 @@ def test_simulator_reads_its_compose_environment() -> None:
     assert "http://api:8000" in result.stderr
     assert "9137" in result.stderr
     assert "5 station(s)" in result.stderr
+
+
+def test_a_bare_station_prints_its_actions_rather_than_running_one() -> None:
+    """`station` is a noun. On its own it names the verbs, and touches nothing.
+
+    Exit 0 with help, not exit 2: the caller did not ask for something broken,
+    they asked for something incomplete. It must also not reach a database —
+    a subcommand that opens a connection just to print usage fails on a laptop
+    with the stack down.
+    """
+    result = _run("-m", "meridian.cli", "station")
+
+    assert result.returncode == 0
+    assert "revoke" in result.stdout
+    assert "Traceback" not in result.stderr
+
+
+def test_station_revoke_requires_the_station_it_is_revoking() -> None:
+    """Argparse rejects it before any connection is opened.
+
+    Revocation with a defaulted or guessed target is the one mistake this
+    command must not make quietly.
+    """
+    result = _run("-m", "meridian.cli", "station", "revoke")
+
+    assert result.returncode == 2
+    assert "--station-id" in result.stderr

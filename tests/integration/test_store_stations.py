@@ -8,6 +8,7 @@ test runs inside a transaction that is always rolled back — the same
 
 from __future__ import annotations
 
+from argparse import Namespace
 from collections.abc import Iterator
 from dataclasses import replace
 from typing import Any
@@ -16,6 +17,7 @@ import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
+from meridian.cli import EXIT_FAILED, _station_revoke  # noqa: E402
 from meridian.store.invites import consume_invite  # noqa: E402 — after importorskip
 from meridian.store.stations import (  # noqa: E402
     Capability,
@@ -24,6 +26,7 @@ from meridian.store.stations import (  # noqa: E402
     find_station_id_by_token_hash,
     find_station_provenance,
     insert_station,
+    revoke_station_token,
     rotate_station_token,
 )
 
@@ -280,3 +283,126 @@ def test_a_failed_station_insert_rolls_back_its_invite_consumption(
         )
         (consumed_at,) = cur.fetchone()
     assert consumed_at is None
+
+
+def test_revoking_a_token_stops_the_next_lookup(rollback: Any) -> None:
+    """Stage 5's completion gate: revocation is immediate.
+
+    Immediate by construction rather than by invalidation —
+    ``find_station_id_by_token_hash`` filters on ``token_revoked_at`` at lookup,
+    so there is no cache between the write and the next request that could
+    still be holding the old answer.
+    """
+    token = bytes([9]) * 32
+    insert_station(
+        rollback, sample_station("st_revoke", token_sha256=token), [SAMPLE_CAPABILITY]
+    )
+    assert find_station_id_by_token_hash(rollback, token) == "st_revoke"
+
+    assert revoke_station_token(rollback, station_id="st_revoke") is True
+
+    assert find_station_id_by_token_hash(rollback, token) is None
+
+
+def test_revoking_twice_keeps_the_first_instant(rollback: Any) -> None:
+    """The first revocation is when the credential died.
+
+    Overwriting it with the moment somebody repeated the command would lose the
+    only record of when the exposure ended, so the second call is a no-op that
+    reports as one.
+    """
+    insert_station(
+        rollback,
+        sample_station("st_twice", token_sha256=bytes([8]) * 32),
+        [SAMPLE_CAPABILITY],
+    )
+    assert revoke_station_token(rollback, station_id="st_twice") is True
+
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select token_revoked_at from stations where station_id = %s",
+            ("st_twice",),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    first_revoked_at = row[0]
+
+    assert revoke_station_token(rollback, station_id="st_twice") is False
+
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select token_revoked_at from stations where station_id = %s",
+            ("st_twice",),
+        )
+        assert cur.fetchone() == (first_revoked_at,)
+
+
+def test_revoking_an_unknown_station_reports_nothing_done(rollback: Any) -> None:
+    """False, not an exception. The operator gets an exit code, not a traceback."""
+    assert revoke_station_token(rollback, station_id="st_does_not_exist") is False
+
+
+def test_rotating_a_token_lifts_an_earlier_revocation(rollback: Any) -> None:
+    """D-034's recovery path has to survive revocation, or it cannot recover.
+
+    A station shut out by ``meridian station revoke`` is readmitted by an invite
+    bound to it, which rotates its token. If rotation left ``token_revoked_at``
+    set, the freshly minted token would authenticate as nothing and the operator
+    would have no way back in at all.
+    """
+    insert_station(
+        rollback,
+        sample_station("st_rotate_after_revoke", token_sha256=bytes([7]) * 32),
+        [SAMPLE_CAPABILITY],
+    )
+    revoke_station_token(rollback, station_id="st_rotate_after_revoke")
+
+    replacement = bytes([6]) * 32
+    rotate_station_token(
+        rollback, station_id="st_rotate_after_revoke", token_sha256=replacement
+    )
+
+    assert (
+        find_station_id_by_token_hash(rollback, replacement) == "st_rotate_after_revoke"
+    )
+
+
+def test_the_cli_handler_reports_a_revocation_and_its_exit_code(
+    rollback: Any, capsys: Any
+) -> None:
+    """`meridian station revoke`, one layer below the connection it opens.
+
+    ``_station_revoke`` is called directly with this test's rolled-back
+    connection rather than through ``_run_station``, which would open its own
+    connection and leave the row behind. What is under test is the handler:
+    the exit code, and that the operator is told the way back in.
+    """
+    insert_station(
+        rollback,
+        sample_station("st_cli", token_sha256=bytes([5]) * 32),
+        [SAMPLE_CAPABILITY],
+    )
+
+    code = _station_revoke(rollback, Namespace(station_id="st_cli"))
+
+    assert code == 0
+    output = capsys.readouterr()
+    assert "st_cli" in output.out
+    # D-024: the station stops rather than re-registering, so the operator has
+    # to be told that a bound invite is what readmits it.
+    assert "--for-station st_cli" in output.err
+
+
+def test_the_cli_handler_fails_on_a_station_with_no_live_token(
+    rollback: Any, capsys: Any
+) -> None:
+    """EXIT_FAILED, and a message that does not claim the station is unknown.
+
+    "No station with a live token" covers absent, deleted and already-revoked
+    alike. An operator does not need those told apart — in all three the
+    station holds nothing that works.
+    """
+    code = _station_revoke(rollback, Namespace(station_id="st_absent"))
+
+    assert code == EXIT_FAILED
+    assert "no station with a live token" in capsys.readouterr().err

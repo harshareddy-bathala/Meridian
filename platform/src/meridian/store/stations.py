@@ -30,6 +30,7 @@ __all__ = [
     "find_station_id_by_token_hash",
     "find_station_provenance",
     "insert_station",
+    "revoke_station_token",
     "rotate_station_token",
 ]
 
@@ -261,6 +262,50 @@ def rotate_station_token(
             """,
             (token_sha256, station_id),
         )
+
+
+def revoke_station_token(conn: Connection, *, station_id: str) -> bool:
+    """Withdraw a station's bearer token, so the next request it makes is a 401.
+
+    The counterpart to :func:`rotate_station_token`, which clears this column.
+    Nothing wrote ``token_revoked_at`` before this function existed — the column
+    was declared in ``0002_stations.sql`` and read by
+    :func:`find_station_id_by_token_hash`, and the only statement touching it
+    *cleared* it, so a compromised station could not be shut out at all.
+
+    Args:
+        conn: Open connection. The caller owns the transaction.
+        station_id: The station whose credential is being withdrawn.
+
+    Returns:
+        True when a live token was withdrawn. False when the station does not
+        exist, is deleted, or was already revoked — the three cases an operator
+        does not need told apart, since in all of them the station holds no
+        working token afterwards. Matching ``revoke_invite``'s shape.
+
+    Note:
+        Guarded on ``token_revoked_at is null`` so that revoking twice keeps the
+        **first** timestamp. That instant is when the credential actually died,
+        and overwriting it with the moment somebody repeated the command would
+        lose the only record of when the exposure ended.
+
+        Revocation takes effect on the next request with no invalidation step,
+        because ``find_station_id_by_token_hash`` filters on this column at
+        lookup rather than consulting a cache. Stage 5's completion gate asks
+        for revocation to be immediate; it is immediate by construction.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            update stations
+            set token_revoked_at = now()
+            where station_id = %s
+              and token_revoked_at is null
+              and deleted_at is null
+            """,
+            (station_id,),
+        )
+        return cur.rowcount > 0
 
 
 def find_station_id_by_token_hash(conn: Connection, token_sha256: bytes) -> str | None:

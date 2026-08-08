@@ -19,7 +19,7 @@ psycopg = pytest.importorskip("psycopg")
 from meridian.registry import InvalidInviteError, RegistrationRequest  # noqa: E402
 from meridian.registry.psycopg_registry import PsycopgRegistry  # noqa: E402
 from meridian.store.invites import hash_invite_token, revoke_invite  # noqa: E402
-from meridian.store.stations import Capability  # noqa: E402
+from meridian.store.stations import Capability, revoke_station_token  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -428,3 +428,53 @@ def test_recovery_with_a_matching_simulated_still_succeeds(
     )
 
     assert recovered.station_id == created.station_id
+
+
+def test_revocation_makes_the_very_next_authenticate_fail(
+    registry: Any, rollback: Any
+) -> None:
+    """Stage 5's completion gate, end to end through the registry.
+
+    Registration mints a token that authenticates; `meridian station revoke`
+    withdraws it; the same token then resolves to nothing. Asserted through
+    `authenticate()` rather than through the store lookup it delegates to,
+    because the gate is a statement about the credential the platform hands a
+    station, not about one SQL predicate.
+    """
+    insert_invite(rollback, plaintext="revocation-invite")
+    created = registry.register(sample_request(invite_token="revocation-invite"))
+    assert registry.authenticate(created.bearer_token) == created.station_id
+
+    assert revoke_station_token(rollback, station_id=created.station_id) is True
+
+    assert registry.authenticate(created.bearer_token) is None
+
+
+def test_a_revoked_station_is_readmitted_by_a_bound_invite(
+    registry: Any, rollback: Any
+) -> None:
+    """Revocation must be reversible by the operator, or it is a one-way door.
+
+    D-024 tells a station that meets 401 to stop rather than re-register, and
+    D-034 makes the way back an invite bound to that station_id. This is the
+    two halves meeting: revoke, then readmit, and the new token works while the
+    old one stays dead.
+    """
+    insert_invite(rollback, plaintext="readmit-original")
+    created = registry.register(
+        sample_request(invite_token="readmit-original", registration_key="held-key")
+    )
+    revoke_station_token(rollback, station_id=created.station_id)
+
+    insert_invite(
+        rollback,
+        plaintext="readmit-bound",
+        consumed_by_station_id=created.station_id,
+    )
+    readmitted = registry.register(
+        sample_request(invite_token="readmit-bound", registration_key="held-key")
+    )
+
+    assert readmitted.station_id == created.station_id
+    assert registry.authenticate(readmitted.bearer_token) == created.station_id
+    assert registry.authenticate(created.bearer_token) is None
