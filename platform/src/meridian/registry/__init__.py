@@ -13,11 +13,11 @@ holds no connection and contains no SQL — ``meridian.registry.psycopg_registry
 is the concrete implementation, and it is the only module that may compose
 ``meridian.store`` calls into MSP §4.1's decision table.
 
-**Implementation status.** ``register``, ``authenticate`` and ``liveness`` are
-implemented in ``psycopg_registry``. ``was_listening`` is *planned* — it reads
-heartbeat rows, and no endpoint writes them yet. They are
-declared now because their contract constrains the schema, not because anything
-calls them yet (CLAUDE.local.md §8, interface before implementation).
+**Implementation status.** All four methods are implemented in
+``psycopg_registry``. ``was_listening`` has no production caller yet — the
+module that consumes it, ``meridian.reliability``, is Phase 3 — so its
+correctness rests entirely on ``tests/integration/test_was_listening.py``
+rather than on anything exercising it in anger.
 
 Reference: docs/MSP-SPEC.md §4.1; docs/ARCHITECTURE.md; docs/DECISIONS.md
 D-017, D-020, D-023, D-034.
@@ -38,6 +38,7 @@ from meridian.store.stations import Capability
 
 __all__ = [
     "InvalidInviteError",
+    "ListeningQuery",
     "Liveness",
     "Registration",
     "RegistrationRequest",
@@ -106,6 +107,33 @@ class RegistrationRequest:
     capabilities: Sequence[Capability]
     client_implementation: str | None
     client_version: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ListeningQuery:
+    """One question for :meth:`Registry.was_listening`.
+
+    Bundled rather than passed as five parameters: CLAUDE.local.md §2 caps a
+    function at four (five, hard) and says to take a dataclass beyond that.
+    ``mode`` is the field that pushed it over, and it is not optional — D-028
+    stored ``heartbeats.listening_mode`` precisely so this question could be
+    asked honestly, because a station tuned to the right frequency running the
+    wrong demodulator did not observe the pass.
+    """
+
+    station_id: str
+    satellite_id: str
+    centre_freq_hz: int
+    """The frequency the *assignment* named, not the one the station reported.
+
+    Matched within a Doppler-sized tolerance rather than exactly — see
+    ``registry.doppler_tolerance``. A station retunes across a pass, so an
+    exact comparison would answer False for every station that works.
+    """
+
+    mode: str
+    window: tuple[datetime, datetime]
+    """Start and end, timezone-aware UTC, compared against ``received_at``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,13 +267,7 @@ class Registry(Protocol):
         """
         ...
 
-    def was_listening(
-        self,
-        station_id: str,
-        satellite_id: str,
-        centre_freq_hz: int,
-        window: tuple[datetime, datetime],
-    ) -> bool:
+    def was_listening(self, query: ListeningQuery) -> bool:
         """Whether heartbeats confirm this station was listening for this target.
 
         **This method is why absence can be interpreted at all.** Without a
@@ -253,7 +275,34 @@ class Registry(Protocol):
         specific satellite at a specific time, a missing observation means
         nothing — it could be a miss, or a station that was switched off.
 
-        ``meridian.reliability`` calls this and nothing else to decide what counts
-        as a miss. No other module may reimplement the judgement.
+        ``meridian.reliability`` calls this and nothing else to decide what
+        counts as a miss. No other module may reimplement the judgement.
+
+        Four things must hold together, which is the roadmap's Stage 5 list:
+        the heartbeat overlaps the window, names the satellite, reports a
+        frequency within Doppler of the one asked about, and reports the same
+        mode. A fifth is not a property of the heartbeat alone — the
+        assignment it names must be one actually issued to this station, or a
+        station could assert listening against an id it invented.
+
+        Args:
+            query: What is being asked about. A dataclass rather than five
+                parameters, per CLAUDE.local.md §2 (D-056).
+
+        Returns:
+            True when at least one heartbeat confirms all of the above.
+
+        Note:
+            **Overlap, not coverage.** One confirming heartbeat inside the
+            window satisfies this, so a station that listened for thirty
+            seconds of a twelve-minute pass and stopped counts as having
+            listened. That is the roadmap's wording and a known limit;
+            refining it to a coverage fraction changes this return type and
+            belongs with the reliability layer that consumes it (D-056).
+
+            Timing is judged on the platform's ``received_at``, never the
+            station's ``sent_at``. A station with a broken clock could
+            otherwise assert coverage of any window it chose, and this method
+            decides what counts as a miss.
         """
         ...

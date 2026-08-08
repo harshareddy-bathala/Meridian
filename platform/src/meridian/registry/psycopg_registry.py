@@ -2,8 +2,8 @@
 
 Implements ``Registry.register()``, ``Registry.authenticate()`` and
 ``Registry.liveness()`` against ``meridian.store.stations`` and
-``meridian.store.invites``. ``was_listening()`` is not implemented here — it
-needs a heartbeat endpoint to have written the rows it reads.
+``meridian.store.invites``, and ``Registry.was_listening()`` against
+``meridian.store.heartbeats``.
 
 This module holds MSP §4.1's actual decision logic: which of the six rows of
 its recovery table a presented ``(invite_token, registration_key)`` pair
@@ -11,7 +11,8 @@ selects. Everything below it is store calls; everything above it — parsing
 the wire request into a ``RegistrationRequest``, translating
 ``InvalidInviteError`` into a `403` — is the API layer's job.
 
-Reference: docs/MSP-SPEC.md §4.1; docs/DECISIONS.md D-017, D-020, D-023, D-034.
+Reference: docs/MSP-SPEC.md §4.1, §4.2; docs/DECISIONS.md D-017, D-020, D-023,
+D-034, D-054, D-056.
 """
 
 from __future__ import annotations
@@ -23,12 +24,18 @@ from datetime import datetime, timedelta
 
 from meridian.registry import (
     InvalidInviteError,
+    ListeningQuery,
     Liveness,
     Registration,
     RegistrationRequest,
     UnknownStationError,
 )
+from meridian.registry.doppler_tolerance import doppler_tolerance_hz
 from meridian.registry.liveness import derive_liveness
+from meridian.store.heartbeats import (
+    ListeningEvidenceQuery,
+    has_listening_evidence,
+)
 from meridian.store.invites import (
     consume_invite,
     find_invite_by_hash,
@@ -109,13 +116,12 @@ def is_recovery_eligible(
 
 
 class PsycopgRegistry:
-    """``Registry.register()`` and ``.authenticate()``, backed by the store layer.
+    """The whole ``Registry`` protocol, backed by the store layer.
 
-    A **partial** implementation: ``liveness()`` and ``was_listening()`` are
-    not here. Deliberately not declared to inherit from ``Registry`` —
-    Python resolves the protocol structurally, and there is no benefit to
-    forcing a subclass relationship before the class actually satisfies it.
-    Stage 5 completes it once heartbeat data exists to derive them from.
+    Complete: all four ``Registry`` methods are implemented here. Deliberately
+    not declared to inherit from ``Registry`` — Python resolves the protocol
+    structurally, so the annotation would buy nothing that ``mypy`` does not
+    already check at every call site that expects a ``Registry``.
 
     Constructed per request with an open connection, the two ``Settings``
     fields it needs, and the instant to judge time-dependent rows against —
@@ -190,6 +196,30 @@ class PsycopgRegistry:
         if heartbeat is None:
             raise UnknownStationError(station_id)
         return derive_liveness(heartbeat.last_heartbeat_at, now=now)
+
+    def was_listening(self, query: ListeningQuery) -> bool:
+        """See :meth:`meridian.registry.Registry.was_listening` for the contract.
+
+        The one domain judgement made here is how wide "the same frequency" is.
+        A station retunes continuously across a pass, so it reports a
+        Doppler-shifted frequency rather than the assignment's nominal one, and
+        the store layer is handed an explicit range rather than a centre and a
+        rule for widening it (D-056).
+        """
+        tolerance_hz = doppler_tolerance_hz(query.centre_freq_hz)
+        window_start, window_end = query.window
+        return has_listening_evidence(
+            self._conn,
+            ListeningEvidenceQuery(
+                station_id=query.station_id,
+                satellite_id=query.satellite_id,
+                mode=query.mode,
+                freq_min_hz=query.centre_freq_hz - tolerance_hz,
+                freq_max_hz=query.centre_freq_hz + tolerance_hz,
+                window_start=window_start,
+                window_end=window_end,
+            ),
+        )
 
     def _create_station(
         self, invite_hash: bytes, request: RegistrationRequest
