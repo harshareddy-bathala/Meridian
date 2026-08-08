@@ -157,6 +157,22 @@ jobs:
       - name: MSP conformance tests
         run: uv run pytest -m msp_conformance
 
+      # tests/e2e/ is wired and empty until Stage 10, so this selects nothing and
+      # pytest exits 5 ("no tests collected"). The step is here now rather than
+      # with the first e2e test, because the alternative is a suite that lands
+      # and silently never runs — which is exactly what happened to
+      # msp_conformance above until it was noticed. 5 is tolerated; every other
+      # non-zero code is a failure.
+      #
+      # This job has a database but not the compose stack, so it will need to
+      # move to the `image` job when there is something to run. Left here so the
+      # marker is exercised from the same place as the other three, and the move
+      # is a deliberate edit rather than a discovery.
+      - name: End-to-end tests
+        run: |
+          set -euo pipefail
+          uv run pytest -m e2e || test $? -eq 5
+
   image:
     # Build the runtime image and prove the deployment artefact works.
     #
@@ -187,6 +203,10 @@ jobs:
         run: |
           set -euo pipefail
           cp deploy/.env.example .env
+          # Stamped before the build starts and read after /healthz answers, so
+          # the figure covers what the requirement covers: image build, database
+          # initialisation, migrations and the API becoming ready.
+          echo "BRING_UP_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
           docker compose -f deploy/docker-compose.yml up -d --build
 
       - name: Migrations ran and the API is healthy
@@ -205,6 +225,25 @@ jobs:
           cat /tmp/health.json
           grep -q '"status":"ok"' /tmp/health.json
           grep -q '"database":"ok"' /tmp/health.json
+
+      - name: The bring-up took under ten minutes
+        # "docker compose up brings the whole platform up on a clean machine in
+        # under ten minutes" is asserted in six files in this repository and was
+        # measured in none of them. This job is that exact scenario — a clean
+        # runner, a cold build, no cached layers — so the claim is checked where
+        # it is already being performed rather than trusted.
+        #
+        # A separate step from the health check on purpose: a failure here reads
+        # as "the platform came up, too slowly", which is a different problem
+        # from "the platform did not come up" and wants a different fix.
+        run: |
+          set -euo pipefail
+          elapsed=$(( $(date +%s) - BRING_UP_STARTED_AT ))
+          echo "cold bring-up: ${elapsed}s"
+          if [ "$elapsed" -ge 600 ]; then
+            echo "::error::Cold bring-up took ${elapsed}s. README.md and CLAUDE.md both call ten minutes a hard requirement."
+            exit 1
+          fi
 
       - name: Declared executables resolve inside the image
         # `meridian --version` is the one CLI subcommand that does real work, so
@@ -264,6 +303,39 @@ jobs:
           # commit anybody wrote. Without this the check fails on every pull
           # request regardless of what its commits say.
           done < <(git log --no-merges --format=%s "origin/${{ github.base_ref }}..HEAD")
+          exit $failed
+
+      - name: A Co-Authored-By line git cannot read is not a trailer
+        # D-043 requires the trailer on AI-assisted commits and says nothing
+        # about commits written without assistance — "the one that matters is
+        # the commit that does *not* carry it". So presence is deliberately NOT
+        # checked: demanding it everywhere would put the trailer on every commit
+        # and destroy the signal the decision exists to preserve.
+        #
+        # What is checked is the failure that loses the record silently. A
+        # `Co-Authored-By:` line separated from the trailer block by a blank
+        # line, or trailing prose after it, is not parsed by git as a trailer —
+        # `%(trailers:key=...)` returns nothing, `git log --author` cannot find
+        # it, and the provenance is present to a human reader and absent to
+        # every tool. That is worse than no trailer, because it looks done.
+        #
+        # Verified to fail, on a scratch repository, against a message with
+        # prose after the trailer block — which is how we know it can.
+        run: |
+          set -euo pipefail
+          failed=0
+          while read -r sha; do
+            [ -z "$sha" ] && continue
+            written=$(git log -1 --format=%B "$sha" | grep -ci '^Co-Authored-By:' || true)
+            parsed=$(git log -1 --format='%(trailers:key=Co-Authored-By,valueonly)' "$sha" \
+              | grep -c . || true)
+            if [ "$written" -gt 0 ] && [ "$parsed" -eq 0 ]; then
+              echo "::error::$(git log -1 --format=%s "$sha")"
+              echo "::error::  has a Co-Authored-By line that git does not parse as a trailer."
+              echo "::error::  It must sit in the final paragraph, one trailer per line, nothing after it."
+              failed=1
+            fi
+          done < <(git log --no-merges --format=%H "origin/${{ github.base_ref }}..HEAD")
           exit $failed
 
       - name: Warn when the diff exceeds 400 lines
