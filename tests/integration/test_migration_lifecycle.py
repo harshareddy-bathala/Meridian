@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = REPO_ROOT / "deploy" / "alembic.ini"
-HEAD_REVISION = "0006"
+HEAD_REVISION = "0008"
 
 
 @pytest.fixture
@@ -66,6 +66,13 @@ def _upgrade_to_head(url: str) -> None:
     command.upgrade(config, "head")
 
 
+def _upgrade_to(url: str, revision: str) -> None:
+    """Run `alembic upgrade <revision>`, stopping part way through the history."""
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", url)
+    command.upgrade(config, revision)
+
+
 def _applied_revision(url: str) -> Any:
     with psycopg.connect(url) as conn, conn.cursor() as cur:
         cur.execute("select version_num from alembic_version")
@@ -73,7 +80,7 @@ def _applied_revision(url: str) -> Any:
     return row[0] if row else None
 
 
-def test_empty_database_reaches_head(scratch_database: str, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_empty_database_reaches_head(scratch_database: str, monkeypatch) -> None:
     """The clean-checkout path: nothing, then the whole schema."""
     monkeypatch.setenv("DATABASE_URL", scratch_database)
     _upgrade_to_head(scratch_database)
@@ -89,7 +96,7 @@ def test_empty_database_reaches_head(scratch_database: str, monkeypatch) -> None
     assert row is not None and row[0] >= 10
 
 
-def test_upgrade_head_twice_is_a_no_op(scratch_database: str, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_upgrade_head_twice_is_a_no_op(scratch_database: str, monkeypatch) -> None:
     """Compose runs `migrate` on every `up`. The second run must do nothing.
 
     Alembic guarantees this at the revision level — it compares against
@@ -108,7 +115,7 @@ def test_upgrade_head_twice_is_a_no_op(scratch_database: str, monkeypatch) -> No
 
 def test_generated_observation_id_matches_the_documented_formula(
     scratch_database: str,
-    monkeypatch,  # type: ignore[no-untyped-def]
+    monkeypatch,
 ) -> None:
     """D-027: the id in the acknowledgement is derived, and derived *this* way.
 
@@ -169,3 +176,69 @@ def test_generated_observation_id_matches_the_documented_formula(
     # The id printed in MSP §4.4's acknowledgement example, so the specification
     # cannot drift from the schema without this failing.
     assert rows[0][1] == "ob_05601bd09768"
+
+
+# Distinct because `stations.token_sha256` is unique from 0007 onward. Real
+# hashes are 32 bytes; the length is irrelevant here and being explicit beats an
+# escape sequence that renders as an invisible control character in the source.
+TOKEN_HASH = bytes([1]) * 32
+KEY_HASH = bytes([2]) * 32
+SECOND_TOKEN_HASH = bytes([3]) * 32
+
+INSERT_STATION = (
+    "insert into stations (station_id, name, operator, lat_deg, lon_deg,"
+    " alt_m, token_sha256, registration_key_sha256)"
+    " values (%s, %s, 'test', 12.9716, %s, 920, %s, %s)"
+)
+
+
+def test_0007_rewrites_a_longitude_the_old_range_allowed(
+    scratch_database: str, monkeypatch
+) -> None:
+    """D-052: 200 degrees east becomes -160, rather than failing the migration.
+
+    Migration 0007 narrows `stations.lon_deg` from -180..360 to -180..180. A
+    CHECK is validated against existing rows when it is created, so a station
+    stored under the old range would fail the migration outright and stop a
+    deployment half way through — which is why the revision rewrites before it
+    constrains.
+
+    This steps to 0006, writes the row the old constraint allowed, and only then
+    upgrades. Asserting the constraint alone would not catch a revision that
+    added it without the rewrite: against an empty database, that revision
+    passes.
+    """
+    monkeypatch.setenv("DATABASE_URL", scratch_database)
+    _upgrade_to(scratch_database, "0006")
+
+    with psycopg.connect(scratch_database) as conn, conn.cursor() as cur:
+        cur.execute(INSERT_STATION, ("st-east", "East", 200.0, TOKEN_HASH, KEY_HASH))
+        conn.commit()
+
+    _upgrade_to_head(scratch_database)
+
+    with psycopg.connect(scratch_database) as conn, conn.cursor() as cur:
+        cur.execute("select lon_deg from stations where station_id = 'st-east'")
+        row = cur.fetchone()
+
+    assert row is not None
+    # 200E and -160 are the same meridian, which is what makes the rewrite
+    # lossless rather than a guess at what the operator meant.
+    assert row[0] == -160.0
+
+
+def test_0007_refuses_a_longitude_outside_iso_6709(
+    scratch_database: str, monkeypatch
+) -> None:
+    """After 0007, the range azimuth uses is no longer storable as a longitude."""
+    monkeypatch.setenv("DATABASE_URL", scratch_database)
+    _upgrade_to_head(scratch_database)
+
+    with (
+        psycopg.connect(scratch_database) as conn,
+        conn.cursor() as cur,
+        pytest.raises(psycopg.errors.CheckViolation),
+    ):
+        cur.execute(
+            INSERT_STATION, ("st-bad", "Bad", 200.0, SECOND_TOKEN_HASH, KEY_HASH)
+        )

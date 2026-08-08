@@ -200,7 +200,11 @@ Cost: `README.md`'s `python -m simulator.station` becomes `python -m meridian_si
 
 `DATA-MODEL.md` gives column tuples but no types, no keys and no nullability, so the migrations could not be written from it. Settling the mechanics here rather than discovering them one table at a time:
 
-**Surrogate primary keys.** Every table gets `id bigint generated always as identity primary key`. `DATA-MODEL.md` referenced `assignments.pass_id` and `passes.element_set_id` without ever giving those tables a key to reference.
+**Surrogate primary keys.** ~~Every table gets `id bigint generated always as identity primary key`.~~ `DATA-MODEL.md` referenced `assignments.pass_id` and `passes.element_set_id` without ever giving those tables a key to reference.
+
+*Amended 2026-08-08 — natural keys where one exists.* The migrations do not implement the rule above and never did, and `DATA-MODEL.md` states the opposite rule while citing this entry for it. Recording the change here rather than leaving the log silently contradicted by the schema it governs.
+
+`stations` is keyed on `station_id`, `satellites` on `satellite_id`, `assignments` on `assignment_id` — identifiers MSP puts on the wire, so a surrogate would have meant every join carrying a second key nobody outside the database can name. `observations` has no `id` column at all: it is keyed `(assignment_id, revision, started_at)`, which D-015's revision lineage requires and the hypertable rule below then extends with the partition column. `passes` and `element_sets`, which have no wire identifier, do take the surrogate. The rule this entry should have stated is *a natural key where the domain supplies one, a surrogate where it does not* — which is what was built.
 
 **Hypertable keys include the partition column.** TimescaleDB requires the partitioning column to be part of any unique or primary key on a hypertable. So `observations`, `heartbeats` and `noise_measurements` are keyed `(id, <partition column>)`. This is a constraint of the storage engine, not a modelling choice, and it is why the natural-looking `primary key (id)` will not work there.
 
@@ -294,6 +298,11 @@ Both are optional top-level `float|null`, in seconds. `null` means unknown and m
 `DATA-MODEL.md` stores a "token hash" on `stations`. `deploy/.env.example` declares `TOKEN_SECRET`, which "signs station bearer tokens". Those are two different designs — hashed opaque tokens and signed tokens — and only one can be built.
 
 **Opaque tokens.** 32 bytes from `secrets.token_urlsafe`, stored as a SHA-256 hash, compared in constant time. `TOKEN_SECRET` is removed from `deploy/.env.example`.
+
+*Clarified 2026-08-08.* "Compared in constant time" described the implementation loosely enough to be wrong in one place and unnecessary in another, and the code matched neither reading until this correction. Precisely:
+
+- **The bearer token is never compared in Python.** `store.stations.find_station_id_by_token_hash` hashes the presented token and *looks the hash up* in an indexed `bytea` column. There is no comparison to make constant-time; the timing that remains is an index probe, which does not vary with how many leading bytes matched.
+- **The registration key is compared**, in `registry.psycopg_registry._key_matches`, because it is fetched by `station_id` and then checked. That comparison was `bytes.__eq__` — which short-circuits — and is now `hmac.compare_digest`. This is the one that matters: the registration key authorises minting a new bearer token on an existing station (D-023, D-034), so a timing oracle on it is a credential-recovery path rather than an information leak.
 
 The advantage of a signed token is validation without a database read. That advantage does not exist here: `platform/registry` is "the authority on whether a station was listening at a given moment" and must load the station row on every heartbeat anyway to update health state and last-heartbeat age. So signing buys no round trip and adds a signing-key rotation problem, on a platform whose entire point is running unattended.
 
@@ -1023,6 +1032,230 @@ one clock tick.
 
 **Found by running the client against the endpoint, not by reading the code.** Both
 were written against D-016 and both looked correct.
+
+---
+
+## D-046 — Invite expiry is checked before MSP §4.1's table, and it binds bound invites too
+
+**2026-08-08 · accepted** · *implements D-020, D-034; found by audit*
+
+`store.invites.revoke_invite` implements withdrawal as `set expires_at = now()`, deliberately, so that a withdrawn invite and a lapsed one are one fact to every future reader. `registry.psycopg_registry.register()` then never read `expires_at` at all.
+
+**The consequence was that `meridian invite revoke` did nothing.** It reported "Revoked 1 invite(s)", set the column, and the invite went on registering stations. `--expires-in-days` was decorative for the same reason. MSP-SPEC.md §6 defines `invalid_invite` as "unknown, already used, **or withdrawn**"; the third case had no implementation.
+
+Two things had to be decided to fix it, neither settled by the specification.
+
+**Where the check goes: before the table, not inside a row.** MSP §4.1's six-row table selects an outcome from `(invite state, registration_key)`. Expiry is not one of its axes. Putting the check ahead of the table means one predicate covers creation, unbound recovery and bound recovery alike, and no future row can be added that forgets it.
+
+**A bound invite is *not* exempt.** D-034 exempts a bound invite from the recovery *window*, on the reasoning that an operator issuing an invite against a named `station_id` has supplied the authorisation the window exists to require. That argument does not extend to expiry: an operator who issued a bound invite and then withdrew it has withdrawn the authorisation itself. Exempting bound invites would make the operator's only revocation control silently inapplicable to the one case — post-window credential rotation — where it is most likely to be used in anger.
+
+**The comparison is made by the database, not in Python.** This was the third thing that had to be decided, and it was forced by a test that passed or failed depending on which tests ran before it.
+
+`revoke_invite` writes `expires_at = now()` — the *database's* clock. The first implementation compared that against a Python `datetime.now(UTC)` captured at the start of the request. Measured on the development machine:
+
+```
+python datetime.now(UTC)   : 2026-08-08 07:37:22.123359+00:00
+postgres now()             : 2026-08-08 07:37:22.129477+00:00   <- transaction start
+postgres clock_timestamp() : 2026-08-08 07:37:22.136484+00:00
+```
+
+Two separate problems. Postgres `now()` is *transaction start*, not statement time, so its value depends on when the transaction opened — which is what made the test non-deterministic. And the Python clock ran ~6 ms behind, with a 15.6 ms resolution on Windows (D-045 measured the same tick): the two readings above, taken either side of a database round trip, were *bit-identical*.
+
+Neither margin matters for D-023's one-hour recovery window, which is why `is_recovery_eligible` still takes a Python `now`. It matters absolutely here, because `expires_at = now()` sets the deadline to *this instant* — the margin is zero by construction, so any skew at all lets a revoked invite through.
+
+So `Invite` carries `is_expired`, computed in the `select` as `(expires_at is not null and expires_at <= now())`. One clock writes it and the same clock reads it. `cli._invite_state` was making the identical cross-clock comparison and now uses the same column, so `meridian invite list` cannot report "pending" for an invite it just revoked either.
+
+An invite with a null `expires_at` never expires, which is D-020's default and what the bootstrap invite relies on.
+
+---
+
+## D-047 — One invite admits one station, enforced by acting on the race guard
+
+**2026-08-08 · accepted** · *implements D-020; found by audit*
+
+`store.invites.consume_invite` guards the race in SQL with `where consumed_at is null` and reports the outcome by return value, its docstring stating that the loser "must treat that as `invalid_invite`". Both call sites in `psycopg_registry` discarded that value.
+
+**Two concurrent `POST /msp/v0/register` with the same unconsumed invite therefore both succeeded.** Both passed the `consumed_at is null` read in `register()`, both inserted a station with a different generated `station_id`, and both called `consume_invite`; under READ COMMITTED the second blocked on the row lock, re-evaluated the predicate, got `rowcount 0` — and nothing looked at it. One invite, two stations. That is precisely the property D-020 says `invite_tokens` exists to provide.
+
+**The guard is acted on inside the caller's transaction**, in `_consume_or_raise`, so raising rolls the station row back with it. The alternative — checking first, then inserting — reintroduces the same race one statement earlier; the `update`'s own row lock is the only serialisation point available without escalating the isolation level for every registration.
+
+The loser is rejected as `invalid_invite`, not as a conflict. MSP §3 does not let a client learn why its invite failed, and "someone else got there first" is exactly the kind of detail an attacker probing a leaked invite would want.
+
+**Both this and D-046 were found by reading the code against the specification, not by a failing test.** Neither had a test that could have caught it: the suite exercised one registration at a time, against invites it had just created.
+
+---
+
+## D-048 — Recovery restores an identity, and `simulated` is never taken from a station
+
+**2026-08-08 · accepted** · *implements D-005, D-013; found by audit*
+
+MSP §4.1's recovery rows say only "same `station_id`, newly minted token". They are silent on what happens to the rest of the payload — `name`, `location`, `capabilities`, `client`, and `simulated` — which a recovering station sends in full because the request shape is the same one it used to register.
+
+`_recover_unbound_station` and `_recover_bound_station` read all of them and discarded all of them.
+
+**Recovery restores an identity; it does not re-register.** Ignoring the profile fields is the right default: recovery exists because a response was lost in flight (D-023) or an operator authorised a rotation (D-034), not because the station's description changed. A station that genuinely moved should be re-registered, not recovered. This is now stated in `Registry.register`'s docstring rather than left as behaviour a reader has to infer from an omission.
+
+**`simulated` is the exception, and is rejected on mismatch.** A station cannot change its own nature. Silently ignoring a mismatch meant a simulated station could recover claiming `simulated: false` — keeping the stored `true`, so the row stayed correct, but the platform answered `200` to a request whose central claim it had discarded. The reverse is the dangerous direction if the two ever drift. `403 invalid_invite`, collapsed into the same error as every other rejecting row because MSP §3 does not let a client learn why.
+
+**The wider rule: `simulated` is platform-derived, always.** MSP §4.2 puts no `simulated` on the wire today, but `store.heartbeats.NewHeartbeat` accepts one from its caller, and the only value a heartbeat route would have to hand is whatever the station sent. `meridian.observations`' module docstring already states the invariant — "copied from the station's registry record" — with nothing to read it from. `store.stations.find_station_provenance` is now that reader, and `store/heartbeats.py`'s header says so at the point of use.
+
+`store.assignments.DueAssignment` also omitted `simulated`, which `assignments` has carried since `0004_passes.sql`. An assignment delivered over MSP §4.3 would have had no way to mark itself. Added.
+
+---
+
+## D-049 — `element_sets` records provenance in `source`, not a `simulated` boolean
+
+**2026-08-08 · accepted** · *clarifies D-013*
+
+D-013 enumerated the tables that carry a `simulated` boolean — `stations`, `passes`, `assignments`, `observations`, `heartbeats` — and did not consider `element_sets`, which has `source in ('celestrak', 'spacetrack', 'manual', 'simulator')` instead.
+
+**That asymmetry is kept, deliberately.** `simulated` would be exactly `source = 'simulator'`, and a stored column derivable from another column in the same row is a column that can disagree with it. `source` also carries more: it distinguishes `celestrak` from `spacetrack` from `manual`, which element-set age and divergence analysis need and a boolean would flatten. It is part of `element_set_unique (satellite_id, epoch, source)`, so the same set from two providers is two rows by design.
+
+**The obligation this creates is on `passes`, and it is not yet met.** A pass computed from a simulator-sourced element set is simulated, and `passes.simulated` is the column that has to say so. Nothing writes `passes` yet — propagation is Stage 6 — so this is recorded now, before the code exists, rather than discovered afterwards: **whoever inserts a `passes` row must set `simulated` from its element set's `source`, not default it to `false`.** The risk this closes is a dashboard filtering `where simulated = false` and silently including simulator-derived passes, which is the credibility failure CLAUDE.md's fifth rule is about.
+
+---
+
+## D-050 — A request that declares no body size is rejected, like one that declares too much
+
+**2026-08-08 · accepted** · *implements D-028*
+
+D-028 decided the caps and said they are "enforced as middleware, ahead of JSON parsing". No middleware existed. `MSP-SPEC.md` §6 has tabulated four limits since Stage 3 and `grep -i middleware platform/` returned nothing, so every cap in the specification was a claim about the reference implementation that the reference implementation did not meet. Two of the four apply to endpoints that do not exist yet; **the 64 KiB body cap applies to `register` and `time`, which are live and publicly reachable under the `public` profile.** `meridian.api.request_limits` now enforces them.
+
+**The sub-question D-028 did not answer: what happens to a body whose size is not declared.** §6 requires rejection "before the body is parsed", and a `Transfer-Encoding: chunked` request declares no length — so before parsing there is nothing to compare against the cap. Three options:
+
+*Allow it through.* Rejected. It is a complete bypass of the check, reachable by any client that chooses chunked encoding, and it is the option under which the cap reads as enforced while not being.
+
+*Count bytes as the body streams and abort past the limit.* Rejected, though it is the technically fuller answer. It moves the decision to after parsing has begun, which is a different rule than the one §6 states, and aborting mid-stream from ASGI middleware means interrupting an application that has already been entered — the failure path is harder to reason about than the thing it protects.
+
+*Reject a body-bearing request that declares no length.* **Taken.** MSP §8 binds JSON bodies over HTTP/1.1, and every client that sends a JSON body sends `Content-Length` for it — `httpx`, which the reference client uses, does so for any `json=` or `bytes` body and only goes chunked for a generator. So this costs no real station, and it is the only option under which "rejected before the body is parsed" is literally true.
+
+Scoped to `POST`, `PUT` and `PATCH`. `GET /msp/v0/time` carries no body and declares no length; requiring one there would reject every correct call to the one endpoint a station with no credentials and a wrong clock can still reach.
+
+A malformed length — `64K`, `1.5`, empty, negative — is refused for the same reason. Leniency there is the bypass again with an extra step: a value that fails to parse and is treated as absent is a value an attacker chooses on purpose.
+
+---
+
+## D-051 — Rate limiting is deferred, and the reason is that a wrong limiter is worse than none
+
+**2026-08-08 · accepted**
+
+`rate_limited` has been one of MSP §6's eight codes since Stage 3. Nothing raises it and no limiter exists. `POST /msp/v0/register` is internet-reachable under the `public` profile, unauthenticated by design (D-006 admits stations by invite, not by network position), and performs a database lookup per request.
+
+**Deferred to the deployment stage, deliberately, and not because it is unimportant.** The obvious implementation — an in-process per-IP token bucket — does not work correctly in this deployment and would be actively harmful:
+
+- **The client IP is not the peer address.** Public traffic arrives through a Cloudflare tunnel, so every request presents the tunnel's address. A limiter keyed on the peer would rate-limit the entire network as one client — the first genuinely busy day would look exactly like an attack.
+- **Keying on `CF-Connecting-IP` instead is worse.** The compose file also publishes the API on the host, so a request that did not come through the tunnel can set that header to anything. An attacker rotates it per request and is never limited; an operator on a fixed address is. The limiter would then be a control that fails open for the case it exists for and closed for the case it does not.
+- **In-process state is the wrong lifetime.** It resets on every restart and does not survive a second worker, which is the shape the deployment takes on the Pi.
+
+The correct place is the edge — Cloudflare's own rate limiting on the tunnel hostname — with the platform-side limiter, if one is still wanted, keyed on the invite token rather than on any address. **That is a deployment-stage decision and it needs the deployment to exist.** Recorded here so that the gap between "the protocol defines `rate_limited`" and "nothing can produce it" is a decision on the record rather than an omission somebody finds in a viva.
+
+The trigger to revisit: the first time the platform is reachable from outside the college network for longer than a demonstration, which is Stage 10's exit condition rather than Phase 1's.
+
+---
+
+## D-052 — Longitude is ISO 6709, and migration 0007 rewrites rather than rejects
+
+**2026-08-08 · accepted** · *corrects the schema shipped in 0002, 0003 and 0004*
+
+`stations.lon_deg` shipped with `check (lon_deg between -180 and 360)`. That upper bound is **azimuth's range applied to a longitude** — the two sit three lines apart in `DATA-MODEL.md`'s conventions and the wrong one was copied. Under it, `200` and `-160` are two storable spellings of the same meridian, so two stations at the same place sort, group and subtract as though they were 360 degrees apart. Nothing had noticed because the one registered station is at 77°E.
+
+**Longitude is −180..+180 (ISO 6709).** Corrected in the schema, and mirrored in `api/models/registration.py`'s `Location`, whose `le=360` had the same bound for the same reason.
+
+**Existing rows are rewritten, not rejected.** A `CHECK` is validated against existing rows when it is created, so adding the constraint alone would fail the migration outright on any station stored under the old range — half way through a deployment, which is the worst place to discover it. `0007` runs `update stations set lon_deg = lon_deg - 360 where lon_deg > 180` first. That is lossless: 200E *is* −160, not an approximation of it, so no operator intent is guessed at. `tests/integration/test_migration_lifecycle.py` steps a scratch database to 0006, writes the row the old constraint allowed, then upgrades — because a test that asserted only the constraint would pass against a revision that forgot the rewrite.
+
+### Three smaller judgement calls in the same migration
+
+**`satellite_transmitters.source` is restricted to `('manual', 'simulator')`** — the two values anything can produce today. `element_sets.source` also lists `celestrak` and `spacetrack`, but those publish element sets and not transmitter records, and enumerating a source no code can write would be scaffolding for a design that does not exist. D-021 chose `CHECK` over a Postgres `enum` precisely so that an ingest adapter can widen this in one transactional statement when there is one.
+
+**`passes.max_elevation_deg` is 0..90, and must be at least `min_elevation_deg`.** The original −90..90 allowed a maximum elevation of −40, which is not a pass: `GLOSSARY.md` defines one as a period during which the satellite is *above* the horizon. The pair constraint is the one that makes the two columns interpretable together — a window is the interval where elevation is at or above the floor, so the peak over that interval cannot be below it. A row violating it is a propagation or frame-conversion error, which is the silent class `CLAUDE.md` warns coordinate frames produce, and it is far cheaper to catch on insert than in a reliability figure three stages later.
+
+**`stations.client_impl` is renamed to `client_implementation`.** `CLAUDE.local.md` §4 permits no abbreviation absent from `GLOSSARY.md`, which lists `lat`, `lon`, `alt` and `freq` and does not list `impl`. Renamed at the column and not only in Python, because an attribute called `client_implementation` writing to a column called `client_impl` moves the abbreviation instead of removing it. The MSP wire field stays `client.impl` — it is fixed by §4.1 and is carried by a Pydantic alias, which is the same mechanism now carrying `lat`, `lon`, `az_deg` and `min_el_deg` while the Python identifiers spell themselves out. `populate_by_name` is deliberately left off, so the wire contract stays exactly what the specification prints.
+
+---
+
+## D-053 — Meridian is its own network; no third-party client runs on our station
+
+**2026-08-08 · accepted**
+
+"Why not just contribute to SatNOGS?" is the first question this project will be asked, and the answer has to be on the record rather than improvised.
+
+~~**We do not run `satnogs-client` or TinyGS firmware on our hardware, and we build no adapter for either.**~~ **Meridian is an independent network with an open protocol; the contribution is MSP and the platform behind it, not another node on somebody else's map.** Nothing in this repository speaks to another network, and no adapter for one is built here.
+
+*Amended 2026-08-08, the same day, before this entry was relied on.* The struck sentence overreached and **contradicted `PROJECT.md` §5.4**, which has said since the project document was written that registering our station on an existing public network is a *"separate, optional requirement"* whose value, if done, is that it *"demonstrates that the station is good enough for an independent network to accept"*. **§5.4 stands.** What this entry actually settles is narrower, and is the part that was ever in question: the platform depends on no external network, and no third-party client sits anywhere on Meridian's path from prediction to reception. Whether an operator additionally points their own hardware at another network on their own time is not a decision this repository gets to make, and forbidding it here would be the decision log legislating past its own scope.
+
+**This is not a licence problem, and saying so matters.** `satnogs-client` is AGPL-3.0, and running it as a separate process would create no obligation on this repository — the same separate-process argument `README.md` already makes for GPL decoders, which are invoked and never linked. AGPL §13 would bite only if we *modified* it and exposed the modified version over a network, and those changes would be published separately in any case. CLAUDE.md's third rule still forbids copying any of it in, and that is unchanged. **The reason we do not run it is scope, not licence.**
+
+**The binding constraint, had we wanted to run both concurrently, is the radio.** An SDR is opened by exactly one process, so Meridian and a third-party client cannot use the same receiver at the same time; `rotctld` accepts several clients but two schedulers issuing conflicting bearings is meaningless. Resolving that means either a second receiver — **and there is no dual-hardware plan** — or a time-sharing arbiter, which is real engineering (window negotiation, pre-emption, a foreign client inside our own scheduling story) for something no success criterion asks for. Both are rejected **as platform features**; neither says anything about what an operator does with their own box outside a Meridian window.
+
+**One receiver serving two bands is a scheduling constraint, not a limitation to engineer around.** `ARCHITECTURE.md` already has the scheduler enforce non-overlap **per station**, including slew and settling time, so a 137 MHz pass and a 437 MHz pass on one receiver cannot both be issued — the rule that makes the single-receiver case correct is the same rule that was already there for slew. That a station must choose between two visible passes is the oversubscribed problem this project exists to solve. Hardware that could never conflict would remove the demonstration rather than improve it.
+
+**What replaces "join them" is "match them".** The station is expected to perform comparably to a competent SatNOGS or TinyGS station on the bands it covers, and that comparison is the honest way to show the network is worth joining. Parity is measured on our own numbers — decode yield, `peak_snr_db`, and predicted-versus-actual AOS — under `docs/EVALUATION.md`'s method, against our own station's history. It is **not** established by ingesting another network's observations and comparing totals: their archive contains only passes somebody chose to observe, which is the selection bias `EVALUATION.md` §1 names as this project's main methodological threat, and importing it to score ourselves would import the bias with it.
+
+**The design obligation this leaves is small and worth keeping.** Reception (SDR capture, rotator control, decoders) stays separable from the MSP client rather than interleaving protocol calls with radio control, and standard interfaces are preferred where one exists — hamlib `rotctld` for the rotator, files or pipes for decoder output. That costs nothing now, and it is what stops "independent" from quietly meaning "unable to do anything else". It is a shape, not a feature, and no SatNOGS or TinyGS code, dependency or API call belongs in this repository.
+
+**Hardware this assumes.** The full ₹43,500 build — `PROJECT.md` §17's Tiers 1, 2 **and 3** — so tracking is funded rather than optional. One Pi-and-SDR station receiving on **137 MHz** (Meteor-M LRPT, the primary target) through a fixed QFH, and **437 MHz** through the crossed Yagi on the workshop-built rotator, the latter being where the cubesat traffic SatNOGS carries mostly sits. Tier 3 buys the antenna, rotator, motors and amplifier — not the receiver, which already tunes both. Alongside it, an **ESP LoRa node as a second receiving path** for LoRa-modulated satellites — a receiver, not a controller, and not a replacement for anything: the Arduino Uno R4 WiFi remains the rotator controller exactly as `CLAUDE.md`'s stack section states. The LoRa node is TinyGS-class hardware by nature and is nonetheless ours, speaking MSP; that it *could* run TinyGS firmware and will not is the clearest illustration of this decision.
+
+---
+
+## D-054 — Liveness is derived on read, and the stored column is dropped
+
+**2026-08-08 · accepted** · *resolves a contradiction in D-013's own schema*
+
+The codebase said both things at once. `0002_stations.sql` declared `stations.liveness` as a stored `text` with a `CHECK` and a partial index; `Registry.liveness(station_id, *, now)` took the current instant as a parameter, which only makes sense if the answer is computed. Nothing ever wrote the column — every row has carried the `'never_seen'` default since the table existed. Stage 5's roadmap entry offers both options and observes that "dynamic calculation avoids stale stored values".
+
+**Derived on read.** Liveness is a function of one stored instant and the current time. A stored conclusion is correct only until the clock passes its next threshold, and **nothing moves the clock on the platform's behalf** — so a station that stopped reporting would keep reading `online` until some unrelated write happened to refresh it. That is precisely the case liveness exists to detect, which makes the stored form wrong exactly when it matters. A column derivable from another column in the same row is a column that can disagree with it; D-049 refused that for `element_sets` and the same argument applies here. Migration `0008` drops it, taking `stations_liveness_idx` with it — an index over a column with one distinct value in every row could never have been selective. `last_heartbeat_at` stays: it is the measurement, `liveness` was the opinion.
+
+**The thresholds do not derive from the heartbeat interval, and this was nearly got wrong.** D-013 already fixed `stale` at 60 s and `offline` at 90 s from SC-5, and states the direction of the dependency: the success criterion sets the threshold rather than the other way round. Deriving them from `Settings.heartbeat_interval_s` would let a deployment raise the interval and quietly stop meeting SC-5 while every dashboard still read "offline" as though it meant the same thing.
+
+**What the interval does constrain is its own ceiling.** At D-030's 30 s, `stale` is two missed heartbeats and `offline` is three. At 45 s a station heartbeating exactly on time sits more than 60 s past its last heartbeat for a third of every cycle and flaps into `stale` while behaving exactly as specified — and every reliability figure reading liveness inherits it. So `load_settings` refuses `HEARTBEAT_INTERVAL_S` above 30. **That refusal fires on every start, not only a public one**, unlike the placeholder-secret check beside it: a placeholder on loopback exposes nothing, whereas a wrong liveness number on a laptop is the one that gets copied into a report.
+
+**Where the code lives.** `meridian.registry.liveness` is a leaf module importing nothing from `meridian`, which is what lets `meridian.config` check a setting against it without an import cycle through the store layer. It owns the `Liveness` vocabulary (re-exported from `meridian.registry`, so callers are unaffected), both thresholds with their provenance, and a pure `derive_liveness` that reads no clock — the instant is passed in, so a caller classifying a page of stations gives them all one value and a test states an age instead of sleeping for it.
+
+**An unknown station raises rather than returning a fifth value.** `UnknownStationError` is a `LookupError`. A caller reaches `liveness()` with an id it has already listed, so an id the registry cannot find is a caller bug, not a state for every call site to branch on. Soft-deleted stations read as absent rather than as permanently offline — a deleted station is not a fault to investigate.
+
+**A safety test refused the drop, and it was right to.** `test_no_sql_file_drops_or_truncates` banned `drop column` outright in any migration — "migrations add; they do not destroy". Rather than edit the assertion until it passed, the ban stays and the exception is now an explicit entry in `ALLOWED_DESTRUCTIVE` naming the file and the statement, so weakening the rule costs a reviewed line in a diff instead of a quiet change to a test nobody re-reads. The bar for an entry is that **no data can be lost** — not that losing it would be convenient — and `stations.liveness` clears it because nothing ever wrote the column. Two further tests hold the allowance honest: one fails if an entry no longer matches the file it names, so a stale permission cannot sit there licensing a future drop; the other refuses any allowance whose statement touches `observations`, `heartbeats`, `passes` or `assignments`, whatever the file is called. That last one was verified to fail by appending a drop against `observations`, which is how we know it can.
+
+*Rejected:* the roadmap's other option, a periodic background job writing the column. It buys nothing here — the derived answer is a subtraction against an indexed timestamp — and it would reintroduce the staleness above between runs. A job is still the right shape for *alerting* on transitions later, and it can compute transitions by comparing derived values without needing anywhere to store the current one.
+
+---
+
+## D-055 — A token that names another station is `not_owner`, and `health` is capped where the body cap cannot see it
+
+**2026-08-08 · accepted** · *records two choices made while implementing MSP §4.2*
+
+**A bearer token that authenticates as one station, presenting a body naming another, is `not_owner` (403).** MSP §6's table glosses `not_owner` as "Assignment was not issued to this station", so §6 does not describe this case at all. The eight codes are closed — a ninth would reach a station as a 500 (`errors.MspError` refuses to build one) — so the choice is between an existing code and inventing protocol, and inventing protocol is not on the table.
+
+`unauthorized` (401) is the near miss and is **rejected on its consequence**. D-024 requires a station meeting 401 to *stop, log and surface to its operator*, and not retry. That is correct for a dead credential and wrong here: the token is live and the fault is the station's own body. A 401 would take a working station off the network over a client bug, and the operator would go looking at the credential rather than at the payload. `not_owner` says "you are not who you claim" at 403, without condemning the token.
+
+**The token is the identity; the body's `station_id` is the station restating it.** The disagreement is refused rather than resolved either way — trusting the token would let a leaked credential file heartbeats under another station's name, and trusting the body would be no authentication at all. The response names neither value, so a token holder cannot probe which station ids exist (MSP §3).
+
+*Consequence for the specification:* `MSP-SPEC.md` §6's gloss for `not_owner` is now narrower than its use. A third-party implementer reading only §6 would not expect a 403 here. The gloss should widen to cover identity as well as assignment ownership; that is a wording change to the published protocol and belongs in the next specification pass, not a silent edit alongside an endpoint.
+
+**`health` is capped at 4 KiB in the Pydantic model, not in the request-size middleware.** D-028 sets both limits and D-050 built the middleware, which reads `Content-Length` and knows nothing about the body's contents. A 60 KiB request carrying a 60 KiB `health` object passes the 64 KiB body cap and must still be refused, so the narrower limit has to live where the parsed object is. Both produce `malformed`, so the split is invisible on the wire and matters only to whoever goes looking for where a limit is enforced.
+
+---
+
+## D-056 — `was_listening()` takes a `mode` and a Doppler-sized frequency tolerance
+
+**2026-08-08 · accepted** · *settles the contract before anything implements it*
+
+`Registry.was_listening()` is declared in Phase 1 and implemented in Stage 5, and the roadmap calls it *"the only authority reliability uses to classify absence"*. Two faults in its declared signature are cheap to fix now and become cross-module changes the moment anything calls it.
+
+**It gains `mode`.** D-028 added `heartbeats.listening_mode` for exactly this method — *"a station tuned to the right frequency running the wrong demodulator did not observe the pass"* — and the signature then omitted the parameter that would let it use the column. Without it, the method cannot answer the question D-028 stored the data to answer.
+
+**With five parameters it takes a dataclass instead.** `CLAUDE.local.md` §2 caps a function at four (five, hard) and says to take a dataclass beyond that. `ListeningQuery` bundles the station, the satellite, the frequency, the mode and the window, matching the precedent set by `store.stations.NewStation` and `OrbitService.pass_windows`.
+
+**The frequency match is a tolerance, not an equality, and the tolerance is Doppler.** `centre_freq_hz: int` compared exactly would answer "was listening" as *false* for every station that retunes during a pass — which is every station that works. The shift at 137 MHz in low Earth orbit reaches roughly ±3 kHz, wider than the receiver's passband, so a station has to retune continuously across a pass rather than sit on the nominal frequency. A station reporting its *current* tuned frequency mid-pass is reporting a Doppler-shifted one.
+
+So the tolerance is the largest shift the geometry can produce: `centre_freq_hz × v_max / c`, with `v_max` a bound on range rate in low Earth orbit. **Fractional rather than fixed, because Doppler is proportional to frequency** — a fixed ±4 kHz would be right at 137 MHz and three times too tight at 437 MHz, which is the band Tier 3 adds (D-053).
+
+*Checked against the risk it creates:* a tolerance wide enough to confuse two satellites would let a station listening to one be credited for another. At 137 MHz the tolerance is under ±4 kHz, and the closest pair in the band this project cares about is NOAA's 137.9125 MHz against Meteor's 137.900 MHz — 12.5 kHz apart, comfortably outside. The tolerance is narrower than the band's own channel spacing, which is the property that has to hold.
+
+**Timing is judged on `received_at`, never `sent_at`.** `0006_heartbeats.sql` already says `sent_at` is the station's clock and untrusted, and this is where that matters most: a station with a broken clock could otherwise assert coverage of any window it liked, and this method decides what counts as a miss. `received_at` is the platform's own clock and the hypertable's partitioning column, so the honest choice is also the fast one. Network delay is seconds against a pass of eight to fifteen minutes.
+
+**Overlap, not coverage.** The roadmap's wording is *"must prove overlap with the pass time"*, and one confirming heartbeat inside the window is what this returns. **This is a real limit and is stated rather than hidden:** a station that listened for thirty seconds of a twelve-minute pass and stopped satisfies it. Refining it to a coverage fraction needs a threshold nobody has evidence for yet, and belongs with the reliability layer that consumes it in Stage 20 — the method returning `bool` is what would have to change, so it is flagged here as the known revision rather than designed around now.
+
+**A valid assignment is part of the proof.** The roadmap lists it fourth, and it is the one criterion that is not a property of the heartbeat alone: the `listening_assignment_id` must name an assignment actually issued to that station. Without the join a station could assert listening against an id it invented, and the platform would count a miss against a pass nobody scheduled.
 
 ---
 

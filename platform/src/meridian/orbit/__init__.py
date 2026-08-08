@@ -8,9 +8,14 @@ and writing one teaches us nothing the library does not already encode.
 
 Coordinate frames are where silent bugs live. TEME — what SGP4 outputs — is not
 ECEF and is not topocentric. Convert deliberately and test against known
-ground-truth passes; the test suite includes a mutation check that disables the
-TEME→ECEF rotation and asserts the predictions move, so the suite is demonstrably
-sensitive to the exact bug class this warning is about.
+ground-truth passes.
+
+**Planned (Stage 6):** the propagator itself, and with it a mutation check
+that disables the TEME→ECEF rotation and asserts the predictions move — so
+the suite is demonstrably sensitive to the exact bug class this warning is
+about, rather than merely accompanied by a warning about it. Nothing in this
+package computes anything yet; it declares the interface the propagator will
+satisfy.
 """
 
 from meridian.orbit.service import OrbitService

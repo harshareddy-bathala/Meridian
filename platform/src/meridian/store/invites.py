@@ -48,6 +48,25 @@ class Invite:
     label: str
     created_at: datetime
     expires_at: datetime | None
+
+    is_expired: bool
+    """Whether ``expires_at`` has passed, **evaluated by the database** (D-046).
+
+    Carried as a column rather than recomputed by callers because
+    :func:`revoke_invite` writes ``expires_at`` with the database's clock, and
+    comparing that against a Python ``datetime.now(UTC)`` compares two clocks.
+    They disagree: measured on this project's own development machine,
+    Postgres ``now()`` ran roughly 6 ms ahead of ``datetime.now(UTC)``, whose
+    resolution is 15.6 ms on Windows anyway (D-045). A revocation is therefore
+    invisible to a Python-side comparison for several milliseconds after it
+    commits — small, but the margin at the instant of revocation is zero by
+    construction, so any skew at all is enough.
+
+    Note ``now()`` in Postgres is transaction start, not statement time. That
+    is the correct reading here: every row a single query returns is then
+    judged against one instant.
+    """
+
     consumed_at: datetime | None
     consumed_by_station_id: str | None
     issued_for_station_id: str | None
@@ -136,8 +155,9 @@ def list_invites(conn: Connection) -> list[Invite]:
     with conn.cursor(row_factory=class_row(Invite)) as cur:
         cur.execute(
             """
-            select label, created_at, expires_at, consumed_at,
-                   consumed_by_station_id, issued_for_station_id
+            select label, created_at, expires_at,
+                   (expires_at is not null and expires_at <= now()) as is_expired,
+                   consumed_at, consumed_by_station_id, issued_for_station_id
             from invite_tokens
             order by created_at desc
             """
@@ -157,8 +177,9 @@ def find_invite_by_hash(conn: Connection, token_sha256: bytes) -> Invite | None:
     with conn.cursor(row_factory=class_row(Invite)) as cur:
         cur.execute(
             """
-            select label, created_at, expires_at, consumed_at,
-                   consumed_by_station_id, issued_for_station_id
+            select label, created_at, expires_at,
+                   (expires_at is not null and expires_at <= now()) as is_expired,
+                   consumed_at, consumed_by_station_id, issued_for_station_id
             from invite_tokens
             where token_sha256 = %s
             """,

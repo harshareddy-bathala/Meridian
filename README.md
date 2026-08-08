@@ -36,6 +36,7 @@ Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](http
 | `docs/GLOSSARY.md` | Domain terms |
 | `docs/PROJECT.md` | The full project document — problem, method, phases, budget |
 | `docs/GIT-WORKFLOW.md` | Commit, branch and review rules |
+| `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` | The staged build order, and what each stage's completion gate is |
 | `CLAUDE.md` | Context for AI coding assistants |
 | `ATTRIBUTION.md` | Log of ideas read from other projects |
 | `site/` | The static site at `meridian.org.in`. No build step — the directory is what gets served. |
@@ -58,6 +59,8 @@ Optional profiles: `--profile metrics` for Prometheus and Grafana on `:3001`, `-
 
 Bringing the whole platform up on a clean machine in under ten minutes is a hard requirement, not an aspiration. If it takes longer, that is a bug. Measured: about five minutes cold on a laptop including image pulls and the image build, twenty seconds warm. On a Pi, pull a prebuilt image rather than building on the device.
 
+CI measures it on every pull request rather than taking the figure on trust — a cold `docker compose up --build` on a clean runner, timed from before the build to the first healthy `/healthz`, failing over 600 seconds.
+
 ## Development
 
 ```bash
@@ -76,7 +79,7 @@ Tests are organised by what they need to run, one directory per marker:
 | `uv run pytest -m msp_conformance` | nothing — it drives the app in-process | yes, from `GET /msp/v0/time` |
 | `uv run pytest -m e2e` | the full compose stack | **not yet** — Stage 10 |
 
-`e2e/` exists with its marker wired and no tests in it, so that command currently selects nothing and pytest exits `5`. That is the expected state until there is a stack to drive — the directory is there first so the marker wiring is settled before anyone writes an end-to-end test, rather than being invented alongside one.
+`e2e/` exists with its marker wired and no tests in it, so that command currently selects nothing and pytest exits `5`. That is the expected state until there is a stack to drive — the directory is there first so the marker wiring is settled before anyone writes an end-to-end test, rather than being invented alongside one. CI runs the marker anyway, tolerating exit `5` and nothing else, so the first end-to-end test to land executes rather than sitting collected-but-never-run.
 
 Conformance tests assert the **bytes** `docs/MSP-SPEC.md` promises — field names, exact error bodies, status codes, version handling — rather than that an operation works. They are what a third-party station implementation would be tested against, which is why they spell out expected bodies in full instead of computing them from the code under test.
 

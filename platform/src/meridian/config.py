@@ -10,6 +10,11 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from meridian.registry.liveness import (
+    MAX_HEARTBEAT_INTERVAL_S,
+    is_heartbeat_interval_consistent,
+)
+
 __all__ = [
     "InsecureConfigurationError",
     "Settings",
@@ -46,6 +51,8 @@ class Settings:
     public_base_url: str
     tunnel_hostname: str
     public_mode: bool
+
+    grafana_admin_password: str
 
     simulator_seed: int
     simulator_station_count: int
@@ -189,6 +196,13 @@ def load_settings(*, env: dict[str, str] | None = None) -> Settings:
     Placeholders are fine on loopback — that is what makes ``cp .env.example .env
     && docker compose up`` work out of the box, which the ten-minute bring-up
     requirement needs.
+
+    **A second refusal has nothing to do with secrets and fires everywhere.**
+    ``HEARTBEAT_INTERVAL_S`` past 30 s leaves SC-5's fixed liveness thresholds
+    describing something other than "two and three missed heartbeats", and a
+    healthy station then reads ``stale`` for part of every cycle. That is a wrong
+    number rather than an exposure, so loopback is not an excuse — see
+    :func:`_refuse_an_interval_liveness_cannot_describe`.
     """
     if env is not None:
         os.environ.update(env)
@@ -211,31 +225,68 @@ def load_settings(*, env: dict[str, str] | None = None) -> Settings:
         public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"),
         tunnel_hostname=os.environ.get("TUNNEL_HOSTNAME", "").strip(),
         public_mode=_bool_env("MERIDIAN_PUBLIC", False),
+        grafana_admin_password=os.environ.get("GRAFANA_ADMIN_PASSWORD", PLACEHOLDER),
         simulator_seed=_int_env("SIMULATOR_SEED", 4471),
         simulator_station_count=_int_env("SIMULATOR_STATION_COUNT", 1),
     )
 
+    _refuse_an_interval_liveness_cannot_describe(settings.heartbeat_interval_s)
+
     if settings.is_public:
-        # The database password is read back out of the URL the process will
-        # actually connect with, not from POSTGRES_PASSWORD. Compose embeds the
-        # password inside DATABASE_URL and never passes the separate variable to
-        # the API, so a check against the variable passed a deployment carrying
-        # `change-me` in the URL it was about to use.
-        placeholders = [
-            name
-            for name, value in (
-                ("TOKEN_HASH_PEPPER", settings.token_hash_pepper),
-                ("REGISTRATION_INVITE_TOKEN", settings.registration_invite_token),
-                ("DATABASE_URL password", settings.database_password),
-            )
-            if value == PLACEHOLDER
-        ]
-        if placeholders:
-            raise InsecureConfigurationError(
-                "Refusing to start: "
-                + ", ".join(placeholders)
-                + f" still set to {PLACEHOLDER!r} while the platform is publicly "
-                "reachable. Generate each with: openssl rand -hex 32"
-            )
+        _refuse_placeholder_secrets(settings)
 
     return settings
+
+
+def _refuse_an_interval_liveness_cannot_describe(heartbeat_interval_s: int) -> None:
+    """Raise if the configured interval would make a healthy station read stale."""
+    # Checked on every start, not only a public one, unlike the placeholder
+    # refusal below. A placeholder secret on loopback exposes nothing; an
+    # interval past this ceiling produces *wrong numbers* on any deployment,
+    # and CLAUDE.md's seventh rule makes liveness load-bearing for every
+    # reliability figure in the project. A wrong figure on a laptop is the one
+    # that gets copied into a report.
+    if is_heartbeat_interval_consistent(heartbeat_interval_s):
+        return
+    raise InsecureConfigurationError(
+        f"Refusing to start: HEARTBEAT_INTERVAL_S is {heartbeat_interval_s}, and "
+        f"liveness thresholds are fixed at 60 s and 90 s by SC-5 (D-013). Above "
+        f"{MAX_HEARTBEAT_INTERVAL_S} s a station heartbeating exactly on time "
+        "spends part of every cycle reading 'stale'. Use 30, which is what "
+        "D-030 fixes for all of MSP 0.x."
+    )
+
+
+def _refuse_placeholder_secrets(settings: Settings) -> None:
+    """Raise if any secret is still ``change-me`` on a publicly reachable deployment."""
+    # The database password is read back out of the URL the process will
+    # actually connect with, not from POSTGRES_PASSWORD. Compose embeds the
+    # password inside DATABASE_URL and never passes the separate variable to
+    # the API, so a check against the variable passed a deployment carrying
+    # `change-me` in the URL it was about to use.
+    #
+    # GRAFANA_ADMIN_PASSWORD is checked even though Grafana runs only under
+    # `--profile metrics` and this process cannot see which profiles are up.
+    # That is deliberately over-strict: compose publishes Grafana on host
+    # :3001, `--profile public --profile metrics` with a copied .env produced a
+    # platform that started cleanly beside an admin console on `admin/change-me`,
+    # and the cost of the strict direction is a refusal with a message saying
+    # exactly which variable to set.
+    placeholders = [
+        name
+        for name, value in (
+            ("TOKEN_HASH_PEPPER", settings.token_hash_pepper),
+            ("REGISTRATION_INVITE_TOKEN", settings.registration_invite_token),
+            ("DATABASE_URL password", settings.database_password),
+            ("GRAFANA_ADMIN_PASSWORD", settings.grafana_admin_password),
+        )
+        if value == PLACEHOLDER
+    ]
+    if not placeholders:
+        return
+    raise InsecureConfigurationError(
+        "Refusing to start: "
+        + ", ".join(placeholders)
+        + f" still set to {PLACEHOLDER!r} while the platform is publicly "
+        "reachable. Generate each with: openssl rand -hex 32"
+    )

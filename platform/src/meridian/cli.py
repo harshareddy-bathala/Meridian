@@ -7,9 +7,11 @@ naming a file nobody had written. A declared executable that does not exist is
 worse than an absent one: it is discovered by whoever is trying to use it, at the
 moment they need it.
 
-``invite`` is real (Stage 4.2) — it opens its own short-lived connection rather
-than the API's pooled one, because a one-shot process has nothing to pool.
-Every other subcommand here is still a **shell**: the parser, the arguments and
+``invite`` (Stage 4.2) and ``station`` (Stage 5) are real — each opens its own
+short-lived connection rather than the API's pooled one, because a one-shot
+process has nothing to pool. Between them they are the whole operator surface
+for admitting a station and shutting one out.
+``passes`` and ``serve`` are still **shells**: the parser, the arguments and
 the exit codes are real; the work is not. Each one names the stage that
 implements it, so a caller gets an answer instead of a traceback.
 
@@ -29,7 +31,7 @@ import psycopg
 
 from meridian import __version__
 from meridian.config import load_settings
-from meridian.store import invites
+from meridian.store import invites, stations
 from meridian.store.pool import CONNECT_TIMEOUT_S
 
 __all__ = ["main"]
@@ -49,8 +51,9 @@ NEEDS_ACTION = frozenset({"passes"})
 
 ``meridian serve`` is complete on its own; ``meridian passes`` is not, and
 printing that subparser's help is more useful than reporting the whole group
-as pending. ``invite`` needs the same treatment but is handled separately in
-:func:`main`, since it dispatches to real handlers rather than :func:`_pending`.
+as pending. ``invite`` and ``station`` need the same treatment but are handled
+separately in :func:`main`, since they dispatch to real handlers rather than
+to :func:`_pending`.
 """
 
 
@@ -159,7 +162,9 @@ def _invite_state(invite: invites.Invite) -> str:
     """One word (or two) describing what can still be done with an invite."""
     if invite.consumed_at is not None:
         return f"consumed by {invite.consumed_by_station_id}"
-    if invite.expires_at is not None and invite.expires_at <= datetime.now(UTC):
+    # The database decides this, not a comparison here — an invite revoked
+    # moments ago would otherwise still print "pending" (D-046).
+    if invite.is_expired:
         return "expired"
     return "pending"
 
@@ -177,16 +182,60 @@ def _invite_revoke(conn: invites.Connection, args: argparse.Namespace) -> int:
     return 0
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="meridian",
-        description="Control platform for satellite ground stations.",
-    )
-    parser.add_argument(
-        "--version", action="version", version=f"meridian {__version__}"
-    )
-    subcommands = parser.add_subparsers(dest="command", metavar="<command>")
+def _run_station(args: argparse.Namespace) -> int:
+    """Run ``meridian station revoke``, the subcommand's only action.
 
+    No dispatch on ``args.action``, unlike :func:`_run_invite`: argparse admits
+    exactly one action here and :func:`main` has already sent the actionless
+    case to the help text, so a lookup would have one entry and no decision to
+    make. A second action turns this into the same shape as ``invite``.
+
+    Its own connection for the invocation, for the same reason
+    :func:`_run_invite` opens one: a CLI call is a single short-lived process
+    and there is nothing here for a pool to amortize.
+    """
+    settings = load_settings()
+    try:
+        conn = psycopg.connect(settings.psycopg_url, connect_timeout=CONNECT_TIMEOUT_S)
+    except (psycopg.Error, OSError) as exc:
+        print(  # noqa: T201 — this is a CLI; stderr is the interface
+            f"meridian station: cannot reach the database: {exc}", file=sys.stderr
+        )
+        return EXIT_FAILED
+
+    with conn:
+        return _station_revoke(conn, args)
+
+
+def _station_revoke(conn: stations.Connection, args: argparse.Namespace) -> int:
+    """Handle ``meridian station revoke``."""
+    if not stations.revoke_station_token(conn, station_id=args.station_id):
+        print(  # noqa: T201 — this is a CLI; stderr is the interface
+            f"meridian station revoke: no station with a live token: {args.station_id}",
+            file=sys.stderr,
+        )
+        return EXIT_FAILED
+    print(  # noqa: T201
+        f"Revoked the bearer token for {args.station_id}. Its next request gets 401."
+    )
+    print(  # noqa: T201
+        "The station will stop and surface the failure to its operator rather "
+        "than re-register (D-024). To let it back in, issue a replacement "
+        "invite bound to it: meridian invite create --label <who> "
+        f"--for-station {args.station_id}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _add_invite_parser(
+    # argparse gives this object no public name. Spelling out the private one is
+    # still better than `Any`, which mypy's disallow_any_explicit forbids and
+    # which would switch off checking for every helper below. `from __future__
+    # import annotations` means it is never evaluated at runtime.
+    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """Wire ``meridian invite`` and its three actions."""
     invite = subcommands.add_parser(
         "invite",
         help="issue, list and revoke registration invites",
@@ -216,6 +265,36 @@ def _build_parser() -> argparse.ArgumentParser:
     revoke = invite_actions.add_parser("revoke", help="withdraw an unconsumed invite")
     revoke.add_argument("--label", required=True)
 
+
+def _add_station_parser(
+    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """Wire ``meridian station`` and its one action."""
+    station = subcommands.add_parser(
+        "station",
+        help="operate on a registered station",
+        description=(
+            "Revocation is the operator's only way to shut a station out. A "
+            "compromised or decommissioned station keeps working until its "
+            "token is withdrawn, because a bearer token has no expiry (D-017)."
+        ),
+    )
+    station_actions = station.add_subparsers(dest="action", metavar="<action>")
+    revoke = station_actions.add_parser(
+        "revoke", help="withdraw a station's bearer token, effective immediately"
+    )
+    revoke.add_argument(
+        "--station-id",
+        required=True,
+        metavar="STATION_ID",
+        help="the station to shut out, as it appears in the register response",
+    )
+
+
+def _add_pending_parsers(
+    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """Wire the subcommands whose parsers are real and whose work is not."""
     passes = subcommands.add_parser("passes", help="generate pass windows")
     passes_actions = passes.add_subparsers(dest="action", metavar="<action>")
     generate = passes_actions.add_parser(
@@ -225,6 +304,27 @@ def _build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
 
     subcommands.add_parser("serve", help="run the API (use uvicorn directly for now)")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """The whole command tree.
+
+    One helper per subcommand rather than one long body: the function was
+    already at 49 lines against CLAUDE.local.md §2's limit of 40, and a parser
+    builder grows by a block every time a command lands.
+    """
+    parser = argparse.ArgumentParser(
+        prog="meridian",
+        description="Control platform for satellite ground stations.",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"meridian {__version__}"
+    )
+    subcommands = parser.add_subparsers(dest="command", metavar="<command>")
+
+    _add_invite_parser(subcommands)
+    _add_station_parser(subcommands)
+    _add_pending_parsers(subcommands)
 
     return parser
 
@@ -238,6 +338,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.action is None:
             parser.parse_args(["invite", "--help"])  # exits
         return _run_invite(args)
+
+    if args.command == "station":
+        if args.action is None:
+            parser.parse_args(["station", "--help"])  # exits
+        return _run_station(args)
 
     pending = PENDING.get(args.command)
     if pending is None:  # no subcommand, or one argparse already rejected

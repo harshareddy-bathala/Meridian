@@ -21,7 +21,6 @@ dev = [
     "meridian-client",
     "meridian-sim",
     "pytest>=8.0",
-    "pytest-asyncio>=0.24",
     "ruff>=0.6",
     "mypy>=1.11",
     "httpx>=0.27",
@@ -185,12 +184,21 @@ warn_unreachable = true
 mypy_path = ["platform/src", "client/src", "simulator/src"]
 
 [[tool.mypy.overrides]]
+# Neither library ships type information, and neither ever will — `sgp4` is a
+# port of a 1980s Fortran reference and `skyfield` predates the typing ecosystem
+# it would need. Without this every import in meridian/orbit is an error about
+# the library rather than about our code. Scoped to these two names, so a
+# dependency added later is type-checked by default rather than by omission.
 module = ["sgp4.*", "skyfield.*"]
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-module = ["tests.*"]
-strict = false
+# There is deliberately no `tests.*` override. CI type-checks
+# `platform/src client/src simulator/src` and not `tests/`, and mypy cannot load
+# the suite anyway: four directories each hold a `conftest.py`, none of them are
+# packages, and mypy rejects the duplicate module name before it checks a line.
+# A `strict = false` block for a path that is never checked reads as "tests are
+# type-checked leniently" when the truth is that they are not type-checked at
+# all — so the block is gone and this comment says which it is.
 
 [[tool.mypy.overrides]]
 # A bare `class X(BaseModel):` fails disallow_any_explicit — BaseModel's own
@@ -227,8 +235,3 @@ markers = [
     "msp_conformance: asserts exact MSP wire shapes against golden fixtures",
     "e2e: needs the full compose stack",
 ]
-
-[tool.coverage.report]
-# Report only. No threshold gate in Phase 1 — a coverage floor this early
-# produces tests written for the floor.
-show_missing = true

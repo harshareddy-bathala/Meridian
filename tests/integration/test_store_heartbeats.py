@@ -55,7 +55,7 @@ def sample_station(station_id: str) -> NewStation:
         simulated=False,
         simulator_run_id=None,
         seed=None,
-        client_impl="meridian-reference",
+        client_implementation="meridian-reference",
         client_version="0.1.0",
     )
 

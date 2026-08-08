@@ -19,11 +19,13 @@ from meridian.config import InsecureConfigurationError, Settings, load_settings
 REAL_PEPPER = "0f9a" * 16
 REAL_INVITE = "7c31" * 16
 REAL_PASSWORD = "e41b" * 16
+REAL_GRAFANA_PASSWORD = "b28d" * 16
 
 BASE_ENV = {
     "DATABASE_URL": "postgresql://meridian:change-me@db:5432/meridian",
     "TOKEN_HASH_PEPPER": "change-me",
     "REGISTRATION_INVITE_TOKEN": "change-me",
+    "GRAFANA_ADMIN_PASSWORD": "change-me",
 }
 
 MANAGED = (
@@ -37,6 +39,8 @@ MANAGED = (
     "TUNNEL_HOSTNAME",
     "MERIDIAN_PUBLIC",
     "API_PORT",
+    "HEARTBEAT_INTERVAL_S",
+    "GRAFANA_ADMIN_PASSWORD",
 )
 
 
@@ -59,6 +63,7 @@ def _secure(**overrides: str) -> dict[str, str]:
         "DATABASE_URL": f"postgresql://meridian:{REAL_PASSWORD}@db:5432/meridian",
         "TOKEN_HASH_PEPPER": REAL_PEPPER,
         "REGISTRATION_INVITE_TOKEN": REAL_INVITE,
+        "GRAFANA_ADMIN_PASSWORD": REAL_GRAFANA_PASSWORD,
         **overrides,
     }
 
@@ -84,6 +89,7 @@ def test_placeholders_are_refused_on_a_public_address(
     assert "TOKEN_HASH_PEPPER" in message
     assert "REGISTRATION_INVITE_TOKEN" in message
     assert "DATABASE_URL password" in message
+    assert "GRAFANA_ADMIN_PASSWORD" in message
 
 
 def test_a_tunnel_hostname_alone_counts_as_public(
@@ -140,6 +146,7 @@ def test_a_placeholder_password_inside_database_url_is_caught(
     message = str(excinfo.value)
     assert "DATABASE_URL password" in message
     assert "TOKEN_HASH_PEPPER" not in message
+    assert "GRAFANA_ADMIN_PASSWORD" not in message
 
 
 def test_postgres_password_still_covered_when_no_database_url_is_set(
@@ -186,3 +193,75 @@ def test_an_unparseable_public_flag_is_refused(monkeypatch: pytest.MonkeyPatch) 
     """
     with pytest.raises(InsecureConfigurationError, match="MERIDIAN_PUBLIC"):
         _load(monkeypatch, MERIDIAN_PUBLIC="maybe")
+
+
+def test_a_placeholder_grafana_password_alone_refuses_a_public_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every other secret real, and the platform still must not start.
+
+    `--profile public --profile metrics` with a copied .env produced exactly
+    this: a platform that started cleanly beside a Grafana published on host
+    :3001 with `admin/change-me`. The variable is passed to the api service for
+    no reason other than to let this check see it.
+    """
+    with pytest.raises(InsecureConfigurationError) as excinfo:
+        _load(
+            monkeypatch,
+            **_secure(GRAFANA_ADMIN_PASSWORD="change-me"),
+            PUBLIC_BASE_URL="https://meridian.example.org",
+        )
+
+    message = str(excinfo.value)
+    assert "GRAFANA_ADMIN_PASSWORD" in message
+    assert "TOKEN_HASH_PEPPER" not in message
+
+
+def test_a_placeholder_grafana_password_is_fine_on_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cp .env.example .env && docker compose --profile metrics up` still works.
+
+    The strict direction is only strict where it matters. A Grafana on a laptop's
+    own loopback is the development case the ten-minute bring-up depends on.
+    """
+    settings = _load(monkeypatch, PUBLIC_BASE_URL="http://localhost:8000")
+
+    assert not settings.is_public
+    assert settings.grafana_admin_password == "change-me"
+
+
+def test_a_heartbeat_interval_liveness_cannot_describe_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fires on loopback too, unlike the placeholder refusal.
+
+    SC-5 fixes `stale` at 60 s and `offline` at 90 s (D-013). At a 45 s
+    interval a station heartbeating exactly on time is more than 60 s past its
+    last heartbeat for part of every cycle, so it flaps into `stale` while
+    behaving as specified — and every reliability figure reading liveness
+    inherits that. A wrong number is not excused by being local.
+    """
+    with pytest.raises(InsecureConfigurationError) as excinfo:
+        _load(
+            monkeypatch,
+            PUBLIC_BASE_URL="http://localhost:8000",
+            HEARTBEAT_INTERVAL_S="45",
+        )
+
+    message = str(excinfo.value)
+    assert "HEARTBEAT_INTERVAL_S" in message
+    assert "30" in message
+
+
+def test_the_default_heartbeat_interval_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-030 fixes 30 s for all of MSP 0.x, and it must survive its own check.
+
+    A consistency check that rejected the documented default would be found by
+    whoever ran `docker compose up` on a clean machine.
+    """
+    settings = _load(monkeypatch, PUBLIC_BASE_URL="http://localhost:8000")
+
+    assert settings.heartbeat_interval_s == 30

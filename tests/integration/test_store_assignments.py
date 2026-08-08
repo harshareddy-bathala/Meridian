@@ -272,6 +272,31 @@ def test_find_due_assignments_respects_the_window_and_carries_joined_fields(
     assert result.expected_max_elevation_deg == 61.4
     assert result.element_set_line1 == LINE1
     assert result.element_set_line2 == LINE2
+    # CLAUDE.md rule 5 — the column exists on `assignments`, so the query that
+    # feeds MSP §4.3 has to carry it or the message cannot mark itself (D-048).
+    assert result.simulated is False
+
+
+def test_find_due_assignments_carries_a_simulated_assignment(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    now = datetime.now(UTC)
+    insert_assignment(
+        assignment_id="as_simulated",
+        start_at=now + timedelta(minutes=5),
+        end_at=now + timedelta(minutes=15),
+    )
+    with rollback.cursor() as cur:
+        cur.execute(
+            "update assignments set simulated = true where assignment_id = %s",
+            ("as_simulated",),
+        )
+
+    due = find_due_assignments(
+        rollback, STATION_ID, horizon_end=now + timedelta(hours=2)
+    )
+
+    assert [d.simulated for d in due] == [True]
 
 
 def test_find_due_assignments_returns_more_than_eight_when_eligible(

@@ -114,6 +114,7 @@ Response:
 **Notes.**
 
 - `min_elevation_deg` is the station's declared floor, not its measured horizon — the platform learns the real obstruction profile from observation history and may override this downward per azimuth. Altitude is required: it materially affects pass geometry.
+- `location` is **ISO 6709**: `lat` in −90..+90, `lon` in −180..+180, `alt_m` in metres above the ellipsoid. A longitude outside that range is `malformed`, including one expressed as 0..360 — 200 is not accepted as a spelling of −160, because a platform that silently rewrote it would be guessing which convention a station meant. Stated because the ranges were previously left implicit and the reference implementation accepted 0..360 for longitude by mistake; see `docs/DECISIONS.md` D-052.
 - `horizon_mask` is **optional** and azimuth-resolved: an obstruction the operator already knows about, because they can see the building. The platform applies `max(declared, learned)` per azimuth bin, so a declaration constrains scheduling immediately but never overwrites a measurement and never becomes training data for the learned profile. A station that omits it is not claiming a clear horizon, only that it has not measured one. See `docs/DECISIONS.md` D-031.
 - `simulated` is **required** and **top-level**, alongside `name` and `location`. It is a property of the station, not of the client implementation — a physical station may run the simulator's client build for testing, and a simulated station may be driven by the reference client. See §5 and `docs/DECISIONS.md` D-005.
 - `invite_token` is consumed by a successful registration. A rejected or reused token returns `403` with error code `invalid_invite`.
@@ -377,7 +378,9 @@ A request over its limit is rejected as `malformed` before the body is parsed.
 | `health` object, serialised | 4 KiB |
 | `doppler_samples` | 512 entries |
 
-These are stated in the protocol rather than left to the deployment because a station needs to know what it may send before it sends it, and because `health` is opaque JSON written every thirty seconds by every station — unbounded, that is storage exhaustion with no attacker required. See `docs/DECISIONS.md` D-028 and D-032.
+**A request carrying a body must declare its length.** A `POST` without a `Content-Length` header — a chunked body — is `malformed`, because a body of undeclared size cannot be checked against the limit before it is parsed, which is what the paragraph above requires. Every HTTP client that sends a JSON body sends `Content-Length` for it, so this constrains no ordinary station; it is stated because a station implementer streaming a body would otherwise discover it as a rejection. `GET /msp/v0/time` carries no body and is unaffected.
+
+These are stated in the protocol rather than left to the deployment because a station needs to know what it may send before it sends it, and because `health` is opaque JSON written every thirty seconds by every station — unbounded, that is storage exhaustion with no attacker required. See `docs/DECISIONS.md` D-028, D-032 and D-050.
 
 ---
 

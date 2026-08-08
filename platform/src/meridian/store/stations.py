@@ -24,10 +24,15 @@ __all__ = [
     "Capability",
     "Connection",
     "NewStation",
+    "StationHeartbeat",
+    "StationProvenance",
     "StationRecoveryInfo",
     "find_station_for_recovery",
+    "find_station_heartbeat",
     "find_station_id_by_token_hash",
+    "find_station_provenance",
     "insert_station",
+    "revoke_station_token",
     "rotate_station_token",
 ]
 
@@ -78,7 +83,7 @@ class NewStation:
     simulated: bool
     simulator_run_id: str | None
     seed: int | None
-    client_impl: str | None
+    client_implementation: str | None
     client_version: str | None
 
 
@@ -107,7 +112,7 @@ def insert_station(
             insert into stations
                 (station_id, name, operator, lat_deg, lon_deg, alt_m,
                  token_sha256, registration_key_sha256, simulated,
-                 simulator_run_id, seed, client_impl, client_version)
+                 simulator_run_id, seed, client_implementation, client_version)
             values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
@@ -122,7 +127,7 @@ def insert_station(
                 station.simulated,
                 station.simulator_run_id,
                 station.seed,
-                station.client_impl,
+                station.client_implementation,
                 station.client_version,
             ),
         )
@@ -159,11 +164,14 @@ class StationRecoveryInfo:
     inside D-023's recovery window" — a question that only applies to an
     *unbound* invite; a bound invite (D-034) ignores the window entirely, so
     the registry service reads these two fields only on that path.
+    ``simulated`` answers "is the station recovering the same *kind* of
+    station it registered as" (D-048).
     """
 
     registration_key_sha256: bytes
     registered_at: datetime
     last_heartbeat_at: datetime | None
+    simulated: bool
 
 
 def find_station_for_recovery(
@@ -180,9 +188,104 @@ def find_station_for_recovery(
     with conn.cursor(row_factory=class_row(StationRecoveryInfo)) as cur:
         cur.execute(
             """
-            select registration_key_sha256, registered_at, last_heartbeat_at
+            select registration_key_sha256, registered_at, last_heartbeat_at,
+                   simulated
             from stations
             where station_id = %s
+            """,
+            (station_id,),
+        )
+        return cur.fetchone()
+
+
+@dataclass(frozen=True, slots=True)
+class StationProvenance:
+    """Whether a station's data is simulated, and what produced it.
+
+    The three fields ``0002_stations.sql`` keeps together under its
+    ``station_simulated_together`` CHECK: a simulated station carries a run
+    id and a seed, a real one carries neither.
+    """
+
+    simulated: bool
+    simulator_run_id: str | None
+    seed: int | None
+
+
+def find_station_provenance(
+    conn: Connection, station_id: str
+) -> StationProvenance | None:
+    """The registry's answer to "is this station simulated", for one station.
+
+    **This is the only admissible source of ``simulated`` for anything a
+    station sends.** A heartbeat and an observation both carry a
+    ``simulated`` field on the wire, and a station is free to put whatever it
+    likes there; taking it at face value would let a simulated station file
+    measured-looking rows, which is the failure CLAUDE.md's fifth rule exists
+    to prevent. ``meridian.observations``' own module docstring states the
+    same invariant. The value belongs to the registration record, and this is
+    how a caller reads it back.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+        station_id: The station to look up, already authenticated.
+
+    Returns:
+        Its provenance, or ``None`` when no such station exists.
+    """
+    with conn.cursor(row_factory=class_row(StationProvenance)) as cur:
+        cur.execute(
+            """
+            select simulated, simulator_run_id, seed
+            from stations
+            where station_id = %s
+            """,
+            (station_id,),
+        )
+        return cur.fetchone()
+
+
+@dataclass(frozen=True, slots=True)
+class StationHeartbeat:
+    """When a station last reported, if it ever has."""
+
+    last_heartbeat_at: datetime | None
+    """Timezone-aware UTC, or ``None`` when the station has never heartbeat.
+
+    ``None`` is not "very old". A station that registered and never reported is
+    a commissioning problem; one that reported and stopped is a fault in
+    something that was working. ``registry.liveness.derive_liveness`` keeps them
+    apart as ``never_seen`` and ``offline``.
+    """
+
+
+def find_station_heartbeat(
+    conn: Connection, station_id: str
+) -> StationHeartbeat | None:
+    """When one station last reported.
+
+    Separate from :func:`find_station_for_recovery`, which reads the same column
+    among four others for a different question. A caller asking about liveness
+    should not have to fetch a registration key hash to get it.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+        station_id: The station to look up.
+
+    Returns:
+        Its last heartbeat instant, or ``None`` when there is no such station.
+        The two ``None``s are at different levels and mean different things: no
+        row at all versus a row that has never reported. Deleted stations are
+        excluded, so a soft-deleted station reads as absent rather than as
+        permanently offline — it is not a fault to investigate.
+    """
+    with conn.cursor(row_factory=class_row(StationHeartbeat)) as cur:
+        cur.execute(
+            """
+            select last_heartbeat_at
+            from stations
+            where station_id = %s
+              and deleted_at is null
             """,
             (station_id,),
         )
@@ -208,6 +311,50 @@ def rotate_station_token(
             """,
             (token_sha256, station_id),
         )
+
+
+def revoke_station_token(conn: Connection, *, station_id: str) -> bool:
+    """Withdraw a station's bearer token, so the next request it makes is a 401.
+
+    The counterpart to :func:`rotate_station_token`, which clears this column.
+    Nothing wrote ``token_revoked_at`` before this function existed — the column
+    was declared in ``0002_stations.sql`` and read by
+    :func:`find_station_id_by_token_hash`, and the only statement touching it
+    *cleared* it, so a compromised station could not be shut out at all.
+
+    Args:
+        conn: Open connection. The caller owns the transaction.
+        station_id: The station whose credential is being withdrawn.
+
+    Returns:
+        True when a live token was withdrawn. False when the station does not
+        exist, is deleted, or was already revoked — the three cases an operator
+        does not need told apart, since in all of them the station holds no
+        working token afterwards. Matching ``revoke_invite``'s shape.
+
+    Note:
+        Guarded on ``token_revoked_at is null`` so that revoking twice keeps the
+        **first** timestamp. That instant is when the credential actually died,
+        and overwriting it with the moment somebody repeated the command would
+        lose the only record of when the exposure ended.
+
+        Revocation takes effect on the next request with no invalidation step,
+        because ``find_station_id_by_token_hash`` filters on this column at
+        lookup rather than consulting a cache. Stage 5's completion gate asks
+        for revocation to be immediate; it is immediate by construction.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            update stations
+            set token_revoked_at = now()
+            where station_id = %s
+              and token_revoked_at is null
+              and deleted_at is null
+            """,
+            (station_id,),
+        )
+        return cur.rowcount > 0
 
 
 def find_station_id_by_token_hash(conn: Connection, token_sha256: bytes) -> str | None:

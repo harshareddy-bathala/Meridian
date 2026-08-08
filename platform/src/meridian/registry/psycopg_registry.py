@@ -1,9 +1,9 @@
 """``PsycopgRegistry`` — the concrete ``Registry`` backed by the store layer.
 
-Implements ``Registry.register()`` and ``Registry.authenticate()`` against
-``meridian.store.stations`` and ``meridian.store.invites``. ``liveness()`` and
-``was_listening()`` are not implemented here — Stage 5, once heartbeats carry
-data to derive them from.
+Implements ``Registry.register()``, ``Registry.authenticate()`` and
+``Registry.liveness()`` against ``meridian.store.stations`` and
+``meridian.store.invites``, and ``Registry.was_listening()`` against
+``meridian.store.heartbeats``.
 
 This module holds MSP §4.1's actual decision logic: which of the six rows of
 its recovery table a presented ``(invite_token, registration_key)`` pair
@@ -11,16 +11,31 @@ selects. Everything below it is store calls; everything above it — parsing
 the wire request into a ``RegistrationRequest``, translating
 ``InvalidInviteError`` into a `403` — is the API layer's job.
 
-Reference: docs/MSP-SPEC.md §4.1; docs/DECISIONS.md D-017, D-020, D-023, D-034.
+Reference: docs/MSP-SPEC.md §4.1, §4.2; docs/DECISIONS.md D-017, D-020, D-023,
+D-034, D-054, D-056.
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
-from meridian.registry import InvalidInviteError, Registration, RegistrationRequest
+from meridian.registry import (
+    InvalidInviteError,
+    ListeningQuery,
+    Liveness,
+    Registration,
+    RegistrationRequest,
+    UnknownStationError,
+)
+from meridian.registry.doppler_tolerance import doppler_tolerance_hz
+from meridian.registry.liveness import derive_liveness
+from meridian.store.heartbeats import (
+    ListeningEvidenceQuery,
+    has_listening_evidence,
+)
 from meridian.store.invites import (
     consume_invite,
     find_invite_by_hash,
@@ -31,6 +46,7 @@ from meridian.store.stations import (
     NewStation,
     StationRecoveryInfo,
     find_station_for_recovery,
+    find_station_heartbeat,
     find_station_id_by_token_hash,
     insert_station,
     rotate_station_token,
@@ -100,25 +116,35 @@ def is_recovery_eligible(
 
 
 class PsycopgRegistry:
-    """``Registry.register()`` and ``.authenticate()``, backed by the store layer.
+    """The whole ``Registry`` protocol, backed by the store layer.
 
-    A **partial** implementation: ``liveness()`` and ``was_listening()`` are
-    not here. Deliberately not declared to inherit from ``Registry`` —
-    Python resolves the protocol structurally, and there is no benefit to
-    forcing a subclass relationship before the class actually satisfies it.
-    Stage 5 completes it once heartbeat data exists to derive them from.
+    Complete: all four ``Registry`` methods are implemented here. Deliberately
+    not declared to inherit from ``Registry`` — Python resolves the protocol
+    structurally, so the annotation would buy nothing that ``mypy`` does not
+    already check at every call site that expects a ``Registry``.
 
-    Constructed per request with an open connection and the two ``Settings``
-    fields it needs — the shape a FastAPI ``Depends()`` builds it with.
+    Constructed per request with an open connection, the two ``Settings``
+    fields it needs, and the instant to judge time-dependent rows against —
+    the shape a FastAPI ``Depends()`` builds it with.
+
+    ``now_utc`` is taken at construction rather than read from the clock
+    inside each decision: one request is one instant, and a registry built
+    with an explicit instant is testable without freezing the system clock.
     """
 
     def __init__(
-        self, conn: Connection, *, pepper: str, recovery_window_s: int
+        self,
+        conn: Connection,
+        *,
+        pepper: str,
+        recovery_window_s: int,
+        now_utc: datetime,
     ) -> None:
-        """Bind this instance to one request's connection and configuration."""
+        """Bind this instance to one request's connection, configuration and instant."""
         self._conn = conn
         self._pepper = pepper
         self._recovery_window_s = recovery_window_s
+        self._now_utc = now_utc
 
     def register(self, request: RegistrationRequest) -> Registration:
         """See :meth:`meridian.registry.Registry.register` for the contract."""
@@ -126,6 +152,16 @@ class PsycopgRegistry:
         invite = find_invite_by_hash(self._conn, invite_hash)
         if invite is None:
             raise InvalidInviteError("no such invite")
+
+        # Checked before any row of MSP §4.1's table is selected: an operator
+        # who ran `meridian invite revoke` has withdrawn the invite for every
+        # outcome, recovery included, and a bound invite is exempt from
+        # D-034's *window* but not from its own expiry. `is_expired` is
+        # computed by the database rather than compared here, because
+        # `revoke_invite` writes `expires_at` with the database's clock —
+        # see Invite.is_expired and D-046.
+        if invite.is_expired:
+            raise InvalidInviteError("invite expired or withdrawn")
 
         if invite.issued_for_station_id is not None:
             if invite.consumed_at is not None:
@@ -148,6 +184,43 @@ class PsycopgRegistry:
             self._conn, hash_with_pepper(self._pepper, bearer_token)
         )
 
+    def liveness(self, station_id: str, *, now: datetime) -> Liveness:
+        """See :meth:`meridian.registry.Registry.liveness` for the contract.
+
+        Two lines of work, deliberately: read the instant, then classify it.
+        The classification lives in :func:`meridian.registry.liveness.
+        derive_liveness`, which is pure and has its own unit tests, so the
+        thresholds SC-5 fixes are not buried behind a database.
+        """
+        heartbeat = find_station_heartbeat(self._conn, station_id)
+        if heartbeat is None:
+            raise UnknownStationError(station_id)
+        return derive_liveness(heartbeat.last_heartbeat_at, now=now)
+
+    def was_listening(self, query: ListeningQuery) -> bool:
+        """See :meth:`meridian.registry.Registry.was_listening` for the contract.
+
+        The one domain judgement made here is how wide "the same frequency" is.
+        A station retunes continuously across a pass, so it reports a
+        Doppler-shifted frequency rather than the assignment's nominal one, and
+        the store layer is handed an explicit range rather than a centre and a
+        rule for widening it (D-056).
+        """
+        tolerance_hz = doppler_tolerance_hz(query.centre_freq_hz)
+        window_start, window_end = query.window
+        return has_listening_evidence(
+            self._conn,
+            ListeningEvidenceQuery(
+                station_id=query.station_id,
+                satellite_id=query.satellite_id,
+                mode=query.mode,
+                freq_min_hz=query.centre_freq_hz - tolerance_hz,
+                freq_max_hz=query.centre_freq_hz + tolerance_hz,
+                window_start=window_start,
+                window_end=window_end,
+            ),
+        )
+
     def _create_station(
         self, invite_hash: bytes, request: RegistrationRequest
     ) -> Registration:
@@ -168,12 +241,12 @@ class PsycopgRegistry:
             simulated=request.simulated,
             simulator_run_id=request.simulator_run_id,
             seed=request.seed,
-            client_impl=request.client_impl,
+            client_implementation=request.client_implementation,
             client_version=request.client_version,
         )
         with self._conn.transaction():
             insert_station(self._conn, new_station, request.capabilities)
-            consume_invite(self._conn, token_sha256=invite_hash, station_id=station_id)
+            self._consume_or_raise(invite_hash, station_id)
         return Registration(station_id=station_id, bearer_token=bearer_plaintext)
 
     def _recover_unbound_station(
@@ -184,12 +257,13 @@ class PsycopgRegistry:
         if not is_recovery_eligible(
             last_heartbeat_at=info.last_heartbeat_at,
             registered_at=info.registered_at,
-            now=datetime.now(UTC),
+            now=self._now_utc,
             window_s=self._recovery_window_s,
         ):
             raise InvalidInviteError("registration recovery window has closed")
         if not self._key_matches(info, request.registration_key):
             raise InvalidInviteError("registration key does not match")
+        self._reject_simulated_mismatch(info, request)
         return self._mint_and_rotate(station_id)
 
     def _recover_bound_station(
@@ -199,10 +273,36 @@ class PsycopgRegistry:
         info = self._recovery_info_or_raise(station_id)
         if not self._key_matches(info, request.registration_key):
             raise InvalidInviteError("registration key does not match")
+        self._reject_simulated_mismatch(info, request)
         with self._conn.transaction():
             registration = self._mint_and_rotate(station_id)
-            consume_invite(self._conn, token_sha256=invite_hash, station_id=station_id)
+            self._consume_or_raise(invite_hash, station_id)
         return registration
+
+    def _consume_or_raise(self, invite_hash: bytes, station_id: str) -> None:
+        """Consume the invite, or reject the registration that lost the race."""
+        # consume_invite's `where consumed_at is null` is the only thing
+        # stopping one invite admitting two stations, and it reports the
+        # outcome by return value rather than by raising. Discarding it would
+        # leave both racing requests believing they had won, which is exactly
+        # the property D-020 says invite_tokens exists to provide. Raising
+        # inside the caller's transaction rolls the station row back with it.
+        if not consume_invite(
+            self._conn, token_sha256=invite_hash, station_id=station_id
+        ):
+            raise InvalidInviteError("invite consumed concurrently")
+
+    def _reject_simulated_mismatch(
+        self, info: StationRecoveryInfo, request: RegistrationRequest
+    ) -> None:
+        """Refuse a recovery that claims a different ``simulated`` than the row."""
+        # Recovery restores an identity; it does not re-register (D-048). Name,
+        # location, capabilities and client info on the request are ignored on
+        # this path, but `simulated` cannot be, because ignoring it silently is
+        # what lets a simulated station recover as a real one and file
+        # measured-looking data ever after - CLAUDE.md's fifth rule.
+        if request.simulated != info.simulated:
+            raise InvalidInviteError("simulated flag does not match the station")
 
     def _recovery_info_or_raise(self, station_id: str) -> StationRecoveryInfo:
         info = find_station_for_recovery(self._conn, station_id)
@@ -211,8 +311,12 @@ class PsycopgRegistry:
         return info
 
     def _key_matches(self, info: StationRecoveryInfo, registration_key: str) -> bool:
+        """Whether the presented registration key hashes to the stored value."""
         presented = hash_with_pepper(self._pepper, registration_key)
-        return presented == info.registration_key_sha256
+        # compare_digest, not `==`: this key authorises minting a new bearer
+        # token on an existing station (D-023, D-034), so a timing oracle on
+        # it is a credential-recovery path, not merely an information leak.
+        return hmac.compare_digest(presented, info.registration_key_sha256)
 
     def _mint_and_rotate(self, station_id: str) -> Registration:
         bearer_plaintext, bearer_hash = generate_bearer_token(self._pepper)

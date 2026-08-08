@@ -3,8 +3,10 @@
 Parses and validates the wire request, and translates it into
 ``meridian.registry.RegistrationRequest`` — the reshaping from wire field
 names (``location.lat``, ``client.impl``) into the domain shape's flat
-fields (``lat_deg``, ``client_impl``) lives here, on the boundary, and
-nowhere past it.
+fields (``lat_deg``, ``client_implementation``) lives here, on the boundary,
+and nowhere past it. Wire names are fixed by MSP §4.1 and are carried as
+Pydantic aliases, so the Python identifiers can obey CLAUDE.local.md §4's
+rule that a name states its unit and spells out its words.
 
 This module holds no business logic and touches no database — matching
 ``meridian.api.msp``'s own rule, extended to the models a route validates
@@ -41,16 +43,25 @@ class Location(BaseModel):
     site.
     """
 
-    lat: float = Field(ge=-90, le=90)
-    lon: float = Field(ge=-180, le=360)
+    # The Python names carry their unit (CLAUDE.local.md §4); the aliases are
+    # the wire names MSP §4.1 fixes and cannot change. Validation accepts the
+    # alias only — `populate_by_name` is deliberately not set, so a body sending
+    # `lat_deg` is rejected rather than quietly admitted alongside `lat`.
+    #
+    # The upper bound on longitude is 180, not the 360 this field shipped with.
+    # 360 is azimuth's range: under it 200 and -160 were two spellings of one
+    # meridian, and a station could store either. ISO 6709, migration 0007 and
+    # DATA-MODEL.md's conventions all say -180..180. See D-052.
+    lat_deg: float = Field(alias="lat", ge=-90, le=90)
+    lon_deg: float = Field(alias="lon", ge=-180, le=180)
     alt_m: float
 
 
 class HorizonMaskEntry(BaseModel):
     """One entry of an optional, azimuth-resolved declared obstruction (D-031)."""
 
-    az_deg: float
-    min_el_deg: float
+    azimuth_deg: float = Field(alias="az_deg")
+    min_elevation_deg: float = Field(alias="min_el_deg")
 
 
 class CapabilityPayload(BaseModel):
@@ -83,8 +94,11 @@ class CapabilityPayload(BaseModel):
         ``station_capabilities.horizon_mask_json`` expects — shaping it is
         this boundary's job, not the store layer's.
         """
+        # The dict keys are the *stored* shape D-031 fixes for
+        # `station_capabilities.horizon_mask_json`, and stay as they are. Only
+        # the Python attribute names spell themselves out.
         mask = [
-            {"az_deg": entry.az_deg, "min_el_deg": entry.min_el_deg}
+            {"az_deg": entry.azimuth_deg, "min_el_deg": entry.min_elevation_deg}
             for entry in self.horizon_mask
         ]
         return Capability(
@@ -102,7 +116,7 @@ class CapabilityPayload(BaseModel):
 class ClientInfo(BaseModel):
     """MSP §4.1's ``client`` object."""
 
-    impl: str
+    implementation: str = Field(alias="impl")
     version: str
 
 
@@ -149,8 +163,8 @@ class RegisterRequestBody(BaseModel):
             registration_key=self.registration_key,
             name=self.name,
             operator=self.operator,
-            lat_deg=self.location.lat,
-            lon_deg=self.location.lon,
+            lat_deg=self.location.lat_deg,
+            lon_deg=self.location.lon_deg,
             alt_m=self.location.alt_m,
             simulated=self.simulated,
             simulator_run_id=self.simulator_run_id,
@@ -158,7 +172,7 @@ class RegisterRequestBody(BaseModel):
             capabilities=[
                 capability.to_capability() for capability in self.capabilities
             ],
-            client_impl=self.client.impl,
+            client_implementation=self.client.implementation,
             client_version=self.client.version,
         )
 

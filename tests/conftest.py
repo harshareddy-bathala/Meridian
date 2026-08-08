@@ -86,7 +86,7 @@ def conn(database_url: str) -> Iterator[Any]:
 
 
 @pytest.fixture
-def scalar(conn: Any):  # type: ignore[no-untyped-def]
+def scalar(conn: Any):
     """Run a query and return its first column, or ``None``."""
 
     def _scalar(sql: str, *args: object) -> Any:

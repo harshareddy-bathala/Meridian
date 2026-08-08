@@ -73,7 +73,39 @@ def test_revoke_expires_a_pending_invite(rollback: Any) -> None:
 
     (invite,) = [i for i in list_invites(rollback) if i.label == "unit-test-revoke"]
     assert invite.expires_at is not None
-    assert invite.expires_at <= datetime.now(UTC)
+    # `is_expired`, not `expires_at <= datetime.now(UTC)`: revocation writes
+    # the timestamp with the database's clock, and comparing it against the
+    # Python clock here is the cross-clock bug D-046 exists to close. That
+    # comparison passed or failed depending on which tests ran before it.
+    assert invite.is_expired is True
+
+
+def test_is_expired_is_false_for_an_invite_with_no_expiry(rollback: Any) -> None:
+    """D-020's default: an invite with no ``expires_at`` never expires."""
+    create_invite(
+        rollback,
+        label="unit-test-no-expiry",
+        expires_at=None,
+        issued_for_station_id=None,
+    )
+
+    (invite,) = [i for i in list_invites(rollback) if i.label == "unit-test-no-expiry"]
+    assert invite.expires_at is None
+    assert invite.is_expired is False
+
+
+def test_is_expired_is_false_while_the_expiry_is_still_ahead(rollback: Any) -> None:
+    create_invite(
+        rollback,
+        label="unit-test-future-expiry",
+        expires_at=datetime.now(UTC) + timedelta(days=1),
+        issued_for_station_id=None,
+    )
+
+    (invite,) = [
+        i for i in list_invites(rollback) if i.label == "unit-test-future-expiry"
+    ]
+    assert invite.is_expired is False
 
 
 def test_revoke_is_a_no_op_the_second_time(rollback: Any) -> None:

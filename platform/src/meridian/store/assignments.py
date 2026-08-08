@@ -53,6 +53,12 @@ class DueAssignment:
     timing_uncertainty_s: float
     priority: float
 
+    simulated: bool
+    """Carried because CLAUDE.md's fifth rule says simulated data is labelled
+    at *every* layer, and an assignment is a layer: the column exists on
+    ``assignments`` (``0004_passes.sql``), so a query that omitted it would
+    hand the API a message with no way to mark itself."""
+
 
 def find_assignment_ids_by_state(
     conn: Connection, station_id: str, states: Sequence[str]
@@ -177,7 +183,8 @@ def find_due_assignments(
                 es.line1 as element_set_line1,
                 es.line2 as element_set_line2,
                 a.timing_uncertainty_s,
-                a.priority
+                a.priority,
+                a.simulated
             from assignments a
             join passes p on p.id = a.pass_id
             join element_sets es on es.id = p.element_set_id

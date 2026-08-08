@@ -5,9 +5,11 @@ them** (docs/ARCHITECTURE.md rule 2), enforced by the ruff banned-import rule in
 the workspace ``pyproject.toml`` rather than by review. Everything goes through
 this protocol, so a propagator change never ripples outward.
 
-Implementations are pure: no database, no network, no clock reads. The element-set
-archive lives in ``meridian.orbit.archive``, which does touch the store; callers
-see both through ``meridian.orbit``.
+Implementations are pure: no database, no network, no clock reads.
+
+**Planned (Stage 6):** an element-set archive — the one part of this package
+that will touch the store — alongside the propagator. It does not exist yet;
+this module is the protocol both will be written against.
 """
 
 from __future__ import annotations

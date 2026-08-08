@@ -217,3 +217,66 @@ def test_secrets_do_not_leak_through_a_validation_error_response(
     assert response.status_code == 400
     assert "tok_ThisMustNeverComeBack" not in response.text
     assert "key_ThisMustNeverComeBackEither" not in response.text
+
+
+# --- The wire names are the specification's, not Python's --------------------
+#
+# The Python identifiers behind these fields were spelled out in D-052 -
+# `location.lat` reads as `lat_deg`, `client.impl` as `implementation` - using
+# Pydantic aliases so the wire shape does not move. These assert that it did not.
+
+
+def test_the_location_object_still_uses_the_specifications_names(
+    client: TestClient, rollback: Any
+) -> None:
+    """§4.1 prints `{"lat": 12.9716, "lon": 77.5946, "alt_m": 920}`.
+
+    `sample_payload` sends exactly that, so a registration that succeeds is the
+    evidence. Renaming the Python attributes without an alias would fail here
+    with `malformed` rather than quietly accepting a body no station sends.
+    """
+    insert_invite(rollback, plaintext="conformance-invite-aliases")
+
+    response = client.post(
+        REGISTER_PATH,
+        json=sample_payload(invite_token="conformance-invite-aliases"),
+        headers=CURRENT,
+    )
+
+    assert response.status_code == 200
+
+
+def test_a_body_using_the_python_names_is_rejected(
+    client: TestClient, rollback: Any
+) -> None:
+    """`populate_by_name` is off, so `lat_deg` on the wire is not `lat`.
+
+    An alias that also accepted the Python name would make the platform speak a
+    superset of MSP - and a station tested only against this implementation
+    would then send a body no other implementation has to accept. The
+    specification prints one spelling; this endpoint takes one spelling.
+    """
+    insert_invite(rollback, plaintext="conformance-invite-pyname")
+    body = sample_payload(invite_token="conformance-invite-pyname")
+    body["location"] = {"lat_deg": 12.9716, "lon_deg": 77.5946, "alt_m": 920}
+
+    response = client.post(REGISTER_PATH, json=body, headers=CURRENT)
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "malformed"
+
+
+def test_a_longitude_past_180_is_rejected(client: TestClient, rollback: Any) -> None:
+    """D-052: the model's bound was azimuth's 360, and is now ISO 6709's 180.
+
+    Rejected at the model, so it never reaches the database - the `CHECK` added
+    by migration 0007 is the backstop, not the error the station is meant to see.
+    """
+    insert_invite(rollback, plaintext="conformance-invite-longitude")
+    body = sample_payload(invite_token="conformance-invite-longitude")
+    body["location"] = {"lat": 12.9716, "lon": 200.0, "alt_m": 920}
+
+    response = client.post(REGISTER_PATH, json=body, headers=CURRENT)
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "malformed"

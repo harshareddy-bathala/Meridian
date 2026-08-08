@@ -73,6 +73,11 @@ services:
       HEARTBEAT_INTERVAL_S: ${HEARTBEAT_INTERVAL_S:-30}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
       TUNNEL_HOSTNAME: ${TUNNEL_HOSTNAME:-}
+      # Passed to the api service although Grafana is a different service, so
+      # that meridian.config's placeholder refusal can see it. Grafana is
+      # published on host :3001 and the refusal is the only thing standing
+      # between a public deployment and an admin console on `admin/change-me`.
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
       # Derived from the tunnel token, not set by hand. `--profile public` starts
       # the tunnel whenever CLOUDFLARE_TUNNEL_TOKEN is set, and it will do that
       # with TUNNEL_HOSTNAME and PUBLIC_BASE_URL both left at their development

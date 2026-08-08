@@ -6,6 +6,14 @@ rest of ``meridian.store``, this module makes no decision about what a
 heartbeat *means* — reconciling ``held_assignments`` against
 ``meridian.store.assignments`` is a later session's orchestration, built on
 top of this one.
+
+**``NewHeartbeat.simulated`` must not be read from the request body.** MSP
+§4.2 puts no ``simulated`` field on the wire, and if a later revision does,
+a station's own claim is not evidence: the value belongs to the
+registration record, and ``store.stations.find_station_provenance`` is how
+a caller reads it back (D-048, CLAUDE.md rule 5). This module cannot
+enforce that — it takes whatever ``bool`` it is handed — so the rule is
+written here, where whoever builds the heartbeat route will read it.
 """
 
 from __future__ import annotations
@@ -13,11 +21,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from psycopg.rows import scalar_row
+
 from meridian.store.stations import Connection
 
 __all__ = [
+    "ListeningEvidenceQuery",
     "ListeningReport",
     "NewHeartbeat",
+    "has_listening_evidence",
     "insert_heartbeat",
     "touch_last_heartbeat",
 ]
@@ -113,3 +125,81 @@ def touch_last_heartbeat(conn: Connection, station_id: str) -> None:
             "update stations set last_heartbeat_at = now() where station_id = %s",
             (station_id,),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ListeningEvidenceQuery:
+    """The resolved predicate behind ``Registry.was_listening()``.
+
+    Every field is already a concrete bound. The frequency arrives as a range
+    rather than a centre and a tolerance because deciding *how wide* the range
+    should be is a domain judgement about Doppler shift, and this layer makes no
+    domain judgements — ``registry.doppler_tolerance`` makes it and hands the
+    result down (D-056).
+    """
+
+    station_id: str
+    satellite_id: str
+    mode: str
+    freq_min_hz: int
+    freq_max_hz: int
+    window_start: datetime
+    window_end: datetime
+
+
+def has_listening_evidence(conn: Connection, query: ListeningEvidenceQuery) -> bool:
+    """Whether any heartbeat confirms the station was listening as described.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+        query: The resolved bounds to match against.
+
+    Returns:
+        True when at least one heartbeat matches every clause **and** names an
+        assignment issued to that same station.
+
+    Note:
+        The join against ``assignments`` is not decoration. Without it a station
+        could report a ``listening`` block quoting an ``assignment_id`` it
+        invented, and the platform would accept that as proof it was working on
+        a pass nobody scheduled — turning an absence into a confirmed miss on
+        the station's own say-so. The join is on ``station_id`` as well as the
+        id, so quoting *another* station's real assignment fails too.
+
+        Matched on ``received_at``, the platform's clock and this hypertable's
+        partitioning column. ``sent_at`` is the station's own and is untrusted
+        (``0006_heartbeats.sql``); trusting it here would let a station with a
+        broken clock assert coverage of any window it liked, and this predicate
+        is the sole authority on what counts as a miss.
+
+        The window is half-open — ``received_at >= start`` and ``< end`` — so
+        two adjacent windows cannot both claim one heartbeat.
+    """
+    with conn.cursor(row_factory=scalar_row) as cur:
+        cur.execute(
+            """
+            select exists (
+                select 1
+                from heartbeats as heartbeat
+                join assignments as assignment
+                  on assignment.assignment_id = heartbeat.listening_assignment_id
+                 and assignment.station_id = heartbeat.station_id
+                where heartbeat.station_id = %s
+                  and heartbeat.listening_satellite_id = %s
+                  and heartbeat.listening_mode = %s
+                  and heartbeat.listening_freq_hz between %s and %s
+                  and heartbeat.received_at >= %s
+                  and heartbeat.received_at < %s
+            )
+            """,
+            (
+                query.station_id,
+                query.satellite_id,
+                query.mode,
+                query.freq_min_hz,
+                query.freq_max_hz,
+                query.window_start,
+                query.window_end,
+            ),
+        )
+        return bool(cur.fetchone())

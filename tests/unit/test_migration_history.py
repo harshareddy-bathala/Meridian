@@ -37,7 +37,11 @@ def test_exactly_one_head(script: ScriptDirectory) -> None:
 
 
 def test_history_is_linear_and_gapless(script: ScriptDirectory) -> None:
-    """0001 → 0006, each pointing at its predecessor, no branches."""
+    """0001 → head, each pointing at its predecessor, no branches.
+
+    The range is derived from what is on disk rather than written down, so a new
+    revision does not need this docstring edited to stay covered.
+    """
     revisions = list(script.walk_revisions())
     identifiers = [revision.revision for revision in reversed(revisions)]
     assert identifiers == [f"{n:04d}" for n in range(1, len(identifiers) + 1)]
@@ -114,15 +118,94 @@ def test_every_revisions_upgrade_applies_its_own_sql_file(
         assert (SQL_DIR / f"{name}.sql").is_file()
 
 
+DESTRUCTIVE_STATEMENTS = ("drop table", "drop column", "truncate", "delete from")
+
+ALLOWED_DESTRUCTIVE = {
+    ("0008_derived_liveness.sql", "drop column"),
+}
+"""Destructive statements that have been argued for, one entry each.
+
+**Adding an entry here is the point.** The ban below is deliberately blunt, and
+the migrations are forward-only (GIT-WORKFLOW.md rule 9), so a drop that turns
+out to be wrong is recovered from a backup rather than stepped back. Requiring a
+line in this set means no drop reaches `main` without somebody writing down which
+file and which statement, in a diff a reviewer reads.
+
+The bar for an entry is that **no data can be lost**, not that losing it would be
+convenient. `0008` drops `stations.liveness`, which nothing ever wrote: it was
+declared in `0002` with a `'never_seen'` default and every row still carries that
+default, so the column holds no measurement to destroy. It is dropped because a
+value derivable from `last_heartbeat_at` is a value that can disagree with it
+(D-054, following D-049's reasoning for `element_sets`).
+
+Nothing in the observation lineage — `observations`, `heartbeats`, `passes`,
+`assignments` — may ever appear here. Those are unrecoverable by definition: a
+pass does not come back.
+"""
+
+
 def test_no_sql_file_drops_or_truncates() -> None:
-    """Migrations add; they do not destroy.
+    """Migrations add; they do not destroy, unless it is written down.
 
     A `drop table` or `truncate` reaching the observation lineage is
     unrecoverable, and DATA-MODEL.md's conventions say soft delete only. This
     reads the SQL rather than trusting the convention.
+
+    An exception needs an entry in `ALLOWED_DESTRUCTIVE` naming the file and the
+    statement, so weakening this rule costs a reviewed line rather than a quiet
+    edit to the assertion.
     """
-    forbidden = ("drop table", "drop column", "truncate", "delete from")
     for path in sorted(SQL_DIR.glob("*.sql")):
         body = path.read_text(encoding="utf-8").lower()
-        for phrase in forbidden:
+        for phrase in DESTRUCTIVE_STATEMENTS:
+            if (path.name, phrase) in ALLOWED_DESTRUCTIVE:
+                continue
             assert phrase not in body, f"{path.name} contains {phrase!r}"
+
+
+def test_every_allowed_destructive_statement_is_still_there() -> None:
+    """An allowance that no longer applies is an allowance nobody notices.
+
+    If `0008` were reworked to stop dropping the column, this entry would sit in
+    the set permitting a future drop in that file that nobody argued for. The
+    exception has to keep earning itself.
+    """
+    for name, phrase in sorted(ALLOWED_DESTRUCTIVE):
+        path = SQL_DIR / name
+        assert path.exists(), f"{name} is allowed a {phrase!r} and does not exist"
+        assert phrase in path.read_text(encoding="utf-8").lower(), (
+            f"{name} no longer contains {phrase!r}; remove its allowance"
+        )
+
+
+def test_the_observation_lineage_is_never_allowed_a_destructive_statement() -> None:
+    """The one rule the allow-list must not be able to buy its way past.
+
+    A missed pass does not come back, so a drop against these tables is
+    unrecoverable in a way a config column never is. Asserted against the SQL of
+    every allowed file rather than against its name, because a file called
+    something harmless can still carry the statement.
+    """
+    lineage = ("observations", "heartbeats", "passes", "assignments")
+    for name, phrase in sorted(ALLOWED_DESTRUCTIVE):
+        body = (SQL_DIR / name).read_text(encoding="utf-8").lower()
+        for statement in _statements_containing(body, phrase):
+            for table in lineage:
+                assert table not in statement, (
+                    f"{name}: {phrase!r} touches {table} — the observation "
+                    "lineage is never droppable"
+                )
+
+
+def _statements_containing(body: str, phrase: str) -> list[str]:
+    """Every semicolon-delimited statement in ``body`` that contains ``phrase``.
+
+    Comments are stripped first: `0008` explains at length why it drops a column,
+    and naming a lineage table in that prose must not read as touching it.
+    """
+    without_comments = "\n".join(
+        line for line in body.splitlines() if not line.strip().startswith("--")
+    )
+    return [
+        statement for statement in without_comments.split(";") if phrase in statement
+    ]
