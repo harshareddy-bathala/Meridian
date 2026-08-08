@@ -7,9 +7,13 @@ this protocol, so a propagator change never ripples outward.
 
 Implementations are pure: no database, no network, no clock reads.
 
-**Planned (Stage 6):** an element-set archive — the one part of this package
-that will touch the store — alongside the propagator. It does not exist yet;
-this module is the protocol both will be written against.
+The element-set archive these implementations read from is
+``meridian.store.element_sets``, not this package: propagation takes an
+:class:`~meridian.orbit.types.ElementSet` it is handed, so nothing here opens a
+connection and every implementation stays testable without a database.
+
+**Planned (Stage 6):** the propagator itself. This module is the protocol it
+is being written against.
 """
 
 from __future__ import annotations

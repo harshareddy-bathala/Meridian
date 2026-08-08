@@ -1259,6 +1259,30 @@ So the tolerance is the largest shift the geometry can produce: `centre_freq_hz 
 
 ---
 
+## D-057 — An element set is identified by its contents, not by its epoch
+
+**2026-08-08 · accepted** · *migration 0009; found while starting Stage 6*
+
+`element_sets` shipped with `unique (satellite_id, epoch, source)` and the table comment *"the same set retrieved twice is one row"*. The comment describes deduplication; the constraint does something stronger and different. **Two genuinely different element sets can carry the same epoch from the same source** — a catalogue correction, a re-fit after a manoeuvre, an operator republishing for the same epoch — and the second was rejected.
+
+That is a data-loss path sitting behind a constraint that reads like a safety feature. `DATA-MODEL.md` says this table is never overwritten because the historical series is what makes uncertainty modelling possible, and the set that gets discarded is exactly the one that would explain why a prediction from that epoch was wrong.
+
+**The key becomes `(satellite_id, source, content_sha256)`**, with the hash computed by an `IMMUTABLE` function and stored in a generated column. Three outcomes, which is the table this decision was chosen from and which `tests/integration/test_store_element_sets.py` asserts one test each:
+
+| Insert | Rows after | Before 0009 |
+|---|---|---|
+| the same lines twice, one source | 1 | 1 |
+| different lines, same epoch, same source | 2 | **1 — silently** |
+| the same lines from `celestrak` then `spacetrack` | 2 | 2 |
+
+**`source` stays in the key deliberately.** Keying on content alone would collapse the third row to one, discarding whichever retrieval arrived second. D-049 made `source` the way this table records provenance rather than a `simulated` boolean, so two retrievals of identical lines from two catalogues are two facts — and their agreement is the only cheap cross-check available on element-set data we did not generate.
+
+**A generated column rather than a value the caller supplies.** The alternative — hashing in Python and inserting the result — makes a row whose hash disagrees with its lines representable, and the unique constraint then guards nothing, because two identical sets could carry different hashes. The `IMMUTABLE` marking is justified the same way `observation_id`'s is in `0005`: `convert_to` is `STABLE` because text-to-bytes depends on server encoding in the general case, and a two-line element set is fixed-width ASCII by format definition, so the bytes are identical under every encoding PostgreSQL supports. The lines are joined with a newline rather than concatenated bare — a pair split at a different boundary would otherwise hash identically, which cannot arise while the format stays fixed-width and costs one byte to stop depending on that.
+
+*Consequence:* `find_element_set_current_at` orders by `epoch` and breaks ties on `retrieved_at`. Two sources publishing one epoch is now representable, so the tie-break had to be named rather than left to the planner — CLAUDE.md requires every number in a report to be regenerable, and a query that resolves a tie differently on different days is not.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
