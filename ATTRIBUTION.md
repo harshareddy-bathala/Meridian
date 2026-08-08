@@ -98,4 +98,25 @@ file exists to document.
                   property that matters at Phase 3's fifty simulated stations
                   and not the property the article was optimising for.
             Copied: none
+
+2026-08-08  Reference values for topocentric look angles
+            Read: Skyfield documentation, "Earth Satellites"
+                  https://rhodesmill.org/skyfield/earth-satellites.html
+                  (MIT)
+            Wrote: tests/unit/test_look_angles_reference.py — the ISS element
+                  set, the Bluffton ground site, the instant and the three
+                  printed values (altitude, azimuth, distance) are transcribed
+                  verbatim from that page's worked example and used as the
+                  expected values our implementation is checked against. This is
+                  a deliberate use of someone else's answer as the authority: a
+                  propagator tested only against its own output is tested
+                  against nothing. The implementation in
+                  platform/src/meridian/orbit/skyfield_service.py is our own —
+                  the sampler, the half-open window, the range-rate projection
+                  and the sign convention appear nowhere in the source. The test
+                  file states in its own docstring what this does not prove,
+                  namely that a frame error inside Skyfield would be invisible
+                  to a fixture derived from Skyfield.
+            Copied: none — the TLE and the site are public data, and the printed
+                  numbers are facts about them rather than expression.
 ```
