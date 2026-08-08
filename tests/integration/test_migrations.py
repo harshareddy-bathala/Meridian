@@ -77,7 +77,7 @@ def fixtures(rollback: Callable[..., Any]) -> Callable[..., Any]:
     return rollback
 
 
-def test_all_expected_tables_exist(conn) -> None:  # type: ignore[no-untyped-def]
+def test_all_expected_tables_exist(conn) -> None:
     """Phase 1 builds these and no others (D-018, D-020, D-021)."""
     with conn.cursor() as cur:
         cur.execute(
@@ -110,14 +110,14 @@ def test_all_expected_tables_exist(conn) -> None:  # type: ignore[no-untyped-def
     assert not (deferred & tables)
 
 
-def test_observations_and_heartbeats_are_hypertables(conn) -> None:  # type: ignore[no-untyped-def]
+def test_observations_and_heartbeats_are_hypertables(conn) -> None:
     with conn.cursor() as cur:
         cur.execute("select hypertable_name from timescaledb_information.hypertables")
         hypertables = {r[0] for r in cur.fetchall()}
     assert {"observations", "heartbeats"} <= hypertables
 
 
-def test_heartbeats_partitions_on_platform_clock(scalar) -> None:  # type: ignore[no-untyped-def]
+def test_heartbeats_partitions_on_platform_clock(scalar) -> None:
     """Never partition on a client-supplied timestamp (D-013).
 
     A station with a dead RTC reporting ``sent_at: 1970-01-01`` would otherwise
@@ -130,7 +130,7 @@ def test_heartbeats_partitions_on_platform_clock(scalar) -> None:  # type: ignor
     assert column == "received_at"
 
 
-def test_held_assignments_defaults_to_empty_not_null(scalar) -> None:  # type: ignore[no-untyped-def]
+def test_held_assignments_defaults_to_empty_not_null(scalar) -> None:
     """MSP §4.2: an empty list is meaningful and must stay
     distinguishable from absence."""
     nullable = scalar(
@@ -140,7 +140,7 @@ def test_held_assignments_defaults_to_empty_not_null(scalar) -> None:  # type: i
     assert nullable == "NO"
 
 
-def test_simulated_flag_reaches_every_derived_table(conn) -> None:  # type: ignore[no-untyped-def]
+def test_simulated_flag_reaches_every_derived_table(conn) -> None:
     """ARCHITECTURE.md rule 4 — the flag propagates to every derived record.
 
     ``heartbeats`` is included since D-028. D-013 had already ruled that the flag
@@ -167,7 +167,7 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:  # type: igno
     assert "element_sets" not in carrying
 
 
-def test_outcome_enum_is_exactly_the_msp_five(scalar) -> None:  # type: ignore[no-untyped-def]
+def test_outcome_enum_is_exactly_the_msp_five(scalar) -> None:
     """D-010 pins this to MSP §4.4. Drift between the two is the failure mode.
 
     Exactly these five, not "these five among others". A sixth value added to the
@@ -192,7 +192,7 @@ def test_outcome_enum_is_exactly_the_msp_five(scalar) -> None:  # type: ignore[n
     }
 
 
-def test_a_sixth_outcome_is_rejected(fixtures) -> None:  # type: ignore[no-untyped-def]
+def test_a_sixth_outcome_is_rejected(fixtures) -> None:
     """The constraint holds against a write, not only in the catalogue."""
     with pytest.raises(psycopg.errors.CheckViolation):
         fixtures(
@@ -207,7 +207,7 @@ def test_a_sixth_outcome_is_rejected(fixtures) -> None:  # type: ignore[no-untyp
         )
 
 
-def test_observations_current_returns_the_latest_revision(fixtures) -> None:  # type: ignore[no-untyped-def]
+def test_observations_current_returns_the_latest_revision(fixtures) -> None:
     """D-015: a resubmission appends; the view hides the history from callers.
 
     Two revisions of one assignment go in. ``observations`` must hold both — the
@@ -244,7 +244,7 @@ def test_observations_current_returns_the_latest_revision(fixtures) -> None:  # 
     assert current == [(2, "decoded")]
 
 
-def test_observation_id_is_a_stored_generated_column(scalar) -> None:  # type: ignore[no-untyped-def]
+def test_observation_id_is_a_stored_generated_column(scalar) -> None:
     """D-027: MSP §4.4's acknowledgement needs an id, and a retry needs the same one.
 
     Generated in the database rather than in Python so the ingest path and the
@@ -258,7 +258,7 @@ def test_observation_id_is_a_stored_generated_column(scalar) -> None:  # type: i
     assert generated == "ALWAYS"
 
 
-def test_listening_block_is_all_or_nothing_including_mode(scalar) -> None:  # type: ignore[no-untyped-def]
+def test_listening_block_is_all_or_nothing_including_mode(scalar) -> None:
     """D-028: a partial listening block cannot support the assertion it exists to make.
 
     ``mode`` joined the constraint because a station tuned to the right frequency
@@ -280,7 +280,7 @@ def test_listening_block_is_all_or_nothing_including_mode(scalar) -> None:  # ty
         assert column in definition
 
 
-def test_stations_carry_a_registration_key_hash(scalar) -> None:  # type: ignore[no-untyped-def]
+def test_stations_carry_a_registration_key_hash(scalar) -> None:
     """D-023: without it a lost register response strands a station permanently."""
     data_type = scalar(
         "select data_type from information_schema.columns "
@@ -295,7 +295,7 @@ def test_stations_carry_a_registration_key_hash(scalar) -> None:  # type: ignore
     assert nullable == "NO"
 
 
-def test_a_bound_invite_cannot_be_consumed_by_another_station(fixtures) -> None:  # type: ignore[no-untyped-def]
+def test_a_bound_invite_cannot_be_consumed_by_another_station(fixtures) -> None:
     """D-034: the binding is the security property, so the database enforces it.
 
     A replacement invite names the station whose token it rotates. If any other
@@ -333,7 +333,7 @@ def test_a_bound_invite_cannot_be_consumed_by_another_station(fixtures) -> None:
         )
 
 
-def test_a_bound_invite_is_consumable_by_the_station_it_names(fixtures) -> None:  # type: ignore[no-untyped-def]
+def test_a_bound_invite_is_consumable_by_the_station_it_names(fixtures) -> None:
     """The other half of D-034: the binding must not block the case it exists for."""
     fixtures(
         "insert into invite_tokens (token_sha256, label, issued_for_station_id)"
@@ -356,7 +356,7 @@ def test_a_bound_invite_is_consumable_by_the_station_it_names(fixtures) -> None:
     assert rows == [("st_fixture",)]
 
 
-def test_an_unbound_invite_still_admits_any_station(fixtures) -> None:  # type: ignore[no-untyped-def]
+def test_an_unbound_invite_still_admits_any_station(fixtures) -> None:
     """D-020's ordinary invite is unchanged by D-034: null means "any new station"."""
     fixtures(
         "insert into invite_tokens (token_sha256, label) values (%s, %s)",
@@ -378,7 +378,7 @@ def test_an_unbound_invite_still_admits_any_station(fixtures) -> None:  # type: 
     assert rows == [(None, "st_fixture")]
 
 
-def test_declared_horizon_mask_defaults_to_an_empty_array(scalar) -> None:  # type: ignore[no-untyped-def]
+def test_declared_horizon_mask_defaults_to_an_empty_array(scalar) -> None:
     """D-031: a station that declares nothing is not claiming a clear horizon.
 
     The default is ``[]`` rather than ``NULL`` so "declared nothing" and
@@ -393,7 +393,7 @@ def test_declared_horizon_mask_defaults_to_an_empty_array(scalar) -> None:  # ty
     assert default is not None and "[]" in default
 
 
-def test_no_plaintext_token_columns_exist(conn) -> None:  # type: ignore[no-untyped-def]
+def test_no_plaintext_token_columns_exist(conn) -> None:
     """D-017: tokens are opaque secrets stored hashed, never in the clear.
 
     A column called ``token`` or ``invite_token`` appearing anywhere in this

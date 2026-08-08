@@ -73,7 +73,7 @@ def _applied_revision(url: str) -> Any:
     return row[0] if row else None
 
 
-def test_empty_database_reaches_head(scratch_database: str, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_empty_database_reaches_head(scratch_database: str, monkeypatch) -> None:
     """The clean-checkout path: nothing, then the whole schema."""
     monkeypatch.setenv("DATABASE_URL", scratch_database)
     _upgrade_to_head(scratch_database)
@@ -89,7 +89,7 @@ def test_empty_database_reaches_head(scratch_database: str, monkeypatch) -> None
     assert row is not None and row[0] >= 10
 
 
-def test_upgrade_head_twice_is_a_no_op(scratch_database: str, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_upgrade_head_twice_is_a_no_op(scratch_database: str, monkeypatch) -> None:
     """Compose runs `migrate` on every `up`. The second run must do nothing.
 
     Alembic guarantees this at the revision level — it compares against
@@ -108,7 +108,7 @@ def test_upgrade_head_twice_is_a_no_op(scratch_database: str, monkeypatch) -> No
 
 def test_generated_observation_id_matches_the_documented_formula(
     scratch_database: str,
-    monkeypatch,  # type: ignore[no-untyped-def]
+    monkeypatch,
 ) -> None:
     """D-027: the id in the acknowledgement is derived, and derived *this* way.
 
