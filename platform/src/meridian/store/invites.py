@@ -29,6 +29,7 @@ __all__ = [
     "expiry_from_days",
     "find_invite_by_hash",
     "generate_invite_token",
+    "hash_invite_token",
     "list_invites",
     "revoke_invite",
     "seed_bootstrap_invite",
@@ -52,18 +53,29 @@ class Invite:
     issued_for_station_id: str | None
 
 
+def hash_invite_token(token: str) -> bytes:
+    """Hash a plaintext invite token the way it is stored and looked up.
+
+    Plain SHA-256 — unlike a station bearer token (D-017), an invite carries
+    no pepper. ``TOKEN_HASH_PEPPER`` in ``deploy/.env.example`` is documented
+    as scoped to station tokens: an invite is already single-use and
+    short-lived, so a hash lifted from a database leak buys an attacker a
+    token that expires or gets consumed, not a standing credential.
+
+    A named function rather than an inline call at each of
+    :func:`generate_invite_token` and the registry service's presented-token
+    lookup, so "how an invite token is hashed" exists in exactly one place.
+    """
+    return hashlib.sha256(token.encode("ascii")).digest()
+
+
 def generate_invite_token() -> tuple[str, bytes]:
     """A fresh invite: the plaintext to display once, and the hash to store.
 
-    32 bytes from ``secrets.token_urlsafe``, hashed with plain SHA-256 —
-    unlike a station bearer token (D-017), an invite carries no pepper.
-    ``TOKEN_HASH_PEPPER`` in ``deploy/.env.example`` is documented as scoped
-    to station tokens: an invite is already single-use and short-lived, so a
-    hash lifted from a database leak buys an attacker a token that expires or
-    gets consumed, not a standing credential.
+    32 bytes from ``secrets.token_urlsafe``, hashed by :func:`hash_invite_token`.
     """
     plaintext = secrets.token_urlsafe(32)
-    return plaintext, hashlib.sha256(plaintext.encode("ascii")).digest()
+    return plaintext, hash_invite_token(plaintext)
 
 
 def expiry_from_days(days: int | None, *, now: datetime) -> datetime | None:
@@ -231,7 +243,7 @@ def seed_bootstrap_invite(
         nothing was touched, per D-020's "without overwriting or recreating
         consumed invites."
     """
-    token_sha256 = hashlib.sha256(token.encode("ascii")).digest()
+    token_sha256 = hash_invite_token(token)
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """

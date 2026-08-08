@@ -100,6 +100,16 @@ ignore = [
 # still runs everywhere.
 exclude = ["*.md"]
 
+[tool.ruff.lint.flake8-bugbear]
+# B008 flags a function call as a default argument on the assumption it is a
+# mutable-default mistake. FastAPI's dependency injection *is* this pattern —
+# `Depends(get_connection)` must be evaluated at declaration time so FastAPI can
+# see it and resolve it per request — and B008 already knows to exempt bare
+# `Header(...)`/`Query(...)` with literal arguments, but not `Depends(some_func)`,
+# whose argument is itself a call. Naming the dotted path here is what tells
+# ruff this specific call is the idiom, not the mistake.
+extend-immutable-calls = ["fastapi.Depends"]
+
 [tool.ruff.lint.mccabe]
 max-complexity = 8
 
@@ -181,6 +191,18 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["tests.*"]
 strict = false
+
+[[tool.mypy.overrides]]
+# A bare `class X(BaseModel):` fails disallow_any_explicit — BaseModel's own
+# public surface (model_dump() -> dict[str, Any], the ConfigDict it accepts,
+# the synthesized __init__ from Field() defaults) carries Any that a subclass
+# cannot avoid, plugin or not. pydantic's own mypy plugin exists to resolve
+# this properly, but its shipped pydantic 2.13.4 build crashes importing
+# mypy.expandtype.ExpandTypeVisitor under mypy 2.3.0 (verified directly, not
+# assumed) — adopt it once the two are compatible, not before. Scoped to
+# api/models/ rather than global, so every other module keeps the check.
+module = ["meridian.api.models.*"]
+disallow_any_explicit = false
 
 [tool.pytest.ini_options]
 # --import-mode=importlib so two test files may share a basename across
