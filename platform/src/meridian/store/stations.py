@@ -24,9 +24,11 @@ __all__ = [
     "Capability",
     "Connection",
     "NewStation",
+    "StationHeartbeat",
     "StationProvenance",
     "StationRecoveryInfo",
     "find_station_for_recovery",
+    "find_station_heartbeat",
     "find_station_id_by_token_hash",
     "find_station_provenance",
     "insert_station",
@@ -237,6 +239,53 @@ def find_station_provenance(
             select simulated, simulator_run_id, seed
             from stations
             where station_id = %s
+            """,
+            (station_id,),
+        )
+        return cur.fetchone()
+
+
+@dataclass(frozen=True, slots=True)
+class StationHeartbeat:
+    """When a station last reported, if it ever has."""
+
+    last_heartbeat_at: datetime | None
+    """Timezone-aware UTC, or ``None`` when the station has never heartbeat.
+
+    ``None`` is not "very old". A station that registered and never reported is
+    a commissioning problem; one that reported and stopped is a fault in
+    something that was working. ``registry.liveness.derive_liveness`` keeps them
+    apart as ``never_seen`` and ``offline``.
+    """
+
+
+def find_station_heartbeat(
+    conn: Connection, station_id: str
+) -> StationHeartbeat | None:
+    """When one station last reported.
+
+    Separate from :func:`find_station_for_recovery`, which reads the same column
+    among four others for a different question. A caller asking about liveness
+    should not have to fetch a registration key hash to get it.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+        station_id: The station to look up.
+
+    Returns:
+        Its last heartbeat instant, or ``None`` when there is no such station.
+        The two ``None``s are at different levels and mean different things: no
+        row at all versus a row that has never reported. Deleted stations are
+        excluded, so a soft-deleted station reads as absent rather than as
+        permanently offline — it is not a fault to investigate.
+    """
+    with conn.cursor(row_factory=class_row(StationHeartbeat)) as cur:
+        cur.execute(
+            """
+            select last_heartbeat_at
+            from stations
+            where station_id = %s
+              and deleted_at is null
             """,
             (station_id,),
         )

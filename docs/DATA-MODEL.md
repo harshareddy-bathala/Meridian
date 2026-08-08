@@ -9,7 +9,7 @@ PostgreSQL with TimescaleDB. Observations and heartbeats are hypertables.
 ## Core tables
 
 ### `stations`
-Identity, location, operator, registration time, token hash, registration key hash, `simulated` flag, derived liveness, last heartbeat.
+Identity, location, operator, registration time, token hash, registration key hash, `simulated` flag, last heartbeat. Liveness is **not** a column — it is derived from `last_heartbeat_at` on read (D-054).
 
 `simulator_run_id` and `seed` are required when `simulated` is true and absent when it is false (MSP §5), enforced as a `CHECK` constraint rather than in application code — the constraint *is* the protocol rule, and the schema is the right place for it.
 
@@ -17,7 +17,9 @@ Identity, location, operator, registration time, token hash, registration key ha
 
 A station past that window rotates its token through a **bound** invite instead: an `invite_tokens` row naming its `station_id`, issued by an operator, presented with the same `registration_key`. It produces no second station row and ignores the recovery window, because the operator's act of issuing it is the authorisation the window otherwise stands in for. See D-034.
 
-**`liveness` is the platform's derived conclusion, not what the station reported** (D-013). The station reports `state` in each heartbeat and a `health` object alongside it; both are stored on `heartbeats` as sent. `liveness` takes `never_seen`, `online`, `stale` (60 s, two missed heartbeats) or `offline` (90 s, three). The 90 s comes from SC-5, which requires an injected node failure to be detected within that time — the success criterion sets the threshold, not the other way round.
+**Liveness is the platform's derived conclusion, not what the station reported** (D-013). The station reports `state` in each heartbeat and a `health` object alongside it; both are stored on `heartbeats` as sent. Liveness takes `never_seen`, `online`, `stale` (60 s, two missed heartbeats) or `offline` (90 s, three). The 90 s comes from SC-5, which requires an injected node failure to be detected within that time — the success criterion sets the threshold, not the other way round.
+
+**It is computed on read, never stored** (D-054). `stations.liveness` existed as a column from `0002` until `0008` and nothing ever wrote it. A stored conclusion is correct only until the clock passes its next threshold, and nothing moves the clock on the platform's behalf — so a station that went quiet would keep reading `online` until an unrelated write refreshed it, which is the case liveness exists to detect. `meridian.registry.liveness` owns the vocabulary and both thresholds; `last_heartbeat_at` is the only thing stored.
 
 Capabilities are a separate table (`station_capabilities`) — a station may have several: a VHF fixed antenna and a UHF tracking antenna are distinct capabilities with different frequency ranges, polarisation and elevation limits. Each capability also carries the `modes` array from MSP §4.1 and a `tracking` flag.
 
@@ -197,7 +199,7 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 
 | Column | Values |
 |---|---|
-| `stations.liveness` (derived) | `never_seen`, `online`, `stale`, `offline` |
+| liveness (derived on read, not a column — D-054) | `never_seen`, `online`, `stale`, `offline` |
 | `heartbeats.state` (reported) | `idle`, `slewing`, `listening`, `processing`, `degraded`, `maintenance` — MSP §4.2 |
 | `assignments.state` | `issued`, `held`, `in_progress`, `reported`, `expired` — D-008 |
 | `assignments.decision` | `scheduled`, `skipped` |

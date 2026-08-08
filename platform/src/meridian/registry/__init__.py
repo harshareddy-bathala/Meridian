@@ -13,9 +13,9 @@ holds no connection and contains no SQL — ``meridian.registry.psycopg_registry
 is the concrete implementation, and it is the only module that may compose
 ``meridian.store`` calls into MSP §4.1's decision table.
 
-**Implementation status.** ``register`` and ``authenticate`` are implemented in
-``psycopg_registry``. ``liveness`` and ``was_listening`` are *planned* — Stage 5,
-once a heartbeat endpoint exists to supply data to derive them from. They are
+**Implementation status.** ``register``, ``authenticate`` and ``liveness`` are
+implemented in ``psycopg_registry``. ``was_listening`` is *planned* — it reads
+heartbeat rows, and no endpoint writes them yet. They are
 declared now because their contract constrains the schema, not because anything
 calls them yet (CLAUDE.local.md §8, interface before implementation).
 
@@ -28,8 +28,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Protocol
 
+# Re-exported: `Liveness` and its thresholds live in the leaf module so that
+# `meridian.config` can check a setting against them without an import cycle.
+# Callers keep importing the name from this package.
+from meridian.registry.liveness import Liveness
 from meridian.store.stations import Capability
 
 __all__ = [
@@ -38,19 +42,28 @@ __all__ = [
     "Registration",
     "RegistrationRequest",
     "Registry",
+    "UnknownStationError",
 ]
 
-Liveness = Literal["never_seen", "online", "stale", "offline"]
-"""The platform's derived conclusion about a station.
 
-Distinct from the ``state`` a station reports in its heartbeat and from the
-``health`` object it sends alongside — see docs/DECISIONS.md D-013 on why all
-three are not called the same thing.
+class UnknownStationError(LookupError):
+    """No station with that id exists, or it has been soft-deleted.
 
-Thresholds come from SC-5, which requires an injected node failure to be detected
-within 90 s: ``stale`` at 60 s (two missed heartbeats), ``offline`` at 90 s
-(three). The success criterion sets the threshold rather than the other way round.
-"""
+    Raised only by methods asked about a *named* station — a caller reaches
+    :meth:`Registry.liveness` with an id it already listed, so an id the
+    registry cannot find is a caller bug rather than a state to branch on.
+    Distinct from :class:`InvalidInviteError`, which is a protocol outcome a
+    station is told about; this one never reaches the wire.
+
+    A ``LookupError`` rather than a bare ``Exception``: "asked for something
+    that is not there" is exactly what that base class means, so a caller
+    already writing ``except LookupError`` around a lookup catches it.
+    """
+
+    def __init__(self, station_id: str) -> None:
+        """Name the station that was not found."""
+        super().__init__(f"no such station: {station_id}")
+        self.station_id = station_id
 
 
 class InvalidInviteError(Exception):
@@ -194,7 +207,36 @@ class Registry(Protocol):
         ...
 
     def liveness(self, station_id: str, *, now: datetime) -> Liveness:
-        """Derive liveness from the age of the most recent heartbeat."""
+        """Derive liveness from the age of the station's most recent heartbeat.
+
+        **Derived on read, never stored** (D-054). A stored conclusion is only
+        correct until the clock passes its next threshold, and nothing moves
+        the clock on the platform's behalf — so a station that went quiet would
+        keep reading ``online`` until some unrelated write refreshed it, which
+        is precisely the case liveness exists to detect.
+
+        Thresholds are absolute seconds fixed by SC-5, not multiples of
+        ``Settings.heartbeat_interval_s``: ``stale`` at 60 s, ``offline`` at
+        90 s. D-013 records the direction of that dependency deliberately — the
+        success criterion sets the threshold rather than the other way round.
+
+        Args:
+            station_id: The station to classify. Already known to the caller,
+                which is why an unknown one raises rather than returning a
+                fifth value nobody would branch on.
+            now: The instant to measure against, timezone-aware UTC. Passed
+                rather than read inside, so a caller classifying a page of
+                stations gives them all one instant and a test can state an age
+                instead of sleeping for it.
+
+        Returns:
+            One of ``Liveness``' four values.
+
+        Raises:
+            UnknownStationError: No such station, or it is soft-deleted.
+            ValueError: ``now`` is naive. CLAUDE.local.md §6 makes that a bug,
+                not a tolerance.
+        """
         ...
 
     def was_listening(

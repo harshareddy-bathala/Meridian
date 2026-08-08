@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = REPO_ROOT / "deploy" / "alembic.ini"
-HEAD_REVISION = "0007"
+HEAD_REVISION = "0008"
 
 
 @pytest.fixture

@@ -10,6 +10,11 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from meridian.registry.liveness import (
+    MAX_HEARTBEAT_INTERVAL_S,
+    is_heartbeat_interval_consistent,
+)
+
 __all__ = [
     "InsecureConfigurationError",
     "Settings",
@@ -191,6 +196,13 @@ def load_settings(*, env: dict[str, str] | None = None) -> Settings:
     Placeholders are fine on loopback — that is what makes ``cp .env.example .env
     && docker compose up`` work out of the box, which the ten-minute bring-up
     requirement needs.
+
+    **A second refusal has nothing to do with secrets and fires everywhere.**
+    ``HEARTBEAT_INTERVAL_S`` past 30 s leaves SC-5's fixed liveness thresholds
+    describing something other than "two and three missed heartbeats", and a
+    healthy station then reads ``stale`` for part of every cycle. That is a wrong
+    number rather than an exposure, so loopback is not an excuse — see
+    :func:`_refuse_an_interval_liveness_cannot_describe`.
     """
     if env is not None:
         os.environ.update(env)
@@ -218,10 +230,31 @@ def load_settings(*, env: dict[str, str] | None = None) -> Settings:
         simulator_station_count=_int_env("SIMULATOR_STATION_COUNT", 1),
     )
 
+    _refuse_an_interval_liveness_cannot_describe(settings.heartbeat_interval_s)
+
     if settings.is_public:
         _refuse_placeholder_secrets(settings)
 
     return settings
+
+
+def _refuse_an_interval_liveness_cannot_describe(heartbeat_interval_s: int) -> None:
+    """Raise if the configured interval would make a healthy station read stale."""
+    # Checked on every start, not only a public one, unlike the placeholder
+    # refusal below. A placeholder secret on loopback exposes nothing; an
+    # interval past this ceiling produces *wrong numbers* on any deployment,
+    # and CLAUDE.md's seventh rule makes liveness load-bearing for every
+    # reliability figure in the project. A wrong figure on a laptop is the one
+    # that gets copied into a report.
+    if is_heartbeat_interval_consistent(heartbeat_interval_s):
+        return
+    raise InsecureConfigurationError(
+        f"Refusing to start: HEARTBEAT_INTERVAL_S is {heartbeat_interval_s}, and "
+        f"liveness thresholds are fixed at 60 s and 90 s by SC-5 (D-013). Above "
+        f"{MAX_HEARTBEAT_INTERVAL_S} s a station heartbeating exactly on time "
+        "spends part of every cycle reading 'stale'. Use 30, which is what "
+        "D-030 fixes for all of MSP 0.x."
+    )
 
 
 def _refuse_placeholder_secrets(settings: Settings) -> None:

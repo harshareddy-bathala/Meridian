@@ -39,6 +39,7 @@ MANAGED = (
     "TUNNEL_HOSTNAME",
     "MERIDIAN_PUBLIC",
     "API_PORT",
+    "HEARTBEAT_INTERVAL_S",
     "GRAFANA_ADMIN_PASSWORD",
 )
 
@@ -228,3 +229,39 @@ def test_a_placeholder_grafana_password_is_fine_on_loopback(
 
     assert not settings.is_public
     assert settings.grafana_admin_password == "change-me"
+
+
+def test_a_heartbeat_interval_liveness_cannot_describe_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fires on loopback too, unlike the placeholder refusal.
+
+    SC-5 fixes `stale` at 60 s and `offline` at 90 s (D-013). At a 45 s
+    interval a station heartbeating exactly on time is more than 60 s past its
+    last heartbeat for part of every cycle, so it flaps into `stale` while
+    behaving as specified — and every reliability figure reading liveness
+    inherits that. A wrong number is not excused by being local.
+    """
+    with pytest.raises(InsecureConfigurationError) as excinfo:
+        _load(
+            monkeypatch,
+            PUBLIC_BASE_URL="http://localhost:8000",
+            HEARTBEAT_INTERVAL_S="45",
+        )
+
+    message = str(excinfo.value)
+    assert "HEARTBEAT_INTERVAL_S" in message
+    assert "30" in message
+
+
+def test_the_default_heartbeat_interval_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-030 fixes 30 s for all of MSP 0.x, and it must survive its own check.
+
+    A consistency check that rejected the documented default would be found by
+    whoever ran `docker compose up` on a clean machine.
+    """
+    settings = _load(monkeypatch, PUBLIC_BASE_URL="http://localhost:8000")
+
+    assert settings.heartbeat_interval_s == 30

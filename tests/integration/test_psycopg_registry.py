@@ -16,7 +16,11 @@ import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from meridian.registry import InvalidInviteError, RegistrationRequest  # noqa: E402
+from meridian.registry import (  # noqa: E402
+    InvalidInviteError,
+    RegistrationRequest,
+    UnknownStationError,
+)
 from meridian.registry.psycopg_registry import PsycopgRegistry  # noqa: E402
 from meridian.store.invites import hash_invite_token, revoke_invite  # noqa: E402
 from meridian.store.stations import Capability, revoke_station_token  # noqa: E402
@@ -478,3 +482,55 @@ def test_a_revoked_station_is_readmitted_by_a_bound_invite(
     assert readmitted.station_id == created.station_id
     assert registry.authenticate(readmitted.bearer_token) == created.station_id
     assert registry.authenticate(created.bearer_token) is None
+
+
+def _set_last_heartbeat(rollback: Any, station_id: str, age_s: int | None) -> datetime:
+    """Age one station's last heartbeat by ``age_s``, and return the instant `now`.
+
+    The instant is taken from the database, not from Python, so the comparison
+    inside `liveness()` uses one clock at both ends — the cross-clock trap D-046
+    was written for.
+    """
+    with rollback.cursor() as cur:
+        cur.execute("select now()")
+        row = cur.fetchone()
+        assert row is not None
+        now: datetime = row[0]
+        cur.execute(
+            "update stations set last_heartbeat_at = %s where station_id = %s",
+            (None if age_s is None else now - timedelta(seconds=age_s), station_id),
+        )
+    return now
+
+
+@pytest.mark.parametrize(
+    ("age_s", "expected"),
+    [(None, "never_seen"), (5, "online"), (65, "stale"), (120, "offline")],
+)
+def test_liveness_classifies_a_real_station_by_heartbeat_age(
+    registry: Any, rollback: Any, age_s: int | None, expected: str
+) -> None:
+    """The whole path: registered station, aged heartbeat, derived answer.
+
+    The pure derivation has its own unit tests over every boundary; this proves
+    the column is read, the instant survives the round trip as timezone-aware
+    UTC, and the two halves are wired to each other.
+    """
+    insert_invite(rollback, plaintext=f"liveness-invite-{expected}")
+    created = registry.register(
+        sample_request(invite_token=f"liveness-invite-{expected}")
+    )
+    now = _set_last_heartbeat(rollback, created.station_id, age_s)
+
+    assert registry.liveness(created.station_id, now=now) == expected
+
+
+def test_liveness_refuses_a_station_it_cannot_find(registry: Any) -> None:
+    """A caller reaches this with an id it already listed, so absence is a bug.
+
+    Raising beats inventing a fifth value that every call site would have to
+    branch on for a case that means "you asked about something that is not
+    there".
+    """
+    with pytest.raises(UnknownStationError, match="st_nonexistent"):
+        registry.liveness("st_nonexistent", now=datetime.now(UTC))

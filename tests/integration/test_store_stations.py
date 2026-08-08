@@ -23,6 +23,7 @@ from meridian.store.stations import (  # noqa: E402
     Capability,
     NewStation,
     find_station_for_recovery,
+    find_station_heartbeat,
     find_station_id_by_token_hash,
     find_station_provenance,
     insert_station,
@@ -406,3 +407,46 @@ def test_the_cli_handler_fails_on_a_station_with_no_live_token(
 
     assert code == EXIT_FAILED
     assert "no station with a live token" in capsys.readouterr().err
+
+
+def test_find_station_heartbeat_separates_absent_from_never_reported(
+    rollback: Any,
+) -> None:
+    """Two `None`s at different levels, meaning different things.
+
+    No row at all versus a row that has never reported. `derive_liveness` turns
+    the second into `never_seen`; the first is a caller bug the registry raises
+    on, and collapsing them here would take that distinction away.
+    """
+    insert_station(
+        rollback,
+        sample_station("st_hb", token_sha256=bytes([4]) * 32),
+        [SAMPLE_CAPABILITY],
+    )
+
+    found = find_station_heartbeat(rollback, "st_hb")
+    assert found is not None
+    assert found.last_heartbeat_at is None
+
+    assert find_station_heartbeat(rollback, "st_never_registered") is None
+
+
+def test_a_soft_deleted_station_reads_as_absent_not_offline(rollback: Any) -> None:
+    """A decommissioned station is not a fault to investigate.
+
+    Without the `deleted_at` filter it would keep ageing and eventually report
+    `offline` forever, putting a permanent red row on the dashboard for a
+    station somebody deliberately retired.
+    """
+    insert_station(
+        rollback,
+        sample_station("st_gone", token_sha256=bytes([3]) * 32),
+        [SAMPLE_CAPABILITY],
+    )
+    with rollback.cursor() as cur:
+        cur.execute(
+            "update stations set deleted_at = now() where station_id = %s",
+            ("st_gone",),
+        )
+
+    assert find_station_heartbeat(rollback, "st_gone") is None

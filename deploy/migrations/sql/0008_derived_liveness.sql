@@ -1,0 +1,24 @@
+-- 0008 — liveness is derived on read, so the stored column goes.
+--
+-- `stations.liveness` was declared in 0002 as a stored `text` with a CHECK and
+-- its own partial index, alongside `last_heartbeat_at`. Nothing ever wrote it:
+-- every row has carried the `'never_seen'` default since the table existed.
+--
+-- D-054 settles the contradiction rather than filling the column in. Liveness is
+-- a function of one stored instant and the current time, and a stored conclusion
+-- is only correct until the clock passes its next threshold. Nothing moves the
+-- clock on the platform's behalf, so a station that went quiet would keep
+-- reading `online` until some unrelated write happened to refresh it — which is
+-- exactly the case liveness exists to detect. A column that can disagree with
+-- the row it is derived from is the same fault D-049 refused for
+-- `element_sets`, and the same argument applies here.
+--
+-- `last_heartbeat_at` stays. It is the measurement; `liveness` was the opinion.
+--
+-- Dropping the column drops `stations_liveness_idx` with it — Postgres removes
+-- an index whose only column is gone. That index was on a column with one
+-- distinct value in every row, so it could never have been selective anyway.
+--
+-- The vocabulary is not lost: `registry.liveness.Liveness` is the one definition
+-- now, with SC-5's thresholds beside it and unit tests over the boundaries.
+alter table stations drop column liveness;

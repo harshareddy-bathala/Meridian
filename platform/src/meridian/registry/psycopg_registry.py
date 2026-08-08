@@ -1,9 +1,9 @@
 """``PsycopgRegistry`` — the concrete ``Registry`` backed by the store layer.
 
-Implements ``Registry.register()`` and ``Registry.authenticate()`` against
-``meridian.store.stations`` and ``meridian.store.invites``. ``liveness()`` and
-``was_listening()`` are not implemented here — Stage 5, once heartbeats carry
-data to derive them from.
+Implements ``Registry.register()``, ``Registry.authenticate()`` and
+``Registry.liveness()`` against ``meridian.store.stations`` and
+``meridian.store.invites``. ``was_listening()`` is not implemented here — it
+needs a heartbeat endpoint to have written the rows it reads.
 
 This module holds MSP §4.1's actual decision logic: which of the six rows of
 its recovery table a presented ``(invite_token, registration_key)`` pair
@@ -21,7 +21,14 @@ import hmac
 import secrets
 from datetime import datetime, timedelta
 
-from meridian.registry import InvalidInviteError, Registration, RegistrationRequest
+from meridian.registry import (
+    InvalidInviteError,
+    Liveness,
+    Registration,
+    RegistrationRequest,
+    UnknownStationError,
+)
+from meridian.registry.liveness import derive_liveness
 from meridian.store.invites import (
     consume_invite,
     find_invite_by_hash,
@@ -32,6 +39,7 @@ from meridian.store.stations import (
     NewStation,
     StationRecoveryInfo,
     find_station_for_recovery,
+    find_station_heartbeat,
     find_station_id_by_token_hash,
     insert_station,
     rotate_station_token,
@@ -169,6 +177,19 @@ class PsycopgRegistry:
         return find_station_id_by_token_hash(
             self._conn, hash_with_pepper(self._pepper, bearer_token)
         )
+
+    def liveness(self, station_id: str, *, now: datetime) -> Liveness:
+        """See :meth:`meridian.registry.Registry.liveness` for the contract.
+
+        Two lines of work, deliberately: read the instant, then classify it.
+        The classification lives in :func:`meridian.registry.liveness.
+        derive_liveness`, which is pure and has its own unit tests, so the
+        thresholds SC-5 fixes are not buried behind a database.
+        """
+        heartbeat = find_station_heartbeat(self._conn, station_id)
+        if heartbeat is None:
+            raise UnknownStationError(station_id)
+        return derive_liveness(heartbeat.last_heartbeat_at, now=now)
 
     def _create_station(
         self, invite_hash: bytes, request: RegistrationRequest
