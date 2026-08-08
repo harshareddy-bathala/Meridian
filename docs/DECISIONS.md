@@ -1173,6 +1173,48 @@ The trigger to revisit: the first time the platform is reachable from outside th
 
 ---
 
+## D-053 — Meridian is its own network; no third-party client runs on our station
+
+**2026-08-08 · accepted**
+
+"Why not just contribute to SatNOGS?" is the first question this project will be asked, and the answer has to be on the record rather than improvised.
+
+**We do not run `satnogs-client` or TinyGS firmware on our hardware, and we build no adapter for either.** Meridian is an independent network with an open protocol; the contribution is MSP and the platform behind it, not another node on somebody else's map.
+
+**This is not a licence problem, and saying so matters.** `satnogs-client` is AGPL-3.0, and running it as a separate process would create no obligation on this repository — the same separate-process argument `README.md` already makes for GPL decoders, which are invoked and never linked. AGPL §13 would bite only if we *modified* it and exposed the modified version over a network, and those changes would be published separately in any case. CLAUDE.md's third rule still forbids copying any of it in, and that is unchanged. **The reason we do not run it is scope, not licence.**
+
+**The binding constraint, had we wanted both, is the radio.** An SDR is opened by exactly one process, so Meridian and a third-party client cannot use the same receiver at the same time; `rotctld` accepts several clients but two schedulers issuing conflicting bearings is meaningless. Resolving that means either a second receiver — **and there is no dual-hardware plan** — or a time-sharing arbiter, which is real engineering (window negotiation, pre-emption, a foreign client inside our own scheduling story) for something no success criterion asks for. Both are rejected.
+
+**What replaces "join them" is "match them".** The station is expected to perform comparably to a competent SatNOGS or TinyGS station on the bands it covers, and that comparison is the honest way to show the network is worth joining. Parity is measured on our own numbers — decode yield, `peak_snr_db`, and predicted-versus-actual AOS — under `docs/EVALUATION.md`'s method, against our own station's history. It is **not** established by ingesting another network's observations and comparing totals: their archive contains only passes somebody chose to observe, which is the selection bias `EVALUATION.md` §1 names as this project's main methodological threat, and importing it to score ourselves would import the bias with it.
+
+**The design obligation this leaves is small and worth keeping.** Reception (SDR capture, rotator control, decoders) stays separable from the MSP client rather than interleaving protocol calls with radio control, and standard interfaces are preferred where one exists — hamlib `rotctld` for the rotator, files or pipes for decoder output. That costs nothing now, and it is what stops "independent" from quietly meaning "unable to do anything else". It is a shape, not a feature, and no SatNOGS or TinyGS code, dependency or API call belongs in this repository.
+
+**Hardware this assumes.** One Pi-and-SDR station receiving on **137 MHz** (Meteor-M LRPT, the primary target) and **437 MHz**, the latter being where the cubesat traffic SatNOGS carries mostly sits. Alongside it, an **ESP LoRa node as a second receiving path** for LoRa-modulated satellites — a receiver, not a controller, and not a replacement for anything: the Arduino Uno R4 WiFi remains the rotator controller exactly as `CLAUDE.md`'s stack section states. The LoRa node is TinyGS-class hardware by nature and is nonetheless ours, speaking MSP; that it *could* run TinyGS firmware and will not is the clearest illustration of this decision.
+
+---
+
+## D-054 — Liveness is derived on read, and the stored column is dropped
+
+**2026-08-08 · accepted** · *resolves a contradiction in D-013's own schema*
+
+The codebase said both things at once. `0002_stations.sql` declared `stations.liveness` as a stored `text` with a `CHECK` and a partial index; `Registry.liveness(station_id, *, now)` took the current instant as a parameter, which only makes sense if the answer is computed. Nothing ever wrote the column — every row has carried the `'never_seen'` default since the table existed. Stage 5's roadmap entry offers both options and observes that "dynamic calculation avoids stale stored values".
+
+**Derived on read.** Liveness is a function of one stored instant and the current time. A stored conclusion is correct only until the clock passes its next threshold, and **nothing moves the clock on the platform's behalf** — so a station that stopped reporting would keep reading `online` until some unrelated write happened to refresh it. That is precisely the case liveness exists to detect, which makes the stored form wrong exactly when it matters. A column derivable from another column in the same row is a column that can disagree with it; D-049 refused that for `element_sets` and the same argument applies here. Migration `0008` drops it, taking `stations_liveness_idx` with it — an index over a column with one distinct value in every row could never have been selective. `last_heartbeat_at` stays: it is the measurement, `liveness` was the opinion.
+
+**The thresholds do not derive from the heartbeat interval, and this was nearly got wrong.** D-013 already fixed `stale` at 60 s and `offline` at 90 s from SC-5, and states the direction of the dependency: the success criterion sets the threshold rather than the other way round. Deriving them from `Settings.heartbeat_interval_s` would let a deployment raise the interval and quietly stop meeting SC-5 while every dashboard still read "offline" as though it meant the same thing.
+
+**What the interval does constrain is its own ceiling.** At D-030's 30 s, `stale` is two missed heartbeats and `offline` is three. At 45 s a station heartbeating exactly on time sits more than 60 s past its last heartbeat for a third of every cycle and flaps into `stale` while behaving exactly as specified — and every reliability figure reading liveness inherits it. So `load_settings` refuses `HEARTBEAT_INTERVAL_S` above 30. **That refusal fires on every start, not only a public one**, unlike the placeholder-secret check beside it: a placeholder on loopback exposes nothing, whereas a wrong liveness number on a laptop is the one that gets copied into a report.
+
+**Where the code lives.** `meridian.registry.liveness` is a leaf module importing nothing from `meridian`, which is what lets `meridian.config` check a setting against it without an import cycle through the store layer. It owns the `Liveness` vocabulary (re-exported from `meridian.registry`, so callers are unaffected), both thresholds with their provenance, and a pure `derive_liveness` that reads no clock — the instant is passed in, so a caller classifying a page of stations gives them all one value and a test states an age instead of sleeping for it.
+
+**An unknown station raises rather than returning a fifth value.** `UnknownStationError` is a `LookupError`. A caller reaches `liveness()` with an id it has already listed, so an id the registry cannot find is a caller bug, not a state for every call site to branch on. Soft-deleted stations read as absent rather than as permanently offline — a deleted station is not a fault to investigate.
+
+**A safety test refused the drop, and it was right to.** `test_no_sql_file_drops_or_truncates` banned `drop column` outright in any migration — "migrations add; they do not destroy". Rather than edit the assertion until it passed, the ban stays and the exception is now an explicit entry in `ALLOWED_DESTRUCTIVE` naming the file and the statement, so weakening the rule costs a reviewed line in a diff instead of a quiet change to a test nobody re-reads. The bar for an entry is that **no data can be lost** — not that losing it would be convenient — and `stations.liveness` clears it because nothing ever wrote the column. Two further tests hold the allowance honest: one fails if an entry no longer matches the file it names, so a stale permission cannot sit there licensing a future drop; the other refuses any allowance whose statement touches `observations`, `heartbeats`, `passes` or `assignments`, whatever the file is called. That last one was verified to fail by appending a drop against `observations`, which is how we know it can.
+
+*Rejected:* the roadmap's other option, a periodic background job writing the column. It buys nothing here — the derived answer is a subtraction against an indexed timestamp — and it would reintroduce the staleness above between runs. A job is still the right shape for *alerting* on transitions later, and it can compute transitions by comparing derived values without needing anywhere to store the current one.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
