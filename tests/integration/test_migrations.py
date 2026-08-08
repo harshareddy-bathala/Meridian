@@ -160,6 +160,11 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:  # type: igno
         "observations",
         "heartbeats",
     } <= carrying
+    # D-049: element_sets is the deliberate exception. Its provenance lives in
+    # `source`, which distinguishes celestrak from spacetrack from manual as
+    # well as simulator, and is part of element_set_unique. A boolean here
+    # would be derivable from `source` and so able to disagree with it.
+    assert "element_sets" not in carrying
 
 
 def test_outcome_enum_is_exactly_the_msp_five(scalar) -> None:  # type: ignore[no-untyped-def]

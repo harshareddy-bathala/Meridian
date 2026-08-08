@@ -55,7 +55,10 @@ def registry(rollback: Any) -> PsycopgRegistry:
 
 
 def sample_request(
-    *, invite_token: str, registration_key: str = "the-registration-key"
+    *,
+    invite_token: str,
+    registration_key: str = "the-registration-key",
+    simulated: bool = False,
 ) -> RegistrationRequest:
     return RegistrationRequest(
         invite_token=invite_token,
@@ -65,7 +68,7 @@ def sample_request(
         lat_deg=12.9716,
         lon_deg=77.5946,
         alt_m=920.0,
-        simulated=False,
+        simulated=simulated,
         simulator_run_id=None,
         seed=None,
         capabilities=[SAMPLE_CAPABILITY],
@@ -350,3 +353,78 @@ def test_losing_the_consume_race_rejects_and_leaves_no_station(
         cur.execute("select count(*) from stations")
         (station_count,) = cur.fetchone()
     assert station_count == 0
+
+
+def test_unbound_recovery_claiming_a_different_simulated_is_rejected(
+    rollback: Any, registry: PsycopgRegistry
+) -> None:
+    """D-048. A station cannot change its own nature. Before this check, the
+    platform answered 200 to a request whose central claim it had discarded."""
+    insert_invite(rollback, plaintext="original-invite-8")
+    created = registry.register(
+        sample_request(invite_token="original-invite-8", registration_key="my-key")
+    )
+
+    insert_invite(
+        rollback,
+        plaintext="recovery-invite-8",
+        consumed_by_station_id=created.station_id,
+    )
+    with pytest.raises(InvalidInviteError):
+        registry.register(
+            sample_request(
+                invite_token="recovery-invite-8",
+                registration_key="my-key",
+                simulated=True,
+            )
+        )
+
+
+def test_bound_recovery_claiming_a_different_simulated_is_rejected(
+    rollback: Any, registry: PsycopgRegistry
+) -> None:
+    """The same rule on D-034's path — an operator authorising a rotation does
+    not authorise the station changing what kind of station it is."""
+    insert_invite(rollback, plaintext="original-invite-9")
+    created = registry.register(
+        sample_request(invite_token="original-invite-9", registration_key="my-key")
+    )
+
+    insert_invite(
+        rollback,
+        plaintext="bound-invite-9",
+        issued_for_station_id=created.station_id,
+    )
+    with pytest.raises(InvalidInviteError):
+        registry.register(
+            sample_request(
+                invite_token="bound-invite-9",
+                registration_key="my-key",
+                simulated=True,
+            )
+        )
+
+
+def test_recovery_with_a_matching_simulated_still_succeeds(
+    rollback: Any, registry: PsycopgRegistry
+) -> None:
+    """The other side of D-048 — the check must not break ordinary recovery."""
+    insert_invite(rollback, plaintext="original-invite-10")
+    created = registry.register(
+        sample_request(invite_token="original-invite-10", registration_key="my-key")
+    )
+
+    insert_invite(
+        rollback,
+        plaintext="recovery-invite-10",
+        consumed_by_station_id=created.station_id,
+    )
+    recovered = registry.register(
+        sample_request(
+            invite_token="recovery-invite-10",
+            registration_key="my-key",
+            simulated=False,
+        )
+    )
+
+    assert recovered.station_id == created.station_id

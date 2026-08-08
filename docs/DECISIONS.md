@@ -1081,6 +1081,36 @@ The loser is rejected as `invalid_invite`, not as a conflict. MSP §3 does not l
 
 ---
 
+## D-048 — Recovery restores an identity, and `simulated` is never taken from a station
+
+**2026-08-08 · accepted** · *implements D-005, D-013; found by audit*
+
+MSP §4.1's recovery rows say only "same `station_id`, newly minted token". They are silent on what happens to the rest of the payload — `name`, `location`, `capabilities`, `client`, and `simulated` — which a recovering station sends in full because the request shape is the same one it used to register.
+
+`_recover_unbound_station` and `_recover_bound_station` read all of them and discarded all of them.
+
+**Recovery restores an identity; it does not re-register.** Ignoring the profile fields is the right default: recovery exists because a response was lost in flight (D-023) or an operator authorised a rotation (D-034), not because the station's description changed. A station that genuinely moved should be re-registered, not recovered. This is now stated in `Registry.register`'s docstring rather than left as behaviour a reader has to infer from an omission.
+
+**`simulated` is the exception, and is rejected on mismatch.** A station cannot change its own nature. Silently ignoring a mismatch meant a simulated station could recover claiming `simulated: false` — keeping the stored `true`, so the row stayed correct, but the platform answered `200` to a request whose central claim it had discarded. The reverse is the dangerous direction if the two ever drift. `403 invalid_invite`, collapsed into the same error as every other rejecting row because MSP §3 does not let a client learn why.
+
+**The wider rule: `simulated` is platform-derived, always.** MSP §4.2 puts no `simulated` on the wire today, but `store.heartbeats.NewHeartbeat` accepts one from its caller, and the only value a heartbeat route would have to hand is whatever the station sent. `meridian.observations`' module docstring already states the invariant — "copied from the station's registry record" — with nothing to read it from. `store.stations.find_station_provenance` is now that reader, and `store/heartbeats.py`'s header says so at the point of use.
+
+`store.assignments.DueAssignment` also omitted `simulated`, which `assignments` has carried since `0004_passes.sql`. An assignment delivered over MSP §4.3 would have had no way to mark itself. Added.
+
+---
+
+## D-049 — `element_sets` records provenance in `source`, not a `simulated` boolean
+
+**2026-08-08 · accepted** · *clarifies D-013*
+
+D-013 enumerated the tables that carry a `simulated` boolean — `stations`, `passes`, `assignments`, `observations`, `heartbeats` — and did not consider `element_sets`, which has `source in ('celestrak', 'spacetrack', 'manual', 'simulator')` instead.
+
+**That asymmetry is kept, deliberately.** `simulated` would be exactly `source = 'simulator'`, and a stored column derivable from another column in the same row is a column that can disagree with it. `source` also carries more: it distinguishes `celestrak` from `spacetrack` from `manual`, which element-set age and divergence analysis need and a boolean would flatten. It is part of `element_set_unique (satellite_id, epoch, source)`, so the same set from two providers is two rows by design.
+
+**The obligation this creates is on `passes`, and it is not yet met.** A pass computed from a simulator-sourced element set is simulated, and `passes.simulated` is the column that has to say so. Nothing writes `passes` yet — propagation is Stage 6 — so this is recorded now, before the code exists, rather than discovered afterwards: **whoever inserts a `passes` row must set `simulated` from its element set's `source`, not default it to `false`.** The risk this closes is a dashboard filtering `where simulated = false` and silently including simulator-derived passes, which is the credibility failure CLAUDE.md's fifth rule is about.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

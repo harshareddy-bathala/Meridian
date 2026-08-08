@@ -212,6 +212,7 @@ class PsycopgRegistry:
             raise InvalidInviteError("registration recovery window has closed")
         if not self._key_matches(info, request.registration_key):
             raise InvalidInviteError("registration key does not match")
+        self._reject_simulated_mismatch(info, request)
         return self._mint_and_rotate(station_id)
 
     def _recover_bound_station(
@@ -221,6 +222,7 @@ class PsycopgRegistry:
         info = self._recovery_info_or_raise(station_id)
         if not self._key_matches(info, request.registration_key):
             raise InvalidInviteError("registration key does not match")
+        self._reject_simulated_mismatch(info, request)
         with self._conn.transaction():
             registration = self._mint_and_rotate(station_id)
             self._consume_or_raise(invite_hash, station_id)
@@ -238,6 +240,18 @@ class PsycopgRegistry:
             self._conn, token_sha256=invite_hash, station_id=station_id
         ):
             raise InvalidInviteError("invite consumed concurrently")
+
+    def _reject_simulated_mismatch(
+        self, info: StationRecoveryInfo, request: RegistrationRequest
+    ) -> None:
+        """Refuse a recovery that claims a different ``simulated`` than the row."""
+        # Recovery restores an identity; it does not re-register (D-048). Name,
+        # location, capabilities and client info on the request are ignored on
+        # this path, but `simulated` cannot be, because ignoring it silently is
+        # what lets a simulated station recover as a real one and file
+        # measured-looking data ever after - CLAUDE.md's fifth rule.
+        if request.simulated != info.simulated:
+            raise InvalidInviteError("simulated flag does not match the station")
 
     def _recovery_info_or_raise(self, station_id: str) -> StationRecoveryInfo:
         info = find_station_for_recovery(self._conn, station_id)

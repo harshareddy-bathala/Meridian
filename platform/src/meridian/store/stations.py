@@ -24,9 +24,11 @@ __all__ = [
     "Capability",
     "Connection",
     "NewStation",
+    "StationProvenance",
     "StationRecoveryInfo",
     "find_station_for_recovery",
     "find_station_id_by_token_hash",
+    "find_station_provenance",
     "insert_station",
     "rotate_station_token",
 ]
@@ -159,11 +161,14 @@ class StationRecoveryInfo:
     inside D-023's recovery window" — a question that only applies to an
     *unbound* invite; a bound invite (D-034) ignores the window entirely, so
     the registry service reads these two fields only on that path.
+    ``simulated`` answers "is the station recovering the same *kind* of
+    station it registered as" (D-048).
     """
 
     registration_key_sha256: bytes
     registered_at: datetime
     last_heartbeat_at: datetime | None
+    simulated: bool
 
 
 def find_station_for_recovery(
@@ -180,7 +185,55 @@ def find_station_for_recovery(
     with conn.cursor(row_factory=class_row(StationRecoveryInfo)) as cur:
         cur.execute(
             """
-            select registration_key_sha256, registered_at, last_heartbeat_at
+            select registration_key_sha256, registered_at, last_heartbeat_at,
+                   simulated
+            from stations
+            where station_id = %s
+            """,
+            (station_id,),
+        )
+        return cur.fetchone()
+
+
+@dataclass(frozen=True, slots=True)
+class StationProvenance:
+    """Whether a station's data is simulated, and what produced it.
+
+    The three fields ``0002_stations.sql`` keeps together under its
+    ``station_simulated_together`` CHECK: a simulated station carries a run
+    id and a seed, a real one carries neither.
+    """
+
+    simulated: bool
+    simulator_run_id: str | None
+    seed: int | None
+
+
+def find_station_provenance(
+    conn: Connection, station_id: str
+) -> StationProvenance | None:
+    """The registry's answer to "is this station simulated", for one station.
+
+    **This is the only admissible source of ``simulated`` for anything a
+    station sends.** A heartbeat and an observation both carry a
+    ``simulated`` field on the wire, and a station is free to put whatever it
+    likes there; taking it at face value would let a simulated station file
+    measured-looking rows, which is the failure CLAUDE.md's fifth rule exists
+    to prevent. ``meridian.observations``' own module docstring states the
+    same invariant. The value belongs to the registration record, and this is
+    how a caller reads it back.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+        station_id: The station to look up, already authenticated.
+
+    Returns:
+        Its provenance, or ``None`` when no such station exists.
+    """
+    with conn.cursor(row_factory=class_row(StationProvenance)) as cur:
+        cur.execute(
+            """
+            select simulated, simulator_run_id, seed
             from stations
             where station_id = %s
             """,

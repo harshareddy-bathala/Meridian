@@ -133,6 +133,17 @@ class Registry(Protocol):
         revocation by setting ``expires_at``. A bound invite is exempt from
         D-034's recovery *window*, not from its own expiry.
 
+        **On the two recovery rows, this restores an identity — it does not
+        re-register.** ``name``, ``operator``, the location, ``capabilities``
+        and the client fields are read from the request and deliberately not
+        written: recovery exists because a response was lost or an operator
+        authorised a rotation, not because the station's description changed.
+        A station that has genuinely moved is re-registered, not recovered.
+
+        ``simulated`` is the one field that is not merely ignored. A station
+        cannot change its own nature, so a value disagreeing with the stored
+        row is ``InvalidInviteError`` rather than a silent discard (D-048).
+
         "In recovery" means ``last_heartbeat_at is null`` **and** the request
         arrives within ``Settings.registration_recovery_window_s`` of
         ``registered_at`` — both conditions, not either (D-023). A bound

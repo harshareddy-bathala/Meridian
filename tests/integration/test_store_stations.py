@@ -9,6 +9,7 @@ test runs inside a transaction that is always rolled back — the same
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -21,6 +22,7 @@ from meridian.store.stations import (  # noqa: E402
     NewStation,
     find_station_for_recovery,
     find_station_id_by_token_hash,
+    find_station_provenance,
     insert_station,
     rotate_station_token,
 )
@@ -118,6 +120,45 @@ def test_find_station_for_recovery_returns_the_stored_fields(rollback: Any) -> N
     assert info is not None
     assert info.registration_key_sha256 == key_hash
     assert info.last_heartbeat_at is None
+    # D-048: the registry compares this against the recovering request rather
+    # than discarding it, so the recovery lookup has to carry it.
+    assert info.simulated is False
+
+
+def test_find_station_provenance_returns_a_real_station(rollback: Any) -> None:
+    insert_station(rollback, sample_station("st_real"), [SAMPLE_CAPABILITY])
+
+    provenance = find_station_provenance(rollback, "st_real")
+
+    assert provenance is not None
+    assert provenance.simulated is False
+    assert provenance.simulator_run_id is None
+    assert provenance.seed is None
+
+
+def test_find_station_provenance_returns_a_simulated_station(rollback: Any) -> None:
+    """D-048: this is the only admissible source of ``simulated`` for anything
+    a station sends — a heartbeat's own claim is not evidence."""
+    simulated = replace(
+        sample_station("st_sim"),
+        simulated=True,
+        simulator_run_id="run_2026_08_08",
+        seed=4471,
+    )
+    insert_station(rollback, simulated, [SAMPLE_CAPABILITY])
+
+    provenance = find_station_provenance(rollback, "st_sim")
+
+    assert provenance is not None
+    assert provenance.simulated is True
+    assert provenance.simulator_run_id == "run_2026_08_08"
+    assert provenance.seed == 4471
+
+
+def test_find_station_provenance_returns_none_for_an_unknown_station(
+    rollback: Any,
+) -> None:
+    assert find_station_provenance(rollback, "st_does_not_exist") is None
 
 
 def test_find_station_for_recovery_returns_none_for_an_unknown_station(

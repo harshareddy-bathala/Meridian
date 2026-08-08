@@ -6,6 +6,14 @@ rest of ``meridian.store``, this module makes no decision about what a
 heartbeat *means* — reconciling ``held_assignments`` against
 ``meridian.store.assignments`` is a later session's orchestration, built on
 top of this one.
+
+**``NewHeartbeat.simulated`` must not be read from the request body.** MSP
+§4.2 puts no ``simulated`` field on the wire, and if a later revision does,
+a station's own claim is not evidence: the value belongs to the
+registration record, and ``store.stations.find_station_provenance`` is how
+a caller reads it back (D-048, CLAUDE.md rule 5). This module cannot
+enforce that — it takes whatever ``bool`` it is handed — so the rule is
+written here, where whoever builds the heartbeat route will read it.
 """
 
 from __future__ import annotations
