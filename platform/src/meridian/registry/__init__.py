@@ -2,18 +2,25 @@
 
 **The authority on whether a station was listening at a given moment.** Every
 reliability metric depends on this being right, which is why
-:meth:`Registry.was_listening` is implemented and tested in Phase 1 even though
-``meridian.reliability`` does not exist until Phase 3. Left until then, it would be
-reconstructed from whatever the heartbeat table happened to contain, and the
-distinction between "heard nothing" and "was not listening" would erode exactly as
-docs/ARCHITECTURE.md warns.
+:meth:`Registry.was_listening` is declared here in Phase 1 even though
+``meridian.reliability`` does not exist until Phase 3. Left undeclared until
+then, it would be reconstructed from whatever the heartbeat table happened to
+contain, and the distinction between "heard nothing" and "was not listening"
+would erode exactly as docs/ARCHITECTURE.md warns.
 
-**`register` is declared here, not yet implemented.** Stage 4.3's store layer
-(`meridian.store.stations`, `meridian.store.invites`) is built and tested; the
-concrete `Registry` class that composes those calls into MSP §4.1's decision
-table, mints tokens and reads `Settings.token_hash_pepper` is the next
-increment, written against this signature — interface before implementation,
-per CLAUDE.local.md §8.
+This module declares interfaces and value types only. It performs no I/O,
+holds no connection and contains no SQL — ``meridian.registry.psycopg_registry``
+is the concrete implementation, and it is the only module that may compose
+``meridian.store`` calls into MSP §4.1's decision table.
+
+**Implementation status.** ``register`` and ``authenticate`` are implemented in
+``psycopg_registry``. ``liveness`` and ``was_listening`` are *planned* — Stage 5,
+once a heartbeat endpoint exists to supply data to derive them from. They are
+declared now because their contract constrains the schema, not because anything
+calls them yet (CLAUDE.local.md §8, interface before implementation).
+
+Reference: docs/MSP-SPEC.md §4.1; docs/ARCHITECTURE.md; docs/DECISIONS.md
+D-017, D-020, D-023, D-034.
 """
 
 from __future__ import annotations
@@ -120,6 +127,12 @@ class Registry(Protocol):
           not match, or a bound invite presented by the wrong station —
           ``InvalidInviteError``.
 
+        An invite whose ``expires_at`` has passed admits nothing, checked
+        before the table is consulted at all. That covers withdrawal as well
+        as lapsing, because ``store.invites.revoke_invite`` implements
+        revocation by setting ``expires_at``. A bound invite is exempt from
+        D-034's recovery *window*, not from its own expiry.
+
         "In recovery" means ``last_heartbeat_at is null`` **and** the request
         arrives within ``Settings.registration_recovery_window_s`` of
         ``registered_at`` — both conditions, not either (D-023). A bound
@@ -147,10 +160,25 @@ class Registry(Protocol):
     def authenticate(self, bearer_token: str) -> str | None:
         """Return the ``station_id`` for a bearer token, or ``None``.
 
-        Tokens are opaque secrets compared against a stored hash in constant time
-        (docs/DECISIONS.md D-017), not signed tokens — MSP §6 defines
-        ``unauthorized`` as covering *revoked* tokens, and revocation needs the
-        lookup this method performs anyway.
+        Tokens are opaque secrets, not signed tokens (docs/DECISIONS.md
+        D-017) — MSP §6 defines ``unauthorized`` as covering *revoked*
+        tokens, and revocation needs the lookup this method performs anyway.
+
+        The token is hashed with ``Settings.token_hash_pepper`` and the hash
+        is *looked up*; the plaintext is never compared. There is therefore
+        no Python-level comparison here to make constant-time, unlike the
+        registration key in ``register()``, which is fetched and then
+        compared and so uses ``hmac.compare_digest``.
+
+        Args:
+            bearer_token: The token exactly as presented in the
+                ``Authorization: Bearer`` header, unhashed.
+
+        Returns:
+            The owning ``station_id``, or ``None`` when the token is unknown,
+            revoked, or belongs to a deleted station. The three are
+            deliberately indistinguishable — MSP §3 does not let a client
+            learn which.
         """
         ...
 

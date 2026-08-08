@@ -142,6 +142,7 @@ def register(
         conn,
         pepper=settings.token_hash_pepper,
         recovery_window_s=settings.registration_recovery_window_s,
+        now_utc=utc_now(),
     )
     try:
         result = registry.register(body.to_registration_request())

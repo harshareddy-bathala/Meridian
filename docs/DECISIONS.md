@@ -295,6 +295,11 @@ Both are optional top-level `float|null`, in seconds. `null` means unknown and m
 
 **Opaque tokens.** 32 bytes from `secrets.token_urlsafe`, stored as a SHA-256 hash, compared in constant time. `TOKEN_SECRET` is removed from `deploy/.env.example`.
 
+*Clarified 2026-08-08.* "Compared in constant time" described the implementation loosely enough to be wrong in one place and unnecessary in another, and the code matched neither reading until this correction. Precisely:
+
+- **The bearer token is never compared in Python.** `store.stations.find_station_id_by_token_hash` hashes the presented token and *looks the hash up* in an indexed `bytea` column. There is no comparison to make constant-time; the timing that remains is an index probe, which does not vary with how many leading bytes matched.
+- **The registration key is compared**, in `registry.psycopg_registry._key_matches`, because it is fetched by `station_id` and then checked. That comparison was `bytes.__eq__` — which short-circuits — and is now `hmac.compare_digest`. This is the one that matters: the registration key authorises minting a new bearer token on an existing station (D-023, D-034), so a timing oracle on it is a credential-recovery path rather than an information leak.
+
 The advantage of a signed token is validation without a database read. That advantage does not exist here: `platform/registry` is "the authority on whether a station was listening at a given moment" and must load the station row on every heartbeat anyway to update health state and last-heartbeat age. So signing buys no round trip and adds a signing-key rotation problem, on a platform whose entire point is running unattended.
 
 Opaque tokens are also revocable immediately by deleting a row, which matters more on a publicly reachable endpoint than statelessness does. Note that "stateless server" in MSP §1 means no per-session state between requests, not no database — the platform is a database-backed service either way.
@@ -1023,6 +1028,56 @@ one clock tick.
 
 **Found by running the client against the endpoint, not by reading the code.** Both
 were written against D-016 and both looked correct.
+
+---
+
+## D-046 — Invite expiry is checked before MSP §4.1's table, and it binds bound invites too
+
+**2026-08-08 · accepted** · *implements D-020, D-034; found by audit*
+
+`store.invites.revoke_invite` implements withdrawal as `set expires_at = now()`, deliberately, so that a withdrawn invite and a lapsed one are one fact to every future reader. `registry.psycopg_registry.register()` then never read `expires_at` at all.
+
+**The consequence was that `meridian invite revoke` did nothing.** It reported "Revoked 1 invite(s)", set the column, and the invite went on registering stations. `--expires-in-days` was decorative for the same reason. MSP-SPEC.md §6 defines `invalid_invite` as "unknown, already used, **or withdrawn**"; the third case had no implementation.
+
+Two things had to be decided to fix it, neither settled by the specification.
+
+**Where the check goes: before the table, not inside a row.** MSP §4.1's six-row table selects an outcome from `(invite state, registration_key)`. Expiry is not one of its axes. Putting the check ahead of the table means one predicate covers creation, unbound recovery and bound recovery alike, and no future row can be added that forgets it.
+
+**A bound invite is *not* exempt.** D-034 exempts a bound invite from the recovery *window*, on the reasoning that an operator issuing an invite against a named `station_id` has supplied the authorisation the window exists to require. That argument does not extend to expiry: an operator who issued a bound invite and then withdrew it has withdrawn the authorisation itself. Exempting bound invites would make the operator's only revocation control silently inapplicable to the one case — post-window credential rotation — where it is most likely to be used in anger.
+
+**The comparison is made by the database, not in Python.** This was the third thing that had to be decided, and it was forced by a test that passed or failed depending on which tests ran before it.
+
+`revoke_invite` writes `expires_at = now()` — the *database's* clock. The first implementation compared that against a Python `datetime.now(UTC)` captured at the start of the request. Measured on the development machine:
+
+```
+python datetime.now(UTC)   : 2026-08-08 07:37:22.123359+00:00
+postgres now()             : 2026-08-08 07:37:22.129477+00:00   <- transaction start
+postgres clock_timestamp() : 2026-08-08 07:37:22.136484+00:00
+```
+
+Two separate problems. Postgres `now()` is *transaction start*, not statement time, so its value depends on when the transaction opened — which is what made the test non-deterministic. And the Python clock ran ~6 ms behind, with a 15.6 ms resolution on Windows (D-045 measured the same tick): the two readings above, taken either side of a database round trip, were *bit-identical*.
+
+Neither margin matters for D-023's one-hour recovery window, which is why `is_recovery_eligible` still takes a Python `now`. It matters absolutely here, because `expires_at = now()` sets the deadline to *this instant* — the margin is zero by construction, so any skew at all lets a revoked invite through.
+
+So `Invite` carries `is_expired`, computed in the `select` as `(expires_at is not null and expires_at <= now())`. One clock writes it and the same clock reads it. `cli._invite_state` was making the identical cross-clock comparison and now uses the same column, so `meridian invite list` cannot report "pending" for an invite it just revoked either.
+
+An invite with a null `expires_at` never expires, which is D-020's default and what the bootstrap invite relies on.
+
+---
+
+## D-047 — One invite admits one station, enforced by acting on the race guard
+
+**2026-08-08 · accepted** · *implements D-020; found by audit*
+
+`store.invites.consume_invite` guards the race in SQL with `where consumed_at is null` and reports the outcome by return value, its docstring stating that the loser "must treat that as `invalid_invite`". Both call sites in `psycopg_registry` discarded that value.
+
+**Two concurrent `POST /msp/v0/register` with the same unconsumed invite therefore both succeeded.** Both passed the `consumed_at is null` read in `register()`, both inserted a station with a different generated `station_id`, and both called `consume_invite`; under READ COMMITTED the second blocked on the row lock, re-evaluated the predicate, got `rowcount 0` — and nothing looked at it. One invite, two stations. That is precisely the property D-020 says `invite_tokens` exists to provide.
+
+**The guard is acted on inside the caller's transaction**, in `_consume_or_raise`, so raising rolls the station row back with it. The alternative — checking first, then inserting — reintroduces the same race one statement earlier; the `update`'s own row lock is the only serialisation point available without escalating the isolation level for every registration.
+
+The loser is rejected as `invalid_invite`, not as a conflict. MSP §3 does not let a client learn why its invite failed, and "someone else got there first" is exactly the kind of detail an attacker probing a leaked invite would want.
+
+**Both this and D-046 were found by reading the code against the specification, not by a failing test.** Neither had a test that could have caught it: the suite exercised one registration at a time, against invites it had just created.
 
 ---
 

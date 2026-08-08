@@ -159,7 +159,9 @@ def _invite_state(invite: invites.Invite) -> str:
     """One word (or two) describing what can still be done with an invite."""
     if invite.consumed_at is not None:
         return f"consumed by {invite.consumed_by_station_id}"
-    if invite.expires_at is not None and invite.expires_at <= datetime.now(UTC):
+    # The database decides this, not a comparison here — an invite revoked
+    # moments ago would otherwise still print "pending" (D-046).
+    if invite.is_expired:
         return "expired"
     return "pending"
 

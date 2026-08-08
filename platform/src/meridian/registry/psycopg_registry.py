@@ -17,8 +17,9 @@ Reference: docs/MSP-SPEC.md §4.1; docs/DECISIONS.md D-017, D-020, D-023, D-034.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from meridian.registry import InvalidInviteError, Registration, RegistrationRequest
 from meridian.store.invites import (
@@ -108,17 +109,28 @@ class PsycopgRegistry:
     forcing a subclass relationship before the class actually satisfies it.
     Stage 5 completes it once heartbeat data exists to derive them from.
 
-    Constructed per request with an open connection and the two ``Settings``
-    fields it needs — the shape a FastAPI ``Depends()`` builds it with.
+    Constructed per request with an open connection, the two ``Settings``
+    fields it needs, and the instant to judge time-dependent rows against —
+    the shape a FastAPI ``Depends()`` builds it with.
+
+    ``now_utc`` is taken at construction rather than read from the clock
+    inside each decision: one request is one instant, and a registry built
+    with an explicit instant is testable without freezing the system clock.
     """
 
     def __init__(
-        self, conn: Connection, *, pepper: str, recovery_window_s: int
+        self,
+        conn: Connection,
+        *,
+        pepper: str,
+        recovery_window_s: int,
+        now_utc: datetime,
     ) -> None:
-        """Bind this instance to one request's connection and configuration."""
+        """Bind this instance to one request's connection, configuration and instant."""
         self._conn = conn
         self._pepper = pepper
         self._recovery_window_s = recovery_window_s
+        self._now_utc = now_utc
 
     def register(self, request: RegistrationRequest) -> Registration:
         """See :meth:`meridian.registry.Registry.register` for the contract."""
@@ -126,6 +138,16 @@ class PsycopgRegistry:
         invite = find_invite_by_hash(self._conn, invite_hash)
         if invite is None:
             raise InvalidInviteError("no such invite")
+
+        # Checked before any row of MSP §4.1's table is selected: an operator
+        # who ran `meridian invite revoke` has withdrawn the invite for every
+        # outcome, recovery included, and a bound invite is exempt from
+        # D-034's *window* but not from its own expiry. `is_expired` is
+        # computed by the database rather than compared here, because
+        # `revoke_invite` writes `expires_at` with the database's clock —
+        # see Invite.is_expired and D-046.
+        if invite.is_expired:
+            raise InvalidInviteError("invite expired or withdrawn")
 
         if invite.issued_for_station_id is not None:
             if invite.consumed_at is not None:
@@ -173,7 +195,7 @@ class PsycopgRegistry:
         )
         with self._conn.transaction():
             insert_station(self._conn, new_station, request.capabilities)
-            consume_invite(self._conn, token_sha256=invite_hash, station_id=station_id)
+            self._consume_or_raise(invite_hash, station_id)
         return Registration(station_id=station_id, bearer_token=bearer_plaintext)
 
     def _recover_unbound_station(
@@ -184,7 +206,7 @@ class PsycopgRegistry:
         if not is_recovery_eligible(
             last_heartbeat_at=info.last_heartbeat_at,
             registered_at=info.registered_at,
-            now=datetime.now(UTC),
+            now=self._now_utc,
             window_s=self._recovery_window_s,
         ):
             raise InvalidInviteError("registration recovery window has closed")
@@ -201,8 +223,21 @@ class PsycopgRegistry:
             raise InvalidInviteError("registration key does not match")
         with self._conn.transaction():
             registration = self._mint_and_rotate(station_id)
-            consume_invite(self._conn, token_sha256=invite_hash, station_id=station_id)
+            self._consume_or_raise(invite_hash, station_id)
         return registration
+
+    def _consume_or_raise(self, invite_hash: bytes, station_id: str) -> None:
+        """Consume the invite, or reject the registration that lost the race."""
+        # consume_invite's `where consumed_at is null` is the only thing
+        # stopping one invite admitting two stations, and it reports the
+        # outcome by return value rather than by raising. Discarding it would
+        # leave both racing requests believing they had won, which is exactly
+        # the property D-020 says invite_tokens exists to provide. Raising
+        # inside the caller's transaction rolls the station row back with it.
+        if not consume_invite(
+            self._conn, token_sha256=invite_hash, station_id=station_id
+        ):
+            raise InvalidInviteError("invite consumed concurrently")
 
     def _recovery_info_or_raise(self, station_id: str) -> StationRecoveryInfo:
         info = find_station_for_recovery(self._conn, station_id)
@@ -211,8 +246,12 @@ class PsycopgRegistry:
         return info
 
     def _key_matches(self, info: StationRecoveryInfo, registration_key: str) -> bool:
+        """Whether the presented registration key hashes to the stored value."""
         presented = hash_with_pepper(self._pepper, registration_key)
-        return presented == info.registration_key_sha256
+        # compare_digest, not `==`: this key authorises minting a new bearer
+        # token on an existing station (D-023, D-034), so a timing oracle on
+        # it is a credential-recovery path, not merely an information leak.
+        return hmac.compare_digest(presented, info.registration_key_sha256)
 
     def _mint_and_rotate(self, station_id: str) -> Registration:
         bearer_plaintext, bearer_hash = generate_bearer_token(self._pepper)

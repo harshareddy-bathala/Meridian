@@ -18,6 +18,7 @@ the same shape ``api/versioning.py`` already uses for ``MSP-Version``.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import cast
 
 from fastapi import Depends, Header, Request
@@ -100,7 +101,12 @@ def get_authenticated_station_id(
     registry = PsycopgRegistry(
         conn,
         pepper=settings.token_hash_pepper,
+        # authenticate() reads neither of these, but PsycopgRegistry is one
+        # class with one constructor; passing the real values costs nothing
+        # and keeps this call site correct if authentication ever grows a
+        # time-dependent rule (an expiring token, say).
         recovery_window_s=settings.registration_recovery_window_s,
+        now_utc=datetime.now(UTC),
     )
     station_id = registry.authenticate(token)
     if station_id is None:

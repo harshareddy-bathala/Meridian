@@ -9,7 +9,7 @@ end to end — invite in, station row and bearer token out — using the
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -18,7 +18,7 @@ psycopg = pytest.importorskip("psycopg")
 
 from meridian.registry import InvalidInviteError, RegistrationRequest  # noqa: E402
 from meridian.registry.psycopg_registry import PsycopgRegistry  # noqa: E402
-from meridian.store.invites import hash_invite_token  # noqa: E402
+from meridian.store.invites import hash_invite_token, revoke_invite  # noqa: E402
 from meridian.store.stations import Capability  # noqa: E402
 
 pytestmark = pytest.mark.integration
@@ -46,7 +46,12 @@ def rollback(conn: Any) -> Iterator[Any]:
 
 @pytest.fixture
 def registry(rollback: Any) -> PsycopgRegistry:
-    return PsycopgRegistry(rollback, pepper=PEPPER, recovery_window_s=RECOVERY_WINDOW_S)
+    return PsycopgRegistry(
+        rollback,
+        pepper=PEPPER,
+        recovery_window_s=RECOVERY_WINDOW_S,
+        now_utc=datetime.now(UTC),
+    )
 
 
 def sample_request(
@@ -75,6 +80,7 @@ def insert_invite(
     plaintext: str,
     issued_for_station_id: str | None = None,
     consumed_by_station_id: str | None = None,
+    expires_at: datetime | None = None,
 ) -> None:
     """A raw-SQL invite row — this suite drives ``PsycopgRegistry`` from the
     presented side, so the fixture data needs full control over invite state
@@ -83,14 +89,15 @@ def insert_invite(
         cur.execute(
             "insert into invite_tokens"
             " (token_sha256, label, issued_for_station_id,"
-            " consumed_at, consumed_by_station_id)"
-            " values (%s, %s, %s, %s, %s)",
+            " consumed_at, consumed_by_station_id, expires_at)"
+            " values (%s, %s, %s, %s, %s, %s)",
             (
                 hash_invite_token(plaintext),
                 "test-invite",
                 issued_for_station_id,
                 datetime.now(UTC) if consumed_by_station_id else None,
                 consumed_by_station_id,
+                expires_at,
             ),
         )
 
@@ -253,3 +260,93 @@ def test_authenticate_returns_none_for_a_garbage_token(
     registry: PsycopgRegistry,
 ) -> None:
     assert registry.authenticate("no-station-ever-had-this-token") is None
+
+
+def test_an_expired_invite_is_rejected(
+    rollback: Any, registry: PsycopgRegistry
+) -> None:
+    """D-046. Before this check existed, `meridian invite revoke` set
+    ``expires_at`` and ``register()`` went on admitting the invite anyway."""
+    insert_invite(
+        rollback,
+        plaintext="lapsed-invite",
+        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    with pytest.raises(InvalidInviteError):
+        registry.register(sample_request(invite_token="lapsed-invite"))
+
+
+def test_an_invite_with_a_future_expiry_still_registers(
+    rollback: Any, registry: PsycopgRegistry
+) -> None:
+    """The other side of D-046 — the check must not reject a live invite."""
+    insert_invite(
+        rollback,
+        plaintext="still-valid-invite",
+        expires_at=datetime.now(UTC) + timedelta(days=1),
+    )
+    result = registry.register(sample_request(invite_token="still-valid-invite"))
+
+    assert result.station_id.startswith("st_")
+
+
+def test_a_revoked_invite_is_rejected_through_the_store_layer(
+    rollback: Any, registry: PsycopgRegistry
+) -> None:
+    """End to end through ``revoke_invite`` rather than a hand-set timestamp,
+    so the test breaks if revocation ever stops being expiry (D-046)."""
+    insert_invite(rollback, plaintext="to-be-revoked")
+
+    assert revoke_invite(rollback, label="test-invite") == 1
+
+    with pytest.raises(InvalidInviteError):
+        registry.register(sample_request(invite_token="to-be-revoked"))
+
+
+def test_an_expired_bound_invite_is_rejected(
+    rollback: Any, registry: PsycopgRegistry
+) -> None:
+    """D-046's second decision: D-034 exempts a bound invite from the recovery
+    *window*, not from its own expiry. An operator who withdrew a bound invite
+    withdrew the authorisation it carried."""
+    insert_invite(rollback, plaintext="original-invite-7")
+    created = registry.register(
+        sample_request(invite_token="original-invite-7", registration_key="my-key")
+    )
+
+    insert_invite(
+        rollback,
+        plaintext="expired-bound-invite",
+        issued_for_station_id=created.station_id,
+        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    with pytest.raises(InvalidInviteError):
+        registry.register(
+            sample_request(
+                invite_token="expired-bound-invite", registration_key="my-key"
+            )
+        )
+
+
+def test_losing_the_consume_race_rejects_and_leaves_no_station(
+    rollback: Any, registry: PsycopgRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-047. The real race needs two committed connections, which the
+    ``rollback`` isolation pattern cannot express; the property under test is
+    narrower than that anyway — that ``consume_invite`` returning ``False``
+    rejects the registration and rolls its station row back, rather than
+    being discarded. Forcing the return value tests exactly that, and
+    deterministically."""
+    monkeypatch.setattr(
+        "meridian.registry.psycopg_registry.consume_invite",
+        lambda *_args, **_kwargs: False,
+    )
+    insert_invite(rollback, plaintext="contended-invite")
+
+    with pytest.raises(InvalidInviteError):
+        registry.register(sample_request(invite_token="contended-invite"))
+
+    with rollback.cursor() as cur:
+        cur.execute("select count(*) from stations")
+        (station_count,) = cur.fetchone()
+    assert station_count == 0
