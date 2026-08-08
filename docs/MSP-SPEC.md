@@ -377,7 +377,9 @@ A request over its limit is rejected as `malformed` before the body is parsed.
 | `health` object, serialised | 4 KiB |
 | `doppler_samples` | 512 entries |
 
-These are stated in the protocol rather than left to the deployment because a station needs to know what it may send before it sends it, and because `health` is opaque JSON written every thirty seconds by every station — unbounded, that is storage exhaustion with no attacker required. See `docs/DECISIONS.md` D-028 and D-032.
+**A request carrying a body must declare its length.** A `POST` without a `Content-Length` header — a chunked body — is `malformed`, because a body of undeclared size cannot be checked against the limit before it is parsed, which is what the paragraph above requires. Every HTTP client that sends a JSON body sends `Content-Length` for it, so this constrains no ordinary station; it is stated because a station implementer streaming a body would otherwise discover it as a rejection. `GET /msp/v0/time` carries no body and is unaffected.
+
+These are stated in the protocol rather than left to the deployment because a station needs to know what it may send before it sends it, and because `health` is opaque JSON written every thirty seconds by every station — unbounded, that is storage exhaustion with no attacker required. See `docs/DECISIONS.md` D-028, D-032 and D-050.
 
 ---
 

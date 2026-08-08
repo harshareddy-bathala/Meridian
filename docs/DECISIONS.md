@@ -1115,6 +1115,44 @@ D-013 enumerated the tables that carry a `simulated` boolean — `stations`, `pa
 
 ---
 
+## D-050 — A request that declares no body size is rejected, like one that declares too much
+
+**2026-08-08 · accepted** · *implements D-028*
+
+D-028 decided the caps and said they are "enforced as middleware, ahead of JSON parsing". No middleware existed. `MSP-SPEC.md` §6 has tabulated four limits since Stage 3 and `grep -i middleware platform/` returned nothing, so every cap in the specification was a claim about the reference implementation that the reference implementation did not meet. Two of the four apply to endpoints that do not exist yet; **the 64 KiB body cap applies to `register` and `time`, which are live and publicly reachable under the `public` profile.** `meridian.api.request_limits` now enforces them.
+
+**The sub-question D-028 did not answer: what happens to a body whose size is not declared.** §6 requires rejection "before the body is parsed", and a `Transfer-Encoding: chunked` request declares no length — so before parsing there is nothing to compare against the cap. Three options:
+
+*Allow it through.* Rejected. It is a complete bypass of the check, reachable by any client that chooses chunked encoding, and it is the option under which the cap reads as enforced while not being.
+
+*Count bytes as the body streams and abort past the limit.* Rejected, though it is the technically fuller answer. It moves the decision to after parsing has begun, which is a different rule than the one §6 states, and aborting mid-stream from ASGI middleware means interrupting an application that has already been entered — the failure path is harder to reason about than the thing it protects.
+
+*Reject a body-bearing request that declares no length.* **Taken.** MSP §8 binds JSON bodies over HTTP/1.1, and every client that sends a JSON body sends `Content-Length` for it — `httpx`, which the reference client uses, does so for any `json=` or `bytes` body and only goes chunked for a generator. So this costs no real station, and it is the only option under which "rejected before the body is parsed" is literally true.
+
+Scoped to `POST`, `PUT` and `PATCH`. `GET /msp/v0/time` carries no body and declares no length; requiring one there would reject every correct call to the one endpoint a station with no credentials and a wrong clock can still reach.
+
+A malformed length — `64K`, `1.5`, empty, negative — is refused for the same reason. Leniency there is the bypass again with an extra step: a value that fails to parse and is treated as absent is a value an attacker chooses on purpose.
+
+---
+
+## D-051 — Rate limiting is deferred, and the reason is that a wrong limiter is worse than none
+
+**2026-08-08 · accepted**
+
+`rate_limited` has been one of MSP §6's eight codes since Stage 3. Nothing raises it and no limiter exists. `POST /msp/v0/register` is internet-reachable under the `public` profile, unauthenticated by design (D-006 admits stations by invite, not by network position), and performs a database lookup per request.
+
+**Deferred to the deployment stage, deliberately, and not because it is unimportant.** The obvious implementation — an in-process per-IP token bucket — does not work correctly in this deployment and would be actively harmful:
+
+- **The client IP is not the peer address.** Public traffic arrives through a Cloudflare tunnel, so every request presents the tunnel's address. A limiter keyed on the peer would rate-limit the entire network as one client — the first genuinely busy day would look exactly like an attack.
+- **Keying on `CF-Connecting-IP` instead is worse.** The compose file also publishes the API on the host, so a request that did not come through the tunnel can set that header to anything. An attacker rotates it per request and is never limited; an operator on a fixed address is. The limiter would then be a control that fails open for the case it exists for and closed for the case it does not.
+- **In-process state is the wrong lifetime.** It resets on every restart and does not survive a second worker, which is the shape the deployment takes on the Pi.
+
+The correct place is the edge — Cloudflare's own rate limiting on the tunnel hostname — with the platform-side limiter, if one is still wanted, keyed on the invite token rather than on any address. **That is a deployment-stage decision and it needs the deployment to exist.** Recorded here so that the gap between "the protocol defines `rate_limited`" and "nothing can produce it" is a decision on the record rather than an omission somebody finds in a viva.
+
+The trigger to revisit: the first time the platform is reachable from outside the college network for longer than a demonstration, which is Stage 10's exit condition rather than Phase 1's.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

@@ -51,6 +51,9 @@ NOT_OWNER = "not_owner"
 UNKNOWN_ASSIGNMENT = "unknown_assignment"
 MALFORMED = "malformed"
 UNSUPPORTED_VERSION = "unsupported_version"
+# Defined because MSP §6 defines it, and deliberately never raised: no limiter
+# exists, and D-051 records why building one before the deployment exists would
+# produce a control that fails open for the attacker and closed for the operator.
 RATE_LIMITED = "rate_limited"
 SERVER_ERROR = "server_error"
 
