@@ -1219,6 +1219,46 @@ The codebase said both things at once. `0002_stations.sql` declared `stations.li
 
 ---
 
+## D-055 — A token that names another station is `not_owner`, and `health` is capped where the body cap cannot see it
+
+**2026-08-08 · accepted** · *records two choices made while implementing MSP §4.2*
+
+**A bearer token that authenticates as one station, presenting a body naming another, is `not_owner` (403).** MSP §6's table glosses `not_owner` as "Assignment was not issued to this station", so §6 does not describe this case at all. The eight codes are closed — a ninth would reach a station as a 500 (`errors.MspError` refuses to build one) — so the choice is between an existing code and inventing protocol, and inventing protocol is not on the table.
+
+`unauthorized` (401) is the near miss and is **rejected on its consequence**. D-024 requires a station meeting 401 to *stop, log and surface to its operator*, and not retry. That is correct for a dead credential and wrong here: the token is live and the fault is the station's own body. A 401 would take a working station off the network over a client bug, and the operator would go looking at the credential rather than at the payload. `not_owner` says "you are not who you claim" at 403, without condemning the token.
+
+**The token is the identity; the body's `station_id` is the station restating it.** The disagreement is refused rather than resolved either way — trusting the token would let a leaked credential file heartbeats under another station's name, and trusting the body would be no authentication at all. The response names neither value, so a token holder cannot probe which station ids exist (MSP §3).
+
+*Consequence for the specification:* `MSP-SPEC.md` §6's gloss for `not_owner` is now narrower than its use. A third-party implementer reading only §6 would not expect a 403 here. The gloss should widen to cover identity as well as assignment ownership; that is a wording change to the published protocol and belongs in the next specification pass, not a silent edit alongside an endpoint.
+
+**`health` is capped at 4 KiB in the Pydantic model, not in the request-size middleware.** D-028 sets both limits and D-050 built the middleware, which reads `Content-Length` and knows nothing about the body's contents. A 60 KiB request carrying a 60 KiB `health` object passes the 64 KiB body cap and must still be refused, so the narrower limit has to live where the parsed object is. Both produce `malformed`, so the split is invisible on the wire and matters only to whoever goes looking for where a limit is enforced.
+
+---
+
+## D-056 — `was_listening()` takes a `mode` and a Doppler-sized frequency tolerance
+
+**2026-08-08 · accepted** · *settles the contract before anything implements it*
+
+`Registry.was_listening()` is declared in Phase 1 and implemented in Stage 5, and the roadmap calls it *"the only authority reliability uses to classify absence"*. Two faults in its declared signature are cheap to fix now and become cross-module changes the moment anything calls it.
+
+**It gains `mode`.** D-028 added `heartbeats.listening_mode` for exactly this method — *"a station tuned to the right frequency running the wrong demodulator did not observe the pass"* — and the signature then omitted the parameter that would let it use the column. Without it, the method cannot answer the question D-028 stored the data to answer.
+
+**With five parameters it takes a dataclass instead.** `CLAUDE.local.md` §2 caps a function at four (five, hard) and says to take a dataclass beyond that. `ListeningQuery` bundles the station, the satellite, the frequency, the mode and the window, matching the precedent set by `store.stations.NewStation` and `OrbitService.pass_windows`.
+
+**The frequency match is a tolerance, not an equality, and the tolerance is Doppler.** `centre_freq_hz: int` compared exactly would answer "was listening" as *false* for every station that retunes during a pass — which is every station that works. The shift at 137 MHz in low Earth orbit reaches roughly ±3 kHz, wider than the receiver's passband, so a station has to retune continuously across a pass rather than sit on the nominal frequency. A station reporting its *current* tuned frequency mid-pass is reporting a Doppler-shifted one.
+
+So the tolerance is the largest shift the geometry can produce: `centre_freq_hz × v_max / c`, with `v_max` a bound on range rate in low Earth orbit. **Fractional rather than fixed, because Doppler is proportional to frequency** — a fixed ±4 kHz would be right at 137 MHz and three times too tight at 437 MHz, which is the band Tier 3 adds (D-053).
+
+*Checked against the risk it creates:* a tolerance wide enough to confuse two satellites would let a station listening to one be credited for another. At 137 MHz the tolerance is under ±4 kHz, and the closest pair in the band this project cares about is NOAA's 137.9125 MHz against Meteor's 137.900 MHz — 12.5 kHz apart, comfortably outside. The tolerance is narrower than the band's own channel spacing, which is the property that has to hold.
+
+**Timing is judged on `received_at`, never `sent_at`.** `0006_heartbeats.sql` already says `sent_at` is the station's clock and untrusted, and this is where that matters most: a station with a broken clock could otherwise assert coverage of any window it liked, and this method decides what counts as a miss. `received_at` is the platform's own clock and the hypertable's partitioning column, so the honest choice is also the fast one. Network delay is seconds against a pass of eight to fifteen minutes.
+
+**Overlap, not coverage.** The roadmap's wording is *"must prove overlap with the pass time"*, and one confirming heartbeat inside the window is what this returns. **This is a real limit and is stated rather than hidden:** a station that listened for thirty seconds of a twelve-minute pass and stopped satisfies it. Refining it to a coverage fraction needs a threshold nobody has evidence for yet, and belongs with the reliability layer that consumes it in Stage 20 — the method returning `bool` is what would have to change, so it is flagged here as the known revision rather than designed around now.
+
+**A valid assignment is part of the proof.** The roadmap lists it fourth, and it is the one criterion that is not a property of the heartbeat alone: the `listening_assignment_id` must name an assignment actually issued to that station. Without the join a station could assert listening against an id it invented, and the platform would count a miss against a pass nobody scheduled.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
