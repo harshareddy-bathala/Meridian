@@ -47,6 +47,8 @@ class Settings:
     tunnel_hostname: str
     public_mode: bool
 
+    grafana_admin_password: str
+
     simulator_seed: int
     simulator_station_count: int
 
@@ -211,31 +213,47 @@ def load_settings(*, env: dict[str, str] | None = None) -> Settings:
         public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"),
         tunnel_hostname=os.environ.get("TUNNEL_HOSTNAME", "").strip(),
         public_mode=_bool_env("MERIDIAN_PUBLIC", False),
+        grafana_admin_password=os.environ.get("GRAFANA_ADMIN_PASSWORD", PLACEHOLDER),
         simulator_seed=_int_env("SIMULATOR_SEED", 4471),
         simulator_station_count=_int_env("SIMULATOR_STATION_COUNT", 1),
     )
 
     if settings.is_public:
-        # The database password is read back out of the URL the process will
-        # actually connect with, not from POSTGRES_PASSWORD. Compose embeds the
-        # password inside DATABASE_URL and never passes the separate variable to
-        # the API, so a check against the variable passed a deployment carrying
-        # `change-me` in the URL it was about to use.
-        placeholders = [
-            name
-            for name, value in (
-                ("TOKEN_HASH_PEPPER", settings.token_hash_pepper),
-                ("REGISTRATION_INVITE_TOKEN", settings.registration_invite_token),
-                ("DATABASE_URL password", settings.database_password),
-            )
-            if value == PLACEHOLDER
-        ]
-        if placeholders:
-            raise InsecureConfigurationError(
-                "Refusing to start: "
-                + ", ".join(placeholders)
-                + f" still set to {PLACEHOLDER!r} while the platform is publicly "
-                "reachable. Generate each with: openssl rand -hex 32"
-            )
+        _refuse_placeholder_secrets(settings)
 
     return settings
+
+
+def _refuse_placeholder_secrets(settings: Settings) -> None:
+    """Raise if any secret is still ``change-me`` on a publicly reachable deployment."""
+    # The database password is read back out of the URL the process will
+    # actually connect with, not from POSTGRES_PASSWORD. Compose embeds the
+    # password inside DATABASE_URL and never passes the separate variable to
+    # the API, so a check against the variable passed a deployment carrying
+    # `change-me` in the URL it was about to use.
+    #
+    # GRAFANA_ADMIN_PASSWORD is checked even though Grafana runs only under
+    # `--profile metrics` and this process cannot see which profiles are up.
+    # That is deliberately over-strict: compose publishes Grafana on host
+    # :3001, `--profile public --profile metrics` with a copied .env produced a
+    # platform that started cleanly beside an admin console on `admin/change-me`,
+    # and the cost of the strict direction is a refusal with a message saying
+    # exactly which variable to set.
+    placeholders = [
+        name
+        for name, value in (
+            ("TOKEN_HASH_PEPPER", settings.token_hash_pepper),
+            ("REGISTRATION_INVITE_TOKEN", settings.registration_invite_token),
+            ("DATABASE_URL password", settings.database_password),
+            ("GRAFANA_ADMIN_PASSWORD", settings.grafana_admin_password),
+        )
+        if value == PLACEHOLDER
+    ]
+    if not placeholders:
+        return
+    raise InsecureConfigurationError(
+        "Refusing to start: "
+        + ", ".join(placeholders)
+        + f" still set to {PLACEHOLDER!r} while the platform is publicly "
+        "reachable. Generate each with: openssl rand -hex 32"
+    )
