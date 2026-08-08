@@ -171,7 +171,17 @@ def test_no_error_response_leaks_a_header_value_back(client: TestClient) -> None
     assert secret not in response.text
 
 
-def test_an_unknown_msp_path_is_not_served(client: TestClient) -> None:
-    """MSP §8 binds four endpoints. Three are not built yet, and must 404 rather
-    than 200 — a station probing for `heartbeat` needs to learn it is absent."""
-    assert client.post("/msp/v0/heartbeat", json={}, headers=CURRENT).status_code == 404
+def test_an_unbuilt_msp_path_is_not_served(client: TestClient) -> None:
+    """MSP §8 binds four endpoints. `observations` is not built yet.
+
+    It must 404 rather than 200 — a station probing for it needs to learn it is
+    absent rather than get an empty success it will misread as agreement.
+
+    This test named `heartbeat` until `heartbeat` was implemented, and failing
+    at that moment is exactly what it is for: the assertion is "what is not
+    built stays unserved", so it has to be edited whenever something is built.
+    `heartbeat` now has its own conformance file.
+    """
+    response = client.post("/msp/v0/observations", json={}, headers=CURRENT)
+
+    assert response.status_code == 404
