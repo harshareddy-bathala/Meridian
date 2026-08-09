@@ -10,9 +10,9 @@ arrays, no optional members, because a microcontroller client extracts both with
 substring scan and never needs a JSON tree walker. Tests assert the *absence* of
 other keys, not just the presence of these two.
 
-**Bound so far:** ``GET /time`` and ``POST /register``. ``heartbeat`` and
-``observations`` are Stage 5 and Stage 9; MSP §8 describes four endpoints and
-this package currently serves two.
+**Bound so far:** ``GET /time``, ``POST /register`` and ``POST /heartbeat``.
+MSP §8 describes four endpoints and this package serves three; ``observations``
+is not implemented yet.
 
 **Planned:** ``meridian.api.public``, serving the dashboard and anyone else.
 Every response will carry ``simulated``; docs/ARCHITECTURE.md rule 4 makes that

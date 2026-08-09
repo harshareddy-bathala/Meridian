@@ -1,15 +1,18 @@
 """The orbit module's interface to the rest of the platform.
 
-This module owns the ``sgp4``/``skyfield`` boundary. **No other module imports
-them** (docs/ARCHITECTURE.md rule 2), enforced by the ruff banned-import rule in
-the workspace ``pyproject.toml`` rather than by review. Everything goes through
-this protocol, so a propagator change never ripples outward.
+Five questions the platform asks about a satellite: when is it visible, where do
+I point, how far off frequency will it be, how much do we trust the timing, and
+how much have two element sets for the same object drifted apart.
 
-Implementations are pure: no database, no network, no clock reads.
+Everything outside this package calls these methods rather than a propagator
+directly, so swapping the propagator is a change to one implementation and to
+nothing else. ``skyfield_service.SkyfieldOrbitService`` is that implementation.
 
-**Planned (Stage 6):** an element-set archive — the one part of this package
-that will touch the store — alongside the propagator. It does not exist yet;
-this module is the protocol both will be written against.
+Implementations take no database connection, open no sockets and read no clock.
+Element sets arrive as :class:`~meridian.orbit.types.ElementSet` values from
+``meridian.store.element_sets``, and instants arrive from the caller — so a
+prediction can be reproduced exactly from a stored element set and a stored
+time, and every implementation is testable without infrastructure.
 """
 
 from __future__ import annotations

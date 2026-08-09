@@ -167,8 +167,9 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:
     } <= carrying
     # D-049: element_sets is the deliberate exception. Its provenance lives in
     # `source`, which distinguishes celestrak from spacetrack from manual as
-    # well as simulator, and is part of element_set_unique. A boolean here
-    # would be derivable from `source` and so able to disagree with it.
+    # well as simulator, and is part of element_set_content_unique (D-057). A
+    # boolean here would be derivable from `source` and so able to disagree
+    # with it.
     assert "element_sets" not in carrying
 
 
@@ -412,6 +413,45 @@ def test_no_plaintext_token_columns_exist(conn) -> None:
         )
         offenders = cur.fetchall()
     assert offenders == []
+
+
+def test_liveness_is_not_a_stored_column(conn) -> None:
+    """D-054: liveness is derived on read, so 0008 dropped the column.
+
+    A stored conclusion is only correct until the clock passes its next
+    threshold, and nothing moves the clock on the platform's behalf — so a
+    station that went quiet would keep reading `online` until an unrelated
+    write refreshed it, which is the case liveness exists to detect. The
+    vocabulary lives in `registry.liveness` now. Asserted here because a
+    re-added column would fail nothing else: the derivation would keep working
+    while the schema quietly grew a second, disagreeing answer.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "select column_name from information_schema.columns "
+            "where table_name = 'stations' and column_name = 'liveness'"
+        )
+        assert cur.fetchall() == []
+
+
+def test_element_sets_are_keyed_on_content_not_epoch(scalar) -> None:
+    """D-057: two different sets sharing an epoch are two rows, not one.
+
+    The key 0003 shipped, `(satellite_id, epoch, source)`, discarded the second
+    of two sets published for one epoch — a catalogue correction or a re-fit
+    after a manoeuvre — which is the measurement that would explain why a
+    prediction from that epoch was wrong. Read from the catalogue rather than
+    by inserting, because the failure this guards is the *old* key coming back,
+    and a row-level test would pass under either key.
+    """
+    columns = scalar(
+        "select string_agg(a.attname, ',' order by a.attname) "
+        "from pg_constraint c "
+        "join pg_attribute a on a.attrelid = c.conrelid "
+        " and a.attnum = any(c.conkey) "
+        "where c.conname = 'element_set_content_unique'"
+    )
+    assert columns == "content_sha256,satellite_id,source"
 
 
 # --- Migration 0007's corrections -------------------------------------------

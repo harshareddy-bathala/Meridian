@@ -2,11 +2,14 @@
 
 Reads and writes ``assignments`` (``deploy/migrations/sql/0004_passes.sql``).
 Like the rest of ``meridian.store``, this module performs no reconciliation
-decision itself — it offers mechanical, single-purpose operations that a
-later session's orchestration composes. D-008's state machine (``issued``
-to ``held`` to ``in_progress`` to ``reported``, or ``issued``/``held``
-straight to ``expired``) is enforced by callers choosing which of these
-functions to call, not by anything in this file.
+decision itself — it offers mechanical, single-purpose operations for a caller
+to compose. D-008's state machine (``issued`` to ``held`` to ``in_progress`` to
+``reported``, or ``issued``/``held`` straight to ``expired``) is enforced by
+callers choosing which of these functions to call, not by anything in this file.
+
+Of these, only :func:`find_due_assignments` has a caller today —
+``meridian.api.msp`` reads it to answer a heartbeat. The state transitions are
+written and tested but unused: MSP §4.2 reconciliation is not implemented yet.
 """
 
 from __future__ import annotations

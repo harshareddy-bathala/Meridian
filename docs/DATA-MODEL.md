@@ -35,7 +35,9 @@ MSP §4.1 requires an invite token to be **consumed** by a successful registrati
 ### `element_sets`
 Every element set ever retrieved, for every tracked object. **Never overwritten** — the historical series is what makes uncertainty modelling possible.
 
-`(satellite_id, epoch, retrieved_at, line1, line2, source)`
+`(id, satellite_id, epoch, retrieved_at, line1, line2, source, content_sha256)`
+
+A set is identified by `(satellite_id, source, content_sha256)` — its **contents**, not its epoch. Two different sets can carry the same epoch from one source, and keying on epoch discarded the second (D-057). `content_sha256` is a generated column, so no row can carry a hash that disagrees with its lines.
 
 Divergence between successive sets for the same object is a derived view, not a stored column.
 

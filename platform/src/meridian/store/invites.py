@@ -4,8 +4,9 @@ Reads and writes ``invite_tokens`` (``deploy/migrations/sql/0002_stations.sql``)
 This module makes no decision about whether an invite *should* exist or be
 consumed; it only persists and retrieves rows. Issuing one is a CLI action
 today (``meridian.cli``) and will also be an operator action from the
-dashboard later. Consuming one is called from Stage 4.3's registration
-service, which decides whether MSP §4.1's recovery table permits it.
+dashboard later. Consuming one is called from
+``meridian.registry.psycopg_registry``, which decides whether MSP §4.1's
+recovery table permits it.
 
 Reference: docs/DECISIONS.md D-020 (invites are rows, not a config value) and
 D-034 (bound invites for credential rotation).

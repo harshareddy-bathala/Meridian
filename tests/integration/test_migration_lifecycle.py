@@ -31,7 +31,14 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = REPO_ROOT / "deploy" / "alembic.ini"
-HEAD_REVISION = "0008"
+HEAD_REVISION = "0010"
+"""The newest revision, written out rather than read from the script directory.
+
+Deriving it would make these tests assert that alembic agrees with itself. Pinned,
+they fail the moment a migration lands — which is the point: whoever adds one is
+told to come and look at the lifecycle tests rather than discovering later that
+they have been passing vacuously. Bump this in the same commit as the migration.
+"""
 
 
 @pytest.fixture

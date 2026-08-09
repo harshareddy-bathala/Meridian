@@ -1113,6 +1113,8 @@ D-013 enumerated the tables that carry a `simulated` boolean — `stations`, `pa
 
 **The obligation this creates is on `passes`, and it is not yet met.** A pass computed from a simulator-sourced element set is simulated, and `passes.simulated` is the column that has to say so. Nothing writes `passes` yet — propagation is Stage 6 — so this is recorded now, before the code exists, rather than discovered afterwards: **whoever inserts a `passes` row must set `simulated` from its element set's `source`, not default it to `false`.** The risk this closes is a dashboard filtering `where simulated = false` and silently including simulator-derived passes, which is the credibility failure CLAUDE.md's fifth rule is about.
 
+*Amended by D-057.* The key named above, `element_set_unique (satellite_id, epoch, source)`, no longer exists — migration 0009 replaced it with `element_set_content_unique (satellite_id, source, content_sha256)`. The reasoning is untouched by that: `source` is still in the key, so the same lines from two providers are still two rows by design. Only the column list changed.
+
 ---
 
 ## D-050 — A request that declares no body size is rejected, like one that declares too much
@@ -1256,6 +1258,140 @@ So the tolerance is the largest shift the geometry can produce: `centre_freq_hz 
 **Overlap, not coverage.** The roadmap's wording is *"must prove overlap with the pass time"*, and one confirming heartbeat inside the window is what this returns. **This is a real limit and is stated rather than hidden:** a station that listened for thirty seconds of a twelve-minute pass and stopped satisfies it. Refining it to a coverage fraction needs a threshold nobody has evidence for yet, and belongs with the reliability layer that consumes it in Stage 20 — the method returning `bool` is what would have to change, so it is flagged here as the known revision rather than designed around now.
 
 **A valid assignment is part of the proof.** The roadmap lists it fourth, and it is the one criterion that is not a property of the heartbeat alone: the `listening_assignment_id` must name an assignment actually issued to that station. Without the join a station could assert listening against an id it invented, and the platform would count a miss against a pass nobody scheduled.
+
+---
+
+## D-057 — An element set is identified by its contents, not by its epoch
+
+**2026-08-08 · accepted** · *migration 0009; found while starting Stage 6*
+
+`element_sets` shipped with `unique (satellite_id, epoch, source)` and the table comment *"the same set retrieved twice is one row"*. The comment describes deduplication; the constraint does something stronger and different. **Two genuinely different element sets can carry the same epoch from the same source** — a catalogue correction, a re-fit after a manoeuvre, an operator republishing for the same epoch — and the second was rejected.
+
+That is a data-loss path sitting behind a constraint that reads like a safety feature. `DATA-MODEL.md` says this table is never overwritten because the historical series is what makes uncertainty modelling possible, and the set that gets discarded is exactly the one that would explain why a prediction from that epoch was wrong.
+
+**The key becomes `(satellite_id, source, content_sha256)`**, with the hash computed by an `IMMUTABLE` function and stored in a generated column. Three outcomes, which is the table this decision was chosen from and which `tests/integration/test_store_element_sets.py` asserts one test each:
+
+| Insert | Rows after | Before 0009 |
+|---|---|---|
+| the same lines twice, one source | 1 | 1 |
+| different lines, same epoch, same source | 2 | **1 — silently** |
+| the same lines from `celestrak` then `spacetrack` | 2 | 2 |
+
+**`source` stays in the key deliberately.** Keying on content alone would collapse the third row to one, discarding whichever retrieval arrived second. D-049 made `source` the way this table records provenance rather than a `simulated` boolean, so two retrievals of identical lines from two catalogues are two facts — and their agreement is the only cheap cross-check available on element-set data we did not generate.
+
+**A generated column rather than a value the caller supplies.** The alternative — hashing in Python and inserting the result — makes a row whose hash disagrees with its lines representable, and the unique constraint then guards nothing, because two identical sets could carry different hashes. The `IMMUTABLE` marking is justified the same way `observation_id`'s is in `0005`: `convert_to` is `STABLE` because text-to-bytes depends on server encoding in the general case, and a two-line element set is fixed-width ASCII by format definition, so the bytes are identical under every encoding PostgreSQL supports. The lines are joined with a newline rather than concatenated bare — a pair split at a different boundary would otherwise hash identically, which cannot arise while the format stays fixed-width and costs one byte to stop depending on that.
+
+*Consequence:* `find_element_set_current_at` orders by `epoch` and breaks ties on `retrieved_at`. Two sources publishing one epoch is now representable, so the tie-break had to be named rather than left to the planner — CLAUDE.md requires every number in a report to be regenerable, and a query that resolves a tie differently on different days is not.
+
+---
+
+## D-058 — A deleted station cannot be recovered, and rotation reports whether it happened
+
+**2026-08-08 · accepted** · *found auditing `store/stations.py`*
+
+`stations` carries a `deleted_at` for soft deletion, and `find_station_id_by_token_hash`, `find_station_heartbeat` and `revoke_station_token` all filter on it — a deleted station reads as absent. The two functions on the recovery path did not. `find_station_for_recovery` would return a deleted station's registration key, and `rotate_station_token` would mint a fresh bearer token onto it and return `None`.
+
+The result was a recovery that answered `200` with a plaintext token, followed by `401` on the station's very next request, because the lookup that authenticates the token excludes exactly the row the rotation had just written to. **A success that did nothing** — the same shape as the invite race D-020 exists to prevent, and the reason that one is checked by return value.
+
+**Both functions now exclude `deleted_at`, and `rotate_station_token` returns `bool`.** `meridian.registry.psycopg_registry` raises `InvalidInviteError` on a false return, which MSP §3 renders as `invalid_invite` — a client is not told whether the invite was bad or the station was gone.
+
+**Rejected: leaving it, on the grounds that nothing deletes stations yet.** True today — only tests write `deleted_at` — and that is what makes it cheap to fix now. The failure is invisible from the client's side (a valid-looking token that never works) and would surface as an intermittent registration bug in whichever later stage adds the delete, long after the cause was written.
+
+**Rejected: a distinct `station_deleted` error code.** MSP §3 deliberately gives one answer to every invite refusal so a client cannot enumerate station ids by watching which failure it gets. A deleted station is a refusal like any other.
+
+*Consequence:* the second guard in `_mint_and_rotate` is unreachable while `_recovery_info_or_raise` runs first. It is kept because the return value is what tells the caller its plaintext token is valid, and a caller holding a credential should not infer that from another function's ordering.
+
+---
+
+## D-059 — A pass belongs to the search it rises in, and the search looks past its own end to find it whole
+
+**2026-08-09 · accepted** · *`pass_windows`; Stage 6 session C*
+
+`pass_windows(search)` is given a start and an end, and Stage 7's pass-generation job will call it over a rolling horizon, so two searches meet at a boundary. A pass straddling that boundary has to belong to exactly one of them, and it has to come back whole — a scheduler cannot tell a window that ends because the satellite set from one that ends because the search stopped looking.
+
+**The search widens by `PASS_SEARCH_MARGIN_S` at both ends and then keeps only the passes whose *acquisition* falls in `[start, end)`.** Acquisition is the key because it is the one boundary a pass has exactly once; keying on the window's overlap with the interval would match a straddling pass in both searches.
+
+**The margin is 30 minutes, and the number is derived rather than picked.** A satellite is above the horizon while it lies within `arccos(R_earth / (R_earth + h))` of the station and covers that arc at the orbital rate: at 850 km — the altitude of the 137 MHz weather satellites this project receives — that is 56.2° of a 101.8-minute orbit, so 15.9 minutes; at 1400 km it is 22.0 minutes. Thirty minutes covers low Earth orbit with room. A pass that outlasts it **raises** rather than being returned clipped, and `tests/unit/test_pass_windows_reference.py` provokes that by shrinking the margin to a minute, because a guard nobody has fired is a claim rather than a check.
+
+**Rejected: return the clipped pass and flag it** with an `is_truncated` field on `PassWindow`. That pushes the same decision onto Stage 7 and onto the completeness denominator, and `EVALUATION.md` §4.1 needs a denominator computed one way rather than one that depends on how the caller happened to slice time. The flag does exist one layer down, on `pass_search.ElevationPass`, where it is what lets this layer detect the condition at all.
+
+**Rejected: drop passes not wholly inside the interval.** A day-by-day job would lose roughly two passes per satellite per boundary, permanently and silently, and the completeness ratio would improve as a result — the exact failure mode the ratio exists to expose.
+
+~~*Known limit, stated rather than hidden.* Two searches meeting at a seam recompute the same acquisition on different coarse grids, so their answers can differ by up to the 0.05 s refinement tolerance. If a seam falls within that tolerance of a true acquisition, a pass can in principle be claimed by both searches or by neither. `tests/unit/test_pass_windows_reference.py` pins the deterministic case — a seam placed on an acquisition computed from the same grid — and the residual is a coincidence of order 1e-6 per boundary per satellite. It belongs to whichever job splits the horizon, which should de-duplicate on `(satellite_id, aos)`, and is recorded here so that job is written knowing it.~~
+
+*Amended 2026-08-09 by D-063 — the limit is removed, not merely bounded.* The paragraph above accepted a residual ambiguity and pushed de-duplication onto the caller. Measuring it while building the pass store showed it was far larger than "one boundary in a million": shifting a horizon by seven seconds moved **every** acquisition by about two milliseconds, because the coarse grid began wherever the caller's horizon began. A rolling job keyed on acquisition would have stored a fresh copy of every pass on every run. D-063 aligns the scan grid to a fixed anchor, so two searches sharing a `coarse_step_s` now compute the identical acquisition to the microsecond and the seam question does not arise. The rest of this entry — searching past the interval, keying on acquisition — stands unchanged.
+
+---
+
+## D-060 — The Phase 1 timing uncertainty is an along-track prior, and it says so
+
+**2026-08-09 · accepted** · *`orbit/uncertainty.py`; Stage 6 session D*
+
+MSP §4.3 carries `timing_uncertainty_s` to stations, which use it to decide how much extra to record either side of a predicted acquisition. Phase 1 has no measured timing error to fit a model to, and `service.py` already rules out the tempting answer: returning `0.0` claims perfect knowledge of an element set whose accuracy is unstated, and a station reading it opens no margin at all.
+
+**The prior is `(1.0 km + 3.0 km/day × age) / 7.5 km/s`.** An along-track position error moves the satellite forward or back along a path it follows anyway, so the instant it reaches the horizon shifts by that distance over its speed. Each constant has a source rather than a justification: Vallado, Crawford, Hujsak & Kelso, *Revisiting Spacetrack Report #3* (AIAA 2006-6753) puts SGP4 accuracy near epoch at about 1 km for low Earth orbit and its growth at 1–3 km/day; 7.5 km/s is `sqrt(mu/a)` at 800 km, the band the 137 MHz weather satellites occupy. That gives 0.13 s at epoch, 0.53 s after a day and 2.9 s after a week — which matches the operational experience that predictions from week-old elements are seconds out, not minutes.
+
+**The growth rate is taken at the top of the published range deliberately.** The two errors are not symmetric: overstating costs a station some disk, understating has it start recording after the pass began, and a pass is eight to fifteen minutes that never repeats.
+
+**It models along-track error only, and the docstring says so rather than implying completeness.** A pass boundary is a shallow crossing, so cross-track error also moves the crossing instant — by more than it moves the satellite. The figure is therefore a floor. Quantifying the rest needs measured timing error against predicted boundaries, which is exactly what Phase 2 collects.
+
+**Rejected: inflating the prior by a safety factor** to cover what it omits. Any multiplier would be invented, and `CLAUDE.local.md` §5.4 rules out a constant whose provenance is "because it works". A defensible under-estimate that names its own limit is better evidence than a comfortable number nobody can source.
+
+*Consequence:* every result carries `method = "vallado2006-along-track-v1"`. SC-3 compares this prior against a model fitted to measurement, and that comparison is impossible if a stored prediction cannot say which produced it — so the string is versioned, and replacing the model means a new string rather than an edit to this one.
+
+---
+
+## D-061 — The speed of light is written twice, and a test holds the two equal
+
+**2026-08-09 · accepted** · *`orbit/doppler.py`, `registry/doppler_tolerance.py`*
+
+Both modules need `c`. `registry.doppler_tolerance` uses it to bound how far off frequency a station may report and still count as listening; `orbit.doppler` uses it to compute the shift itself. They answer different questions — a bound against a measurement — and sit on opposite sides of a module boundary.
+
+**Both define it, and `tests/unit/test_doppler.py` asserts they agree.** `registry.doppler_tolerance` is documented as a leaf that imports nothing from `meridian`, which is what keeps the registry free of an import cycle through the orbit package; coupling it to `meridian.orbit` to share one float would spend that property on a defined constant that has not changed since 1983.
+
+**Rejected: a shared constants module.** It would hold one value, and `CLAUDE.local.md` §4 exists because modules like that accumulate everything that has no other home. The cost of the duplication is drift, and drift is what the assertion prevents.
+
+**Rejected: importing one from the other.** Whichever direction is chosen makes one of the two modules depend on a package it has no other reason to know about, and the registry's leaf property is load-bearing while the duplication is not.
+
+*Consequence:* the duplication is safe only while the test exists. It is written as a test rather than an assertion at import time so that it fails in CI rather than at whatever moment a station first registers.
+
+---
+
+## D-062 — MSP owes an implementer a way to check their own station, and does not have one
+
+**2026-08-09 · accepted** · *found planning Stage 7; owned by Stage 10*
+
+`CLAUDE.md` describes MSP as "an open protocol any receiving station can implement to join the network". `tests/msp_conformance` has 62 tests, and every one of them checks **our server**. Someone writing a station — in Python, in C on a microcontroller, in whatever a contributor prefers — has no way to check that their client is correct short of registering against a live platform and reading the errors.
+
+That is the same defect class as a docstring describing a test that does not exist: a capability asserted in prose with nothing behind it. An open protocol whose only conformance suite tests the reference server is a specification with a reference implementation, not an open protocol.
+
+**Recorded now, built at Stage 10.** Stage 10 already builds the simulator against the real client over real MSP, which is where the client-side seam gets its shape; a station-side conformance harness is the same seam pointed the other way. The deliverable is a suite an outside implementer can run against their own station, plus `docker compose up` giving them a platform to run it against — the compose requirement already exists.
+
+**Rejected: building it now.** Stage 7 has no client work in it, and the harness would be written against endpoints that Stages 8 and 9 have not finished defining. Writing it early would mean writing it twice.
+
+**Rejected: treating the existing conformance suite as sufficient.** It fixes the wire format, which is necessary and not sufficient: it cannot tell an implementer that their retry policy, their clock-offset estimator or their assignment state machine is wrong, and those are where a station implementation actually fails.
+
+*Consequence:* the roadmap gains an owner for a goal that was previously only implied by CLAUDE.md's description of the protocol. Until it is built, "any receiving station can implement MSP" is a claim about the specification rather than a tested property.
+
+---
+
+## D-063 — A computed pass has a stable identity, which needs an aligned scan grid
+
+**2026-08-09 · accepted** · *migration 0010; `orbit/skyfield_service.py`*
+
+`passes` shipped with no unique key. The pass-generation job runs over a rolling horizon and is expected to be re-run — after a crash, when a new element set arrives, or on the next tick — and each re-run would have inserted a second copy of everything it already held. That is not untidiness: `passes` is the denominator of the completeness ratio in `EVALUATION.md` §4.1, so duplicating it halves every completeness figure the project publishes.
+
+**Identity is the prediction, not the pass:** `unique (station_id, satellite_id, element_set_id, min_elevation_deg, aos)`. Re-running with unchanged inputs writes nothing. A **newer element set** predicting the same rise is a second row on purpose — the same rise predicted twice, seconds apart, and the difference between them is the measurement that makes element-set age a usable feature. D-057 reached the same conclusion for `element_sets`: the series is the measurement, so nothing in it is overwritten.
+
+**The constraint is worthless without a deterministic acquisition, and it was not deterministic.** `pass_windows` began its coarse scan at the caller's horizon, so the bracket around a crossing depended on where the horizon started. Measured directly rather than assumed: shifting the horizon by 7 s moved every acquisition by ~2 ms, and by 17 s moved it ~21 ms. Every re-run would have produced acquisitions that never compared equal, and the constraint would have silently never fired — a safety feature that does nothing, which is the failure mode this project has already found twice.
+
+**The scan grid is therefore aligned to a fixed anchor** (`GRID_ANCHOR`, 2000-01-01) rather than to the interval requested, so the grid is a property of `coarse_step_s` alone. Two searches sharing a step sample the same instants wherever their horizons begin, and one pass has one acquisition to the microsecond. `tests/unit/test_pass_windows_reference.py` asserts equality across four unaligned horizons, and asserts it exactly — near-equality is precisely the state that was wrong.
+
+**Rejected: rounding `aos` to the second for identity.** It collapses the common case and fails on the uncommon one: an acquisition near a second boundary rounds two ways, which is about 5% of passes at a 0.05 s refinement tolerance. Fixing the determinism at the source costs less and is checkable.
+
+**Rejected: one row per physical pass, updated in place as better elements arrive.** It discards the prediction history, which is the input to the uncertainty model, and it makes `passes` mutable — the same mistake D-057 corrected in `element_sets`.
+
+*Consequence:* the completeness denominator must count **distinct physical passes**, not rows, because one pass may legitimately hold several predictions. The grouping rule belongs to the evaluation stage that computes the ratio, and is owed by it rather than assumed here.
 
 ---
 

@@ -19,16 +19,18 @@ psycopg = pytest.importorskip("psycopg")
 
 from meridian.cli import EXIT_FAILED, _station_revoke  # noqa: E402
 from meridian.store.invites import consume_invite  # noqa: E402 — after importorskip
+from meridian.store.station_tokens import (  # noqa: E402
+    find_station_id_by_token_hash,
+    revoke_station_token,
+    rotate_station_token,
+)
 from meridian.store.stations import (  # noqa: E402
     Capability,
     NewStation,
     find_station_for_recovery,
     find_station_heartbeat,
-    find_station_id_by_token_hash,
     find_station_provenance,
     insert_station,
-    revoke_station_token,
-    rotate_station_token,
 )
 
 pytestmark = pytest.mark.integration
@@ -195,6 +197,71 @@ def test_rotate_station_token_mints_and_unrevokes(rollback: Any) -> None:
         stored_hash, revoked_at = cur.fetchone()
     assert bytes(stored_hash) == new_hash
     assert revoked_at is None
+
+
+def test_rotate_station_token_reports_that_it_minted(rollback: Any) -> None:
+    """The return value is what tells the caller its plaintext token is live."""
+    insert_station(rollback, sample_station("st_rotate_ok"), [SAMPLE_CAPABILITY])
+
+    assert (
+        rotate_station_token(
+            rollback, station_id="st_rotate_ok", token_sha256=bytes(range(32))
+        )
+        is True
+    )
+
+
+def test_rotate_station_token_refuses_a_deleted_station(rollback: Any) -> None:
+    """D-058: minting onto a deleted row would answer a recovery with a token
+    that ``find_station_id_by_token_hash`` then refuses — a success that did
+    nothing. The old hash must also survive, or a deleted station would lose
+    the credential record that says what it last held."""
+    old_hash = bytes([3]) * 32
+    insert_station(
+        rollback,
+        sample_station("st_rotate_deleted", token_sha256=old_hash),
+        [SAMPLE_CAPABILITY],
+    )
+    with rollback.cursor() as cur:
+        cur.execute(
+            "update stations set deleted_at = now() where station_id = %s",
+            ("st_rotate_deleted",),
+        )
+
+    minted = rotate_station_token(
+        rollback, station_id="st_rotate_deleted", token_sha256=bytes(range(32))
+    )
+
+    assert minted is False
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select token_sha256 from stations where station_id = %s",
+            ("st_rotate_deleted",),
+        )
+        (stored_hash,) = cur.fetchone()
+    assert bytes(stored_hash) == old_hash
+
+
+def test_rotate_station_token_reports_an_unknown_station(rollback: Any) -> None:
+    assert (
+        rotate_station_token(
+            rollback, station_id="st_does_not_exist", token_sha256=bytes(range(32))
+        )
+        is False
+    )
+
+
+def test_find_station_for_recovery_ignores_a_deleted_station(rollback: Any) -> None:
+    """D-058: a deleted station reads as absent throughout this module, so a
+    recovery cannot reach the rotation that would mint an unusable token."""
+    insert_station(rollback, sample_station("st_recover_deleted"), [SAMPLE_CAPABILITY])
+    with rollback.cursor() as cur:
+        cur.execute(
+            "update stations set deleted_at = now() where station_id = %s",
+            ("st_recover_deleted",),
+        )
+
+    assert find_station_for_recovery(rollback, "st_recover_deleted") is None
 
 
 def test_find_station_id_by_token_hash_finds_a_live_station(rollback: Any) -> None:

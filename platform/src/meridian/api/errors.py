@@ -10,10 +10,12 @@ It sits under `meridian.api` and is imported by every MSP route. It holds **no
 business logic and touches no database** — it maps a failure onto a code and a
 status, nothing more.
 
-**Nothing here may put a secret in a response.** Bearer tokens, invite tokens, SQL
-and stack traces are all things a station must never receive, and the handler for
-an unhandled exception is the one most likely to leak them by accident, so it
-never reports anything but a fixed string.
+**No response built here carries anything but a stable code and a fixed
+message.** That matters most in the unhandled-exception handler: ``str(exc)`` on
+a psycopg failure carries the failing SQL and often the connection string, and on
+a validation failure it carries the submitted value — which for ``register`` is
+an invite token. The detail goes to the log instead, where the operator can read
+it and a station cannot.
 
 Reference: docs/MSP-SPEC.md §6, docs/DECISIONS.md D-004.
 """
@@ -28,11 +30,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 __all__ = [
+    "INVALID_INVITE",
     "MALFORMED",
+    "NOT_OWNER",
     "RATE_LIMITED",
     "SERVER_ERROR",
     "STATUS_FOR_CODE",
     "UNAUTHORIZED",
+    "UNKNOWN_ASSIGNMENT",
     "UNSUPPORTED_VERSION",
     "MspError",
     "error_body",

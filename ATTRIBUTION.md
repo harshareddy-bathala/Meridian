@@ -98,4 +98,55 @@ file exists to document.
                   property that matters at Phase 3's fifty simulated stations
                   and not the property the article was optimising for.
             Copied: none
+
+2026-08-08  Reference values for topocentric look angles
+            Read: Skyfield documentation, "Earth Satellites"
+                  https://rhodesmill.org/skyfield/earth-satellites.html
+                  (MIT)
+            Wrote: tests/unit/test_look_angles_reference.py — the ISS element
+                  set, the Bluffton ground site, the instant and the three
+                  printed values (altitude, azimuth, distance) are transcribed
+                  verbatim from that page's worked example and used as the
+                  expected values our implementation is checked against. This is
+                  a deliberate use of someone else's answer as the authority: a
+                  propagator tested only against its own output is tested
+                  against nothing. The implementation in
+                  platform/src/meridian/orbit/skyfield_service.py is our own —
+                  the sampler, the half-open window, the range-rate projection
+                  and the sign convention appear nowhere in the source. The test
+                  file states in its own docstring what this does not prove,
+                  namely that a frame error inside Skyfield would be invisible
+                  to a fixture derived from Skyfield.
+            Copied: none — the TLE and the site are public data, and the printed
+                  numbers are facts about them rather than expression.
+
+2026-08-09  Cross-check for our own pass search
+            Read: Skyfield API, `EarthSatellite.find_events` — its signature,
+                  its `altitude_degrees` argument and its rise/culminate/set
+                  event codes (MIT)
+            Wrote: tests/unit/test_pass_windows_reference.py calls it and
+                  compares its answer with ours, pass for pass. Only the calling
+                  convention was read; the algorithm was not. Ours is a coarse
+                  scan, bisection on elevation-minus-floor, and a ternary search
+                  for the culmination, in platform/src/meridian/orbit/
+                  pass_search.py and bracket_refinement.py — written before the
+                  reference was consulted, which is why agreement between them
+                  is evidence rather than a restatement. The test file records
+                  that both sides share a propagator and what that costs.
+            Copied: none
+
+2026-08-09  SGP4 accuracy figures behind the timing-uncertainty prior
+            Read: Vallado, Crawford, Hujsak & Kelso, "Revisiting Spacetrack
+                  Report #3", AIAA 2006-6753 — the reported accuracy of SGP4
+                  against precision ephemerides for low Earth orbit: about 1 km
+                  near epoch, degrading by 1–3 km per day (paper, no licence
+                  attached to the prose; no code taken)
+            Wrote: platform/src/meridian/orbit/uncertainty.py turns those two
+                  figures into a 1-sigma timing figure by dividing along-track
+                  position error by orbital speed. The model, the choice to take
+                  the top of the published growth range, and the decision to
+                  report an along-track floor rather than an inflated guess are
+                  ours and are recorded as D-060. No SGP4 implementation was
+                  read or written — propagation is the sgp4/skyfield libraries'.
+            Copied: none — two published measurements, cited
 ```
