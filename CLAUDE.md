@@ -6,11 +6,17 @@ Context for AI coding assistants working in this repository. Read this before wr
 
 ## What this project is
 
-**Meridian** is a control platform for satellite ground stations. It decides which satellite passes are worth receiving, schedules them, monitors the stations doing the work, and reports measured reliability. It also defines **MSP** (Meridian Station Protocol), an open protocol any receiving station can implement to join the network.
+**Meridian** is **predictive scheduling and reliability for satellite ground stations.** Given more passes than a station can receive, it predicts which ones will actually return data, schedules against that prediction under real constraints, and reports measured reliability afterwards. It also defines **MSP** (Meridian Station Protocol), an open protocol any receiving station can implement to join the network.
+
+**This is not another ground-station control platform.** Existing network software schedules on geometric visibility: the satellite clears the horizon, someone claims the pass, and the existence of an observation record is treated as the outcome. Three consequences of rejecting that are the actual work here.
+
+- **Yield, not visibility.** A pass earns a station's time because it is predicted to return frames — not because the geometry permits it. Elevation is one feature in that prediction, not a substitute for it.
+- **A schedule, not a queue.** Stations, passes and time are a constrained assignment problem. Solving it properly is the scheduler's job, and it is reported against baselines that do the obvious thing instead, so the gain is a measured number rather than a claim.
+- **Absence is not a miss.** A station that reported nothing has only missed a pass if its heartbeat confirms it was listening — right target, right frequency, right time. A system without that distinction cannot separate a broken station from an idle one, and every reliability figure it publishes inherits the confusion.
 
 One physical station is built by the team. It is the network's first member and the instrument that validates the software. **The software is the contribution; the station is the proof.**
 
-This is a final year project, team of 3, two semesters. It is assessed academically and will be defended in a viva.
+Built by a team of 3 across two semesters, and assessed academically — it is defended in a viva. **Scope is decided as a product, not as coursework.** The code is written to be picked up by outside contributors after submission, the protocol is open for anyone to implement, and every published number is regenerable by someone who was not in the room. Where an academic deadline and a durable design disagree, say so explicitly rather than quietly shipping the shortcut.
 
 ---
 
