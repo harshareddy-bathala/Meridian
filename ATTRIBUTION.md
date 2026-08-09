@@ -119,4 +119,19 @@ file exists to document.
                   to a fixture derived from Skyfield.
             Copied: none — the TLE and the site are public data, and the printed
                   numbers are facts about them rather than expression.
+
+2026-08-09  Cross-check for our own pass search
+            Read: Skyfield API, `EarthSatellite.find_events` — its signature,
+                  its `altitude_degrees` argument and its rise/culminate/set
+                  event codes (MIT)
+            Wrote: tests/unit/test_pass_windows_reference.py calls it and
+                  compares its answer with ours, pass for pass. Only the calling
+                  convention was read; the algorithm was not. Ours is a coarse
+                  scan, bisection on elevation-minus-floor, and a ternary search
+                  for the culmination, in platform/src/meridian/orbit/
+                  pass_search.py and bracket_refinement.py — written before the
+                  reference was consulted, which is why agreement between them
+                  is evidence rather than a restatement. The test file records
+                  that both sides share a propagator and what that costs.
+            Copied: none
 ```

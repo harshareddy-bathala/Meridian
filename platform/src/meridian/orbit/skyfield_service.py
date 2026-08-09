@@ -33,15 +33,51 @@ Reference: Vallado, *Fundamentals of Astrodynamics and Applications*, ch. 3–4
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta
 
 from skyfield.api import EarthSatellite, load, wgs84
 
 from meridian.orbit.azimuth_continuity import unwrap_azimuth_deg
-from meridian.orbit.types import ElementSet, GroundSite, LookAngle, require_utc
+from meridian.orbit.pass_search import (
+    ElevationPass,
+    ElevationScan,
+    find_elevation_passes,
+)
+from meridian.orbit.types import (
+    ElementSet,
+    GroundSite,
+    LookAngle,
+    PassSearch,
+    PassWindow,
+    require_utc,
+)
 
-__all__ = ["SkyfieldOrbitService"]
+__all__ = ["PASS_SEARCH_MARGIN_S", "SkyfieldOrbitService"]
+
+LookAngleAt = Callable[[datetime], LookAngle]
+"""One satellite and one site bound together, leaving only time to supply."""
+
+PASS_SEARCH_MARGIN_S = 1800.0
+"""How far outside the requested interval :meth:`pass_windows` actually looks.
+
+A pass straddling the edge of the interval has to be found whole, or it is
+reported clipped here and clipped the other way by the next search along — the
+same pass, counted twice and short both times. So the search widens by this at
+both ends, and then keeps only the passes that *rise* inside the interval that
+was asked for.
+
+The margin has to exceed the longest possible pass. A satellite is above the
+horizon while it lies within ``arccos(R_earth / (R_earth + h))`` of the station,
+and it covers that arc at the orbital rate. At 850 km — the altitude of the
+137 MHz weather satellites this project receives — that is 56.2° of a
+101.8-minute orbit, so 15.9 minutes; at 1400 km it is 22.0 minutes. Thirty
+minutes covers low Earth orbit with room, and a pass that outlasts it raises
+rather than being returned clipped.
+
+Reference: Vallado, *Fundamentals of Astrodynamics and Applications*, ch. 11.
+"""
 
 
 class SkyfieldOrbitService:
@@ -56,9 +92,9 @@ class SkyfieldOrbitService:
     building it parses a leap-second table, so a service per request would
     repeat that work on every prediction for no benefit.
 
-    A **partial** implementation: ``look_angles`` is here. ``pass_windows``,
+    A **partial** implementation: ``pass_windows`` and ``look_angles`` are here.
     ``doppler_curve``, ``timing_uncertainty`` and ``element_set_divergence``
-    arrive in the sessions that follow, each with the tests that check it.
+    arrive in the session that follows, each with the tests that check it.
     """
 
     def __init__(self) -> None:
@@ -92,20 +128,100 @@ class SkyfieldOrbitService:
         if not sample_times:
             return []
 
-        wrapped = [self._sample(element_set, site, t) for t in sample_times]
+        look_angle_at = self._look_angle_at(element_set, site)
+        wrapped = [look_angle_at(t) for t in sample_times]
         unwrapped_deg = unwrap_azimuth_deg([angle.azimuth_deg for angle in wrapped])
         return [
             replace(angle, azimuth_deg=azimuth_deg)
             for angle, azimuth_deg in zip(wrapped, unwrapped_deg, strict=True)
         ]
 
-    def _sample(
-        self, element_set: ElementSet, site: GroundSite, t: datetime
-    ) -> LookAngle:
-        """One instant's pointing and range, with azimuth still wrapped at north.
+    def pass_windows(self, search: PassSearch) -> list[PassWindow]:
+        """See :meth:`meridian.orbit.service.OrbitService.pass_windows`.
 
-        Wrapped because unwrapping needs the sample before this one, and a single
-        sample does not have it.
+        Searches :data:`PASS_SEARCH_MARGIN_S` beyond both ends of the requested
+        interval and then keeps only the passes that *rise* inside it. Every
+        window returned is therefore a whole pass, and two searches meeting at a
+        boundary partition the passes between them rather than each reporting a
+        clipped copy of the one that straddles it.
+
+        A satellite that never sets over the site returns nothing: it has no
+        acquisition inside the interval, and "when does it rise" is not a
+        question a permanently visible object answers.
+
+        Note:
+            Two searches meeting at a seam refine the same acquisition on
+            different coarse grids, so their answers can differ by up to the
+            0.05 s refinement tolerance. A seam landing that close to a true
+            acquisition — of order one boundary in a million — can therefore be
+            claimed by both searches or by neither. A job splitting a horizon
+            into consecutive searches should de-duplicate on satellite and
+            acquisition rather than assume the split is exact (D-059).
+        """
+        look_angle_at = self._look_angle_at(search.element_set, search.site)
+
+        def elevation_deg_at(t: datetime) -> float:
+            return look_angle_at(t).elevation_deg
+
+        margin = timedelta(seconds=PASS_SEARCH_MARGIN_S)
+        found = find_elevation_passes(
+            elevation_deg_at,
+            ElevationScan(
+                start=require_utc(search.start, "start") - margin,
+                end=require_utc(search.end, "end") + margin,
+                min_elevation_deg=search.min_elevation_deg,
+                coarse_step_s=search.coarse_step_s,
+            ),
+        )
+        return [
+            self._to_pass_window(look_angle_at, search.element_set, elevation_pass)
+            for elevation_pass in found
+            if search.start <= elevation_pass.aos < search.end
+        ]
+
+    def _to_pass_window(
+        self,
+        look_angle_at: LookAngleAt,
+        element_set: ElementSet,
+        found: ElevationPass,
+    ) -> PassWindow:
+        """Name the satellite and element set a geometric pass came from.
+
+        Raises:
+            ValueError: the pass outlasts the searched margin, so its loss of
+                signal was clipped rather than found — meaning
+                :data:`PASS_SEARCH_MARGIN_S` is too small for this orbit. Raised
+                rather than returned, because a scheduler cannot tell a window
+                that ends early from one that ends when it says it does.
+        """
+        if found.is_truncated:
+            raise ValueError(
+                f"the pass acquired at {found.aos.isoformat()} outlasts the "
+                f"{PASS_SEARCH_MARGIN_S} s search margin"
+            )
+        return PassWindow(
+            satellite_id=element_set.satellite_id,
+            aos=found.aos,
+            los=found.los,
+            max_elevation_deg=found.max_elevation_deg,
+            max_elevation_at=found.max_elevation_at,
+            aos_azimuth_deg=look_angle_at(found.aos).azimuth_deg,
+            los_azimuth_deg=look_angle_at(found.los).azimuth_deg,
+            element_set_epoch=element_set.epoch,
+            element_set_age_s=element_set.age_s(found.aos),
+            min_elevation_deg=found.min_elevation_deg,
+        )
+
+    def _look_angle_at(self, element_set: ElementSet, site: GroundSite) -> LookAngleAt:
+        """Bind one satellite and one site, leaving a function of time.
+
+        Parsing the element set and placing the observer happen once here rather
+        than once per sample. A pass search evaluates the result several hundred
+        times, and repeating that setup on each call dominates everything else
+        the search does.
+
+        Azimuth comes back still wrapped at north, because unwrapping needs the
+        sample before this one and a single instant does not have it.
         """
         satellite = EarthSatellite(
             element_set.line1,
@@ -114,20 +230,24 @@ class SkyfieldOrbitService:
             self._timescale,
         )
         observer = wgs84.latlon(site.lat_deg, site.lon_deg, elevation_m=site.alt_m)
-        topocentric = (satellite - observer).at(self._timescale.from_datetime(t))
-        elevation, azimuth, _ = topocentric.altaz()
+        relative_position = satellite - observer
 
-        range_km, range_rate_km_s = _range_and_rate(
-            [float(component) for component in topocentric.xyz.km],
-            [float(component) for component in topocentric.velocity.km_per_s],
-        )
-        return LookAngle(
-            t=t,
-            azimuth_deg=float(azimuth.degrees),
-            elevation_deg=float(elevation.degrees),
-            range_km=range_km,
-            range_rate_km_s=range_rate_km_s,
-        )
+        def look_angle_at(t: datetime) -> LookAngle:
+            topocentric = relative_position.at(self._timescale.from_datetime(t))
+            elevation, azimuth, _ = topocentric.altaz()
+            range_km, range_rate_km_s = _range_and_rate(
+                [float(component) for component in topocentric.xyz.km],
+                [float(component) for component in topocentric.velocity.km_per_s],
+            )
+            return LookAngle(
+                t=t,
+                azimuth_deg=float(azimuth.degrees),
+                elevation_deg=float(elevation.degrees),
+                range_km=range_km,
+                range_rate_km_s=range_rate_km_s,
+            )
+
+        return look_angle_at
 
 
 def _sample_times(start: datetime, end: datetime, step_s: float) -> list[datetime]:
