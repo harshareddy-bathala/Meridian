@@ -17,10 +17,17 @@ The pieces:
   interval to a crossing or a peak.
 * ``azimuth_continuity`` — unwrapping compass azimuth so a rotator never takes
   the long way round.
+* ``doppler`` — turning a range rate into the frequency offset a station
+  observes.
+* ``uncertainty`` — how far out a predicted pass boundary is likely to be, from
+  the age of the element set it was computed from.
+* ``time_sampling`` — evenly spaced instants across an interval, with the two
+  endpoint rules the rest of the package needs.
 
-The last three know nothing about satellites: they take a callable or a list of
-numbers. That is what lets the geometry be checked against curves whose answers
-are known in closed form, with no element set and no propagator involved.
+Only ``skyfield_service`` propagates. The other six take a callable, a list of
+numbers or a single measurement, which is what lets the geometry be checked
+against curves and formulae whose answers are known in closed form, with no
+element set and no propagator involved.
 
 Orbit propagation is confined to this package, so the rest of the platform is
 written against ``OrbitService`` and not against a particular propagator.

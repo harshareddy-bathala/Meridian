@@ -134,4 +134,19 @@ file exists to document.
                   is evidence rather than a restatement. The test file records
                   that both sides share a propagator and what that costs.
             Copied: none
+
+2026-08-09  SGP4 accuracy figures behind the timing-uncertainty prior
+            Read: Vallado, Crawford, Hujsak & Kelso, "Revisiting Spacetrack
+                  Report #3", AIAA 2006-6753 — the reported accuracy of SGP4
+                  against precision ephemerides for low Earth orbit: about 1 km
+                  near epoch, degrading by 1–3 km per day (paper, no licence
+                  attached to the prose; no code taken)
+            Wrote: platform/src/meridian/orbit/uncertainty.py turns those two
+                  figures into a 1-sigma timing figure by dividing along-track
+                  position error by orbital speed. The model, the choice to take
+                  the top of the published growth range, and the decision to
+                  report an along-track floor rather than an inflated guess are
+                  ours and are recorded as D-060. No SGP4 implementation was
+                  read or written — propagation is the sgp4/skyfield libraries'.
+            Copied: none — two published measurements, cited
 ```

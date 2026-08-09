@@ -1321,6 +1321,40 @@ The result was a recovery that answered `200` with a plaintext token, followed b
 
 ---
 
+## D-060 — The Phase 1 timing uncertainty is an along-track prior, and it says so
+
+**2026-08-09 · accepted** · *`orbit/uncertainty.py`; Stage 6 session D*
+
+MSP §4.3 carries `timing_uncertainty_s` to stations, which use it to decide how much extra to record either side of a predicted acquisition. Phase 1 has no measured timing error to fit a model to, and `service.py` already rules out the tempting answer: returning `0.0` claims perfect knowledge of an element set whose accuracy is unstated, and a station reading it opens no margin at all.
+
+**The prior is `(1.0 km + 3.0 km/day × age) / 7.5 km/s`.** An along-track position error moves the satellite forward or back along a path it follows anyway, so the instant it reaches the horizon shifts by that distance over its speed. Each constant has a source rather than a justification: Vallado, Crawford, Hujsak & Kelso, *Revisiting Spacetrack Report #3* (AIAA 2006-6753) puts SGP4 accuracy near epoch at about 1 km for low Earth orbit and its growth at 1–3 km/day; 7.5 km/s is `sqrt(mu/a)` at 800 km, the band the 137 MHz weather satellites occupy. That gives 0.13 s at epoch, 0.53 s after a day and 2.9 s after a week — which matches the operational experience that predictions from week-old elements are seconds out, not minutes.
+
+**The growth rate is taken at the top of the published range deliberately.** The two errors are not symmetric: overstating costs a station some disk, understating has it start recording after the pass began, and a pass is eight to fifteen minutes that never repeats.
+
+**It models along-track error only, and the docstring says so rather than implying completeness.** A pass boundary is a shallow crossing, so cross-track error also moves the crossing instant — by more than it moves the satellite. The figure is therefore a floor. Quantifying the rest needs measured timing error against predicted boundaries, which is exactly what Phase 2 collects.
+
+**Rejected: inflating the prior by a safety factor** to cover what it omits. Any multiplier would be invented, and `CLAUDE.local.md` §5.4 rules out a constant whose provenance is "because it works". A defensible under-estimate that names its own limit is better evidence than a comfortable number nobody can source.
+
+*Consequence:* every result carries `method = "vallado2006-along-track-v1"`. SC-3 compares this prior against a model fitted to measurement, and that comparison is impossible if a stored prediction cannot say which produced it — so the string is versioned, and replacing the model means a new string rather than an edit to this one.
+
+---
+
+## D-061 — The speed of light is written twice, and a test holds the two equal
+
+**2026-08-09 · accepted** · *`orbit/doppler.py`, `registry/doppler_tolerance.py`*
+
+Both modules need `c`. `registry.doppler_tolerance` uses it to bound how far off frequency a station may report and still count as listening; `orbit.doppler` uses it to compute the shift itself. They answer different questions — a bound against a measurement — and sit on opposite sides of a module boundary.
+
+**Both define it, and `tests/unit/test_doppler.py` asserts they agree.** `registry.doppler_tolerance` is documented as a leaf that imports nothing from `meridian`, which is what keeps the registry free of an import cycle through the orbit package; coupling it to `meridian.orbit` to share one float would spend that property on a defined constant that has not changed since 1983.
+
+**Rejected: a shared constants module.** It would hold one value, and `CLAUDE.local.md` §4 exists because modules like that accumulate everything that has no other home. The cost of the duplication is drift, and drift is what the assertion prevents.
+
+**Rejected: importing one from the other.** Whichever direction is chosen makes one of the two modules depend on a package it has no other reason to know about, and the registry's leaf property is load-bearing while the duplication is not.
+
+*Consequence:* the duplication is safe only while the test exists. It is written as a test rather than an assertion at import time so that it fails in CI rather than at whatever moment a station first registers.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
