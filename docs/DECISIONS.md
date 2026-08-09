@@ -1317,7 +1317,9 @@ The result was a recovery that answered `200` with a plaintext token, followed b
 
 **Rejected: drop passes not wholly inside the interval.** A day-by-day job would lose roughly two passes per satellite per boundary, permanently and silently, and the completeness ratio would improve as a result — the exact failure mode the ratio exists to expose.
 
-*Known limit, stated rather than hidden.* Two searches meeting at a seam recompute the same acquisition on different coarse grids, so their answers can differ by up to the 0.05 s refinement tolerance. If a seam falls within that tolerance of a true acquisition, a pass can in principle be claimed by both searches or by neither. `tests/unit/test_pass_windows_reference.py` pins the deterministic case — a seam placed on an acquisition computed from the same grid — and the residual is a coincidence of order 1e-6 per boundary per satellite. It belongs to whichever job splits the horizon, which should de-duplicate on `(satellite_id, aos)`, and is recorded here so that job is written knowing it.
+~~*Known limit, stated rather than hidden.* Two searches meeting at a seam recompute the same acquisition on different coarse grids, so their answers can differ by up to the 0.05 s refinement tolerance. If a seam falls within that tolerance of a true acquisition, a pass can in principle be claimed by both searches or by neither. `tests/unit/test_pass_windows_reference.py` pins the deterministic case — a seam placed on an acquisition computed from the same grid — and the residual is a coincidence of order 1e-6 per boundary per satellite. It belongs to whichever job splits the horizon, which should de-duplicate on `(satellite_id, aos)`, and is recorded here so that job is written knowing it.~~
+
+*Amended 2026-08-09 by D-063 — the limit is removed, not merely bounded.* The paragraph above accepted a residual ambiguity and pushed de-duplication onto the caller. Measuring it while building the pass store showed it was far larger than "one boundary in a million": shifting a horizon by seven seconds moved **every** acquisition by about two milliseconds, because the coarse grid began wherever the caller's horizon began. A rolling job keyed on acquisition would have stored a fresh copy of every pass on every run. D-063 aligns the scan grid to a fixed anchor, so two searches sharing a `coarse_step_s` now compute the identical acquisition to the microsecond and the seam question does not arise. The rest of this entry — searching past the interval, keying on acquisition — stands unchanged.
 
 ---
 
@@ -1352,6 +1354,44 @@ Both modules need `c`. `registry.doppler_tolerance` uses it to bound how far off
 **Rejected: importing one from the other.** Whichever direction is chosen makes one of the two modules depend on a package it has no other reason to know about, and the registry's leaf property is load-bearing while the duplication is not.
 
 *Consequence:* the duplication is safe only while the test exists. It is written as a test rather than an assertion at import time so that it fails in CI rather than at whatever moment a station first registers.
+
+---
+
+## D-062 — MSP owes an implementer a way to check their own station, and does not have one
+
+**2026-08-09 · accepted** · *found planning Stage 7; owned by Stage 10*
+
+`CLAUDE.md` describes MSP as "an open protocol any receiving station can implement to join the network". `tests/msp_conformance` has 62 tests, and every one of them checks **our server**. Someone writing a station — in Python, in C on a microcontroller, in whatever a contributor prefers — has no way to check that their client is correct short of registering against a live platform and reading the errors.
+
+That is the same defect class as a docstring describing a test that does not exist: a capability asserted in prose with nothing behind it. An open protocol whose only conformance suite tests the reference server is a specification with a reference implementation, not an open protocol.
+
+**Recorded now, built at Stage 10.** Stage 10 already builds the simulator against the real client over real MSP, which is where the client-side seam gets its shape; a station-side conformance harness is the same seam pointed the other way. The deliverable is a suite an outside implementer can run against their own station, plus `docker compose up` giving them a platform to run it against — the compose requirement already exists.
+
+**Rejected: building it now.** Stage 7 has no client work in it, and the harness would be written against endpoints that Stages 8 and 9 have not finished defining. Writing it early would mean writing it twice.
+
+**Rejected: treating the existing conformance suite as sufficient.** It fixes the wire format, which is necessary and not sufficient: it cannot tell an implementer that their retry policy, their clock-offset estimator or their assignment state machine is wrong, and those are where a station implementation actually fails.
+
+*Consequence:* the roadmap gains an owner for a goal that was previously only implied by CLAUDE.md's description of the protocol. Until it is built, "any receiving station can implement MSP" is a claim about the specification rather than a tested property.
+
+---
+
+## D-063 — A computed pass has a stable identity, which needs an aligned scan grid
+
+**2026-08-09 · accepted** · *migration 0010; `orbit/skyfield_service.py`*
+
+`passes` shipped with no unique key. The pass-generation job runs over a rolling horizon and is expected to be re-run — after a crash, when a new element set arrives, or on the next tick — and each re-run would have inserted a second copy of everything it already held. That is not untidiness: `passes` is the denominator of the completeness ratio in `EVALUATION.md` §4.1, so duplicating it halves every completeness figure the project publishes.
+
+**Identity is the prediction, not the pass:** `unique (station_id, satellite_id, element_set_id, min_elevation_deg, aos)`. Re-running with unchanged inputs writes nothing. A **newer element set** predicting the same rise is a second row on purpose — the same rise predicted twice, seconds apart, and the difference between them is the measurement that makes element-set age a usable feature. D-057 reached the same conclusion for `element_sets`: the series is the measurement, so nothing in it is overwritten.
+
+**The constraint is worthless without a deterministic acquisition, and it was not deterministic.** `pass_windows` began its coarse scan at the caller's horizon, so the bracket around a crossing depended on where the horizon started. Measured directly rather than assumed: shifting the horizon by 7 s moved every acquisition by ~2 ms, and by 17 s moved it ~21 ms. Every re-run would have produced acquisitions that never compared equal, and the constraint would have silently never fired — a safety feature that does nothing, which is the failure mode this project has already found twice.
+
+**The scan grid is therefore aligned to a fixed anchor** (`GRID_ANCHOR`, 2000-01-01) rather than to the interval requested, so the grid is a property of `coarse_step_s` alone. Two searches sharing a step sample the same instants wherever their horizons begin, and one pass has one acquisition to the microsecond. `tests/unit/test_pass_windows_reference.py` asserts equality across four unaligned horizons, and asserts it exactly — near-equality is precisely the state that was wrong.
+
+**Rejected: rounding `aos` to the second for identity.** It collapses the common case and fails on the uncommon one: an acquisition near a second boundary rounds two ways, which is about 5% of passes at a 0.05 s refinement tolerance. Fixing the determinism at the source costs less and is checkable.
+
+**Rejected: one row per physical pass, updated in place as better elements arrive.** It discards the prediction history, which is the input to the uncertainty model, and it makes `passes` mutable — the same mistake D-057 corrected in `element_sets`.
+
+*Consequence:* the completeness denominator must count **distinct physical passes**, not rows, because one pass may legitimately hold several predictions. The grouping rule belongs to the evaluation stage that computes the ratio, and is owed by it rather than assumed here.
 
 ---
 

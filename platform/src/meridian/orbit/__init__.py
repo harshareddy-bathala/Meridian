@@ -21,8 +21,9 @@ The pieces:
   observes.
 * ``uncertainty`` — how far out a predicted pass boundary is likely to be, from
   the age of the element set it was computed from.
-* ``time_sampling`` — evenly spaced instants across an interval, with the two
-  endpoint rules the rest of the package needs.
+* ``time_sampling`` — evenly spaced instants across an interval: the two
+  endpoint rules the rest of the package needs, and the fixed grid that makes
+  one pass get one answer whichever horizon found it.
 
 Only ``skyfield_service`` propagates. The other six take a callable, a list of
 numbers or a single measurement, which is what lets the geometry be checked

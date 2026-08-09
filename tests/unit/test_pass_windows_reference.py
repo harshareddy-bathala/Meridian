@@ -247,9 +247,9 @@ def test_a_pass_rising_exactly_at_the_interval_end_is_left_to_the_next_search(
 
     A real pass never rises at a round instant, so the coincidence is built
     rather than waited for: the acquisition of the second pass is used as the
-    ``end`` of a new search. That search keeps ``WINDOW_START``, so it samples
-    the same coarse grid and refines the same bracket, and its computed
-    acquisition is therefore the identical instant rather than one a hair away.
+    ``end`` of a new search. Because the coarse grid is aligned to a fixed
+    anchor rather than to the horizon, that search refines the same bracket and
+    computes the identical instant rather than one a hair away.
 
     An inclusive end would return that pass here *and* in the search beginning
     at the same instant, so a rolling pass-generation job would double-count
@@ -261,6 +261,39 @@ def test_a_pass_rising_exactly_at_the_interval_end_is_left_to_the_next_search(
 
     assert len(before_the_seam) == 1
     assert all(window.aos < seam for window in before_the_seam)
+
+
+def test_one_pass_gets_one_acquisition_whatever_horizon_found_it(
+    service: SkyfieldOrbitService, iss: ElementSet
+) -> None:
+    """Identity, to the microsecond, across horizons that do not line up.
+
+    A pass-generation job runs over a rolling horizon, so the same physical pass
+    is recomputed by searches beginning at unrelated instants. Before the coarse
+    grid was aligned to a fixed anchor, shifting the horizon by seven seconds
+    moved every acquisition by about two milliseconds — enough that no two runs
+    ever agreed, and a job keyed on acquisition would have stored a fresh copy
+    of every pass on every run while looking perfectly correct.
+
+    Equality is asserted, not approximation: near-equality is exactly the state
+    that was wrong, and a tolerance here would have accepted it.
+    """
+    horizons = [
+        service.pass_windows(
+            search_over(iss, WINDOW_START + timedelta(seconds=shift), WINDOW_END)
+        )
+        for shift in (0, 7, 13, 17)
+    ]
+
+    reference = horizons[0]
+    assert len(reference) == EXPECTED_PASS_COUNT
+    for shifted in horizons[1:]:
+        assert [window.aos for window in shifted] == [
+            window.aos for window in reference
+        ]
+        assert [window.los for window in shifted] == [
+            window.los for window in reference
+        ]
 
 
 def test_a_pass_outlasting_the_search_margin_raises_rather_than_being_clipped(

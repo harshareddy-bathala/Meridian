@@ -47,7 +47,7 @@ from meridian.orbit.pass_search import (
     ElevationScan,
     find_elevation_passes,
 )
-from meridian.orbit.time_sampling import half_open_sample_times
+from meridian.orbit.time_sampling import aligned_to_grid, half_open_sample_times
 from meridian.orbit.types import (
     DopplerSample,
     ElementSet,
@@ -155,14 +155,9 @@ class SkyfieldOrbitService:
         acquisition inside the interval, and "when does it rise" is not a
         question a permanently visible object answers.
 
-        Note:
-            Two searches meeting at a seam refine the same acquisition on
-            different coarse grids, so their answers can differ by up to the
-            0.05 s refinement tolerance. A seam landing that close to a true
-            acquisition — of order one boundary in a million — can therefore be
-            claimed by both searches or by neither. A job splitting a horizon
-            into consecutive searches should de-duplicate on satellite and
-            acquisition rather than assume the split is exact (D-059).
+        The scan is aligned to a fixed grid rather than to the interval asked
+        for, so one pass gets one answer no matter which horizon found it —
+        see :func:`_aligned_to_grid`.
         """
         look_angle_at = self._look_angle_at(search.element_set, search.site)
 
@@ -173,7 +168,9 @@ class SkyfieldOrbitService:
         found = find_elevation_passes(
             elevation_deg_at,
             ElevationScan(
-                start=require_utc(search.start, "start") - margin,
+                start=aligned_to_grid(
+                    require_utc(search.start, "start") - margin, search.coarse_step_s
+                ),
                 end=require_utc(search.end, "end") + margin,
                 min_elevation_deg=search.min_elevation_deg,
                 coarse_step_s=search.coarse_step_s,

@@ -13,15 +13,25 @@ count; over a fifteen-minute pass at a third of a second it reaches most of a
 millisecond, which lands in the timestamps a rotator is driven by. Multiplying
 rounds once, at the end.
 
+:func:`aligned_to_grid` answers the third question the other two do not: *where*
+the instants fall. A scan that starts wherever its caller's horizon starts gives
+one pass two different answers depending on who asked, which is fine for
+pointing and fatal for identity.
+
 Arithmetic on datetimes: no propagator, no clock and no I/O.
 """
 
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
-__all__ = ["closed_sample_times", "half_open_sample_times"]
+__all__ = [
+    "GRID_ANCHOR",
+    "aligned_to_grid",
+    "closed_sample_times",
+    "half_open_sample_times",
+]
 
 
 def half_open_sample_times(
@@ -79,3 +89,37 @@ def closed_sample_times(
     if times[-1] < end:
         times.append(end)
     return times
+
+
+GRID_ANCHOR = datetime(2000, 1, 1, tzinfo=UTC)
+"""The instant every coarse scan grid is measured from.
+
+Any fixed instant would do; this is J2000's civil date, which is already the
+reference epoch for the frames underneath. What matters is that it never moves.
+"""
+
+
+def aligned_to_grid(t: datetime, step_s: float) -> datetime:
+    """The last grid instant at or before ``t``, counting from :data:`GRID_ANCHOR`.
+
+    Without this the coarse scan starts wherever the caller's horizon starts, so
+    the same pass sampled by two different horizons is bracketed at two
+    different places and refined to two answers a few milliseconds apart. That
+    is harmless for pointing and fatal for identity: a pass-generation job run
+    over a rolling horizon would store the same physical pass again on every
+    run, because no two acquisitions would ever compare equal.
+
+    Aligning the scan start makes the grid a property of the step alone. Two
+    searches sharing a ``coarse_step_s`` then sample the same instants wherever
+    their horizons begin, and one pass has one acquisition to the microsecond.
+
+    Args:
+        t: The instant to align, timezone-aware UTC.
+        step_s: Grid spacing in seconds — ``PassSearch.coarse_step_s``.
+
+    Returns:
+        A grid instant at or before ``t``, never after it, so aligning a scan
+        start can only widen the interval searched and never narrow it.
+    """
+    elapsed_s = (t - GRID_ANCHOR).total_seconds()
+    return GRID_ANCHOR + timedelta(seconds=math.floor(elapsed_s / step_s) * step_s)
