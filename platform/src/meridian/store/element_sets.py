@@ -96,12 +96,10 @@ def insert_element_set(conn: Connection, element_set: NewElementSet) -> bool:
         these exact lines from this source.
 
     Note:
-        **The return value is the outcome and callers must act on it.**
-        ``store.invites.consume_invite`` reports a race the same way, and both
-        of its call sites discarding the value is how one invite came to admit
-        two stations. A caller counting retrievals, or deciding whether to
-        re-run a prediction, gets a wrong answer by ignoring this — silently,
-        because the insert did not fail.
+        **The return value carries the only signal that anything happened.**
+        A duplicate is not an error here and raises nothing, so a caller
+        counting retrievals, or deciding whether a new set justifies re-running
+        a prediction, reads that from this boolean or not at all.
 
         "Already held" is judged on content, not on epoch (D-057). Two
         different sets sharing an epoch are two rows; the same set retrieved

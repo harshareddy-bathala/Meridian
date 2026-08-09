@@ -3,9 +3,10 @@
 Reads and writes ``heartbeats`` and the one column of ``stations`` a
 heartbeat touches (``deploy/migrations/sql/0006_heartbeats.sql``). Like the
 rest of ``meridian.store``, this module makes no decision about what a
-heartbeat *means* — reconciling ``held_assignments`` against
-``meridian.store.assignments`` is a later session's orchestration, built on
-top of this one.
+heartbeat *means*. ``meridian.api.msp`` records each report through
+:func:`insert_heartbeat` and :func:`touch_last_heartbeat`; reconciling a
+report's ``held_assignments`` against ``meridian.store.assignments`` (MSP
+§4.2) is not implemented yet, so nothing calls that module's transitions.
 
 **Where ``NewHeartbeat.simulated`` comes from.** It is the station's own
 provenance, read from its registration record via
@@ -79,7 +80,7 @@ def insert_heartbeat(conn: Connection, heartbeat: NewHeartbeat) -> None:
 
     ``received_at`` is left to the column's ``default now()`` — the
     platform's own clock, not a value this function is handed, the same
-    reasoning ``store.stations.rotate_station_token`` applies to
+    reasoning ``store.station_tokens.rotate_station_token`` applies to
     ``token_issued_at``.
 
     Does not touch ``stations.last_heartbeat_at``; see
