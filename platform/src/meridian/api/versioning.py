@@ -41,9 +41,6 @@ and the promise is kept by editing one line rather than by finding every place a
 version was compared.
 """
 
-CURRENT_VERSION = "0.1"
-"""What this platform speaks, for the header it sends back on a response."""
-
 
 @dataclass(frozen=True, slots=True)
 class ProtocolVersion:

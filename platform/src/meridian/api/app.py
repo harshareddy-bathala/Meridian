@@ -78,7 +78,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Meridian",
         version=__version__,
-        summary="Control platform for satellite ground stations.",
+        summary="Predictive scheduling and reliability for satellite ground stations.",
         lifespan=_lifespan,
     )
 
