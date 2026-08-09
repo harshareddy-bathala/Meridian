@@ -1,9 +1,9 @@
 """``PsycopgRegistry`` — the concrete ``Registry`` backed by the store layer.
 
-Implements ``Registry.register()``, ``Registry.authenticate()`` and
-``Registry.liveness()`` against ``meridian.store.stations`` and
-``meridian.store.invites``, and ``Registry.was_listening()`` against
-``meridian.store.heartbeats``.
+Implements ``Registry.register()`` and ``Registry.liveness()`` against
+``meridian.store.stations`` and ``meridian.store.invites``,
+``Registry.authenticate()`` against ``meridian.store.station_tokens``, and
+``Registry.was_listening()`` against ``meridian.store.heartbeats``.
 
 This module holds MSP §4.1's actual decision logic: which of the six rows of
 its recovery table a presented ``(invite_token, registration_key)`` pair

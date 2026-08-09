@@ -360,6 +360,43 @@ def test_losing_the_consume_race_rejects_and_leaves_no_station(
     assert station_count == 0
 
 
+def test_losing_the_consume_race_on_a_bound_invite_leaves_the_old_token_working(
+    rollback: Any, registry: PsycopgRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-047 at the *second* call site — the bound rotation path.
+
+    `_consume_or_raise` is reached from two places, and the sibling test above
+    covers only the new-station one. Here the invite is consumed *after* the
+    token has already been rotated, so losing the race has to roll the rotation
+    back with it. If it did not, the station would be holding a token the
+    registry never recorded while its replacement invite stayed unconsumed and
+    redeemable — the operator's one authorised rotation spent on nothing, and
+    the station locked out with no way back in.
+    """
+    insert_invite(rollback, plaintext="original-invite-race")
+    created = registry.register(
+        sample_request(invite_token="original-invite-race", registration_key="my-key")
+    )
+    insert_invite(
+        rollback,
+        plaintext="bound-invite-race",
+        issued_for_station_id=created.station_id,
+    )
+    monkeypatch.setattr(
+        "meridian.registry.psycopg_registry.consume_invite",
+        lambda *_args, **_kwargs: False,
+    )
+
+    with pytest.raises(InvalidInviteError):
+        registry.register(
+            sample_request(invite_token="bound-invite-race", registration_key="my-key")
+        )
+
+    # The rotation rolled back, so the token minted before registration is
+    # still the one the station holds.
+    assert registry.authenticate(created.bearer_token) == created.station_id
+
+
 def test_unbound_recovery_claiming_a_different_simulated_is_rejected(
     rollback: Any, registry: PsycopgRegistry
 ) -> None:

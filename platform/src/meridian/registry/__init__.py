@@ -8,10 +8,11 @@ then, it would be reconstructed from whatever the heartbeat table happened to
 contain, and the distinction between "heard nothing" and "was not listening"
 would erode exactly as docs/ARCHITECTURE.md warns.
 
-This module declares interfaces and value types only. It performs no I/O,
-holds no connection and contains no SQL — ``meridian.registry.psycopg_registry``
-is the concrete implementation, and it is the only module that may compose
-``meridian.store`` calls into MSP §4.1's decision table.
+This module declares interfaces and value types only. It performs no I/O, holds
+no connection and contains no SQL, so it can be read to learn what the registry
+promises without reading any SQL at all.
+``meridian.registry.psycopg_registry`` is the concrete implementation: MSP
+§4.1's decision table is composed there, out of ``meridian.store`` calls.
 
 **Implementation status.** All four methods are implemented in
 ``psycopg_registry``. ``was_listening`` has no production caller yet — the
