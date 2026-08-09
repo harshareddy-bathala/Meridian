@@ -23,7 +23,8 @@ from meridian.registry import (  # noqa: E402
 )
 from meridian.registry.psycopg_registry import PsycopgRegistry  # noqa: E402
 from meridian.store.invites import hash_invite_token, revoke_invite  # noqa: E402
-from meridian.store.stations import Capability, revoke_station_token  # noqa: E402
+from meridian.store.station_tokens import revoke_station_token  # noqa: E402
+from meridian.store.stations import Capability  # noqa: E402
 
 pytestmark = pytest.mark.integration
 

@@ -41,15 +41,17 @@ from meridian.store.invites import (
     find_invite_by_hash,
     hash_invite_token,
 )
+from meridian.store.station_tokens import (
+    find_station_id_by_token_hash,
+    rotate_station_token,
+)
 from meridian.store.stations import (
     Connection,
     NewStation,
     StationRecoveryInfo,
     find_station_for_recovery,
     find_station_heartbeat,
-    find_station_id_by_token_hash,
     insert_station,
-    rotate_station_token,
 )
 
 __all__ = [
@@ -305,9 +307,14 @@ class PsycopgRegistry:
             raise InvalidInviteError("simulated flag does not match the station")
 
     def _recovery_info_or_raise(self, station_id: str) -> StationRecoveryInfo:
+        """The station the invite names, or `invalid_invite` if it is not live."""
         info = find_station_for_recovery(self._conn, station_id)
-        if info is None:  # pragma: no cover — the invite's own FK guarantees this
-            raise InvalidInviteError("invite names no station")
+        if info is None:
+            # The invite's foreign key guarantees the row exists, so the only
+            # way here is a station deleted after its invite was written.
+            # `invalid_invite` rather than a distinct code: MSP §3 does not let
+            # a client learn why an invite was refused.
+            raise InvalidInviteError("invite names no live station")
         return info
 
     def _key_matches(self, info: StationRecoveryInfo, registration_key: str) -> bool:
@@ -319,8 +326,16 @@ class PsycopgRegistry:
         return hmac.compare_digest(presented, info.registration_key_sha256)
 
     def _mint_and_rotate(self, station_id: str) -> Registration:
+        """Issue a new bearer token on an existing station, or refuse."""
         bearer_plaintext, bearer_hash = generate_bearer_token(self._pepper)
-        rotate_station_token(
+        # Returning a plaintext token that no row accepts would answer a
+        # recovery with `200` and a credential dead on arrival, so the outcome
+        # is checked rather than assumed. `_recovery_info_or_raise` has already
+        # rejected a deleted station, which makes this the second guard on the
+        # same fact and unreachable today; it is here because the caller is
+        # holding a token whose validity is exactly this return value (D-058).
+        if not rotate_station_token(
             self._conn, station_id=station_id, token_sha256=bearer_hash
-        )
+        ):
+            raise InvalidInviteError("invite names no live station")
         return Registration(station_id=station_id, bearer_token=bearer_plaintext)

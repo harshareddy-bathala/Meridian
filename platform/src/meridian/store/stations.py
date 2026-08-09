@@ -3,8 +3,17 @@
 Reads and writes ``stations`` and ``station_capabilities``
 (``deploy/migrations/sql/0002_stations.sql``). Like ``meridian.store.invites``,
 this module makes no decision about *whether* a station should be created,
-recovered or authenticated — it only persists and retrieves rows. Stage 4.3's
-registry service decides; this module gives it something typed to call.
+recovered or authenticated — it only persists and retrieves rows.
+``meridian.registry.psycopg_registry`` decides; this module gives it something
+typed to call.
+
+Throughout, a soft-deleted station (``deleted_at`` set) reads as absent rather
+than as a station in some other state, so a caller never has to ask.
+
+The bearer-token columns are ``meridian.store.station_tokens``'. A station's
+first token hash is written here, with the row that carries it; every rotation,
+revocation and authentication lookup afterwards lives in that module, so the
+credential lifecycle can be read end to end in one file.
 
 Both secrets stored here — the bearer token and the registration key — arrive
 already hashed. Hashing them needs ``Settings.token_hash_pepper`` (D-017,
@@ -18,7 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 import psycopg
-from psycopg.rows import class_row, scalar_row
+from psycopg.rows import class_row
 
 __all__ = [
     "Capability",
@@ -29,16 +38,20 @@ __all__ = [
     "StationRecoveryInfo",
     "find_station_for_recovery",
     "find_station_heartbeat",
-    "find_station_id_by_token_hash",
     "find_station_provenance",
     "insert_station",
-    "revoke_station_token",
-    "rotate_station_token",
 ]
 
 Connection = psycopg.Connection[tuple[object, ...]]
 """Matches :data:`meridian.store.invites.Connection` — a pooled connection or
 a bare ``psycopg.connect()`` result, whichever the caller has."""
+
+Cursor = psycopg.Cursor[tuple[object, ...]]
+"""The cursor type the private row-writing helpers below take.
+
+They take a cursor rather than a connection so that the transaction stays open
+in the one public function that owns it, rather than each helper opening a
+nested one of its own."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,52 +120,64 @@ def insert_station(
         psycopg.errors.UniqueViolation: ``station.station_id`` already exists.
     """
     with conn.transaction(), conn.cursor() as cur:
-        cur.execute(
-            """
-            insert into stations
-                (station_id, name, operator, lat_deg, lon_deg, alt_m,
-                 token_sha256, registration_key_sha256, simulated,
-                 simulator_run_id, seed, client_implementation, client_version)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
+        _insert_station_row(cur, station)
+        _insert_capability_rows(cur, station.station_id, capabilities)
+
+
+def _insert_station_row(cur: Cursor, station: NewStation) -> None:
+    """Write the one ``stations`` row. Caller owns the transaction."""
+    cur.execute(
+        """
+        insert into stations
+            (station_id, name, operator, lat_deg, lon_deg, alt_m,
+             token_sha256, registration_key_sha256, simulated,
+             simulator_run_id, seed, client_implementation, client_version)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            station.station_id,
+            station.name,
+            station.operator,
+            station.lat_deg,
+            station.lon_deg,
+            station.alt_m,
+            station.token_sha256,
+            station.registration_key_sha256,
+            station.simulated,
+            station.simulator_run_id,
+            station.seed,
+            station.client_implementation,
+            station.client_version,
+        ),
+    )
+
+
+def _insert_capability_rows(
+    cur: Cursor, station_id: str, capabilities: Sequence[Capability]
+) -> None:
+    """Write one ``station_capabilities`` row per capability."""
+    cur.executemany(
+        """
+        insert into station_capabilities
+            (station_id, band, freq_min_hz, freq_max_hz, modes,
+             polarisation, tracking, min_elevation_deg, horizon_mask_json)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+        """,
+        [
             (
-                station.station_id,
-                station.name,
-                station.operator,
-                station.lat_deg,
-                station.lon_deg,
-                station.alt_m,
-                station.token_sha256,
-                station.registration_key_sha256,
-                station.simulated,
-                station.simulator_run_id,
-                station.seed,
-                station.client_implementation,
-                station.client_version,
-            ),
-        )
-        cur.executemany(
-            """
-            insert into station_capabilities
-                (station_id, band, freq_min_hz, freq_max_hz, modes,
-                 polarisation, tracking, min_elevation_deg, horizon_mask_json)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-            """,
-            [
-                (
-                    station.station_id,
-                    cap.band,
-                    cap.freq_min_hz,
-                    cap.freq_max_hz,
-                    list(cap.modes),
-                    cap.polarisation,
-                    cap.tracking,
-                    cap.min_elevation_deg,
-                    cap.horizon_mask_json,
-                )
-                for cap in capabilities
-            ],
-        )
+                station_id,
+                cap.band,
+                cap.freq_min_hz,
+                cap.freq_max_hz,
+                list(cap.modes),
+                cap.polarisation,
+                cap.tracking,
+                cap.min_elevation_deg,
+                cap.horizon_mask_json,
+            )
+            for cap in capabilities
+        ],
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,10 +205,18 @@ def find_station_for_recovery(
     """The fields needed to validate a registration retry against ``station_id``.
 
     Returns:
-        ``None`` if no such station exists — which should not happen for a
-        ``station_id`` reached via ``invite_tokens.consumed_by_station_id`` or
-        ``issued_for_station_id``, both foreign keys, but the caller decides
-        what that means rather than this function raising.
+        ``None`` if there is no live station to recover. The foreign keys on
+        ``invite_tokens.consumed_by_station_id`` and ``issued_for_station_id``
+        guarantee the row exists, so in practice this means the station was
+        deleted after its invite was written. The caller decides what that
+        means rather than this function raising.
+
+    Note:
+        Deleted stations are excluded, matching
+        ``station_tokens.find_station_id_by_token_hash`` and
+        :func:`find_station_heartbeat`
+        — throughout this module a deleted station reads as absent. Recovering
+        one would mint a token that cannot then authenticate (D-058).
     """
     with conn.cursor(row_factory=class_row(StationRecoveryInfo)) as cur:
         cur.execute(
@@ -192,6 +225,7 @@ def find_station_for_recovery(
                    simulated
             from stations
             where station_id = %s
+              and deleted_at is null
             """,
             (station_id,),
         )
@@ -203,7 +237,7 @@ class StationProvenance:
     """Whether a station's data is simulated, and what produced it.
 
     The three fields ``0002_stations.sql`` keeps together under its
-    ``station_simulated_together`` CHECK: a simulated station carries a run
+    ``station_simulated_fields`` CHECK: a simulated station carries a run
     id and a seed, a real one carries neither.
     """
 
@@ -288,94 +322,5 @@ def find_station_heartbeat(
               and deleted_at is null
             """,
             (station_id,),
-        )
-        return cur.fetchone()
-
-
-def rotate_station_token(
-    conn: Connection, *, station_id: str, token_sha256: bytes
-) -> None:
-    """Mint a fresh bearer token onto an existing station.
-
-    The "newly minted token" outcome in every recovery row of MSP §4.1's
-    table. Clears ``token_revoked_at`` as well as setting the new hash — a
-    station recovered through a bound invite after a `401` (D-034) is, by
-    that recovery, no longer revoked.
-    """
-    with conn.transaction(), conn.cursor() as cur:
-        cur.execute(
-            """
-            update stations
-            set token_sha256 = %s, token_issued_at = now(), token_revoked_at = null
-            where station_id = %s
-            """,
-            (token_sha256, station_id),
-        )
-
-
-def revoke_station_token(conn: Connection, *, station_id: str) -> bool:
-    """Withdraw a station's bearer token, so the next request it makes is a 401.
-
-    The counterpart to :func:`rotate_station_token`, which clears this column.
-    Nothing wrote ``token_revoked_at`` before this function existed — the column
-    was declared in ``0002_stations.sql`` and read by
-    :func:`find_station_id_by_token_hash`, and the only statement touching it
-    *cleared* it, so a compromised station could not be shut out at all.
-
-    Args:
-        conn: Open connection. The caller owns the transaction.
-        station_id: The station whose credential is being withdrawn.
-
-    Returns:
-        True when a live token was withdrawn. False when the station does not
-        exist, is deleted, or was already revoked — the three cases an operator
-        does not need told apart, since in all of them the station holds no
-        working token afterwards. Matching ``revoke_invite``'s shape.
-
-    Note:
-        Guarded on ``token_revoked_at is null`` so that revoking twice keeps the
-        **first** timestamp. That instant is when the credential actually died,
-        and overwriting it with the moment somebody repeated the command would
-        lose the only record of when the exposure ended.
-
-        Revocation takes effect on the next request with no invalidation step,
-        because ``find_station_id_by_token_hash`` filters on this column at
-        lookup rather than consulting a cache. Stage 5's completion gate asks
-        for revocation to be immediate; it is immediate by construction.
-    """
-    with conn.transaction(), conn.cursor() as cur:
-        cur.execute(
-            """
-            update stations
-            set token_revoked_at = now()
-            where station_id = %s
-              and token_revoked_at is null
-              and deleted_at is null
-            """,
-            (station_id,),
-        )
-        return cur.rowcount > 0
-
-
-def find_station_id_by_token_hash(conn: Connection, token_sha256: bytes) -> str | None:
-    """The lookup half of ``Registry.authenticate()``.
-
-    Excludes a revoked or deleted station — MSP §6 defines ``unauthorized``
-    as covering a revoked token, and a deleted station has no valid identity
-    to authenticate as. Deciding what to do with a ``None`` result (which
-    covers "no such token", "revoked" and "deleted" alike, indistinguishably
-    — MSP §3 does not let a client learn which) belongs to the registry
-    service, not this function.
-    """
-    with conn.cursor(row_factory=scalar_row) as cur:
-        cur.execute(
-            """
-            select station_id
-            from stations
-            where token_sha256 = %s
-              and token_revoked_at is null
-              and deleted_at is null
-            """,
-            (token_sha256,),
         )
         return cur.fetchone()

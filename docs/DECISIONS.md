@@ -1113,6 +1113,8 @@ D-013 enumerated the tables that carry a `simulated` boolean — `stations`, `pa
 
 **The obligation this creates is on `passes`, and it is not yet met.** A pass computed from a simulator-sourced element set is simulated, and `passes.simulated` is the column that has to say so. Nothing writes `passes` yet — propagation is Stage 6 — so this is recorded now, before the code exists, rather than discovered afterwards: **whoever inserts a `passes` row must set `simulated` from its element set's `source`, not default it to `false`.** The risk this closes is a dashboard filtering `where simulated = false` and silently including simulator-derived passes, which is the credibility failure CLAUDE.md's fifth rule is about.
 
+*Amended by D-057.* The key named above, `element_set_unique (satellite_id, epoch, source)`, no longer exists — migration 0009 replaced it with `element_set_content_unique (satellite_id, source, content_sha256)`. The reasoning is untouched by that: `source` is still in the key, so the same lines from two providers are still two rows by design. Only the column list changed.
+
 ---
 
 ## D-050 — A request that declares no body size is rejected, like one that declares too much
@@ -1280,6 +1282,42 @@ That is a data-loss path sitting behind a constraint that reads like a safety fe
 **A generated column rather than a value the caller supplies.** The alternative — hashing in Python and inserting the result — makes a row whose hash disagrees with its lines representable, and the unique constraint then guards nothing, because two identical sets could carry different hashes. The `IMMUTABLE` marking is justified the same way `observation_id`'s is in `0005`: `convert_to` is `STABLE` because text-to-bytes depends on server encoding in the general case, and a two-line element set is fixed-width ASCII by format definition, so the bytes are identical under every encoding PostgreSQL supports. The lines are joined with a newline rather than concatenated bare — a pair split at a different boundary would otherwise hash identically, which cannot arise while the format stays fixed-width and costs one byte to stop depending on that.
 
 *Consequence:* `find_element_set_current_at` orders by `epoch` and breaks ties on `retrieved_at`. Two sources publishing one epoch is now representable, so the tie-break had to be named rather than left to the planner — CLAUDE.md requires every number in a report to be regenerable, and a query that resolves a tie differently on different days is not.
+
+---
+
+## D-058 — A deleted station cannot be recovered, and rotation reports whether it happened
+
+**2026-08-08 · accepted** · *found auditing `store/stations.py`*
+
+`stations` carries a `deleted_at` for soft deletion, and `find_station_id_by_token_hash`, `find_station_heartbeat` and `revoke_station_token` all filter on it — a deleted station reads as absent. The two functions on the recovery path did not. `find_station_for_recovery` would return a deleted station's registration key, and `rotate_station_token` would mint a fresh bearer token onto it and return `None`.
+
+The result was a recovery that answered `200` with a plaintext token, followed by `401` on the station's very next request, because the lookup that authenticates the token excludes exactly the row the rotation had just written to. **A success that did nothing** — the same shape as the invite race D-020 exists to prevent, and the reason that one is checked by return value.
+
+**Both functions now exclude `deleted_at`, and `rotate_station_token` returns `bool`.** `meridian.registry.psycopg_registry` raises `InvalidInviteError` on a false return, which MSP §3 renders as `invalid_invite` — a client is not told whether the invite was bad or the station was gone.
+
+**Rejected: leaving it, on the grounds that nothing deletes stations yet.** True today — only tests write `deleted_at` — and that is what makes it cheap to fix now. The failure is invisible from the client's side (a valid-looking token that never works) and would surface as an intermittent registration bug in whichever later stage adds the delete, long after the cause was written.
+
+**Rejected: a distinct `station_deleted` error code.** MSP §3 deliberately gives one answer to every invite refusal so a client cannot enumerate station ids by watching which failure it gets. A deleted station is a refusal like any other.
+
+*Consequence:* the second guard in `_mint_and_rotate` is unreachable while `_recovery_info_or_raise` runs first. It is kept because the return value is what tells the caller its plaintext token is valid, and a caller holding a credential should not infer that from another function's ordering.
+
+---
+
+## D-059 — A pass belongs to the search it rises in, and the search looks past its own end to find it whole
+
+**2026-08-09 · accepted** · *`pass_windows`; Stage 6 session C*
+
+`pass_windows(search)` is given a start and an end, and Stage 7's pass-generation job will call it over a rolling horizon, so two searches meet at a boundary. A pass straddling that boundary has to belong to exactly one of them, and it has to come back whole — a scheduler cannot tell a window that ends because the satellite set from one that ends because the search stopped looking.
+
+**The search widens by `PASS_SEARCH_MARGIN_S` at both ends and then keeps only the passes whose *acquisition* falls in `[start, end)`.** Acquisition is the key because it is the one boundary a pass has exactly once; keying on the window's overlap with the interval would match a straddling pass in both searches.
+
+**The margin is 30 minutes, and the number is derived rather than picked.** A satellite is above the horizon while it lies within `arccos(R_earth / (R_earth + h))` of the station and covers that arc at the orbital rate: at 850 km — the altitude of the 137 MHz weather satellites this project receives — that is 56.2° of a 101.8-minute orbit, so 15.9 minutes; at 1400 km it is 22.0 minutes. Thirty minutes covers low Earth orbit with room. A pass that outlasts it **raises** rather than being returned clipped, and `tests/unit/test_pass_windows_reference.py` provokes that by shrinking the margin to a minute, because a guard nobody has fired is a claim rather than a check.
+
+**Rejected: return the clipped pass and flag it** with an `is_truncated` field on `PassWindow`. That pushes the same decision onto Stage 7 and onto the completeness denominator, and `EVALUATION.md` §4.1 needs a denominator computed one way rather than one that depends on how the caller happened to slice time. The flag does exist one layer down, on `pass_search.ElevationPass`, where it is what lets this layer detect the condition at all.
+
+**Rejected: drop passes not wholly inside the interval.** A day-by-day job would lose roughly two passes per satellite per boundary, permanently and silently, and the completeness ratio would improve as a result — the exact failure mode the ratio exists to expose.
+
+*Known limit, stated rather than hidden.* Two searches meeting at a seam recompute the same acquisition on different coarse grids, so their answers can differ by up to the 0.05 s refinement tolerance. If a seam falls within that tolerance of a true acquisition, a pass can in principle be claimed by both searches or by neither. `tests/unit/test_pass_windows_reference.py` pins the deterministic case — a seam placed on an acquisition computed from the same grid — and the residual is a coincidence of order 1e-6 per boundary per satellite. It belongs to whichever job splits the horizon, which should de-duplicate on `(satellite_id, aos)`, and is recorded here so that job is written knowing it.
 
 ---
 

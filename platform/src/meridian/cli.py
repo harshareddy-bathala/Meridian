@@ -31,7 +31,7 @@ import psycopg
 
 from meridian import __version__
 from meridian.config import load_settings
-from meridian.store import invites, stations
+from meridian.store import invites, station_tokens, stations
 from meridian.store.pool import CONNECT_TIMEOUT_S
 
 __all__ = ["main"]
@@ -209,7 +209,7 @@ def _run_station(args: argparse.Namespace) -> int:
 
 def _station_revoke(conn: stations.Connection, args: argparse.Namespace) -> int:
     """Handle ``meridian station revoke``."""
-    if not stations.revoke_station_token(conn, station_id=args.station_id):
+    if not station_tokens.revoke_station_token(conn, station_id=args.station_id):
         print(  # noqa: T201 — this is a CLI; stderr is the interface
             f"meridian station revoke: no station with a live token: {args.station_id}",
             file=sys.stderr,
