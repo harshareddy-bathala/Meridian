@@ -19,15 +19,15 @@ Reference: docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md Stage 6;
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from meridian.orbit.bracket_refinement import (
     ValueAt,
     refine_maximum,
     refine_zero_crossing,
 )
+from meridian.orbit.time_sampling import closed_sample_times
 from meridian.orbit.types import require_utc
 
 __all__ = [
@@ -127,9 +127,12 @@ def find_elevation_passes(
 
     Args:
         elevation_at: Elevation in degrees at an instant. Called once per
-            coarse step, plus roughly twenty per boundary and forty per
-            culmination, so an expensive implementation should expect that
-            cost rather than be surprised by it.
+            coarse step, plus about ten per boundary and forty per culmination
+            — so a whole pass costs roughly sixty calls beyond the scan itself,
+            and an expensive implementation should expect that rather than be
+            surprised by it. The culmination dominates because a ternary search
+            spends two calls a step to shrink the bracket by a third, where
+            bisection spends one to halve it.
         scan: The interval, the floor and the coarse step.
 
     Returns:
@@ -142,7 +145,7 @@ def find_elevation_passes(
     if scan.coarse_step_s <= 0:
         raise ValueError(f"coarse_step_s must be positive, got {scan.coarse_step_s}")
 
-    times = _coarse_sample_times(
+    times = closed_sample_times(
         require_utc(scan.start, "start"),
         require_utc(scan.end, "end"),
         scan.coarse_step_s,
@@ -158,29 +161,6 @@ def find_elevation_passes(
     return [
         _refine_pass(elevation_at, scan, samples, span) for span in _above_spans(above)
     ]
-
-
-def _coarse_sample_times(
-    start: datetime, end: datetime, step_s: float
-) -> list[datetime]:
-    """Instants across the closed interval ``[start, end]``.
-
-    Closed, unlike the half-open windows this project uses elsewhere: a crossing
-    is detected *between* two samples, so the instant at ``end`` is needed as
-    the far side of the last bracket rather than as a sample in its own right.
-
-    Each instant is ``start`` plus a whole multiple of the step rather than the
-    previous plus one more, so the sample times do not drift across a long scan.
-    """
-    span_s = (end - start).total_seconds()
-    if span_s <= 0:
-        return []
-
-    whole_steps = math.floor(span_s / step_s)
-    times = [start + timedelta(seconds=step_s * i) for i in range(whole_steps + 1)]
-    if times[-1] < end:
-        times.append(end)
-    return times
 
 
 def _above_spans(above: list[bool]) -> list[tuple[int, int]]:

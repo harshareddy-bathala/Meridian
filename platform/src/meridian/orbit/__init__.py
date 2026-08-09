@@ -10,9 +10,17 @@ The pieces:
 * ``types`` — the value types that cross the boundary, all angles in degrees,
   all frequencies integer hertz, all times timezone-aware UTC.
 * ``skyfield_service`` — the implementation, built on the ``sgp4`` and
-  ``skyfield`` libraries.
-* ``azimuth_continuity`` — the one piece of look-angle work that needs no
-  propagator, and so is tested on its own.
+  ``skyfield`` libraries. It is the only module here that propagates anything.
+* ``pass_search`` — finding the intervals a curve spends above a floor, given
+  only a function from time to elevation.
+* ``bracket_refinement`` — bisection and ternary search, narrowing a bracketed
+  interval to a crossing or a peak.
+* ``azimuth_continuity`` — unwrapping compass azimuth so a rotator never takes
+  the long way round.
+
+The last three know nothing about satellites: they take a callable or a list of
+numbers. That is what lets the geometry be checked against curves whose answers
+are known in closed form, with no element set and no propagator involved.
 
 Orbit propagation is confined to this package, so the rest of the platform is
 written against ``OrbitService`` and not against a particular propagator.
