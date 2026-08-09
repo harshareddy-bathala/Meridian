@@ -33,26 +33,32 @@ Reference: Vallado, *Fundamentals of Astrodynamics and Applications*, ch. 3–4
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from skyfield.api import EarthSatellite, load, wgs84
 
 from meridian.orbit.azimuth_continuity import unwrap_azimuth_deg
+from meridian.orbit.doppler import doppler_offset_hz
 from meridian.orbit.pass_search import (
     ElevationPass,
     ElevationScan,
     find_elevation_passes,
 )
+from meridian.orbit.time_sampling import half_open_sample_times
 from meridian.orbit.types import (
+    DopplerSample,
     ElementSet,
     GroundSite,
     LookAngle,
     PassSearch,
     PassWindow,
+    TimingUncertainty,
     require_utc,
 )
+from meridian.orbit.uncertainty import timing_uncertainty_at_age
 
 __all__ = ["PASS_SEARCH_MARGIN_S", "SkyfieldOrbitService"]
 
@@ -92,9 +98,9 @@ class SkyfieldOrbitService:
     building it parses a leap-second table, so a service per request would
     repeat that work on every prediction for no benefit.
 
-    A **partial** implementation: ``pass_windows`` and ``look_angles`` are here.
-    ``doppler_curve``, ``timing_uncertainty`` and ``element_set_divergence``
-    arrive in the session that follows, each with the tests that check it.
+    Complete: all five ``OrbitService`` methods are implemented here, so a
+    caller annotated to take an ``OrbitService`` type-checks against this class
+    without it having to say so.
     """
 
     def __init__(self) -> None:
@@ -122,7 +128,7 @@ class SkyfieldOrbitService:
         if step_s <= 0:
             raise ValueError(f"step_s must be positive, got {step_s}")
 
-        sample_times = _sample_times(
+        sample_times = half_open_sample_times(
             require_utc(start, "start"), require_utc(end, "end"), step_s
         )
         if not sample_times:
@@ -178,6 +184,86 @@ class SkyfieldOrbitService:
             for elevation_pass in found
             if search.start <= elevation_pass.aos < search.end
         ]
+
+    def doppler_curve(
+        self,
+        element_set: ElementSet,
+        site: GroundSite,
+        centre_freq_hz: int,
+        times: Sequence[datetime],
+    ) -> list[DopplerSample]:
+        """See :meth:`meridian.orbit.service.OrbitService.doppler_curve`.
+
+        The instants are taken as given rather than sampled here, so a caller
+        can ask for exactly the times it already holds — the ones on a stored
+        look-angle series, or the ones an observation reported.
+        """
+        look_angle_at = self._look_angle_at(element_set, site)
+        return [
+            DopplerSample(
+                t=t,
+                offset_hz=doppler_offset_hz(
+                    look_angle_at(require_utc(t, "times")).range_rate_km_s,
+                    centre_freq_hz,
+                ),
+            )
+            for t in times
+        ]
+
+    def timing_uncertainty(
+        self, element_set: ElementSet, at: datetime
+    ) -> TimingUncertainty:
+        """See :meth:`meridian.orbit.service.OrbitService.timing_uncertainty`.
+
+        The propagator is not consulted: the Phase 1 answer depends only on how
+        old the element set is, so the model lives in
+        :mod:`meridian.orbit.uncertainty` and this method supplies the age.
+        """
+        return timing_uncertainty_at_age(element_set.age_s(require_utc(at, "at")))
+
+    def element_set_divergence(
+        self, a: ElementSet, b: ElementSet, at: datetime
+    ) -> float:
+        """See :meth:`meridian.orbit.service.OrbitService.element_set_divergence`.
+
+        Both sets are propagated to ``at`` and the straight-line distance between
+        the two positions is returned. The frame cancels: both go through the
+        same conversion, so the separation is the same number whichever frame it
+        is measured in, and only the choice of instant matters.
+
+        Raises:
+            ValueError: the two sets describe different objects, whose positions
+                differ by thousands of kilometres for reasons that have nothing
+                to do with element-set quality. The comparison is only
+                meaningful within one satellite's own series.
+        """
+        if a.satellite_id != b.satellite_id:
+            raise ValueError(
+                f"element sets describe different objects: {a.satellite_id} "
+                f"and {b.satellite_id}"
+            )
+        instant = require_utc(at, "at")
+        return math.dist(
+            self._geocentric_position_km(a, instant),
+            self._geocentric_position_km(b, instant),
+        )
+
+    def _geocentric_position_km(
+        self, element_set: ElementSet, t: datetime
+    ) -> list[float]:
+        """Where this element set puts its object at ``t``.
+
+        Measured from Earth's centre rather than from any station, so two sets
+        can be compared without a site entering the answer.
+        """
+        satellite = EarthSatellite(
+            element_set.line1,
+            element_set.line2,
+            element_set.satellite_id,
+            self._timescale,
+        )
+        position = satellite.at(self._timescale.from_datetime(t))
+        return [float(component) for component in position.xyz.km]
 
     def _to_pass_window(
         self,
@@ -250,28 +336,6 @@ class SkyfieldOrbitService:
         return look_angle_at
 
 
-def _sample_times(start: datetime, end: datetime, step_s: float) -> list[datetime]:
-    """Instants at ``step_s`` intervals across ``[start, end)``.
-
-    Half-open, matching the contract's wording and the window convention
-    ``registry.was_listening`` uses, so two adjacent intervals cannot both sample
-    one instant and count it twice.
-
-    Each instant is ``start`` plus a whole multiple of the step rather than the
-    previous instant plus a step: accumulating a float across a fifteen-minute
-    pass drifts, and the drift ends up in the timestamps a rotator is driven by.
-    The upper bound is then applied by comparison rather than by trusting
-    ``span / step`` to round the way arithmetic says it should.
-    """
-    span_s = (end - start).total_seconds()
-    if span_s <= 0:
-        return []
-
-    candidate_count = math.ceil(span_s / step_s)
-    candidates = (start + timedelta(seconds=step_s * i) for i in range(candidate_count))
-    return [t for t in candidates if t < end]
-
-
 def _range_and_rate(
     position_km: list[float], velocity_km_s: list[float]
 ) -> tuple[float, float]:
@@ -303,3 +367,19 @@ def _range_and_rate(
     range_km = math.sqrt(sum(component**2 for component in position_km))
     radial_km2_s = sum(r * v for r, v in zip(position_km, velocity_km_s, strict=True))
     return range_km, radial_km2_s / range_km
+
+
+if TYPE_CHECKING:
+    from meridian.orbit.service import OrbitService
+
+    def _conforms_to_the_protocol(service: SkyfieldOrbitService) -> OrbitService:
+        """Never runs, never called — mypy checks it and that is the point.
+
+        The class does not inherit from ``OrbitService``, because Python
+        resolves protocols structurally and the annotation would add nothing.
+        The cost of that is real, though: a method renamed here, or a signature
+        changed on one side and not the other, would silently stop satisfying
+        the interface and nothing would say so until a call site broke. This
+        line is what says so, at type-check time.
+        """
+        return service
