@@ -24,9 +24,11 @@ from meridian.store.stations import Connection
 
 __all__ = [
     "DueAssignment",
+    "NewAssignment",
     "expire_overdue_assignments",
     "find_assignment_ids_by_state",
     "find_due_assignments",
+    "insert_assignments",
     "mark_assignment_in_progress",
     "mark_assignments_held",
 ]
@@ -200,3 +202,113 @@ def find_due_assignments(
             (station_id, horizon_end),
         )
         return cur.fetchall()
+
+
+@dataclass(frozen=True, slots=True)
+class NewAssignment:
+    """One scheduling decision in insertable form — taken or skipped.
+
+    A skip is a row here, not an absence. The scheduler considered the pass and
+    decided against it, and docs/PROJECT.md §13 calls the screen that explains
+    those decisions "the entire project" — so a skipped pass that left no row
+    would be unrecoverable the moment the run ended.
+
+    ``issued_at`` is absent on purpose: it is the platform's own clock and is
+    left to the column default, the same reasoning ``insert_heartbeat`` applies
+    to ``received_at``.
+    """
+
+    assignment_id: str
+    pass_id: int
+    station_id: str
+
+    start_at: datetime
+    end_at: datetime
+    """The *assignment's* window, wider than the pass (D-021).
+
+    Opened out by the platform's stated timing uncertainty, because a station
+    recording from exactly the predicted acquisition starts after a pass whose
+    element set was stale has already begun.
+    """
+
+    centre_freq_hz: int
+    mode: str
+    timing_uncertainty_s: float
+
+    decision: str
+    """``scheduled`` or ``skipped`` — what the scheduler wanted."""
+
+    reason: str
+    model_config: str
+    score: float
+    """What the ranking function returned. Read with ``model_config`` or not at
+    all: the unit differs by configuration (D-065)."""
+
+    conflicts_with_assignment_id: str | None
+    """For a skip, the assignment that took the slot. ``None`` otherwise."""
+
+    priority: float
+    simulated: bool
+    """Copied from the pass, which copied it from the station (D-013)."""
+
+
+def insert_assignments(conn: Connection, decisions: Sequence[NewAssignment]) -> int:
+    """Write a whole run's decisions in one transaction, returning how many.
+
+    Args:
+        conn: An open connection. This function manages its own transaction,
+            which nests as a savepoint when the caller already has one open.
+        decisions: Every selection and every skip from one scheduler run, in an
+            order where each ``conflicts_with_assignment_id`` names a row
+            already in the sequence or already stored.
+
+    Returns:
+        The number of rows written.
+
+    Raises:
+        psycopg.errors.ForeignKeyViolation: A ``conflicts_with_assignment_id``
+            names no assignment, or a ``pass_id`` names no pass.
+        psycopg.errors.UniqueViolation: An ``assignment_id`` already exists.
+
+    Note:
+        **One transaction for the whole run, unlike ``insert_pass``.** A pass is
+        a standalone prediction and a half-finished generation run leaves
+        correct rows; a schedule is not. Its rows reference each other — a skip
+        names the selection that displaced it — so a run that stopped halfway
+        could leave a skip whose winner was never written, or a set of
+        selections that silently under-uses a station. Either is a schedule that
+        reads as complete and is not.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany(
+            """
+            insert into assignments
+                (assignment_id, pass_id, station_id, start_at, end_at,
+                 centre_freq_hz, mode, timing_uncertainty_s, decision, reason,
+                 model_config, score, conflicts_with_assignment_id, priority,
+                 simulated)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            on conflict on constraint assignment_decision_unique do nothing
+            """,
+            [
+                (
+                    one.assignment_id,
+                    one.pass_id,
+                    one.station_id,
+                    one.start_at,
+                    one.end_at,
+                    one.centre_freq_hz,
+                    one.mode,
+                    one.timing_uncertainty_s,
+                    one.decision,
+                    one.reason,
+                    one.model_config,
+                    one.score,
+                    one.conflicts_with_assignment_id,
+                    one.priority,
+                    one.simulated,
+                )
+                for one in decisions
+            ],
+        )
+        return cur.rowcount

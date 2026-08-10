@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = REPO_ROOT / "deploy" / "alembic.ini"
-HEAD_REVISION = "0011"
+HEAD_REVISION = "0012"
 """The newest revision, written out rather than read from the script directory.
 
 Deriving it would make these tests assert that alembic agrees with itself. Pinned,

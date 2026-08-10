@@ -31,6 +31,7 @@ from meridian.store.stations import Connection
 __all__ = [
     "StoredTransmitter",
     "find_active_transmitters",
+    "find_satellite_priorities",
 ]
 
 
@@ -89,3 +90,39 @@ def find_active_transmitters(conn: Connection) -> list[StoredTransmitter]:
             """
         )
         return cur.fetchall()
+
+
+@dataclass(frozen=True, slots=True)
+class _SatellitePriority:
+    """One row of the priority query, so the two columns arrive typed."""
+
+    satellite_id: str
+    priority: float
+
+
+def find_satellite_priorities(conn: Connection) -> dict[str, float]:
+    """Every live satellite's operator weighting, keyed by satellite id.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+
+    Returns:
+        One entry per live satellite. A satellite nobody has weighted carries
+        1.0, the column default, at which configuration B reduces exactly to
+        configuration A.
+
+    Note:
+        Read from ``satellites``, never from ``assignments.priority``. That
+        column records what a past decision *used*, so deriving the next run's
+        weighting from it would mean the first run had nothing to read and every
+        run after it quoted itself.
+    """
+    with conn.cursor(row_factory=class_row(_SatellitePriority)) as cur:
+        cur.execute(
+            """
+            select satellite_id, priority
+            from satellites
+            where active and deleted_at is null
+            """
+        )
+        return {row.satellite_id: row.priority for row in cur.fetchall()}

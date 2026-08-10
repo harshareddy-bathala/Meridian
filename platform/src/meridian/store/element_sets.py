@@ -31,6 +31,7 @@ from meridian.store.stations import Connection
 __all__ = [
     "NewElementSet",
     "StoredElementSet",
+    "find_element_set_by_id",
     "find_element_set_current_at",
     "find_element_sets_in_epoch_range",
     "insert_element_set",
@@ -202,3 +203,37 @@ def find_element_sets_in_epoch_range(
             (satellite_id, start, end),
         )
         return cur.fetchall()
+
+
+def find_element_set_by_id(
+    conn: Connection, element_set_id: int
+) -> StoredElementSet | None:
+    """The archived set with this id.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+        element_set_id: The id a stored pass recorded.
+
+    Returns:
+        The set, or None when no such row exists.
+
+    Note:
+        The lookup a *stored prediction* needs, as opposed to
+        :func:`find_element_set_current_at`, which is how a new prediction
+        chooses one. A pass names the exact set that produced it, so anything
+        re-deriving that pass — the scheduler widening its window by the
+        element set's age, the evaluation attributing timing error — reads it
+        back by id rather than asking which set was current, and gets the same
+        answer however much the archive has grown since.
+    """
+    with conn.cursor(row_factory=class_row(StoredElementSet)) as cur:
+        cur.execute(
+            """
+            select id, satellite_id, epoch, retrieved_at,
+                   line1, line2, source, content_sha256
+            from element_sets
+            where id = %s
+            """,
+            (element_set_id,),
+        )
+        return cur.fetchone()
