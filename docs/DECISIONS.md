@@ -1471,6 +1471,36 @@ The pass-generation job decides which station-and-satellite pairs are worth prop
 
 ---
 
+## D-067 — Overdue is not expired, and an assignment being executed is still delivered
+
+**2026-08-10 · accepted** · *`registry/heartbeat_reconciliation.py`, `store/assignments.py`, `api/msp.py`, Stage 8*
+
+Wiring MSP §4.2's reconciliation into the heartbeat endpoint surfaced two defects. Both are the same shape as the one D-035 found in D-026 — a rule stated in two places, disagreeing — and both would have shipped, because each was a query written against one sentence of a specification that contains two.
+
+**An assignment the station still names does not expire, however overdue it is.** `expire_overdue_assignments` moved every `issued` or `held` row past its `end_at`. MSP §4.2's table defines that row as *"Absent, window has passed"*, and D-008 defines the state as the station never having taken the work. A station that held a pass, executed it and is queuing its observation satisfies neither, and expiring it is not a cosmetic mislabel: **D-008 has no arc from `expired` to `reported`**, so the observation arriving in Stage 9 would have nowhere to land. The predicate now excludes anything named in the heartbeat driving the sweep.
+
+*The cost, stated plainly:* a station that stops heartbeating altogether never has its overdue rows swept, because the only sweep is the one its own heartbeat triggers. D-026 accepted per-heartbeat reconciliation and Phase 1 has no periodic job; the alternative is a background sweeper, which is a scheduled process to maintain and a second writer on the hot table, to correct rows nothing reads until the reliability layer exists. **A periodic sweep is owed by the reliability stage**, which is also the first consumer that would notice the difference. Recording it because a station stuck at `held` forever is a real state a reader will find.
+
+**An assignment in `in_progress` must still be delivered.** The delivery predicate was `state in ('issued', 'held')`, which was correct until reconciliation could produce a third state. The moment a station reports a `listening` block, its row leaves `held` — and the assignment disappears from its own heartbeat response, mid-pass. A station that reboots while receiving is then told it has nothing to do.
+
+This is precisely the failure D-035 fixed by moving the lower bound from `start_at` to `end_at`, arriving a second time through a different column. MSP §4.2's prose is the arbiter and was already right: a station sees an assignment *"on every heartbeat until it is reported or its `end_at` has passed"* — and executing it is neither. The literal predicate printed two paragraphs later was the thing that was wrong.
+
+```
+state in ('issued', 'held', 'in_progress')  and  end_at >= now  and  start_at <= now + 2 h
+```
+
+*This amends D-035 as D-035 amended D-026.* `MSP-SPEC.md` §4.2's delivery block is updated in the same change, so the specification and the query cannot drift again.
+
+**Three smaller rules, settled while the comparison was being written.**
+
+*A station listing an assignment the platform has already `reported` or `expired` is not a protocol error.* MSP §4.2's fourth row is for an id *never issued to this station*, which is a broken implementation and worth a warning. A station lagging behind a state change is neither, and treating the two alike would fill the log with the one signal meant to mean something is genuinely wrong. The comparison is therefore against every assignment ever issued to that station, not against the two states that can transition.
+
+*A `listening` block naming an assignment absent from the same heartbeat's `held_assignments` starts nothing.* The message contradicts itself, and a contradiction is not evidence. `in_progress` means the station holds this work and is executing it; half of that claim, from a station that just denied the other half, does not support the transition — and `Registry.was_listening()` rests on it.
+
+*Holds are applied before starts.* A station whose pass opened between two heartbeats genuinely confirms and begins in one message, and `mark_assignment_in_progress` moves a row only out of `held`. Refusing the pair would delay `in_progress` by a whole 30-second interval, which against an 8-minute pass is the part carrying the rise.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

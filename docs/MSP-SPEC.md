@@ -197,7 +197,12 @@ All four of its fields are stored, `mode` included: a station tuned to the right
 | Issued, and present in the list | The station holds it — state `held` |
 | Issued, absent, window still ahead | The station has not accepted it. **Phase 1 changes nothing** — it stays `issued`, is offered again on the next heartbeat, and expires after `end_at` if it is never taken. Reissue to another station arrives with the scheduler (D-022) |
 | Absent, window has passed | `expired` — the station never took the work |
+| **Present**, window has passed | **Not `expired`.** The station took the work and is finishing with it; its observation may still arrive. Overdue alone is not the test (D-067) |
 | Present, but never issued to this station | Protocol error. Log and ignore; do not act on it |
+
+The last row means an id this station was **never** issued. A station still naming an assignment the platform has already closed as `reported` or `expired` has lagged behind a state change, which is not a protocol error and is not logged as one.
+
+The `listening` block moves the assignment it names from `held` to `in_progress` — but only if the same heartbeat also lists that assignment in `held_assignments`. A station listening on something it says it does not hold has contradicted itself in one message, and a contradiction is not evidence for either half. A station may confirm an assignment and report listening on it in the same heartbeat, which is what happens when a pass opens between two polls.
 
 **There is no decline message. A decline is absence from this list.** The heartbeat states current holdings rather than announcing a transition, which makes it idempotent and self-healing: a lost message is not a lost decline, because the next heartbeat carries the same truth thirty seconds later. It also covers cases an explicit decline never would — a station that rebooted and lost its assignments reports identically to one that refused them, and in both cases the platform's correct action is the same.
 
@@ -216,12 +221,14 @@ Response carries any assignments due:
 **Delivery policy.** An assignment is returned to its station when
 
 ```
-state is 'issued' or 'held'   and   end_at >= now   and   start_at <= now + 2 h
+state in ('issued', 'held', 'in_progress')   and   end_at >= now   and   start_at <= now + 2 h
 ```
 
 sorted by `start_at` ascending, capped at 8.
 
 **The lower bound is `end_at`, not `start_at`.** An assignment whose window has opened is the station's *current* work, and dropping it from the response at the moment it became current would contradict the redelivery rule below — a station that lost its state mid-pass would be told it had nothing to do.
+
+**`in_progress` is in the predicate for the same reason** (`docs/DECISIONS.md` D-067). A station executing an assignment has not reported it and its window has not passed, so the redelivery rule below applies to it unchanged. Omitting the state would make the assignment vanish from the response at the moment the station reported listening on it — the same failure as above, reached through the state column instead of the clock.
 
 **An assignment the station already holds is returned again.** Delivery is not once-only: a station sees the same assignment on every heartbeat until it is reported or its `end_at` has passed. This is the same idea as `held_assignments` above, in the other direction — the response states the current work rather than announcing a change, so a lost response is not lost work and the next heartbeat carries the same truth. **A client must deduplicate by `assignment_id`** and must not treat redelivery as a new assignment.
 
