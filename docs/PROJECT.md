@@ -1,5 +1,5 @@
 # Meridian
-## A satellite ground station network and control platform
+## Predictive scheduling and reliability for satellite ground stations
 
 **Project document — problem, design, method, and plan**
 
@@ -107,7 +107,7 @@ Related work does exist and we do not claim otherwise. Satellite range schedulin
 
 **Software first.** The platform is built and proven before hardware is purchased. Hardware validates software; it cannot rescue it.
 
-**Open by default.** MSP is published and a reference client released. Any station, built by anyone, can join without our permission.
+**Open by default.** MSP is published and a reference client released, so a station built by anyone can speak the protocol without adopting our software or asking us first. Joining *this* network is a separate question and currently needs an invite token from the operator: an unauthenticated write endpoint on a publicly reachable address is not defensible. That is a policy at one endpoint, not a property of the protocol, and reversing it later changes nothing a station implemented (D-006).
 
 **Modular.** Receivers, antennas and decoders will change. The platform must not care which are attached.
 
@@ -133,7 +133,7 @@ Our station reports to our platform, over our protocol, and appears on our publi
 
 1. **It makes the project independent.** If every external service disappeared tomorrow, Meridian would still schedule, receive, decode, monitor and report.
 2. **It makes the demonstration self-contained.** Everything shown runs on infrastructure we built.
-3. **It makes the network real rather than hypothetical.** A published protocol, a reference client, a live registry and a public site mean a second station could join without asking us.
+3. **It makes the network real rather than hypothetical.** A published protocol, a reference client, a live registry and a public site mean a second station could join without us building anything further for it — the operator issues an invite, and the station is one already-written client away from being on the map.
 
 We are honest about size: **the network has one physical station.** Behaviour at scale is demonstrated with fifty simulated stations speaking the real protocol to the real platform. Growth is future work, not a claim.
 
@@ -181,19 +181,19 @@ Anyone with the link can watch. That is the demo, and it works from a phone.
 ```
                           ANYONE, ANYWHERE
                                  │
-                    ┌────────────▼────────────┐
+                    ┌────────────▼─────────────┐
                     │   DASHBOARD + PUBLIC API │
-                    └────────────┬────────────┘
+                    └────────────┬─────────────┘
                                  │
-        ┌────────────────────────▼─────────────────────────┐
+        ┌────────────────────────▼──────────────────────────┐
         │                  PLATFORM                         │      ┌──────────────┐
         │  Orbit service   Prediction      Scheduler        │◄╌╌╌╌╌┤  External    │
         │  Station registry  Observation store  Reliability │      │  archives    │
-        └────────────────────────┬─────────────────────────┘      │  (optional,  │
+        └────────────────────────┬──────────────────────────┘      │  (optional,  │
                                  │                                 │  data only)  │
-        ┌────────────────────────▼─────────────────────────┐      └──────────────┘
+        ┌────────────────────────▼──────────────────────────┐      └──────────────┘
         │       MERIDIAN STATION PROTOCOL  (MSP)            │   open specification
-        └───────┬─────────────────┬─────────────────┬──────┘
+        └───────┬─────────────────┬─────────────────┬───────┘
                 │                 │                 │
         ┌───────▼──────┐  ┌───────▼───────┐  ┌──────▼───────┐
         │ Station 001  │  │ Microcontrol- │  │ 50 simulated │

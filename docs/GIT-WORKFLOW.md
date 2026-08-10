@@ -67,7 +67,9 @@ We use Conventional Commits. The format is:
 
 ### Scopes
 
-Use the module name: `orbit`, `prediction`, `scheduler`, `registry`, `observations`, `reliability`, `api`, `client`, `simulator`, `dashboard`, `site`, `firmware`, `ingest`, `deploy`, `docs`, `msp`, `repo`.
+Use the module name: `orbit`, `prediction`, `scheduler`, `registry`, `observations`, `reliability`, `store`, `api`, `client`, `simulator`, `dashboard`, `site`, `firmware`, `ingest`, `deploy`, `docs`, `msp`, `repo`.
+
+There is no `platform` scope and no `sim` scope: name the module, or use `repo` for a change that genuinely spans several.
 
 Two of these are easy to confuse:
 
@@ -84,7 +86,7 @@ They are separate surfaces on purpose; see D-036. A change to the public page is
 
 - Imperative mood: "add", not "added" or "adds"
 - No capital letter at the start, no full stop at the end
-- Under 72 characters
+- **At most 61 characters after `): `** — that is what the `conventions` job measures, and it keeps the whole subject line near 72
 - Say what changed, not that you changed something
 
 **Good:**
@@ -242,7 +244,8 @@ git fetch origin && git rebase origin/main
 ```
 
 **Types:** `feat` `fix` `docs` `test` `refactor` `perf` `chore` `ci` `spec`
-**Subject:** imperative, lowercase, no full stop, under 72 chars
+**Subject:** imperative, lowercase, no full stop, ≤61 chars after `): `
+**Scope:** required — a subject with no `(scope)` fails CI
 **Body:** why, not what
 **PR:** under 400 lines, one review, green CI
 **Never:** secrets, data files, code you cannot explain
