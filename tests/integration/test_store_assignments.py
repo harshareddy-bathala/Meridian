@@ -229,7 +229,7 @@ def test_expire_overdue_assignments_transitions_only_overdue_issued_or_held(
         state="reported",
     )
 
-    expired = expire_overdue_assignments(rollback, STATION_ID)
+    expired = expire_overdue_assignments(rollback, STATION_ID, still_held=[])
 
     assert expired == 1
     with rollback.cursor() as cur:
@@ -240,6 +240,39 @@ def test_expire_overdue_assignments_transitions_only_overdue_issued_or_held(
     assert rows["as_overdue"] == "expired"
     assert rows["as_current"] == "issued"
     assert rows["as_reported_overdue"] == "reported"
+
+
+def test_expire_overdue_assignments_exempts_one_the_station_still_names(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """D-067: overdue is not enough — `expired` means the work was never taken.
+
+    A station that still names an assignment after its window closed executed it
+    and is finishing with it. Expiring that row would misreport what happened and
+    strand the observation, because D-008 has no arc from `expired` to
+    `reported`.
+    """
+    past_end = datetime.now(UTC) - timedelta(hours=1)
+    for assignment_id in ("as_still_held", "as_dropped"):
+        insert_assignment(
+            assignment_id=assignment_id,
+            start_at=past_end - timedelta(minutes=15),
+            end_at=past_end,
+            state="held",
+        )
+
+    expired = expire_overdue_assignments(
+        rollback, STATION_ID, still_held=["as_still_held"]
+    )
+
+    assert expired == 1
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select assignment_id, state from assignments order by assignment_id"
+        )
+        rows = dict(cur.fetchall())
+    assert rows["as_still_held"] == "held"
+    assert rows["as_dropped"] == "expired"
 
 
 def test_find_due_assignments_respects_the_window_and_carries_joined_fields(
@@ -297,6 +330,50 @@ def test_find_due_assignments_carries_a_simulated_assignment(
     )
 
     assert [d.simulated for d in due] == [True]
+
+
+def test_find_due_assignments_still_returns_one_in_progress(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """D-067: an assignment being executed is the station's *current* work.
+
+    Dropping it at the moment the station reported listening would tell a station
+    that rebooted mid-pass it had nothing to do — the failure D-035 fixed by
+    moving the lower bound to `end_at`, arriving again through the state column.
+    """
+    now = datetime.now(UTC)
+    insert_assignment(
+        assignment_id="as_under_way",
+        start_at=now - timedelta(minutes=3),
+        end_at=now + timedelta(minutes=7),
+        state="in_progress",
+    )
+
+    due = find_due_assignments(
+        rollback, STATION_ID, horizon_end=now + timedelta(hours=2)
+    )
+
+    assert [d.assignment_id for d in due] == ["as_under_way"]
+
+
+def test_find_due_assignments_omits_a_reported_or_expired_one(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """The two terminal states are where redelivery stops (MSP §4.2)."""
+    now = datetime.now(UTC)
+    for assignment_id, state in (("as_done", "reported"), ("as_gone", "expired")):
+        insert_assignment(
+            assignment_id=assignment_id,
+            start_at=now - timedelta(minutes=3),
+            end_at=now + timedelta(minutes=7),
+            state=state,
+        )
+
+    due = find_due_assignments(
+        rollback, STATION_ID, horizon_end=now + timedelta(hours=2)
+    )
+
+    assert due == []
 
 
 def test_find_due_assignments_returns_more_than_eight_when_eligible(

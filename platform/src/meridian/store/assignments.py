@@ -7,9 +7,10 @@ to compose. D-008's state machine (``issued`` to ``held`` to ``in_progress`` to
 ``reported``, or ``issued``/``held`` straight to ``expired``) is enforced by
 callers choosing which of these functions to call, not by anything in this file.
 
-Of these, only :func:`find_due_assignments` has a caller today —
-``meridian.api.msp`` reads it to answer a heartbeat. The state transitions are
-written and tested but unused: MSP §4.2 reconciliation is not implemented yet.
+``meridian.api.msp`` composes most of this file into one transaction per
+heartbeat: it reconciles what the station reported, applies the transitions
+:mod:`meridian.registry.heartbeat_reconciliation` derived, expires what the
+station has stopped naming, and reads back what is due.
 """
 
 from __future__ import annotations
@@ -133,24 +134,44 @@ def mark_assignment_in_progress(
         return cur.rowcount > 0
 
 
-def expire_overdue_assignments(conn: Connection, station_id: str) -> int:
-    """``(issued|held) -> expired`` where ``end_at`` has passed.
+def expire_overdue_assignments(
+    conn: Connection, station_id: str, *, still_held: Sequence[str]
+) -> int:
+    """``(issued|held) -> expired`` for overdue rows the station no longer names.
 
-    Scoped to one station and called as part of that station's own
-    heartbeat — MSP §4.2 describes reconciliation per-heartbeat, and Phase
-    1 has no periodic sweep job independent of one.
+    Args:
+        conn: An open connection. This function owns its transaction.
+        station_id: Whose assignments to sweep.
+        still_held: The ``held_assignments`` from the heartbeat driving this
+            call. Rows named here are exempt however overdue they are.
 
     Returns:
         How many rows expired.
+
+    Note:
+        **Being overdue is not enough** (D-067). MSP §4.2 defines this row of its
+        table as *absent, window has passed*, and D-008 defines ``expired`` as
+        the station never having taken the work. A station still naming an
+        assignment after its window closed took the work and is finishing with
+        it — expiring that row would both misreport what happened and strand the
+        observation, because D-008 has no arc from ``expired`` to ``reported``.
+
+        Scoped to one station and called as part of that station's own heartbeat.
+        A station that stops heartbeating altogether therefore never has its
+        overdue rows swept; Phase 1 has no periodic job independent of a
+        heartbeat, and D-067 records that sweep as owed by the reliability stage.
     """
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
             update assignments
             set state = 'expired'
-            where station_id = %s and state in ('issued', 'held') and end_at < now()
+            where station_id = %s
+              and state in ('issued', 'held')
+              and end_at < now()
+              and not (assignment_id = any(%s))
             """,
-            (station_id,),
+            (station_id, list(still_held)),
         )
         return cur.rowcount
 
@@ -158,12 +179,20 @@ def expire_overdue_assignments(conn: Connection, station_id: str) -> int:
 def find_due_assignments(
     conn: Connection, station_id: str, *, horizon_end: datetime
 ) -> list[DueAssignment]:
-    """Every assignment eligible for delivery to ``station_id`` (D-026, D-035).
+    """Every assignment eligible for delivery to ``station_id`` (D-026, D-035, D-067).
 
-    ``state in ('issued', 'held') and end_at >= now() and start_at <=
-    horizon_end``, ordered by ``start_at``. The lower bound is ``end_at``,
-    not ``start_at`` — an assignment whose window has opened is the
+    ``state in ('issued', 'held', 'in_progress') and end_at >= now() and
+    start_at <= horizon_end``, ordered by ``start_at``. The lower bound is
+    ``end_at``, not ``start_at`` — an assignment whose window has opened is the
     station's *current* work and must still be returned.
+
+    ``in_progress`` is in the predicate for the same reason (D-067). Without it
+    an assignment disappears from the response the moment the station reports
+    listening on it, so a station that reboots mid-pass is told it has nothing to
+    do — the failure D-035 fixed by moving the lower bound, arriving again
+    through a different column. MSP §4.2's prose is the arbiter: a station sees
+    an assignment on every heartbeat until it is reported or its window has
+    passed, and executing it is neither.
 
     Applies **no limit and does no logging**. Capping at 8 and logging
     D-035's "more than 8 eligible" warning belongs to whoever is making the
@@ -194,7 +223,7 @@ def find_due_assignments(
             join passes p on p.id = a.pass_id
             join element_sets es on es.id = p.element_set_id
             where a.station_id = %s
-              and a.state in ('issued', 'held')
+              and a.state in ('issued', 'held', 'in_progress')
               and a.end_at >= now()
               and a.start_at <= %s
             order by a.start_at asc
