@@ -1443,6 +1443,34 @@ The pass-generation job decides which station-and-satellite pairs are worth prop
 
 ---
 
+## D-066 — Configuration B is a product, priority lives on the satellite, and a schedule can be re-run
+
+**2026-08-10 · accepted** · *migration 0012; `scheduler/{priority_baseline,run,assignment_records}.py`, Stage 7*
+
+`EVALUATION.md` §3 defines configuration **B** as *"elevation + priority weighting"* and says nothing about how the two combine. Writing the scheduler run surfaced two further gaps in the schema. All three are settled here.
+
+**B's score is elevation × priority, not elevation + priority.** The two have no common unit: degrees plus a weight is a number with no meaning, and its behaviour depends entirely on the arbitrary scale chosen for the weight — a network using priorities of 1–5 and one using 100–500 would rank differently for no reason anybody intended. A multiplier is a statement about relative worth, which is what "weighting" already means.
+
+*The property this was chosen for:* with every priority at 1.0, **B reduces to A exactly** — same order, same scores. That is asserted in the tests rather than assumed, and it is what makes SC-1's **D − B** a measurement of priority weighting rather than partly of a formula change.
+
+*Rejected: lexicographic — priority first, elevation as tie-break.* It lets a priority-2 satellite at 10° displace a priority-1 pass at 50°, so a station spends its slot on geometry that mostly does not decode. A weight should shade a decision, not overrule it.
+
+**A non-positive priority is refused rather than clamped.** Zero makes every pass of that satellite tie at exactly zero whatever its geometry, so the ranking silently stops being about elevation and falls through to the tie-break; negative inverts it, ranking that satellite's worst pass above its best. Both produce a schedule that looks entirely normal. A satellite an operator wants excluded is **deactivated**, which removes it from pass generation and from the completeness denominator honestly (D-064) rather than filling the denominator with opportunities the scheduler was never going to take.
+
+**Priority belongs to `satellites`, not to `assignments`.** `assignments.priority` records what a decision *used*, which is the right thing for it to record and useless as an input — reading it back would derive next week's weighting from last week's schedule, so the first run would have nothing and every run after it would be quoting itself. An operator has opinions about *objects*: "Meteor-M is the project, this cubesat is a bonus". Migration 0012 adds `satellites.priority`, defaulting to 1.0 to match `assignments.priority` and so preserve the reduction above.
+
+**A schedule has an identity, so a run can be repeated.** Re-running the scheduler inserted a second complete copy — the failure D-063 fixed for `passes`, in the table that consumes them, and worse here: two `scheduled` rows for one pass means a station told twice to receive the same thing, and MSP §4.2's reconciliation holds two ids for one reception. `unique (pass_id, model_config)` fixes it, and **both parts of the key matter**: keyed on the pass alone, configurations A and B would collide, and running both over one horizon is exactly what the ablation requires — the two schedules have to coexist to be compared.
+
+**Assignment ids are derived, not random**: `as_` + the first twelve hex of `sha256(pass_id:model_config)`, following `observations.observation_id` (D-027). A repeat therefore mints the same ids and collapses onto that constraint, and a skip can name the assignment that displaced it without a round trip to discover what id the winner was given.
+
+**Phase 1's station turnaround is zero, and that is a fact about the hardware rather than a simplification.** D-065 left this open. `PROJECT.md` builds station 001 with a fixed quadrifilar helix at 137 MHz and makes the tracking build — a crossed Yagi on a rotator — Tier 3 and explicitly optional: *"every claim the project makes is provable with a fixed antenna."* A fixed antenna does not slew, so there is nothing to wait for between passes, and any positive value would discard passes the station could genuinely have taken. The simulated stations are fixed by construction too.
+
+*What has to change before a tracking station can be scheduled correctly, stated now rather than discovered then:* turnaround becomes a per-station column with a **measured** value, because `station_capabilities.tracking` is a boolean that implies no duration. Until that exists, a station registering with a rotator will be scheduled as though it were fixed. The constant lives in `cli_schedule.PHASE_1_TURNAROUND_S` with this reasoning attached, and the non-overlap rule takes it as a parameter — so the change is a value and a column, not a rewrite.
+
+**One transmitter per assignment, chosen deterministically.** A satellite may carry several downlinks a station can receive; the assignment names one frequency. Phase 1 takes the first in the catalogue's order — by frequency, then by id. Which downlink is worth more is a question about expected yield, and there is no model to answer it with until Stage 17. Picking arbitrarily but reproducibly is the honest placeholder, and the choice is visible in `assignments.centre_freq_hz` rather than hidden.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
