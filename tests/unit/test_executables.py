@@ -150,6 +150,32 @@ def test_simulator_rejects_a_nonsense_station_count() -> None:
     assert result.returncode == 1
 
 
+def test_simulator_reports_an_unreadable_seed_rather_than_crashing() -> None:
+    """A typo in `.env` must not become a container that restarts forever.
+
+    compose passes SIMULATOR_SEED straight through under `restart:
+    unless-stopped`, so anything raised while the parser is being built is a
+    crash loop that reports the same traceback to nobody. The variable is named
+    in the message because "must be an integer" is only actionable if the
+    operator knows which of the three to look at.
+    """
+    import os
+
+    env = {**os.environ, "SIMULATOR_SEED": "not-a-number"}
+    result = subprocess.run(
+        [sys.executable, "-m", "meridian_sim.station"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "SIMULATOR_SEED" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_readme_does_not_reference_the_pre_d012_module_path() -> None:
     """D-012 renamed `simulator.station` to `meridian_sim.station`.
 

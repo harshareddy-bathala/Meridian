@@ -1,10 +1,13 @@
 """``python -m meridian_sim.station`` — virtual stations speaking real MSP.
 
 A **shell**. The arguments, their defaults and the exit code are real; the
-stations are not. It exists now because ``deploy/docker-compose.yml`` has run
-this module under the ``sim`` profile since the compose file was written, and the
-module did not exist — so ``--profile sim`` produced a container that died on
-``ModuleNotFoundError`` and, under ``restart: unless-stopped``, kept dying.
+stations are not.
+
+``deploy/docker-compose.yml`` runs this module under the ``sim`` profile with
+``restart: unless-stopped``, which sets the bar every version of this file has to
+clear: it must exist, and it must exit with a message rather than a traceback.
+Anything that raises on the way up becomes a container that restarts forever,
+reporting the same stack trace to nobody in particular.
 
 What replaces this, at Stage 10, must satisfy the constraint that makes the
 simulator worth having at all:
@@ -29,6 +32,11 @@ from meridian_sim import __version__
 __all__ = ["main"]
 
 EXIT_NOT_IMPLEMENTED = 2
+"""Matches ``meridian.cli``'s code for the same meaning, so a script driving both
+reads one convention: 2 is "not built yet", 1 is "ran and could not complete"."""
+
+EXIT_FAILED = 1
+"""A bad argument or an unreadable environment variable."""
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_SEED = 4471
@@ -37,9 +45,25 @@ reproducible, so the default is a value the documentation also names rather than
 something the process invents at startup."""
 
 
+class UnreadableEnvironmentError(ValueError):
+    """An environment variable this module needs could not be read as a number."""
+
+
 def _int_env(name: str, default: int) -> int:
+    """Read an integer variable, treating unset and empty alike as the default."""
     raw = os.environ.get(name, "").strip()
-    return int(raw) if raw else default
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        # Compose passes SIMULATOR_SEED and SIMULATOR_STATION_COUNT straight from
+        # `.env`, so a typo there arrives here. Left as a bare int() it surfaced
+        # as a traceback from a crash-looping container under `restart:
+        # unless-stopped` — which is the failure this module exists to replace.
+        raise UnreadableEnvironmentError(
+            f"{name} must be an integer, got {raw!r}"
+        ) from exc
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -87,14 +111,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: Command line arguments, or ``None`` to read ``sys.argv``.
 
     Returns:
-        ``1`` for a bad argument, and ``EXIT_NOT_IMPLEMENTED`` otherwise — which
-        is every valid invocation until Stage 10 puts real stations behind it.
+        :data:`EXIT_FAILED` for a bad argument or an unreadable environment
+        variable, and :data:`EXIT_NOT_IMPLEMENTED` otherwise — which is every
+        valid invocation until Stage 10 puts real stations behind it.
     """
-    args = _build_parser().parse_args(argv)
+    try:
+        parser = _build_parser()
+    except UnreadableEnvironmentError as exc:
+        print(f"meridian_sim.station: {exc}", file=sys.stderr)  # noqa: T201
+        return EXIT_FAILED
+
+    args = parser.parse_args(argv)
 
     if args.count < 1:
         print("--count must be at least 1", file=sys.stderr)  # noqa: T201
-        return 1
+        return EXIT_FAILED
 
     print(  # noqa: T201 — this is a CLI; stderr is the interface
         "meridian_sim.station: not implemented yet.\n"
