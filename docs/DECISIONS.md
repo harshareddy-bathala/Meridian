@@ -1421,6 +1421,28 @@ The pass-generation job decides which station-and-satellite pairs are worth prop
 
 ---
 
+## D-065 — A schedule records what it scored, what displaced what, and how long the antenna takes
+
+**2026-08-10 · accepted** · *migration 0011; `scheduler/{elevation_baseline,conflict_rejection}.py`, Stage 7*
+
+`assignments` could say a pass was `skipped` and give a `reason` in prose. It could not say what the candidate scored, or which decision took the slot. `PROJECT.md` §13 calls the screen showing this reasoning *"the entire project"* — and a screen that says "skipped: conflicted with another pass" without naming the pass or ranking the two is showing an assertion, not a decision.
+
+**`score` is a new column, not `predicted_yield` reused.** `predicted_yield` is constrained `between 0 and 1` and *means* an expected yield. Configuration A's score is a number of degrees; B's is a priority-weighted quantity that is neither bounded nor a probability. Overloading one column with three meanings would make `EVALUATION.md` §3's comparison of A, B, C and D unreadable at exactly the point it has to be read. The column is unitless deliberately: the unit is a property of `model_config`, so the two are read together or not at all.
+
+**`conflicts_with_assignment_id` names an assignment, not a pass.** Naming the winning *pass* looks equivalent and is not: one physical pass can be predicted several times (D-063), so a pass id identifies an opportunity rather than the decision that displaced this candidate. Within a single run the two are interchangeable, which is why the pure scheduling layer works in pass ids and the run that writes the schedule maps them — across runs, only the assignment id still answers the question.
+
+**The ranking's tie-break is part of the algorithm.** Ties are not an edge case here: a station tracking one satellite sees near-identical geometry on consecutive days, and simulated stations sharing a seed produce exact ties by construction. Ranking is therefore a total order — score descending, then earlier acquisition, then `pass_id`. Left to the input order, the schedule would depend on the order rows came back from the database, and every number computed from it would stop being reproducible, which CLAUDE.md requires each one to be. Earlier acquisition wins because a pass in hand is worth more than an identical one later: less time for the station to go offline, for the element set to age, or for an operator to intervene.
+
+**Ranking is global; non-overlap is per station.** A pass competes for one station's antenna, so conflicts are judged within a station and two stations never conflict however much their passes overlap — a rule that serialised them would make every station after the first useless. Ranking deliberately does *not* group by station, because the Stage 18 optimiser allocates across the network and a per-station ranking here would quietly fix its shape.
+
+**Both selections and rejections are outputs, and every candidate appears in exactly one of them.** A scheduler returning only what it took would leave the skipped passes in no list and no table, and the screen explaining the schedule would have a hole in it with nothing able to detect one.
+
+**Turnaround between two receptions is an input, not a constant, and its value is not decided here.** `ARCHITECTURE.md` requires non-overlap *including slew and settling time*, so the rule takes a `turnaround_s` and honours it; two passes that abut exactly are compatible for a fixed antenna and are not for a rotator, and both answers are correct for the station they describe. What the *platform* should pass is genuinely undecided: nobody has measured station 001's rotator, `stations` has no column for it, and `station_capabilities.tracking` is a boolean that does not imply a duration. **Recorded as owed by the scheduler run** (Stage 7 Session D), which is the first code that must supply a number.
+
+*Consequence, stated rather than discovered later:* whatever value that run picks, the baselines and the Stage 18 optimiser must use the same one, or `EVALUATION.md`'s SC-1 measurement of **D − B** compares two schedulers working to different physical constraints and attributes the difference to the model.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
