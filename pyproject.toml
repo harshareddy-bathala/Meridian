@@ -222,16 +222,19 @@ disallow_any_explicit = false
 # installed distributions are what should be imported.
 addopts = "-q --strict-markers --import-mode=importlib"
 testpaths = ["tests"]
-# One directory per marker, and each directory's conftest applies its own marker
-# via `pytestmark` — so a new test file cannot forget to declare what it needs
-# and leak a compose bring-up into the unit run.
+# One directory per marker, applied by the `pytest_collection_modifyitems` hook
+# in tests/conftest.py from the directory a test lives in — so a new test file
+# cannot forget to declare what it needs and leak a compose bring-up into the
+# unit run. Not by `pytestmark` in each directory's conftest: pytest honours that
+# attribute in test modules only, so it would silently mark nothing.
 #
-#   uv run pytest -m "not integration and not e2e"   fast, no services
+#   uv run pytest -m "not integration and not e2e and not msp_conformance"
+#                                                    fast, no services
 #   uv run pytest -m integration                     needs TimescaleDB
 #   uv run pytest -m msp_conformance                 needs the API
 #   uv run pytest -m e2e                             needs the compose stack
 markers = [
     "integration: needs a running TimescaleDB",
-    "msp_conformance: asserts exact MSP wire shapes against golden fixtures",
+    "msp_conformance: asserts exact MSP wire shapes against the running API",
     "e2e: needs the full compose stack",
 ]
