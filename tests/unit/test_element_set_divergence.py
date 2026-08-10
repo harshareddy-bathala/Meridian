@@ -37,9 +37,10 @@ MEAN_MOTION_FIELD = "15.49815350"
 
 MEAN_MOTION_REV_PER_DAY = float(MEAN_MOTION_FIELD)
 PERTURBED_MEAN_MOTION_FIELD = "15.49825350"
-"""The same to within 1e-4 revolutions per day — about a tenth of a second of
-period. Small enough to be a plausible disagreement between two fits of one
-orbit, large enough that the drift it causes is kilometres within a day."""
+"""The same to within 1e-4 revolutions per day — 0.036 s of orbital period,
+from 5574.858 s to 5574.822 s. Small enough to be a plausible disagreement
+between two fits of one orbit, large enough that the drift it causes is
+kilometres within a day."""
 
 MEAN_MOTION_DELTA_REV_PER_DAY = (
     float(PERTURBED_MEAN_MOTION_FIELD) - MEAN_MOTION_REV_PER_DAY
