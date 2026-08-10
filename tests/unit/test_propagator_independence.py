@@ -101,3 +101,9 @@ def test_the_guard_itself_works() -> None:
     """
     with pytest.raises(NetworkUsedError):
         socket.create_connection(("example.invalid", 80))
+
+    # Both patches, not just one. The fixture argues for covering `socket.socket`
+    # as well, and a control that exercised only `create_connection` would let
+    # that half be dropped without anything noticing.
+    with pytest.raises(NetworkUsedError):
+        socket.socket()
