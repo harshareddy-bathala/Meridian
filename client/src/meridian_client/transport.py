@@ -46,6 +46,14 @@ server being lenient is a client that breaks against a stricter one.
 """
 
 CONNECT_TIMEOUT_S = 5.0
+"""How long to wait for the TCP connection alone.
+
+Shorter than :data:`READ_TIMEOUT_S`, because the two failures are different: a
+connection that has not been accepted in five seconds means the platform is down
+or the tunnel is closed, and no amount of further waiting changes that. A request
+already accepted may legitimately take longer to answer.
+"""
+
 READ_TIMEOUT_S = 10.0
 """Bounded so a hung platform cannot stall the station indefinitely.
 

@@ -38,8 +38,8 @@ from datetime import UTC, datetime
 CLOCK_RESOLUTION_S = time.get_clock_info("time").resolution
 """Smallest interval this machine's wall clock can distinguish.
 
-Read from the platform rather than assumed. It is about 15.6 ms on Windows and
-about 1 ns on Linux, and the difference matters: a localhost round trip completes
+Read from the Python runtime rather than assumed. It is about 15.6 ms on Windows
+and about 1 ns on Linux, and the difference matters: a localhost round trip completes
 inside one Windows tick, so ``received_at - sent_at`` measures as **exactly
 zero** — and an uncertainty of ``0.0`` is not a small number, it is a claim of
 perfect knowledge that MSP §4.2 and D-016 explicitly forbid.
