@@ -32,15 +32,18 @@ from meridian.pass_generation import (
 )
 from meridian.store.pool import CONNECT_TIMEOUT_S
 
-__all__ = ["run_passes"]
+__all__ = ["parse_horizon_bound", "run_passes"]
 
 EXIT_FAILED = 1
 """Matches ``meridian.cli.EXIT_FAILED``. Imported from there would be a cycle:
 ``cli`` imports this module to dispatch to it."""
 
 
-def _parse_horizon_bound(value: str, flag: str) -> datetime:
+def parse_horizon_bound(value: str, flag: str) -> datetime:
     """One ``--from``/``--to`` argument as a timezone-aware UTC instant.
+
+    Public because ``meridian schedule`` takes the same two flags and has to
+    reject the same input the same way; a second copy would drift.
 
     Args:
         value: The argument exactly as typed, ISO-8601.
@@ -105,8 +108,8 @@ def run_passes(args: argparse.Namespace) -> int:
     """
     try:
         horizon = GenerationHorizon(
-            start=_parse_horizon_bound(args.start, "--from"),
-            end=_parse_horizon_bound(args.end, "--to"),
+            start=parse_horizon_bound(args.start, "--from"),
+            end=parse_horizon_bound(args.end, "--to"),
         )
     except ValueError as exc:
         print(f"meridian passes generate: {exc}", file=sys.stderr)  # noqa: T201

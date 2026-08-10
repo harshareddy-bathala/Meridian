@@ -12,9 +12,10 @@ docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md implements it and exits
 :data:`EXIT_NOT_IMPLEMENTED`, so a caller gets an answer rather than a
 traceback — see :data:`PENDING`.
 
-This module owns the command tree and the dispatch. ``passes generate`` is the
-one subcommand whose implementation needs more than a handler and a print, and
-it lives in ``meridian.cli_passes``.
+This module owns the command tree and the dispatch. Each command's work lives
+beside it — ``cli_invite``, ``cli_passes`` and ``cli_schedule`` — so the whole
+command surface is still readable in one file while no single file grows past
+the length a reviewer will actually read.
 
 ``--version`` prints ``meridian.__version__``, which is what the container
 smoke test uses to prove the distribution installed and imports cleanly.
@@ -26,14 +27,15 @@ import argparse
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 import psycopg
 
 from meridian import __version__
+from meridian.cli_invite import run_invite
 from meridian.cli_passes import run_passes
+from meridian.cli_schedule import configurations, run_scheduler
 from meridian.config import load_settings
-from meridian.store import invites, station_tokens, stations
+from meridian.store import station_tokens, stations
 from meridian.store.pool import CONNECT_TIMEOUT_S
 
 __all__ = ["main"]
@@ -85,86 +87,6 @@ def _pending(command: str, pending: _Pending) -> int:
         file=sys.stderr,
     )
     return EXIT_NOT_IMPLEMENTED
-
-
-def _run_invite(args: argparse.Namespace) -> int:
-    """Dispatch ``meridian invite <action>`` to its handler.
-
-    Opens one connection for the whole invocation and closes it on the way
-    out, rather than reaching for :mod:`meridian.store.pool` — a CLI
-    invocation is a single short-lived process, so there is nothing here for
-    a pool to amortize.
-    """
-    settings = load_settings()
-    try:
-        conn = psycopg.connect(settings.psycopg_url, connect_timeout=CONNECT_TIMEOUT_S)
-    except (psycopg.Error, OSError) as exc:
-        print(  # noqa: T201 — this is a CLI; stderr is the interface
-            f"meridian invite: cannot reach the database: {exc}", file=sys.stderr
-        )
-        return EXIT_FAILED
-
-    with conn:
-        if args.action == "create":
-            return _invite_create(conn, args)
-        if args.action == "revoke":
-            return _invite_revoke(conn, args)
-        return _invite_list(conn)
-
-
-def _invite_create(conn: invites.Connection, args: argparse.Namespace) -> int:
-    """Handle ``meridian invite create``."""
-    expires_at = invites.expiry_from_days(args.expires_in_days, now=datetime.now(UTC))
-    try:
-        token = invites.create_invite(
-            conn,
-            label=args.label,
-            expires_at=expires_at,
-            issued_for_station_id=args.for_station,
-        )
-    except psycopg.errors.ForeignKeyViolation:
-        print(  # noqa: T201 — this is a CLI; stderr is the interface
-            f"meridian invite create: no such station: {args.for_station}",
-            file=sys.stderr,
-        )
-        return EXIT_FAILED
-    print(f"Invite for {args.label!r}: {token}")  # noqa: T201
-    print(  # noqa: T201
-        "This is shown once. It will not be displayed again.", file=sys.stderr
-    )
-    return 0
-
-
-def _invite_list(conn: invites.Connection) -> int:
-    """Handle ``meridian invite list``."""
-    for invite in invites.list_invites(conn):
-        state = _invite_state(invite)
-        print(f"{invite.label}\t{state}\t{invite.created_at.isoformat()}")  # noqa: T201
-    return 0
-
-
-def _invite_state(invite: invites.Invite) -> str:
-    """One word (or two) describing what can still be done with an invite."""
-    if invite.consumed_at is not None:
-        return f"consumed by {invite.consumed_by_station_id}"
-    # The database decides this, not a comparison here — an invite revoked
-    # moments ago would otherwise still print "pending" (D-046).
-    if invite.is_expired:
-        return "expired"
-    return "pending"
-
-
-def _invite_revoke(conn: invites.Connection, args: argparse.Namespace) -> int:
-    """Handle ``meridian invite revoke``."""
-    revoked = invites.revoke_invite(conn, label=args.label)
-    if revoked == 0:
-        print(  # noqa: T201 — this is a CLI; stderr is the interface
-            f"meridian invite revoke: no revocable invite labelled {args.label!r}",
-            file=sys.stderr,
-        )
-        return EXIT_FAILED
-    print(f"Revoked {revoked} invite(s) labelled {args.label!r}.")  # noqa: T201
-    return 0
 
 
 def _run_station(args: argparse.Namespace) -> int:
@@ -298,6 +220,31 @@ def _add_passes_parser(
     generate.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
 
 
+def _add_schedule_parser(
+    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """Wire ``meridian schedule``, which takes a verb's arguments and no verb."""
+    schedule = subcommands.add_parser(
+        "schedule",
+        help="assign passes to stations over a horizon",
+        description=(
+            "Ranks the generated passes under one of EVALUATION.md's "
+            "configurations and takes as many as each antenna allows, writing "
+            "down why every skipped pass was skipped. Re-running one "
+            "configuration over one horizon writes nothing (D-066)."
+        ),
+    )
+    schedule.add_argument("--from", dest="start", required=True, help="ISO-8601 UTC")
+    schedule.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
+    schedule.add_argument(
+        "--config",
+        dest="model_config",
+        choices=configurations(),
+        default="A",
+        help="ranking configuration (EVALUATION.md section 3)",
+    )
+
+
 def _add_pending_parsers(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -324,14 +271,25 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_invite_parser(subcommands)
     _add_station_parser(subcommands)
     _add_passes_parser(subcommands)
+    _add_schedule_parser(subcommands)
     _add_pending_parsers(subcommands)
 
     return parser
 
 
+NEEDS_ACTION = frozenset({"invite", "passes", "station"})
+"""Commands that are a noun and mean nothing without a verb after them.
+
+``meridian schedule`` is a verb already and carries its arguments directly, so
+it is absent: sending it to its own help text would make the command
+unrunnable.
+"""
+
+
 IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
-    "invite": _run_invite,
+    "invite": run_invite,
     "passes": run_passes,
+    "schedule": run_scheduler,
     "station": _run_station,
 }
 """Every subcommand that does real work, and the handler that does it.
@@ -353,7 +311,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     handler = IMPLEMENTED.get(args.command)
     if handler is not None:
-        if args.action is None:
+        if args.command in NEEDS_ACTION and args.action is None:
             parser.parse_args([args.command, "--help"])  # exits
         return handler(args)
 
