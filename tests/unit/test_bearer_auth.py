@@ -1,9 +1,10 @@
 """``parse_bearer_token`` — no database needed.
 
 ``get_authenticated_station_id`` itself needs a real connection to call
-``PsycopgRegistry.authenticate()`` through, and is covered once the
-heartbeat endpoint session builds something that exercises it end to end;
-this file covers the pure half CLAUDE.local.md §3 asks to be separable.
+``PsycopgRegistry.authenticate()`` through, so it is exercised end to end by
+``tests/msp_conformance/test_heartbeat_endpoint.py`` instead — a heartbeat with
+no token, and one station's token used to report as another. This file covers
+the pure half CLAUDE.local.md §3 asks to be separable.
 """
 
 from __future__ import annotations
@@ -35,7 +36,11 @@ def test_an_empty_header_is_unauthorized() -> None:
     [
         "abc123",  # no scheme at all
         "Basic abc123",  # the wrong scheme
-        "bearer abc123",  # MSP is case-sensitive on the scheme name
+        # Lower-case scheme. The platform requires the exact prefix ``Bearer ``;
+        # MSP-SPEC.md does not describe the Authorization header at all, and
+        # RFC 7235 makes scheme names case-insensitive, so this pins what the
+        # platform does rather than what the protocol requires.
+        "bearer abc123",
     ],
 )
 def test_a_header_without_the_bearer_prefix_is_unauthorized(header: str) -> None:
