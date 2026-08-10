@@ -108,7 +108,9 @@ meridian/
 │       ├── observations/ ingest, store, dedup
 │       ├── reliability/  SLI computation, budget, chaos
 │       ├── store/        SQL access layer
-│       └── api/          public + MSP endpoints
+│       ├── api/          public + MSP endpoints
+│       ├── pass_generation.py   the job that fills `passes` from local elements
+│       └── cli.py        the `meridian` command; `cli_passes.py` beside it
 ├── client/               distribution: meridian-client
 │   └── src/meridian_client/     reference station client
 ├── simulator/            distribution: meridian-sim

@@ -1395,6 +1395,32 @@ That is the same defect class as a docstring describing a test that does not exi
 
 ---
 
+## D-064 — What pass generation skips, and why every skip is deliberate
+
+**2026-08-10 · accepted** · *`registry/capability_match.py`, `pass_generation.py`, Stage 7*
+
+The pass-generation job decides which station-and-satellite pairs are worth propagating at all. Every pair it skips is a pass that never enters `passes`, and `passes` is the completeness denominator (`EVALUATION.md` §4.1) — so **a wrong skip does not produce a visible error, it produces a better-looking ratio.** That asymmetry is why each filter is recorded here rather than left to read off the SQL.
+
+**A capability covers a transmission when the nominal frequency is inside the declared range, endpoints included, *and* the mode matches.** Mode comparison is case- and whitespace-insensitive but whole-string: `modes` is free lowercase text in Phase 1 because decoder naming varies too much across projects to freeze an enum, so `LRPT` against a catalogue's `lrpt` is a matching bug, while `lrpt` matching `lrpt_hrpt` by prefix would conflate two demodulators.
+
+**A chain declaring no modes matches nothing.** `station_capabilities.modes` defaults to `'{}'` and the API sets no minimum, so this is reachable from a real registration. Reading the empty list as "any mode" would schedule the station for every pass in its frequency range, and those become *confirmed misses*: the station heartbeats, listens, and returns no frames. That is the one input the reliability layer must never be handed on purpose — D-056 and rule 7 exist to separate a broken station from an idle one, and this would manufacture the confusion at the source. A station that receives no passes notices and asks; a reliability figure quietly poisoned by passes nobody could have decoded does not.
+
+**Where several chains cover one transmission, the search uses the lowest declared floor.** The station can take the pass if any of its hardware can. Searching at the higher floor would drop passes the other antenna could have received, and — again — a dropped pass is not merely unscheduled, it is absent from the denominator forever.
+
+**The nominal frequency is tested, not the range the signal actually sweeps.** A pass Doppler-shifts by roughly ±3 kHz at 137 MHz, so a chain whose declared range ends within a few kilohertz of the nominal loses part of the excursion. Phase 1 does not model that: the declared range describes hardware the operator knows and we do not, and narrowing it by a margin nobody has measured would exclude working stations. **This is a stated limit, not an oversight** — the failure it leaves is visible in the observation record as reception degrading at one end of a pass, rather than silent. Note the deliberate asymmetry with D-056: `was_listening` needs a Doppler-sized *tolerance* because it compares against a frequency a station reported mid-pass; this compares against a catalogue value that is never shifted.
+
+**Stations excluded: deleted, and token revoked. Stations kept: offline, stale, and never-seen.** The first two are permanent — a revoked token cannot authenticate, so such a station can never be issued an assignment nor report against one (D-017, D-058), and its passes would pad the denominator with opportunities nothing could act on. Liveness is the opposite case: a station that was down for a day genuinely had passes it did not take, *and that is the outage*. Removing them would let an outage improve the numbers, which is the same failure "absence is not a miss" guards against at the far end of the pipeline.
+
+**Satellites excluded: deleted, inactive, or with an inactive transmitter.** `EVALUATION.md` §5's silent-satellite confound — a pass that produced nothing may mean a bad prediction or a payload that was switched off. Where the catalogue already records that it was off, the cheapest place to keep the pass out is before it is computed.
+
+**The element set is the one current at the horizon start, never the newest.** Fixing it at the horizon start is what makes re-running the job over a past horizon reproduce its own output, which together with D-063's aligned grid is why a second run stores nothing. Using the newest set would change the answer every time a catalogue published, and each run would write a duplicate prediction of every pass.
+
+**One propagation per station-and-satellite pair, not per transmitter.** `passes` has no transmitter column, and rightly so: the geometry is a property of the two bodies, not of a downlink. A satellite whose transmitters a station can receive on different chains is searched once, at the lowest of those chains' floors.
+
+*Consequence, stated rather than discovered later:* a satellite that is tracked, has a live transmitter and has **no element set** the archive can place at the horizon start produces no passes. That is a gap in the archive rather than a decision, so it is **reported by name** in `GenerationReport.satellites_without_element_set` and printed by the CLI. Silence there would be indistinguishable from "this satellite never rises".
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
