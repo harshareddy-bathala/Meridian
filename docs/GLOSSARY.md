@@ -84,11 +84,13 @@ Where silent bugs live. These are not interchangeable, and converting between th
 
 **Observation** — the report of an attempt, **including attempts that produced nothing**. A null result is data.
 
-**Heartbeat** — a station's periodic statement of liveness and current state, every 30 seconds. Carries the `listening` block.
+**Heartbeat** — a station's periodic statement of liveness and current state. Carries the `listening` block. The period is not fixed by the protocol: the platform assigns it at registration as `heartbeat_interval_s`, currently 30.
 
 **The `listening` block** — the field asserting that a station was tuned to a specific frequency for a specific target at a specific time. It is what makes *heard nothing* distinguishable from *was not listening*, and therefore what makes every reliability metric in this project mean anything.
 
 **Simulated station** — a virtual station speaking real MSP over the real network to the real platform. Not a mock. Labelled as simulated at every layer, and never aggregated with measured data in any reported figure.
+
+**NTP — network time protocol** — how a station synchronises its clock. MSP requires it, but does not trust it: a station also estimates its own offset against `GET /msp/v0/time` and reports that offset with an uncertainty, because a station whose NTP has silently failed is exactly the case the estimate exists to catch.
 
 ---
 
@@ -118,7 +120,7 @@ Where silent bugs live. These are not interchangeable, and converting between th
 
 **Absence is not a miss** — a station that reported nothing counts as having missed a pass only if its heartbeat confirms it was listening, on the right frequency, for the right target. Load-bearing for every reliability metric in the system.
 
-**NTP — network time protocol** — how a station synchronises its clock. MSP requires it, but does not trust it: a station also estimates its own offset against `GET /msp/v0/time` and reports that offset with an uncertainty, because a station whose NTP has silently failed is exactly the case the estimate exists to catch.
+---
 
 ## Conventional short names in code
 

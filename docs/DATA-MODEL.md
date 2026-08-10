@@ -21,7 +21,16 @@ A station past that window rotates its token through a **bound** invite instead:
 
 **It is computed on read, never stored** (D-054). `stations.liveness` existed as a column from `0002` until `0008` and nothing ever wrote it. A stored conclusion is correct only until the clock passes its next threshold, and nothing moves the clock on the platform's behalf — so a station that went quiet would keep reading `online` until an unrelated write refreshed it, which is the case liveness exists to detect. `meridian.registry.liveness` owns the vocabulary and both thresholds; `last_heartbeat_at` is the only thing stored.
 
-Capabilities are a separate table (`station_capabilities`) — a station may have several: a VHF fixed antenna and a UHF tracking antenna are distinct capabilities with different frequency ranges, polarisation and elevation limits. Each capability also carries the `modes` array from MSP §4.1 and a `tracking` flag.
+Capabilities are a separate table — see below.
+
+### `station_capabilities`
+`(id, station_id, band, freq_min_hz, freq_max_hz, modes, polarisation, tracking, min_elevation_deg, horizon_mask_json, deleted_at)`
+
+A station may have several: a VHF fixed antenna and a UHF tracking antenna are distinct capabilities with different frequency ranges, polarisation and elevation limits. Each carries the `modes` array from MSP §4.1 and a `tracking` flag.
+
+`freq_min_hz` and `freq_max_hz` are the range the scheduler joins against `satellite_transmitters.centre_freq_hz` to select a transmitter, under `capability_freq_range` guaranteeing the range is not inverted.
+
+`min_elevation_deg` is the station's **declared** floor, not its measured horizon — the platform learns the real obstruction profile from outcome history and may override this downward per azimuth.
 
 `horizon_mask_json` holds the optional azimuth-resolved obstruction an operator declared at registration, defaulting to `[]`. **It is never merged into a learned profile.** The Phase 2 `horizon_profiles` table carries `source in ('declared', 'learned')` and the scheduler takes `max(declared, learned)` per bin, so a declaration constrains scheduling without ever becoming an input to the model that would otherwise be predicting it. See D-031.
 
@@ -39,7 +48,7 @@ Every element set ever retrieved, for every tracked object. **Never overwritten*
 
 A set is identified by `(satellite_id, source, content_sha256)` — its **contents**, not its epoch. Two different sets can carry the same epoch from one source, and keying on epoch discarded the second (D-057). `content_sha256` is a generated column, so no row can carry a hash that disagrees with its lines.
 
-Divergence between successive sets for the same object is a derived view, not a stored column.
+Divergence between successive sets for the same object is computed on demand, not stored. It lives in `meridian.orbit` rather than in SQL because measuring it means propagating both sets to a common instant and differencing the positions, which needs the propagator.
 
 ### `satellites`
 Catalogue identity, name, orbital regime, and observed activity status. The last matters for the silent-satellite confound in `docs/EVALUATION.md`.
@@ -97,11 +106,16 @@ One row per attempt, including attempts that produced nothing.
 `observation_id` is the public identifier MSP §4.4's acknowledgement returns, and it is a **stored generated column** derived from `(assignment_id, revision)` rather than an allocated value:
 
 ```sql
-observation_id text generated always as (
-    'ob_' || substr(encode(sha256(convert_to(
-        assignment_id || ':' || revision::text, 'UTF8')), 'hex'), 1, 12)
-) stored
+create function observation_id(assignment_id text, revision integer)
+returns text language sql immutable strict parallel safe as $$
+    select 'ob_' || substr(
+        encode(sha256(convert_to($1 || ':' || $2::text, 'UTF8')), 'hex'), 1, 12)
+$$;
+
+observation_id text generated always as (observation_id(assignment_id, revision)) stored
 ```
+
+The expression lives in a function rather than inline in the column because a generated column may only call an immutable one, and naming it makes that marking explicit and reviewable.
 
 Derived, because an idempotent retry must return the *same* id as the original submission — and D-015 makes that the path on which nothing is written, so it must not require reading the row back first. Generated in the database rather than in Python, so the ingest path and the public API cannot drift. See D-027.
 
@@ -217,8 +231,11 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 
 ## Derived views
 
+`observations_current` is the only one built. It exposes the highest revision per assignment, and it ships alongside the `observations` table because appending corrections rather than overwriting them is meaningless without something that reads the current one.
+
+The rest wait on data Phase 1 does not yet produce:
+
 - `pass_completeness` — observed ÷ available, per station-day. Drives the selection-bias mitigation.
-- `element_set_divergence` — position difference between successive element sets at common epochs.
 - `timing_error` — first detection minus predicted AOS, joined to element-set age.
 - `sli_current` — the four service level indicators over a rolling window.
 
