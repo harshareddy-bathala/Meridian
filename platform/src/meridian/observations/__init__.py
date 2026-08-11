@@ -1,6 +1,11 @@
 """Ingest, normalisation, deduplication — the system of record.
 
-Records are **immutable once written**; corrections are additive, carried by a
+**Not implemented** — this module is its interface and nothing else, built by
+Stage 9 of docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md. The rules below are what it
+is being built to, not what it currently enforces; MSP §4.4's ``observation``
+message has no endpoint behind it for the same reason.
+
+Records will be **immutable once written**; corrections are additive, carried by a
 ``revision`` counter on the natural key ``(assignment_id, revision)``
 (docs/DECISIONS.md D-015). A resubmission appends ``revision + 1`` and the
 highest revision is current. D-015 considered a self-referencing
@@ -15,8 +20,8 @@ pass. The first belongs to ``meridian.api``, the second to
 ``meridian.reliability`` — which is the sole authority on absence, and calls
 ``Registry.was_listening`` and nothing else to reach it.
 
-``ingest`` is where five invariants land together, which is why they belong in one
-function with one test file rather than spread across the API layer:
+``ingest`` will be where five invariants land together, which is why they belong
+in one function with one test file rather than spread across the API layer:
 
 1. **Ownership** — a station may only submit observations for assignments issued
    to it (MSP §3), else ``not_owner``.

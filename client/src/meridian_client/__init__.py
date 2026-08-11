@@ -7,20 +7,27 @@ submits observations.
 nothing else, so that rule is enforced when the package is built rather than when
 a reviewer notices (docs/DECISIONS.md D-012).
 
-**Built so far:** ``transport`` (retrying MSP HTTP) and ``clock`` (offset
-estimation against ``GET /msp/v0/time``). Registration, credential
-persistence and the assignment loop are Stage 4.3's client half and Stage 8 —
-which is why Stage 4's completion gate, a *client* gate, is not yet met.
+A complete station is ``station_loop.StationLoop`` over four things: a
+``transport`` to the platform, the ``credentials`` that identify it, the
+``held_assignments`` record of what it has accepted, and an ``execution``
+implementation that receives. ``registration`` gets it admitted in the first
+place; ``clock``, ``heartbeat`` and ``assignment_message`` are the protocol it
+speaks once it is.
 
-Must survive three things. Clock skew is tested today; the other two are
-tested when the code that has to survive them exists:
+Submitting observations is Stage 9, and the receiver and decoder are Stage 13 —
+until then ``execution.NullExecutor`` occupies a pass's window and receives
+nothing, which is enough for a station to hold work and report listening.
+
+Must survive three things, all of them tested:
 
 * **network loss mid-pass** — reception is never blocked on the platform being
-  reachable. The client continues executing assignments it already holds and
-  queues observations, submitting them later with their *original* timestamps.
-* **power loss** — rejoins cleanly with no operator intervention.
-* **clock skew** — estimates its offset against ``GET /msp/v0/time`` and reports
-  both the offset and its own uncertainty in the next heartbeat.
+  reachable. Work is started from the on-disk record rather than from a
+  response, so an outage changes nothing the station does.
+* **power loss** — rejoins cleanly with no operator intervention. Its identity,
+  its recovery key and the assignments it holds are all on disk before it claims
+  any of them.
+* **clock skew** — estimates its offset against the platform and reports both
+  the offset and its own uncertainty, never zero for unknown.
 
 **The station never transmits.** There are no transmit code paths here and there
 never will be.

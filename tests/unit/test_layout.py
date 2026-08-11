@@ -1,7 +1,14 @@
 """Guards on the repository layout itself.
 
-These test the scaffolding rather than behaviour, because both invariants below
-fail in ways that are expensive to diagnose and cheap to prevent.
+Two properties of the layout: that ``platform/`` never shadows the standard
+library's ``platform`` module, and that the client distribution's dependency list
+cannot reach a database. Both fail in ways that are expensive to diagnose and
+cheap to prevent — the first as an ``AttributeError`` raised from inside pip, the
+second not at all until someone reads the file.
+
+The two orbit assertions at the end of this file are about ``meridian.orbit``
+rather than about the layout, and would be easier to find beside the rest of the
+orbit tests.
 """
 
 from __future__ import annotations

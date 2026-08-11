@@ -44,6 +44,18 @@ flowchart TD
 
 ---
 
+# Where the build has got to
+
+*Snapshot taken 2026-08-10. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stages 0–7 are done.** Stage 0's specification gaps are closed as decisions D-023 through D-032; the store, the shared MSP infrastructure and the registry are in place; `/msp/v0/time`, `/register` and `/heartbeat` serve; orbit propagation and the element-set archive shipped with pass identity; and pass generation now feeds the two baseline schedulers.
+
+**Stage 8 is in progress** — assignment delivery and heartbeat reconciliation.
+
+**Stage 9 onward has not started.** `meridian.observations`, `meridian.prediction` and `meridian.reliability` are interfaces and nothing else, which is deliberate: `CLAUDE.md` asks that they not be scaffolded ahead of the stage that needs them.
+
+---
+
 # Stage 0 — Resolve specification gaps
 
 Before implementing endpoints, close the protocol contradictions that would otherwise cause rewrites.

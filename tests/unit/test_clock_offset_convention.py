@@ -20,11 +20,15 @@ specification, and now they are the test.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from meridian_client.clock import CLOCK_RESOLUTION_S, estimate_clock_offset
+from meridian_client.clock import (
+    CLOCK_RESOLUTION_S,
+    estimate_clock_offset,
+    require_utc,
+)
 
 
 def estimate_offset(
@@ -125,3 +129,42 @@ def test_naive_timestamps_are_refused() -> None:
     naive = datetime(2026, 8, 14, 9, 31, 2)  # noqa: DTZ001
     with pytest.raises(ValueError, match="naive"):
         estimate_offset(naive, naive, BASE)
+
+
+def test_an_aware_but_non_utc_timestamp_is_refused() -> None:
+    """Aware is not the same as UTC, and this station sits at +05:30.
+
+    The naive case above is the obvious one. This is the one that would actually
+    happen here: a local-time timestamp carrying its offset passes every "is it
+    timezone-aware" check and is still five and a half hours from what the
+    estimator assumes it is being handed.
+
+    `meridian.orbit.require_utc` has a twin of this assertion in
+    `tests/unit/test_layout.py`. The two copies are deliberate — `meridian-client`
+    depends on `httpx` and nothing else so the database boundary holds at install
+    time (D-012) — and the duplicate is only worth having if both halves are held
+    to the same rule.
+    """
+    india_standard_time = timezone(timedelta(hours=5, minutes=30))
+    local = datetime(2026, 8, 14, 15, 1, 2, tzinfo=india_standard_time)
+
+    with pytest.raises(ValueError, match="not UTC"):
+        require_utc(local, "sent_at")
+
+
+def test_a_clock_that_stepped_mid_request_is_refused() -> None:
+    """Receiving before sending is not a small error, it is a different clock.
+
+    NTP can step a station's clock backwards while a request is in flight, and
+    the midpoint of a negative interval is not an estimate of anything — the
+    offset it produces is wrong by however far the clock jumped, with nothing in
+    the number to show it. Refused rather than reported, because
+    `docs/EVALUATION.md` §6.1 keeps any timing error larger than the reported
+    uncertainty, and this one would arrive with a plausible small uncertainty
+    attached.
+    """
+    sent = BASE
+    received = BASE - timedelta(seconds=2)
+
+    with pytest.raises(ValueError, match="precedes"):
+        estimate_offset(sent, received, BASE)

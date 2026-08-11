@@ -139,7 +139,7 @@ def test_the_reference_pass_is_approaching_so_range_rate_is_negative(
 def test_the_result_is_sensitive_to_the_earth_fixed_frame(
     service: SkyfieldOrbitService, iss: ElementSet
 ) -> None:
-    """The mutation check ``orbit/__init__.py`` promises, in the form it can take.
+    """The reference assertion above is only worth having if this one holds.
 
     We do not perform the TEME-to-Earth-fixed rotation ourselves — Skyfield does
     it inside ``satellite - observer`` — so there is no rotation of ours to

@@ -35,7 +35,7 @@ Above **1180px**, `.doc` becomes a three-track grid — prose, an elastic spacer
 
 **There is one contents list, not two.** Forcing a `<details>` open on wide screens would need `::details-content`, which is too new to rely on, and a second list is a list that can disagree with the first.
 
-**The `<h2>` ids and the contents entries come from one pass over the same headings** (`toc.py`, in the job scratch). `verify_site.py` fails if any `href="#…"` on a page points at no element, because a mistyped fragment is silent otherwise.
+**The `<h2>` ids and the contents entries have to agree, and nothing generates them.** The script that first emitted them was scratch and is not in this repository, so adding a heading means adding its `id` and its contents entry by hand. `verify_site.py` fails if any `href="#…"` on a page points at no element, which is what catches the half of that pair you forget; a mistyped fragment is silent otherwise.
 
 **`position: sticky` works only because the body is `overflow-x: clip`, not `hidden`.** `hidden` would make the body a scroll container and pin the rail in place with no error anywhere. If that property is ever changed, the rail stops sticking.
 
@@ -212,11 +212,11 @@ The mark is drawn by one `mark()` function shared by every output, built from th
 
 Reduced motion cancels it on the pseudo-elements, not with `@view-transition { navigation: none }` inside the media query. The nested form is newer and less certainly supported; the pseudo-element form is unambiguously valid. Confirmed by reading the parsed `CSSViewTransitionRule` back out of `document.styleSheets` rather than by assuming the at-rule survived parsing — an unrecognised at-rule is dropped silently.
 
-## Three Cloudflare settings that edit this site
+## Four Cloudflare settings that edit this site
 
-The repository is not the last word on what visitors receive. Three dashboard settings rewrite it, and all three have caused a real bug.
+The repository is not the last word on what visitors receive. Four dashboard settings rewrite it. Three of them have caused a real bug here; Rocket Loader is listed because it would, and is currently off.
 
-> **All three were still switched on when last measured, on 2026-08-06.** D-041 recorded them as the fix and they were never applied; the same symptom was reported again the following day. The asset stamps above now make the cache setting unable to break the site on its own, but the other two are unchanged and only the dashboard can change them. Re-run the two `curl` commands below before believing otherwise.
+> **The three that have bitten us were still switched on when last measured, on 2026-08-06.** D-041 recorded them as the fix and they were never applied; the same symptom was reported again the following day. The asset stamps above now make the cache setting unable to break the site on its own, but the other two are unchanged and only the dashboard can change them. Re-run the two `curl` commands below before believing otherwise.
 
 Check them after any Cloudflare change:
 

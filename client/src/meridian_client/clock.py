@@ -38,8 +38,8 @@ from datetime import UTC, datetime
 CLOCK_RESOLUTION_S = time.get_clock_info("time").resolution
 """Smallest interval this machine's wall clock can distinguish.
 
-Read from the platform rather than assumed. It is about 15.6 ms on Windows and
-about 1 ns on Linux, and the difference matters: a localhost round trip completes
+Read from the Python runtime rather than assumed. It is about 15.6 ms on Windows
+and about 1 ns on Linux, and the difference matters: a localhost round trip completes
 inside one Windows tick, so ``received_at - sent_at`` measures as **exactly
 zero** — and an uncertainty of ``0.0`` is not a small number, it is a claim of
 perfect knowledge that MSP §4.2 and D-016 explicitly forbid.
@@ -50,17 +50,22 @@ __all__ = [
     "ClockEstimate",
     "estimate_clock_offset",
     "parse_server_time",
+    "parse_wire_time",
     "require_utc",
 ]
 
 
-def parse_server_time(raw: str) -> datetime:
-    """Parse the ``server_time`` field of ``GET /msp/v0/time``.
+def parse_wire_time(raw: str, field: str) -> datetime:
+    """Parse any MSP timestamp, whichever message it arrived in.
 
-    MSP §8 shows one form on the wire, ``2026-08-14T09:31:02Z``.
+    MSP §8 shows one form on the wire, ``2026-08-14T09:31:02Z``, and every
+    instant the protocol carries uses it — ``server_time``, an assignment's
+    ``start_at``, an element set's ``epoch``.
 
     Args:
         raw: The string as the platform sent it.
+        field: Which field this is, used in the error. A response carrying
+            several timestamps should say which one was wrong.
 
     Returns:
         The instant, as timezone-aware UTC.
@@ -78,8 +83,13 @@ def parse_server_time(raw: str) -> datetime:
     """
     parsed = datetime.fromisoformat(raw)
     if parsed.tzinfo is None:
-        raise ValueError(f"server_time carries no UTC offset: {raw!r}")
+        raise ValueError(f"{field} carries no UTC offset: {raw!r}")
     return parsed.astimezone(UTC)
+
+
+def parse_server_time(raw: str) -> datetime:
+    """Parse the ``server_time`` field of ``GET /msp/v0/time``."""
+    return parse_wire_time(raw, "server_time")
 
 
 def require_utc(t: datetime, field: str) -> datetime:

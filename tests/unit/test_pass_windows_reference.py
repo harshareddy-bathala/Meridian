@@ -182,7 +182,10 @@ def test_a_raised_floor_returns_a_subset_of_the_passes(
         search_over(iss, WINDOW_START, WINDOW_END, floor_deg=10.0)
     )
 
-    assert len(at_ten) < len(at_horizon)
+    # Exactly one dropped, not merely fewer. The docstring above names which pass
+    # goes and why; `<` would also be satisfied by a search that lost three of
+    # the four, which is a different fault wearing the same result.
+    assert len(at_ten) == len(at_horizon) - 1
     assert all(window.min_elevation_deg == 10.0 for window in at_ten)
     for window in at_ten:
         assert any(

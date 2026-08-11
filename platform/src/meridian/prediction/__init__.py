@@ -1,7 +1,7 @@
 """Feature extraction, yield model, horizon inference, calibration.
 
-**Phase 2. Stub only** — CLAUDE.md (repository root) says not to scaffold this
-beyond an empty module with a documented interface.
+**Phase 2. Not implemented** — this module is its interface and nothing else,
+built by Stage 17 of docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md.
 
 When implemented, this module provides:
 

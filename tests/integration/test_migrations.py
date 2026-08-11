@@ -575,3 +575,127 @@ def test_an_unknown_transmitter_polarisation_stays_storable(fixtures) -> None:
         " (satellite_id, centre_freq_hz, mode) values (%s, 137100000, 'lrpt')",
         "norad:99999",
     )
+
+
+# --- 0011, scheduling decisions -----------------------------------------------
+
+
+def _insert_scheduled_pass(
+    execute: Any, element_set_id: Any, *, hours_ahead: int = 0
+) -> Any:
+    """One pass for the fixture station and satellite, returning its id.
+
+    ``element_set_id`` is passed in rather than created here so two passes can
+    share one set: giving each its own would insert the same two lines twice and
+    collide on D-057's content key. ``hours_ahead`` then moves the acquisition,
+    which is what ``pass_prediction_unique`` keys on to tell two predictions
+    apart.
+    """
+    rows = execute(
+        "insert into passes (satellite_id, station_id, aos, los, max_elevation_deg,"
+        " max_elevation_at, aos_azimuth_deg, los_azimuth_deg, element_set_id,"
+        " min_elevation_deg)"
+        " values (%s, %s, now() + %s * interval '1 hour',"
+        " now() + %s * interval '1 hour' + interval '10 minutes', 40,"
+        " now() + %s * interval '1 hour' + interval '5 minutes', 10, 200, %s, 10)"
+        " returning id",
+        "norad:99999",
+        "st_fixture",
+        hours_ahead,
+        hours_ahead,
+        hours_ahead,
+        element_set_id,
+    )
+    return rows[0][0]
+
+
+def _insert_assignment(
+    execute: Any,
+    assignment_id: str,
+    pass_id: Any,
+    *,
+    score: float | None = None,
+    conflicts_with: str | None = None,
+) -> None:
+    """One assignment row. Naming a conflict makes it a skip, which is what a
+    row that lost to another decision is."""
+    execute(
+        "insert into assignments (assignment_id, pass_id, station_id, start_at,"
+        " end_at, centre_freq_hz, mode, timing_uncertainty_s, decision, reason,"
+        " score, conflicts_with_assignment_id)"
+        " values (%s, %s, %s, now(), now() + interval '12 minutes', 137100000,"
+        " 'lrpt', 0.5, %s, 'test', %s, %s)",
+        assignment_id,
+        pass_id,
+        "st_fixture",
+        "skipped" if conflicts_with else "scheduled",
+        score,
+        conflicts_with,
+    )
+
+
+def test_a_scheduling_decision_records_the_score_it_was_ranked_on(fixtures) -> None:
+    """`predicted_yield` could not have held this: it is capped at 1.
+
+    An elevation score is a number of degrees, so the two are different
+    quantities and storing one in the other's column would make the comparison
+    between EVALUATION.md's configurations unreadable.
+    """
+    pass_id = _insert_scheduled_pass(fixtures, _insert_element_set(fixtures))
+    _insert_assignment(fixtures, "asg_a", pass_id, score=47.2)
+
+    stored = fixtures("select score from assignments where assignment_id = %s", "asg_a")
+    assert stored[0][0] == 47.2
+
+
+def test_a_score_outside_the_predicted_yield_range_is_accepted(fixtures) -> None:
+    """180 degrees is nonsense as a yield and fine as a score — the point of
+    the new column being unconstrained."""
+    pass_id = _insert_scheduled_pass(fixtures, _insert_element_set(fixtures))
+    _insert_assignment(fixtures, "asg_b", pass_id, score=180.0)
+
+
+def test_a_skip_can_name_the_decision_that_displaced_it(fixtures) -> None:
+    """PROJECT.md §13's screen shows *why*, and "why" is another assignment."""
+    element_set_id = _insert_element_set(fixtures)
+    pass_id = _insert_scheduled_pass(fixtures, element_set_id)
+    other_pass_id = _insert_scheduled_pass(fixtures, element_set_id, hours_ahead=2)
+    _insert_assignment(fixtures, "asg_winner", pass_id, score=70.0)
+    _insert_assignment(
+        fixtures, "asg_loser", other_pass_id, score=12.0, conflicts_with="asg_winner"
+    )
+
+    stored = fixtures(
+        "select conflicts_with_assignment_id from assignments where assignment_id = %s",
+        "asg_loser",
+    )
+    assert stored[0][0] == "asg_winner"
+
+
+def test_an_assignment_cannot_be_displaced_by_itself(fixtures) -> None:
+    """A loop reusing one variable produces this and has no other symptom."""
+    pass_id = _insert_scheduled_pass(fixtures, _insert_element_set(fixtures))
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_assignment(fixtures, "asg_self", pass_id, conflicts_with="asg_self")
+
+
+def test_a_conflict_naming_no_such_assignment_is_refused(fixtures) -> None:
+    """The reference is a foreign key, so the explanation cannot dangle."""
+    pass_id = _insert_scheduled_pass(fixtures, _insert_element_set(fixtures))
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        _insert_assignment(
+            fixtures, "asg_orphan", pass_id, conflicts_with="asg_never_existed"
+        )
+
+
+def test_a_scheduled_assignment_names_no_conflict(fixtures) -> None:
+    """Null is the normal case, and the column stays nullable to say so."""
+    pass_id = _insert_scheduled_pass(fixtures, _insert_element_set(fixtures))
+    _insert_assignment(fixtures, "asg_clean", pass_id, score=55.0)
+
+    stored = fixtures(
+        "select score, conflicts_with_assignment_id from assignments"
+        " where assignment_id = %s",
+        "asg_clean",
+    )
+    assert stored[0] == (55.0, None)

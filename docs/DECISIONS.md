@@ -635,6 +635,8 @@ This is the honest fix for Phase 1. Real pagination needs per-assignment deliver
 
 *Rejected:* `order by (last_delivered_at nulls first, start_at)` with a delivery timestamp on `assignments`. It does fix starvation, and it is where Phase 2 should go. It is one column and one write per heartbeat per assignment — a write on the hot path, against a table Phase 1 has no automated writer for, to prevent a state Phase 1 cannot reach. Deferred with the scheduler, not rejected on the merits.
 
+*Amended by D-067.* The eligibility predicate above lists two states, which was complete until heartbeat reconciliation could produce a third: an assignment being executed is `in_progress`, and under the predicate as written it disappears from the response mid-pass. `in_progress` joins `issued` and `held`; the two bounds are unchanged.
+
 ---
 
 ## D-036 — The public site and the dashboard are two surfaces, not one
@@ -1392,6 +1394,154 @@ That is the same defect class as a docstring describing a test that does not exi
 **Rejected: one row per physical pass, updated in place as better elements arrive.** It discards the prediction history, which is the input to the uncertainty model, and it makes `passes` mutable — the same mistake D-057 corrected in `element_sets`.
 
 *Consequence:* the completeness denominator must count **distinct physical passes**, not rows, because one pass may legitimately hold several predictions. The grouping rule belongs to the evaluation stage that computes the ratio, and is owed by it rather than assumed here.
+
+---
+
+## D-064 — What pass generation skips, and why every skip is deliberate
+
+**2026-08-10 · accepted** · *`registry/capability_match.py`, `pass_generation.py`, Stage 7*
+
+The pass-generation job decides which station-and-satellite pairs are worth propagating at all. Every pair it skips is a pass that never enters `passes`, and `passes` is the completeness denominator (`EVALUATION.md` §4.1) — so **a wrong skip does not produce a visible error, it produces a better-looking ratio.** That asymmetry is why each filter is recorded here rather than left to read off the SQL.
+
+**A capability covers a transmission when the nominal frequency is inside the declared range, endpoints included, *and* the mode matches.** Mode comparison is case- and whitespace-insensitive but whole-string: `modes` is free lowercase text in Phase 1 because decoder naming varies too much across projects to freeze an enum, so `LRPT` against a catalogue's `lrpt` is a matching bug, while `lrpt` matching `lrpt_hrpt` by prefix would conflate two demodulators.
+
+**A chain declaring no modes matches nothing.** `station_capabilities.modes` defaults to `'{}'` and the API sets no minimum, so this is reachable from a real registration. Reading the empty list as "any mode" would schedule the station for every pass in its frequency range, and those become *confirmed misses*: the station heartbeats, listens, and returns no frames. That is the one input the reliability layer must never be handed on purpose — D-056 and rule 7 exist to separate a broken station from an idle one, and this would manufacture the confusion at the source. A station that receives no passes notices and asks; a reliability figure quietly poisoned by passes nobody could have decoded does not.
+
+**Where several chains cover one transmission, the search uses the lowest declared floor.** The station can take the pass if any of its hardware can. Searching at the higher floor would drop passes the other antenna could have received, and — again — a dropped pass is not merely unscheduled, it is absent from the denominator forever.
+
+**The nominal frequency is tested, not the range the signal actually sweeps.** A pass Doppler-shifts by roughly ±3 kHz at 137 MHz, so a chain whose declared range ends within a few kilohertz of the nominal loses part of the excursion. Phase 1 does not model that: the declared range describes hardware the operator knows and we do not, and narrowing it by a margin nobody has measured would exclude working stations. **This is a stated limit, not an oversight** — the failure it leaves is visible in the observation record as reception degrading at one end of a pass, rather than silent. Note the deliberate asymmetry with D-056: `was_listening` needs a Doppler-sized *tolerance* because it compares against a frequency a station reported mid-pass; this compares against a catalogue value that is never shifted.
+
+**Stations excluded: deleted, and token revoked. Stations kept: offline, stale, and never-seen.** The first two are permanent — a revoked token cannot authenticate, so such a station can never be issued an assignment nor report against one (D-017, D-058), and its passes would pad the denominator with opportunities nothing could act on. Liveness is the opposite case: a station that was down for a day genuinely had passes it did not take, *and that is the outage*. Removing them would let an outage improve the numbers, which is the same failure "absence is not a miss" guards against at the far end of the pipeline.
+
+**Satellites excluded: deleted, inactive, or with an inactive transmitter.** `EVALUATION.md` §5's silent-satellite confound — a pass that produced nothing may mean a bad prediction or a payload that was switched off. Where the catalogue already records that it was off, the cheapest place to keep the pass out is before it is computed.
+
+**The element set is the one current at the horizon start, never the newest.** Fixing it at the horizon start is what makes re-running the job over a past horizon reproduce its own output, which together with D-063's aligned grid is why a second run stores nothing. Using the newest set would change the answer every time a catalogue published, and each run would write a duplicate prediction of every pass.
+
+**One propagation per station-and-satellite pair, not per transmitter.** `passes` has no transmitter column, and rightly so: the geometry is a property of the two bodies, not of a downlink. A satellite whose transmitters a station can receive on different chains is searched once, at the lowest of those chains' floors.
+
+*Consequence, stated rather than discovered later:* a satellite that is tracked, has a live transmitter and has **no element set** the archive can place at the horizon start produces no passes. That is a gap in the archive rather than a decision, so it is **reported by name** in `GenerationReport.satellites_without_element_set` and printed by the CLI. Silence there would be indistinguishable from "this satellite never rises".
+
+---
+
+## D-065 — A schedule records what it scored, what displaced what, and how long the antenna takes
+
+**2026-08-10 · accepted** · *migration 0011; `scheduler/{elevation_baseline,conflict_rejection}.py`, Stage 7*
+
+`assignments` could say a pass was `skipped` and give a `reason` in prose. It could not say what the candidate scored, or which decision took the slot. `PROJECT.md` §13 calls the screen showing this reasoning *"the entire project"* — and a screen that says "skipped: conflicted with another pass" without naming the pass or ranking the two is showing an assertion, not a decision.
+
+**`score` is a new column, not `predicted_yield` reused.** `predicted_yield` is constrained `between 0 and 1` and *means* an expected yield. Configuration A's score is a number of degrees; B's is a priority-weighted quantity that is neither bounded nor a probability. Overloading one column with three meanings would make `EVALUATION.md` §3's comparison of A, B, C and D unreadable at exactly the point it has to be read. The column is unitless deliberately: the unit is a property of `model_config`, so the two are read together or not at all.
+
+**`conflicts_with_assignment_id` names an assignment, not a pass.** Naming the winning *pass* looks equivalent and is not: one physical pass can be predicted several times (D-063), so a pass id identifies an opportunity rather than the decision that displaced this candidate. Within a single run the two are interchangeable, which is why the pure scheduling layer works in pass ids and the run that writes the schedule maps them — across runs, only the assignment id still answers the question.
+
+**The ranking's tie-break is part of the algorithm.** Ties are not an edge case here: a station tracking one satellite sees near-identical geometry on consecutive days, and simulated stations sharing a seed produce exact ties by construction. Ranking is therefore a total order — score descending, then earlier acquisition, then `pass_id`. Left to the input order, the schedule would depend on the order rows came back from the database, and every number computed from it would stop being reproducible, which CLAUDE.md requires each one to be. Earlier acquisition wins because a pass in hand is worth more than an identical one later: less time for the station to go offline, for the element set to age, or for an operator to intervene.
+
+**Ranking is global; non-overlap is per station.** A pass competes for one station's antenna, so conflicts are judged within a station and two stations never conflict however much their passes overlap — a rule that serialised them would make every station after the first useless. Ranking deliberately does *not* group by station, because the Stage 18 optimiser allocates across the network and a per-station ranking here would quietly fix its shape.
+
+**Both selections and rejections are outputs, and every candidate appears in exactly one of them.** A scheduler returning only what it took would leave the skipped passes in no list and no table, and the screen explaining the schedule would have a hole in it with nothing able to detect one.
+
+**Turnaround between two receptions is an input, not a constant, and its value is not decided here.** `ARCHITECTURE.md` requires non-overlap *including slew and settling time*, so the rule takes a `turnaround_s` and honours it; two passes that abut exactly are compatible for a fixed antenna and are not for a rotator, and both answers are correct for the station they describe. What the *platform* should pass is genuinely undecided: nobody has measured station 001's rotator, `stations` has no column for it, and `station_capabilities.tracking` is a boolean that does not imply a duration. **Recorded as owed by the scheduler run** (Stage 7 Session D), which is the first code that must supply a number.
+
+*Consequence, stated rather than discovered later:* whatever value that run picks, the baselines and the Stage 18 optimiser must use the same one, or `EVALUATION.md`'s SC-1 measurement of **D − B** compares two schedulers working to different physical constraints and attributes the difference to the model.
+
+---
+
+## D-066 — Configuration B is a product, priority lives on the satellite, and a schedule can be re-run
+
+**2026-08-10 · accepted** · *migration 0012; `scheduler/{priority_baseline,run,assignment_records}.py`, Stage 7*
+
+`EVALUATION.md` §3 defines configuration **B** as *"elevation + priority weighting"* and says nothing about how the two combine. Writing the scheduler run surfaced two further gaps in the schema. All three are settled here.
+
+**B's score is elevation × priority, not elevation + priority.** The two have no common unit: degrees plus a weight is a number with no meaning, and its behaviour depends entirely on the arbitrary scale chosen for the weight — a network using priorities of 1–5 and one using 100–500 would rank differently for no reason anybody intended. A multiplier is a statement about relative worth, which is what "weighting" already means.
+
+*The property this was chosen for:* with every priority at 1.0, **B reduces to A exactly** — same order, same scores. That is asserted in the tests rather than assumed, and it is what makes SC-1's **D − B** a measurement of priority weighting rather than partly of a formula change.
+
+*Rejected: lexicographic — priority first, elevation as tie-break.* It lets a priority-2 satellite at 10° displace a priority-1 pass at 50°, so a station spends its slot on geometry that mostly does not decode. A weight should shade a decision, not overrule it.
+
+**A non-positive priority is refused rather than clamped.** Zero makes every pass of that satellite tie at exactly zero whatever its geometry, so the ranking silently stops being about elevation and falls through to the tie-break; negative inverts it, ranking that satellite's worst pass above its best. Both produce a schedule that looks entirely normal. A satellite an operator wants excluded is **deactivated**, which removes it from pass generation and from the completeness denominator honestly (D-064) rather than filling the denominator with opportunities the scheduler was never going to take.
+
+**Priority belongs to `satellites`, not to `assignments`.** `assignments.priority` records what a decision *used*, which is the right thing for it to record and useless as an input — reading it back would derive next week's weighting from last week's schedule, so the first run would have nothing and every run after it would be quoting itself. An operator has opinions about *objects*: "Meteor-M is the project, this cubesat is a bonus". Migration 0012 adds `satellites.priority`, defaulting to 1.0 to match `assignments.priority` and so preserve the reduction above.
+
+**A schedule has an identity, so a run can be repeated.** Re-running the scheduler inserted a second complete copy — the failure D-063 fixed for `passes`, in the table that consumes them, and worse here: two `scheduled` rows for one pass means a station told twice to receive the same thing, and MSP §4.2's reconciliation holds two ids for one reception. `unique (pass_id, model_config)` fixes it, and **both parts of the key matter**: keyed on the pass alone, configurations A and B would collide, and running both over one horizon is exactly what the ablation requires — the two schedules have to coexist to be compared.
+
+**Assignment ids are derived, not random**: `as_` + the first twelve hex of `sha256(pass_id:model_config)`, following `observations.observation_id` (D-027). A repeat therefore mints the same ids and collapses onto that constraint, and a skip can name the assignment that displaced it without a round trip to discover what id the winner was given.
+
+**Phase 1's station turnaround is zero, and that is a fact about the hardware rather than a simplification.** D-065 left this open. `PROJECT.md` builds station 001 with a fixed quadrifilar helix at 137 MHz and makes the tracking build — a crossed Yagi on a rotator — Tier 3 and explicitly optional: *"every claim the project makes is provable with a fixed antenna."* A fixed antenna does not slew, so there is nothing to wait for between passes, and any positive value would discard passes the station could genuinely have taken. The simulated stations are fixed by construction too.
+
+*What has to change before a tracking station can be scheduled correctly, stated now rather than discovered then:* turnaround becomes a per-station column with a **measured** value, because `station_capabilities.tracking` is a boolean that implies no duration. Until that exists, a station registering with a rotator will be scheduled as though it were fixed. The constant lives in `cli_schedule.PHASE_1_TURNAROUND_S` with this reasoning attached, and the non-overlap rule takes it as a parameter — so the change is a value and a column, not a rewrite.
+
+**One transmitter per assignment, chosen deterministically.** A satellite may carry several downlinks a station can receive; the assignment names one frequency. Phase 1 takes the first in the catalogue's order — by frequency, then by id. Which downlink is worth more is a question about expected yield, and there is no model to answer it with until Stage 17. Picking arbitrarily but reproducibly is the honest placeholder, and the choice is visible in `assignments.centre_freq_hz` rather than hidden.
+
+---
+
+## D-067 — Overdue is not expired, and an assignment being executed is still delivered
+
+**2026-08-10 · accepted** · *`registry/heartbeat_reconciliation.py`, `store/assignments.py`, `api/msp.py`, Stage 8*
+
+Wiring MSP §4.2's reconciliation into the heartbeat endpoint surfaced two defects. Both are the same shape as the one D-035 found in D-026 — a rule stated in two places, disagreeing — and both would have shipped, because each was a query written against one sentence of a specification that contains two.
+
+**An assignment the station still names does not expire, however overdue it is.** `expire_overdue_assignments` moved every `issued` or `held` row past its `end_at`. MSP §4.2's table defines that row as *"Absent, window has passed"*, and D-008 defines the state as the station never having taken the work. A station that held a pass, executed it and is queuing its observation satisfies neither, and expiring it is not a cosmetic mislabel: **D-008 has no arc from `expired` to `reported`**, so the observation arriving in Stage 9 would have nowhere to land. The predicate now excludes anything named in the heartbeat driving the sweep.
+
+*The cost, stated plainly:* a station that stops heartbeating altogether never has its overdue rows swept, because the only sweep is the one its own heartbeat triggers. D-026 accepted per-heartbeat reconciliation and Phase 1 has no periodic job; the alternative is a background sweeper, which is a scheduled process to maintain and a second writer on the hot table, to correct rows nothing reads until the reliability layer exists. **A periodic sweep is owed by the reliability stage**, which is also the first consumer that would notice the difference. Recording it because a station stuck at `held` forever is a real state a reader will find.
+
+**An assignment in `in_progress` must still be delivered.** The delivery predicate was `state in ('issued', 'held')`, which was correct until reconciliation could produce a third state. The moment a station reports a `listening` block, its row leaves `held` — and the assignment disappears from its own heartbeat response, mid-pass. A station that reboots while receiving is then told it has nothing to do.
+
+This is precisely the failure D-035 fixed by moving the lower bound from `start_at` to `end_at`, arriving a second time through a different column. MSP §4.2's prose is the arbiter and was already right: a station sees an assignment *"on every heartbeat until it is reported or its `end_at` has passed"* — and executing it is neither. The literal predicate printed two paragraphs later was the thing that was wrong.
+
+```
+state in ('issued', 'held', 'in_progress')  and  end_at >= now  and  start_at <= now + 2 h
+```
+
+*This amends D-035 as D-035 amended D-026.* `MSP-SPEC.md` §4.2's delivery block is updated in the same change, so the specification and the query cannot drift again.
+
+**Three smaller rules, settled while the comparison was being written.**
+
+*A station listing an assignment the platform has already `reported` or `expired` is not a protocol error.* MSP §4.2's fourth row is for an id *never issued to this station*, which is a broken implementation and worth a warning. A station lagging behind a state change is neither, and treating the two alike would fill the log with the one signal meant to mean something is genuinely wrong. The comparison is therefore against every assignment ever issued to that station, not against the two states that can transition.
+
+*A `listening` block naming an assignment absent from the same heartbeat's `held_assignments` starts nothing.* The message contradicts itself, and a contradiction is not evidence. `in_progress` means the station holds this work and is executing it; half of that claim, from a station that just denied the other half, does not support the transition — and `Registry.was_listening()` rests on it.
+
+*Holds are applied before starts.* A station whose pass opened between two heartbeats genuinely confirms and begins in one message, and `mark_assignment_in_progress` moves a row only out of `held`. Refusing the pair would delay `in_progress` by a whole 30-second interval, which against an 8-minute pass is the part carrying the rise.
+
+---
+
+## D-068 — The station writes things down before it claims them
+
+**2026-08-11 · accepted** · *`client/credentials.py`, `client/held_assignments.py`, Stage 8*
+
+A station holds three pieces of durable state: a registration key, a bearer token, and the assignments it has accepted. All three have the same failure mode — a power cut between deciding something and recording it — and the same fix, applied in the same direction each time.
+
+**The write comes before the claim.** The registration key reaches disk before the `register` request is sent (D-023), and an assignment reaches the record before it can appear in `held_assignments`. Reversed, each becomes a lie the platform cannot detect: a consumed invite with no key to recover it, or a station reporting that a pass is covered when the work vanished with its memory. Getting the order right is what removes the error path entirely — if the write fails, the station simply never makes the claim, the platform reads absence as a decline (D-003), and the outcome is correct with nobody handling an exception.
+
+**Every write is temp-then-rename, at `0600` for the secrets.** A truncated credential file is worse than an absent one: absent is a station that should register, truncated is a station that can neither register nor say why. The mode is enforced on POSIX and is best-effort on Windows, which honours only the read-only bit — a station client's real deployment is a Raspberry Pi sharing a filesystem with other service accounts, and that is the case the mode is for.
+
+**Absent and corrupt are different, and are treated differently.** A missing credential file returns `None`, because a first boot is the normal path and not a failure. A file that exists and cannot be read *raises*, because registering again would consume a second invite and create a duplicate row for one physical installation. The same split applies to the assignment record: an empty record is a station that genuinely holds nothing, and an unreadable one is a station that may be holding a pass right now — treating the second as the first would silently decline work already accepted.
+
+**The key and the token are separate files** because they have different lifetimes. A bearer token rotates; the registration key outlives every token it ever recovers (D-034). One combined file would rewrite the key on every rotation, which is the one thing rotation must not touch.
+
+**The record's file format is the wire format.** An assignment is stored exactly as MSP §4.3 delivered it, so reading a record and reading a response are the same code path. A second representation would be a second parser, and the two would drift — with the drift showing up as a station that reboots and misreads its own window.
+
+---
+
+## D-069 — The loop's cadence, and why the execution seam exists before the radio
+
+**2026-08-11 · accepted** · *`client/station_loop.py`, `client/execution.py`, Stage 8*
+
+**A tick that overran is skipped, not queued.** The loop schedules from when a tick was *due*, so the cadence does not drift by the duration of the work; but when a tick runs past the next slot entirely — a long network stall — the missed slots are dropped rather than fired back to back. A heartbeat states the present (D-003), so a burst of them carries no information that the next single one would not, and fifty simulated stations catching up together produce exactly the traffic shape of the incident that caused the stall.
+
+**Scheduled on a monotonic clock, never the wall clock.** A station is *expected* to have its clock corrected — measuring and reporting that correction is what §4.2's `clock_offset_s` is for — and a loop scheduled against a clock that can step backwards stalls, while one that steps forwards spins.
+
+**The heartbeat gets a smaller retry budget than the transport's default.** Four attempts at a ten-second read timeout, plus backoff, can exceed forty seconds; against a thirty-second interval that is a request still in flight when the next is due. `retry_policy_attempts_for` derives the count from the interval instead. The reasoning is that **a heartbeat that cannot finish inside its own interval has already failed** — retrying it does not deliver it sooner than the next tick, and the next tick carries the same statement anyway.
+
+**An unreachable platform is not a refused one.** A transport failure leaves the station executing and holding; only `401` stops the loop, and it stops rather than retries or re-registers (D-024). Work is started from the on-disk record and never from a response, which is what makes an outage during a pass change nothing the station does.
+
+**`PassExecutor` ships now, with one implementation that receives nothing.** The receiver, decoder and rotator are Stage 13, and it would have been reasonable to leave the seam until then. Three reasons not to:
+
+- Without something to start and stop, `assignments.state` never reaches `in_progress` and the whole D-067 path is untestable from the client side.
+- `Registry.was_listening()` is the authority every reliability figure rests on, and it needs `listening` blocks to exist before there is a decoder to produce them.
+- A station with no radio attached is a real configuration, not a gap: a simulated station (Stage 10), a client under test, a Pi being commissioned before its SDR arrives. All three hold assignments, report listening, and produce evidence.
+
+*Named `PassExecutor`, not `Executor` or `Receiver`.* Stage 13 uses `Receiver` for the narrower thing that owns an SDR; an executor drives a receiver, a decoder and possibly a rotator, and the loop should depend on the whole job rather than one part of it.
+
+**Neither `begin` nor `end` may block for the length of a pass.** The loop is single-threaded and must keep heartbeating throughout an 8-to-15-minute reception. An implementation that blocked would stop the station reporting exactly while it had something to report, and the platform would read that as the station going offline — turning a successful pass into a confirmed outage.
 
 ---
 

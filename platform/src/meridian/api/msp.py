@@ -39,8 +39,20 @@ from meridian.api.models.registration import RegisterRequestBody, RegisterRespon
 from meridian.api.versioning import require_msp_version
 from meridian.config import Settings
 from meridian.registry import InvalidInviteError
+from meridian.registry.heartbeat_reconciliation import (
+    HeldReport,
+    LiveAssignments,
+    reconcile,
+)
 from meridian.registry.psycopg_registry import PsycopgRegistry
-from meridian.store.assignments import DueAssignment, find_due_assignments
+from meridian.store.assignments import (
+    DueAssignment,
+    expire_overdue_assignments,
+    find_assignment_ids_by_state,
+    find_due_assignments,
+    mark_assignment_in_progress,
+    mark_assignments_held,
+)
 from meridian.store.heartbeats import insert_heartbeat, touch_last_heartbeat
 from meridian.store.stations import Connection, find_station_provenance
 
@@ -194,13 +206,13 @@ def _record_heartbeat(
 ) -> None:
     """Store one heartbeat and bump the station's last-seen instant.
 
-    Both writes in one transaction: a heartbeat row without the ``stations``
-    bump would leave ``liveness()`` reading ``offline`` for a station that had
-    just reported, and the bump without the row would lose the listening
-    evidence ``was_listening()`` depends on.
+    Both writes together: a heartbeat row without the ``stations`` bump would
+    leave ``liveness()`` reading ``offline`` for a station that had just
+    reported, and the bump without the row would lose the listening evidence
+    ``was_listening()`` depends on.
 
     Args:
-        conn: Open connection. This function owns the transaction.
+        conn: Open connection, with a transaction already open.
         body: The validated §4.2 payload.
         station_id: The identity the bearer token authenticated as — not
             ``body.station_id``, which the caller has already checked matches.
@@ -209,13 +221,83 @@ def _record_heartbeat(
     if provenance is None:  # pragma: no cover — the token just resolved to it
         raise MspError(NOT_OWNER, NOT_OWNER_MESSAGE)
 
-    with conn.transaction():
-        # `simulated` comes from the registration record, never from the wire:
-        # a station's own claim about its nature is not evidence (D-048,
-        # CLAUDE.md rule 5). MSP §4.2 puts no such field on the wire today, and
-        # this is what keeps that true if a later revision adds one.
-        insert_heartbeat(conn, body.to_new_heartbeat(simulated=provenance.simulated))
-        touch_last_heartbeat(conn, station_id)
+    # `simulated` comes from the registration record, never from the wire: a
+    # station's own claim about its nature is not evidence (D-048, CLAUDE.md
+    # rule 5). MSP §4.2 puts no such field on the wire today, and this is what
+    # keeps that true if a later revision adds one.
+    insert_heartbeat(conn, body.to_new_heartbeat(simulated=provenance.simulated))
+    touch_last_heartbeat(conn, station_id)
+
+
+LIVE_STATES = ("issued", "held", "in_progress", "reported", "expired")
+"""Every state an assignment this station was issued can be in.
+
+Read whole rather than filtered to the two states that transition, because
+:class:`LiveAssignments` needs the full set to answer MSP §4.2's protocol-error
+row: an id is foreign when it was *never* issued here, not when it is merely
+finished.
+"""
+
+
+def _reported_holdings(body: HeartbeatRequestBody) -> HeldReport:
+    """The station's own claims, lifted out of the §4.2 payload."""
+    return HeldReport(
+        held_assignment_ids=frozenset(body.held_assignments),
+        listening_assignment_id=(
+            body.listening.assignment_id if body.listening else None
+        ),
+    )
+
+
+def _apply_reconciliation(
+    conn: Connection, station_id: str, body: HeartbeatRequestBody
+) -> None:
+    """Move this station's assignments to match what it just reported.
+
+    Args:
+        conn: Open connection, with a transaction already open.
+        station_id: The authenticated station.
+        body: The validated §4.2 payload.
+
+    Note:
+        ``to_hold`` is applied before ``to_start`` because a station may confirm
+        an assignment and report listening on it in the same heartbeat, and
+        ``mark_assignment_in_progress`` moves a row only out of ``held``.
+
+        Expiry runs last and is told what the station still names, so an
+        assignment held past its window survives to be reported (D-067).
+    """
+    by_state = {
+        state: find_assignment_ids_by_state(conn, station_id, [state])
+        for state in LIVE_STATES
+    }
+    live = LiveAssignments(
+        every_id=frozenset().union(*by_state.values()),
+        awaiting_hold=frozenset(by_state["issued"]),
+        already_held=frozenset(by_state["held"]),
+    )
+    outcome = reconcile(live, _reported_holdings(body))
+
+    if outcome.foreign_ids:
+        # MSP §4.2: "Present, but never issued to this station. Log and ignore;
+        # do not act on it." Logged at warning because the only way to produce it
+        # is a station implementation that invented an id or crossed its wires.
+        _log.warning(
+            "station %s reported holding %d assignment(s) never issued to it: %s",
+            station_id,
+            len(outcome.foreign_ids),
+            ", ".join(outcome.foreign_ids),
+        )
+
+    if outcome.to_hold:
+        mark_assignments_held(conn, station_id, outcome.to_hold)
+    if outcome.to_start is not None:
+        mark_assignment_in_progress(
+            conn, station_id=station_id, assignment_id=outcome.to_start
+        )
+    expire_overdue_assignments(
+        conn, station_id, still_held=sorted(body.held_assignments)
+    )
 
 
 def _assignments_due_now(
@@ -263,6 +345,14 @@ def heartbeat(
     Raises:
         MspError: ``unauthorized`` (401) from the bearer dependency;
             ``not_owner`` (403) when the body names a different station.
+
+    Note:
+        Recording, reconciling and reading back happen in **one transaction**, so
+        the response describes the state this heartbeat just produced. Split
+        across two, a station could be told to hold an assignment that a
+        concurrent write had already expired, and the listening evidence
+        ``was_listening()`` rests on could land without the transition it
+        justifies.
     """
     if body.station_id != station_id:
         _log.warning(
@@ -273,12 +363,12 @@ def heartbeat(
         raise MspError(NOT_OWNER, NOT_OWNER_MESSAGE)
 
     now = utc_now()
-    _record_heartbeat(conn, body, station_id)
+    with conn.transaction():
+        _record_heartbeat(conn, body, station_id)
+        _apply_reconciliation(conn, station_id, body)
+        due = _assignments_due_now(conn, station_id, now)
 
     return HeartbeatResponseBody(
-        assignments=[
-            AssignmentMessage.from_due_assignment(due)
-            for due in _assignments_due_now(conn, station_id, now)
-        ],
+        assignments=[AssignmentMessage.from_due_assignment(one) for one in due],
         server_time=format_server_time(now),
     )

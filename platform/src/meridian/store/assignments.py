@@ -7,9 +7,10 @@ to compose. D-008's state machine (``issued`` to ``held`` to ``in_progress`` to
 ``reported``, or ``issued``/``held`` straight to ``expired``) is enforced by
 callers choosing which of these functions to call, not by anything in this file.
 
-Of these, only :func:`find_due_assignments` has a caller today —
-``meridian.api.msp`` reads it to answer a heartbeat. The state transitions are
-written and tested but unused: MSP §4.2 reconciliation is not implemented yet.
+``meridian.api.msp`` composes most of this file into one transaction per
+heartbeat: it reconciles what the station reported, applies the transitions
+:mod:`meridian.registry.heartbeat_reconciliation` derived, expires what the
+station has stopped naming, and reads back what is due.
 """
 
 from __future__ import annotations
@@ -24,9 +25,11 @@ from meridian.store.stations import Connection
 
 __all__ = [
     "DueAssignment",
+    "NewAssignment",
     "expire_overdue_assignments",
     "find_assignment_ids_by_state",
     "find_due_assignments",
+    "insert_assignments",
     "mark_assignment_in_progress",
     "mark_assignments_held",
 ]
@@ -131,24 +134,44 @@ def mark_assignment_in_progress(
         return cur.rowcount > 0
 
 
-def expire_overdue_assignments(conn: Connection, station_id: str) -> int:
-    """``(issued|held) -> expired`` where ``end_at`` has passed.
+def expire_overdue_assignments(
+    conn: Connection, station_id: str, *, still_held: Sequence[str]
+) -> int:
+    """``(issued|held) -> expired`` for overdue rows the station no longer names.
 
-    Scoped to one station and called as part of that station's own
-    heartbeat — MSP §4.2 describes reconciliation per-heartbeat, and Phase
-    1 has no periodic sweep job independent of one.
+    Args:
+        conn: An open connection. This function owns its transaction.
+        station_id: Whose assignments to sweep.
+        still_held: The ``held_assignments`` from the heartbeat driving this
+            call. Rows named here are exempt however overdue they are.
 
     Returns:
         How many rows expired.
+
+    Note:
+        **Being overdue is not enough** (D-067). MSP §4.2 defines this row of its
+        table as *absent, window has passed*, and D-008 defines ``expired`` as
+        the station never having taken the work. A station still naming an
+        assignment after its window closed took the work and is finishing with
+        it — expiring that row would both misreport what happened and strand the
+        observation, because D-008 has no arc from ``expired`` to ``reported``.
+
+        Scoped to one station and called as part of that station's own heartbeat.
+        A station that stops heartbeating altogether therefore never has its
+        overdue rows swept; Phase 1 has no periodic job independent of a
+        heartbeat, and D-067 records that sweep as owed by the reliability stage.
     """
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
             update assignments
             set state = 'expired'
-            where station_id = %s and state in ('issued', 'held') and end_at < now()
+            where station_id = %s
+              and state in ('issued', 'held')
+              and end_at < now()
+              and not (assignment_id = any(%s))
             """,
-            (station_id,),
+            (station_id, list(still_held)),
         )
         return cur.rowcount
 
@@ -156,12 +179,20 @@ def expire_overdue_assignments(conn: Connection, station_id: str) -> int:
 def find_due_assignments(
     conn: Connection, station_id: str, *, horizon_end: datetime
 ) -> list[DueAssignment]:
-    """Every assignment eligible for delivery to ``station_id`` (D-026, D-035).
+    """Every assignment eligible for delivery to ``station_id`` (D-026, D-035, D-067).
 
-    ``state in ('issued', 'held') and end_at >= now() and start_at <=
-    horizon_end``, ordered by ``start_at``. The lower bound is ``end_at``,
-    not ``start_at`` — an assignment whose window has opened is the
+    ``state in ('issued', 'held', 'in_progress') and end_at >= now() and
+    start_at <= horizon_end``, ordered by ``start_at``. The lower bound is
+    ``end_at``, not ``start_at`` — an assignment whose window has opened is the
     station's *current* work and must still be returned.
+
+    ``in_progress`` is in the predicate for the same reason (D-067). Without it
+    an assignment disappears from the response the moment the station reports
+    listening on it, so a station that reboots mid-pass is told it has nothing to
+    do — the failure D-035 fixed by moving the lower bound, arriving again
+    through a different column. MSP §4.2's prose is the arbiter: a station sees
+    an assignment on every heartbeat until it is reported or its window has
+    passed, and executing it is neither.
 
     Applies **no limit and does no logging**. Capping at 8 and logging
     D-035's "more than 8 eligible" warning belongs to whoever is making the
@@ -192,7 +223,7 @@ def find_due_assignments(
             join passes p on p.id = a.pass_id
             join element_sets es on es.id = p.element_set_id
             where a.station_id = %s
-              and a.state in ('issued', 'held')
+              and a.state in ('issued', 'held', 'in_progress')
               and a.end_at >= now()
               and a.start_at <= %s
             order by a.start_at asc
@@ -200,3 +231,113 @@ def find_due_assignments(
             (station_id, horizon_end),
         )
         return cur.fetchall()
+
+
+@dataclass(frozen=True, slots=True)
+class NewAssignment:
+    """One scheduling decision in insertable form — taken or skipped.
+
+    A skip is a row here, not an absence. The scheduler considered the pass and
+    decided against it, and docs/PROJECT.md §13 calls the screen that explains
+    those decisions "the entire project" — so a skipped pass that left no row
+    would be unrecoverable the moment the run ended.
+
+    ``issued_at`` is absent on purpose: it is the platform's own clock and is
+    left to the column default, the same reasoning ``insert_heartbeat`` applies
+    to ``received_at``.
+    """
+
+    assignment_id: str
+    pass_id: int
+    station_id: str
+
+    start_at: datetime
+    end_at: datetime
+    """The *assignment's* window, wider than the pass (D-021).
+
+    Opened out by the platform's stated timing uncertainty, because a station
+    recording from exactly the predicted acquisition starts after a pass whose
+    element set was stale has already begun.
+    """
+
+    centre_freq_hz: int
+    mode: str
+    timing_uncertainty_s: float
+
+    decision: str
+    """``scheduled`` or ``skipped`` — what the scheduler wanted."""
+
+    reason: str
+    model_config: str
+    score: float
+    """What the ranking function returned. Read with ``model_config`` or not at
+    all: the unit differs by configuration (D-065)."""
+
+    conflicts_with_assignment_id: str | None
+    """For a skip, the assignment that took the slot. ``None`` otherwise."""
+
+    priority: float
+    simulated: bool
+    """Copied from the pass, which copied it from the station (D-013)."""
+
+
+def insert_assignments(conn: Connection, decisions: Sequence[NewAssignment]) -> int:
+    """Write a whole run's decisions in one transaction, returning how many.
+
+    Args:
+        conn: An open connection. This function manages its own transaction,
+            which nests as a savepoint when the caller already has one open.
+        decisions: Every selection and every skip from one scheduler run, in an
+            order where each ``conflicts_with_assignment_id`` names a row
+            already in the sequence or already stored.
+
+    Returns:
+        The number of rows written.
+
+    Raises:
+        psycopg.errors.ForeignKeyViolation: A ``conflicts_with_assignment_id``
+            names no assignment, or a ``pass_id`` names no pass.
+        psycopg.errors.UniqueViolation: An ``assignment_id`` already exists.
+
+    Note:
+        **One transaction for the whole run, unlike ``insert_pass``.** A pass is
+        a standalone prediction and a half-finished generation run leaves
+        correct rows; a schedule is not. Its rows reference each other — a skip
+        names the selection that displaced it — so a run that stopped halfway
+        could leave a skip whose winner was never written, or a set of
+        selections that silently under-uses a station. Either is a schedule that
+        reads as complete and is not.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany(
+            """
+            insert into assignments
+                (assignment_id, pass_id, station_id, start_at, end_at,
+                 centre_freq_hz, mode, timing_uncertainty_s, decision, reason,
+                 model_config, score, conflicts_with_assignment_id, priority,
+                 simulated)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            on conflict on constraint assignment_decision_unique do nothing
+            """,
+            [
+                (
+                    one.assignment_id,
+                    one.pass_id,
+                    one.station_id,
+                    one.start_at,
+                    one.end_at,
+                    one.centre_freq_hz,
+                    one.mode,
+                    one.timing_uncertainty_s,
+                    one.decision,
+                    one.reason,
+                    one.model_config,
+                    one.score,
+                    one.conflicts_with_assignment_id,
+                    one.priority,
+                    one.simulated,
+                )
+                for one in decisions
+            ],
+        )
+        return cur.rowcount

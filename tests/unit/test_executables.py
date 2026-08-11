@@ -63,30 +63,49 @@ def test_meridian_version_succeeds() -> None:
     assert __version__ in result.stdout
 
 
-@pytest.mark.parametrize(
-    "args",
-    [
-        [
-            "passes",
-            "generate",
-            "--from",
-            "2026-08-02T00:00:00Z",
-            "--to",
-            "2026-08-03T00:00:00Z",
-        ],
-        ["serve"],
-    ],
-)
+@pytest.mark.parametrize("args", [["serve"]])
 def test_unimplemented_subcommands_report_instead_of_raising(args: list[str]) -> None:
     """Exit 2 with a message naming the stage, never a traceback.
 
     A stub that raises is discovered by whoever needed the command, at the moment
     they needed it. A stub that answers is discovered by reading its output.
+
+    ``serve`` is the last one. ``passes generate`` was here until Stage 7 built
+    it, and it is now covered by
+    :func:`test_passes_generate_rejects_a_local_time_horizon` and by
+    tests/integration/test_pass_generation.py.
     """
     result = _run("-m", "meridian.cli", *args)
     assert result.returncode == 2
     assert "not implemented yet" in result.stderr
     assert "Stage" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_passes_generate_rejects_a_local_time_horizon() -> None:
+    """A horizon without an offset is refused before any connection is opened.
+
+    The operator running this may not be in UTC, and a horizon shifted by their
+    local offset would generate a day of passes for the wrong day — quietly, and
+    with every row looking exactly as legitimate as a correct one.
+
+    Reaching a database is not required to prove it, which is what keeps this a
+    unit test: the rejection happens first, so this passes on a machine with no
+    Postgres at all.
+    """
+    result = _run(
+        "-m",
+        "meridian.cli",
+        "passes",
+        "generate",
+        "--from",
+        "2026-08-02T00:00:00",
+        "--to",
+        "2026-08-03T00:00:00Z",
+    )
+
+    assert result.returncode == 1
+    assert "--from" in result.stderr
     assert "Traceback" not in result.stderr
 
 
@@ -129,6 +148,32 @@ def test_simulator_station_runs_as_a_module() -> None:
 def test_simulator_rejects_a_nonsense_station_count() -> None:
     result = _run("-m", "meridian_sim.station", "--count", "0")
     assert result.returncode == 1
+
+
+def test_simulator_reports_an_unreadable_seed_rather_than_crashing() -> None:
+    """A typo in `.env` must not become a container that restarts forever.
+
+    compose passes SIMULATOR_SEED straight through under `restart:
+    unless-stopped`, so anything raised while the parser is being built is a
+    crash loop that reports the same traceback to nobody. The variable is named
+    in the message because "must be an integer" is only actionable if the
+    operator knows which of the three to look at.
+    """
+    import os
+
+    env = {**os.environ, "SIMULATOR_SEED": "not-a-number"}
+    result = subprocess.run(
+        [sys.executable, "-m", "meridian_sim.station"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "SIMULATOR_SEED" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_readme_does_not_reference_the_pre_d012_module_path() -> None:

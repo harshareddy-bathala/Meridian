@@ -19,7 +19,6 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-ALEMBIC_INI = REPO_ROOT / "deploy" / "alembic.ini"
 TESTS_ROOT = Path(__file__).resolve().parent
 
 DIRECTORY_MARKERS = {

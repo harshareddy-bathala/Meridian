@@ -80,6 +80,10 @@ def test_a_station_with_a_fast_clock_reports_a_negative_offset_end_to_end(
     """
     platform_now = datetime(2026, 8, 14, 9, 31, 2, tzinfo=UTC)
     monkeypatch.setattr(msp, "utc_now", lambda: platform_now)
+    # Port 1: a database nothing can connect to. MSP §8 says `/time` touches no
+    # database, and pointing the app at an unreachable one is what holds that to
+    # account — if the endpoint ever grew a query, this test would stop passing
+    # rather than quietly acquiring a dependency the protocol says it has not got.
     monkeypatch.setenv("DATABASE_URL", "postgresql://meridian:meridian@127.0.0.1:1/x")
 
     with TestClient(create_app()) as client:

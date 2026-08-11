@@ -100,6 +100,7 @@ class Settings:
 
 
 def _split_scheme(url: str) -> tuple[str, str]:
+    """Split a URL into its scheme and everything after ``://``."""
     scheme, separator, rest = url.partition("://")
     if not separator:
         raise InsecureConfigurationError(f"DATABASE_URL is not a URL: {url!r}")
@@ -146,6 +147,7 @@ _FALSE = frozenset({"", "0", "false", "no", "off"})
 
 
 def _bool_env(name: str, default: bool) -> bool:
+    """Read a boolean variable, refusing a spelling that is neither true nor false."""
     raw = os.environ.get(name)
     if raw is None:
         return default
@@ -161,6 +163,7 @@ def _bool_env(name: str, default: bool) -> bool:
 
 
 def _int_env(name: str, default: int) -> int:
+    """Read an integer variable, treating unset and empty alike as the default."""
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
@@ -173,6 +176,7 @@ def _int_env(name: str, default: int) -> int:
 
 
 def _database_url() -> str:
+    """``DATABASE_URL`` if set, else one assembled from the ``POSTGRES_*`` parts."""
     url = os.environ.get("DATABASE_URL", "").strip()
     if url:
         return url
@@ -184,8 +188,12 @@ def _database_url() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
-def load_settings(*, env: dict[str, str] | None = None) -> Settings:
+def load_settings() -> Settings:
     """Read settings from the environment and refuse an unsafe combination.
+
+    Reads ``os.environ`` directly and takes no override mapping, so a test sets
+    a variable the same way a deployment does — ``monkeypatch.setenv``, which
+    unsets it again afterwards. See ``tests/unit/test_config.py``.
 
     **The platform will not start with placeholder secrets on a public address.**
     D-006 argues that shipping an unauthenticated write endpoint to a public
@@ -204,9 +212,6 @@ def load_settings(*, env: dict[str, str] | None = None) -> Settings:
     number rather than an exposure, so loopback is not an excuse — see
     :func:`_refuse_an_interval_liveness_cannot_describe`.
     """
-    if env is not None:
-        os.environ.update(env)
-
     settings = Settings(
         database_url=_database_url(),
         api_port=_int_env("API_PORT", 8000),
