@@ -33,6 +33,7 @@ from meridian_client.assignment_message import (
 
 __all__ = [
     "AssignmentRecord",
+    "due_now",
     "merge_by_id",
     "still_current",
 ]
@@ -87,6 +88,31 @@ def still_current(held: Sequence[Assignment], now: datetime) -> tuple[Assignment
         (D-067).
     """
     return tuple(one for one in held if one.end_at >= now)
+
+
+def due_now(held: Sequence[Assignment], now: datetime) -> Assignment | None:
+    """The held assignment a station should be receiving at ``now``, if any.
+
+    Args:
+        held: What the station has.
+        now: Timezone-aware UTC.
+
+    Returns:
+        The earliest assignment whose window is open, or ``None`` when the
+        station has nothing to do.
+
+    Note:
+        **Earliest first, and only one.** A station has one antenna chain in
+        Phase 1, and the scheduler already guarantees the windows it issues do
+        not overlap for one station (D-065). If two are open anyway — because two
+        configurations were scheduled, or a clock stepped — taking the earliest
+        is the choice that finishes work rather than abandoning a pass already
+        under way for one that just began.
+    """
+    open_now = [one for one in held if one.start_at <= now <= one.end_at]
+    if not open_now:
+        return None
+    return min(open_now, key=lambda one: (one.start_at, one.assignment_id))
 
 
 class AssignmentRecord:

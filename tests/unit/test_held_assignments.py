@@ -23,6 +23,7 @@ from meridian_client.assignment_message import (
 )
 from meridian_client.held_assignments import (
     AssignmentRecord,
+    due_now,
     merge_by_id,
     still_current,
 )
@@ -234,3 +235,32 @@ def test_replacing_the_record_leaves_no_partial_file(tmp_path: Path) -> None:
     record.accept([assignment("as_b")])
 
     assert [one.name for one in sorted(tmp_path.iterdir())] == ["held.json"]
+
+
+def test_two_open_windows_resolve_to_the_one_that_started_first() -> None:
+    """The scheduler does not issue overlapping windows to one station (D-065), so
+    this is the case where something else went wrong — two configurations
+    scheduled, or a clock stepped. Finishing the pass already under way beats
+    abandoning it for one that just began, and either way the choice has to be
+    the same on every tick or the station would thrash between them.
+    """
+    started_earlier = assignment("as_first", starts_in_minutes=-5, minutes_long=11)
+    started_later = assignment("as_second", starts_in_minutes=-1, minutes_long=11)
+
+    chosen = due_now((started_later, started_earlier), NOW)
+
+    assert chosen is not None
+    assert chosen.assignment_id == "as_first"
+
+
+def test_nothing_is_due_before_a_window_opens() -> None:
+    """A station must not start early: the platform already widened the window by
+    its own timing uncertainty (D-021), so the start it was given is the start."""
+    assert due_now((assignment("as_a", starts_in_minutes=5),), NOW) is None
+
+
+def test_nothing_is_due_after_a_window_closes() -> None:
+    """Symmetric, and the reason the loop can call this every tick unguarded."""
+    finished = assignment("as_a", starts_in_minutes=-30, minutes_long=11)
+
+    assert due_now((finished,), NOW) is None
