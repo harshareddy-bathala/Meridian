@@ -64,6 +64,18 @@ Registration requires an **invite token**, issued out of band by the platform op
 
 On first contact a station registers and receives a `station_id` and a bearer token. The bearer token is presented on every subsequent request; the invite token is used once and never again.
 
+**How the token is presented**, which every implementer needs and which this section previously left to be guessed:
+
+```http
+Authorization: Bearer <token>
+```
+
+One space between the scheme and the token. The token is opaque — a station must not parse it, and the platform makes no promise about its length or alphabet beyond it being printable ASCII with no whitespace. `register` and `time` take no `Authorization` header; `heartbeat` and `observations` require one.
+
+A request whose header is absent, whose scheme is not `Bearer`, or whose token is unknown or revoked receives `401 unauthorized` (§6). The three are one response on purpose: distinguishing them would tell an unauthenticated caller which station ids exist.
+
+The scheme is matched **case-sensitively as `Bearer`**. RFC 7235 makes HTTP auth schemes case-insensitive, so this is stricter than HTTP requires, and it is stated here because a conformance kit cannot be written against an unstated rule — a station sending `bearer` is refused, and its implementer is entitled to read why in the specification rather than discover it against a running platform.
+
 Tokens, not certificates. A microcontroller station cannot be assumed to hold a certificate store or terminate TLS. Where the transport is unencrypted, the token is the only credential, and the platform must treat station-submitted data as untrusted input regardless.
 
 **A station may only submit observations for assignments issued to it.**

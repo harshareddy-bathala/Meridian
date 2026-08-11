@@ -635,6 +635,8 @@ This is the honest fix for Phase 1. Real pagination needs per-assignment deliver
 
 *Rejected:* `order by (last_delivered_at nulls first, start_at)` with a delivery timestamp on `assignments`. It does fix starvation, and it is where Phase 2 should go. It is one column and one write per heartbeat per assignment — a write on the hot path, against a table Phase 1 has no automated writer for, to prevent a state Phase 1 cannot reach. Deferred with the scheduler, not rejected on the merits.
 
+*Amended by D-067.* The eligibility predicate above lists two states, which was complete until heartbeat reconciliation could produce a third: an assignment being executed is `in_progress`, and under the predicate as written it disappears from the response mid-pass. `in_progress` joins `issued` and `held`; the two bounds are unchanged.
+
 ---
 
 ## D-036 — The public site and the dashboard are two surfaces, not one
