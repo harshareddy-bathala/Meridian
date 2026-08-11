@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -125,6 +126,11 @@ class MspTransport:
             time endpoint is unauthenticated, so a station that has lost its
             token can still construct this and establish a clock offset (MSP §8).
         retry: Backoff policy for transport failures and retriable statuses.
+        http_transport: Where the bytes actually go. Defaults to a real network
+            connection; a test supplies one that reaches the platform in-process
+            instead, so the headers, the retries and the error handling under
+            test are the ones a station really uses rather than a rehearsal of
+            them.
     """
 
     def __init__(
@@ -133,16 +139,19 @@ class MspTransport:
         *,
         bearer_token: str | None = None,
         retry: RetryPolicy | None = None,
+        http_transport: httpx.BaseTransport | None = None,
     ) -> None:
         """Open a client against ``base_url``."""
         self._retry = retry or RetryPolicy()
         headers = {"MSP-Version": MSP_VERSION}
         if bearer_token is not None:
+            # MSP §3 fixes the form: one space, and the scheme spelled `Bearer`.
             headers["Authorization"] = f"Bearer {bearer_token}"
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers=headers,
             timeout=httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
+            transport=http_transport,
         )
 
     def close(self) -> None:
@@ -179,21 +188,57 @@ class MspTransport:
         server_time = parse_server_time(response.json()["server_time"])
         return estimate_clock_offset(sent_at, received_at, server_time)
 
+    def post_json(self, path: str, body: Mapping[str, object]) -> httpx.Response:
+        """POST ``body`` as JSON to ``path``, with the same retry policy as a read.
+
+        Args:
+            path: Endpoint path below the base URL, e.g. ``/msp/v0/register``.
+            body: The request object. Serialised by ``httpx``; nothing here
+                inspects it, because this class holds no protocol semantics.
+
+        Returns:
+            The successful response, for the caller to parse.
+
+        Raises:
+            ProtocolError: The platform returned an MSP error, or exhausted the
+                retry policy while returning retriable ones.
+            httpx.HTTPError: The platform could not be reached after the retry
+                policy was exhausted.
+
+        Note:
+            **Retried on the same terms as a GET, which is safe only because
+            every MSP write is idempotent.** ``register`` is made so by the
+            registration key it carries (D-023), ``heartbeat`` states current
+            holdings rather than announcing a change (D-003), and
+            ``observations`` is keyed on its assignment and revision (D-015).
+            A protocol without those properties could not reuse this loop.
+        """
+        return self._send("POST", path, body)
+
     def _get(self, path: str) -> httpx.Response:
         """GET ``path``, retrying transport failures and retriable statuses."""
+        return self._send("GET", path, None)
+
+    def _send(
+        self, method: str, path: str, body: Mapping[str, object] | None
+    ) -> httpx.Response:
+        """One request, retried under the policy, returning the first success."""
         last_error: Exception | None = None
         for attempt in range(1, self._retry.attempts + 1):
             try:
-                response = self._client.get(path)
+                response = self._client.request(method, path, json=body)
             except httpx.HTTPError as exc:
                 last_error = exc
             else:
                 if response.status_code not in RETRIABLE_STATUSES:
                     _raise_for_msp_error(response)
                     return response
-                last_error = ProtocolError(
-                    response.status_code, "retriable", response.text[:200]
-                )
+                # The platform's own code, not a token invented here. MSP §6
+                # makes `error` the only field a caller may branch on, and a 429
+                # arrives carrying `rate_limited` — so a station whose retries
+                # are exhausted can still tell being throttled apart from a
+                # platform fault, which are different things to do next.
+                last_error = _msp_error(response)
             if attempt < self._retry.attempts:
                 _sleep(self._retry.delay_before(attempt))
         raise last_error if last_error else RuntimeError("unreachable")
@@ -204,10 +249,8 @@ def _sleep(seconds: float) -> None:
     time.sleep(seconds)
 
 
-def _raise_for_msp_error(response: httpx.Response) -> None:
-    """Turn an MSP error body into a :class:`ProtocolError`."""
-    if response.status_code < httpx.codes.BAD_REQUEST:
-        return
+def _msp_error(response: httpx.Response) -> ProtocolError:
+    """Read an error response into a :class:`ProtocolError`, MSP-shaped or not."""
     # MSP §6 guarantees the two-field shape, but a proxy or a tunnel can return
     # its own HTML error page — so a body that is not MSP's shape is reported as
     # a server_error rather than crashing on a missing key.
@@ -217,4 +260,11 @@ def _raise_for_msp_error(response: httpx.Response) -> None:
         message = str(body["message"])
     except (ValueError, KeyError, TypeError):
         code, message = "server_error", response.text[:200]
-    raise ProtocolError(response.status_code, code, message)
+    return ProtocolError(response.status_code, code, message)
+
+
+def _raise_for_msp_error(response: httpx.Response) -> None:
+    """Turn an MSP error body into a raised :class:`ProtocolError`."""
+    if response.status_code < httpx.codes.BAD_REQUEST:
+        return
+    raise _msp_error(response)

@@ -26,10 +26,20 @@ class _ScriptedClient:
     def __init__(self, responses: list[httpx.Response]) -> None:
         self._responses = list(responses)
         self.calls = 0
+        self.methods: list[str] = []
 
-    def get(self, _path: str) -> httpx.Response:
-        """Return the next scripted response, whatever path was asked for."""
+    def request(
+        self, method: str, _path: str, *, json: object = None
+    ) -> httpx.Response:
+        """Return the next scripted response, whatever was asked for.
+
+        Stands in for ``httpx.Client.request``, which is the one call the retry
+        loop makes for both reads and writes — so a GET and a POST are retried by
+        the same code and this double covers both.
+        """
         self.calls += 1
+        self.methods.append(method)
+        self.sent = json
         return self._responses.pop(0)
 
 
@@ -72,6 +82,30 @@ def test_a_server_fault_is_retried_until_the_policy_is_exhausted(
 
     assert client.calls == 3
     assert len(no_waiting) == 2  # waits between attempts, not after the last
+
+
+def test_an_exhausted_retry_still_carries_the_platforms_own_error_code(
+    no_waiting: list[float],
+) -> None:
+    """Being throttled and a platform fault are different things to do next.
+
+    MSP §6 makes ``error`` the only field a caller may branch on, and the
+    platform sends a real one with every 429 and 5xx. The retry loop used to
+    replace it with the literal ``"retriable"`` — a code MSP does not define —
+    so a station that exhausted its attempts against a rate limit could not tell
+    that apart from a platform that had fallen over, and backing off harder
+    versus alerting an operator are opposite responses.
+    """
+    throttled = {"error": "rate_limited", "message": "Too many requests."}
+    transport, client = _scripted([_response(429, throttled)] * 3)
+
+    with pytest.raises(ProtocolError) as excinfo:
+        transport.server_time()
+
+    assert excinfo.value.code == "rate_limited"
+    assert excinfo.value.status == 429
+    assert client.calls == 3
+    assert len(no_waiting) == 2
 
 
 def test_a_fault_that_clears_is_not_reported_as_a_failure(
