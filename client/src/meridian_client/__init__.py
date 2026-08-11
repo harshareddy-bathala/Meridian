@@ -7,24 +7,27 @@ submits observations.
 nothing else, so that rule is enforced when the package is built rather than when
 a reviewer notices (docs/DECISIONS.md D-012).
 
-**Built so far:** ``transport`` (retrying MSP HTTP), ``clock`` (offset estimation
-against ``GET /msp/v0/time``), ``credentials`` (the station's identity on disk),
-``registration`` (joining the network, and recovering from a lost response),
-``assignment_message`` and ``held_assignments`` (what the station has been given
-and what it has kept), and ``heartbeat`` (the §4.2 exchange). A station can
-register, be given work, restart, and still know who it is and what it holds.
-The loop that drives all of this on a timer, and the execution it hands work to,
-are the rest of Stage 8.
+A complete station is ``station_loop.StationLoop`` over four things: a
+``transport`` to the platform, the ``credentials`` that identify it, the
+``held_assignments`` record of what it has accepted, and an ``execution``
+implementation that receives. ``registration`` gets it admitted in the first
+place; ``clock``, ``heartbeat`` and ``assignment_message`` are the protocol it
+speaks once it is.
 
-Must survive three things. Clock skew is tested today; the other two are
-tested when the code that has to survive them exists:
+Submitting observations is Stage 9, and the receiver and decoder are Stage 13 —
+until then ``execution.NullExecutor`` occupies a pass's window and receives
+nothing, which is enough for a station to hold work and report listening.
+
+Must survive three things, all of them tested:
 
 * **network loss mid-pass** — reception is never blocked on the platform being
-  reachable. The client continues executing assignments it already holds and
-  queues observations, submitting them later with their *original* timestamps.
-* **power loss** — rejoins cleanly with no operator intervention.
-* **clock skew** — estimates its offset against ``GET /msp/v0/time`` and reports
-  both the offset and its own uncertainty in the next heartbeat.
+  reachable. Work is started from the on-disk record rather than from a
+  response, so an outage changes nothing the station does.
+* **power loss** — rejoins cleanly with no operator intervention. Its identity,
+  its recovery key and the assignments it holds are all on disk before it claims
+  any of them.
+* **clock skew** — estimates its offset against the platform and reports both
+  the offset and its own uncertainty, never zero for unknown.
 
 **The station never transmits.** There are no transmit code paths here and there
 never will be.
