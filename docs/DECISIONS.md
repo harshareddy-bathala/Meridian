@@ -1503,6 +1503,48 @@ state in ('issued', 'held', 'in_progress')  and  end_at >= now  and  start_at <=
 
 ---
 
+## D-068 — The station writes things down before it claims them
+
+**2026-08-11 · accepted** · *`client/credentials.py`, `client/held_assignments.py`, Stage 8*
+
+A station holds three pieces of durable state: a registration key, a bearer token, and the assignments it has accepted. All three have the same failure mode — a power cut between deciding something and recording it — and the same fix, applied in the same direction each time.
+
+**The write comes before the claim.** The registration key reaches disk before the `register` request is sent (D-023), and an assignment reaches the record before it can appear in `held_assignments`. Reversed, each becomes a lie the platform cannot detect: a consumed invite with no key to recover it, or a station reporting that a pass is covered when the work vanished with its memory. Getting the order right is what removes the error path entirely — if the write fails, the station simply never makes the claim, the platform reads absence as a decline (D-003), and the outcome is correct with nobody handling an exception.
+
+**Every write is temp-then-rename, at `0600` for the secrets.** A truncated credential file is worse than an absent one: absent is a station that should register, truncated is a station that can neither register nor say why. The mode is enforced on POSIX and is best-effort on Windows, which honours only the read-only bit — a station client's real deployment is a Raspberry Pi sharing a filesystem with other service accounts, and that is the case the mode is for.
+
+**Absent and corrupt are different, and are treated differently.** A missing credential file returns `None`, because a first boot is the normal path and not a failure. A file that exists and cannot be read *raises*, because registering again would consume a second invite and create a duplicate row for one physical installation. The same split applies to the assignment record: an empty record is a station that genuinely holds nothing, and an unreadable one is a station that may be holding a pass right now — treating the second as the first would silently decline work already accepted.
+
+**The key and the token are separate files** because they have different lifetimes. A bearer token rotates; the registration key outlives every token it ever recovers (D-034). One combined file would rewrite the key on every rotation, which is the one thing rotation must not touch.
+
+**The record's file format is the wire format.** An assignment is stored exactly as MSP §4.3 delivered it, so reading a record and reading a response are the same code path. A second representation would be a second parser, and the two would drift — with the drift showing up as a station that reboots and misreads its own window.
+
+---
+
+## D-069 — The loop's cadence, and why the execution seam exists before the radio
+
+**2026-08-11 · accepted** · *`client/station_loop.py`, `client/execution.py`, Stage 8*
+
+**A tick that overran is skipped, not queued.** The loop schedules from when a tick was *due*, so the cadence does not drift by the duration of the work; but when a tick runs past the next slot entirely — a long network stall — the missed slots are dropped rather than fired back to back. A heartbeat states the present (D-003), so a burst of them carries no information that the next single one would not, and fifty simulated stations catching up together produce exactly the traffic shape of the incident that caused the stall.
+
+**Scheduled on a monotonic clock, never the wall clock.** A station is *expected* to have its clock corrected — measuring and reporting that correction is what §4.2's `clock_offset_s` is for — and a loop scheduled against a clock that can step backwards stalls, while one that steps forwards spins.
+
+**The heartbeat gets a smaller retry budget than the transport's default.** Four attempts at a ten-second read timeout, plus backoff, can exceed forty seconds; against a thirty-second interval that is a request still in flight when the next is due. `retry_policy_attempts_for` derives the count from the interval instead. The reasoning is that **a heartbeat that cannot finish inside its own interval has already failed** — retrying it does not deliver it sooner than the next tick, and the next tick carries the same statement anyway.
+
+**An unreachable platform is not a refused one.** A transport failure leaves the station executing and holding; only `401` stops the loop, and it stops rather than retries or re-registers (D-024). Work is started from the on-disk record and never from a response, which is what makes an outage during a pass change nothing the station does.
+
+**`PassExecutor` ships now, with one implementation that receives nothing.** The receiver, decoder and rotator are Stage 13, and it would have been reasonable to leave the seam until then. Three reasons not to:
+
+- Without something to start and stop, `assignments.state` never reaches `in_progress` and the whole D-067 path is untestable from the client side.
+- `Registry.was_listening()` is the authority every reliability figure rests on, and it needs `listening` blocks to exist before there is a decoder to produce them.
+- A station with no radio attached is a real configuration, not a gap: a simulated station (Stage 10), a client under test, a Pi being commissioned before its SDR arrives. All three hold assignments, report listening, and produce evidence.
+
+*Named `PassExecutor`, not `Executor` or `Receiver`.* Stage 13 uses `Receiver` for the narrower thing that owns an SDR; an executor drives a receiver, a decoder and possibly a rotator, and the loop should depend on the whole job rather than one part of it.
+
+**Neither `begin` nor `end` may block for the length of a pass.** The loop is single-threaded and must keep heartbeating throughout an 8-to-15-minute reception. An implementation that blocked would stop the station reporting exactly while it had something to report, and the platform would read that as the station going offline — turning a successful pass into a confirmed outage.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
