@@ -7,10 +7,11 @@ submits observations.
 nothing else, so that rule is enforced when the package is built rather than when
 a reviewer notices (docs/DECISIONS.md D-012).
 
-**Built so far:** ``transport`` (retrying MSP HTTP) and ``clock`` (offset
-estimation against ``GET /msp/v0/time``). Registration, credential
-persistence and the assignment loop are Stage 4.3's client half and Stage 8 —
-which is why Stage 4's completion gate, a *client* gate, is not yet met.
+**Built so far:** ``transport`` (retrying MSP HTTP), ``clock`` (offset estimation
+against ``GET /msp/v0/time``), ``credentials`` (the station's identity on disk)
+and ``registration`` (joining the network, and recovering from a lost response).
+A station can register, restart and still be itself. The heartbeat loop and
+assignment execution are the rest of Stage 8.
 
 Must survive three things. Clock skew is tested today; the other two are
 tested when the code that has to survive them exists:
