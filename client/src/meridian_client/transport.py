@@ -215,6 +215,30 @@ class MspTransport:
         """
         return self._send("POST", path, body)
 
+    def heartbeat(self, body: Mapping[str, object]) -> dict[str, object]:
+        """Send one MSP §4.2 heartbeat and return the decoded response.
+
+        Args:
+            body: A body from ``meridian_client.heartbeat.build_heartbeat_body``.
+                Not built here — this class holds no protocol semantics, and a
+                transport that knew what a heartbeat was would be the place every
+                later protocol change had to be made twice.
+
+        Returns:
+            The response object, for ``parse_heartbeat_response`` to read.
+
+        Raises:
+            ProtocolError: The platform returned an MSP error. ``unauthorized``
+                means stop and tell the operator, never retry and never
+                re-register (D-024).
+            httpx.HTTPError: The platform could not be reached. The caller keeps
+                executing the work it already holds — a heartbeat is how a
+                station reports, not how it decides what to do.
+        """
+        response = self.post_json("/msp/v0/heartbeat", body)
+        decoded = response.json()
+        return dict(decoded)
+
     def _get(self, path: str) -> httpx.Response:
         """GET ``path``, retrying transport failures and retriable statuses."""
         return self._send("GET", path, None)

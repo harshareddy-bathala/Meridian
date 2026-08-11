@@ -8,10 +8,13 @@ nothing else, so that rule is enforced when the package is built rather than whe
 a reviewer notices (docs/DECISIONS.md D-012).
 
 **Built so far:** ``transport`` (retrying MSP HTTP), ``clock`` (offset estimation
-against ``GET /msp/v0/time``), ``credentials`` (the station's identity on disk)
-and ``registration`` (joining the network, and recovering from a lost response).
-A station can register, restart and still be itself. The heartbeat loop and
-assignment execution are the rest of Stage 8.
+against ``GET /msp/v0/time``), ``credentials`` (the station's identity on disk),
+``registration`` (joining the network, and recovering from a lost response),
+``assignment_message`` and ``held_assignments`` (what the station has been given
+and what it has kept), and ``heartbeat`` (the §4.2 exchange). A station can
+register, be given work, restart, and still know who it is and what it holds.
+The loop that drives all of this on a timer, and the execution it hands work to,
+are the rest of Stage 8.
 
 Must survive three things. Clock skew is tested today; the other two are
 tested when the code that has to survive them exists:
