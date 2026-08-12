@@ -49,7 +49,7 @@ visible rather than silent.
 def _wire_time(instant: datetime) -> str:
     """Render an instant in MSP §8's form: milliseconds and a literal ``Z``.
 
-    The same rendering :func:`meridian.api.msp.format_server_time` applies to
+    The same rendering :func:`meridian.api.platform_clock.format_server_time` applies to
     ``server_time``. Python's ``isoformat`` writes ``+00:00``, which is the same
     instant and a different string — and a microcontroller client comparing
     suffixes, or one whose parser accepts only ``Z``, sees a different thing.
