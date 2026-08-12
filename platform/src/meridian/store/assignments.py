@@ -31,6 +31,7 @@ __all__ = [
     "find_due_assignments",
     "insert_assignments",
     "mark_assignment_in_progress",
+    "mark_assignment_reported",
     "mark_assignments_held",
 ]
 
@@ -128,6 +129,44 @@ def mark_assignment_in_progress(
             update assignments
             set state = 'in_progress'
             where station_id = %s and assignment_id = %s and state = 'held'
+            """,
+            (station_id, assignment_id),
+        )
+        return cur.rowcount > 0
+
+
+def mark_assignment_reported(
+    conn: Connection, *, station_id: str, assignment_id: str
+) -> bool:
+    """``(issued|held|in_progress) -> reported``, once an observation exists.
+
+    Returns:
+        Whether the row moved. ``False`` covers an unknown id, a foreign one,
+        and one already ``reported`` or ``expired`` alike — the caller decides
+        what, if anything, that is worth logging.
+
+    Note:
+        **``issued`` is in the predicate although D-008 draws no arc from it.** A
+        station that took delivery, lost the network before its next heartbeat,
+        executed the pass from its on-disk record and submitted afterwards never
+        gave the platform a chance to see ``held``. Leaving that row ``issued``
+        would keep it eligible for delivery (D-026), so the platform would go on
+        offering a pass that has already been reported.
+
+        ``expired`` is *not* in the predicate, and that is the deliberate half
+        (D-071): it records that the station stopped naming the work, and an
+        observation arriving later does not undo it. The pair is an anomaly the
+        reliability layer needs to see rather than one this function should
+        tidy away.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            update assignments
+            set state = 'reported'
+            where station_id = %s
+              and assignment_id = %s
+              and state in ('issued', 'held', 'in_progress')
             """,
             (station_id, assignment_id),
         )
