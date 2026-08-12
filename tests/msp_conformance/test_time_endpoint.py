@@ -1,7 +1,7 @@
 """``GET /msp/v0/time`` on the wire, asserted against the specification text.
 
-Conformance, not integration: these assert the **bytes** MSP promises â€” field
-names, exact error bodies, status codes and version handling â€” because MSP is
+Conformance, not integration: these assert the **bytes** MSP promises — field
+names, exact error bodies, status codes and version handling — because MSP is
 published for other people to implement, and a reference implementation that
 quietly diverges from its own specification is worse than no specification.
 
@@ -12,7 +12,7 @@ same function it is checking passes when both are wrong together.
 
 Marked ``msp_conformance`` by the directory hook in ``tests/conftest.py``.
 
-Reference: docs/MSP-SPEC.md Â§6, Â§7, Â§8.
+Reference: docs/MSP-SPEC.md §6, §7, §8.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ from meridian.api.app import create_app
 TIME_PATH = "/msp/v0/time"
 CURRENT = {"MSP-Version": "0.1"}
 
-# MSP Â§8: "2026-08-14T09:31:02Z". Millisecond precision, and a literal Z rather
-# than +00:00 â€” the same instant, a different string, and a microcontroller
+# MSP §8: "2026-08-14T09:31:02Z". Millisecond precision, and a literal Z rather
+# than +00:00 — the same instant, a different string, and a microcontroller
 # comparing suffixes sees the difference.
 WIRE_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
@@ -39,7 +39,7 @@ WIRE_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """A client against the real application.
 
-    DATABASE_URL points nowhere on purpose. MSP Â§8 says this endpoint "touches no
+    DATABASE_URL points nowhere on purpose. MSP §8 says this endpoint "touches no
     database", and a test that only passes with a database running cannot tell
     that claim from a coincidence.
     """
@@ -49,7 +49,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_the_response_has_exactly_one_field(client: TestClient) -> None:
-    """MSP Â§8: "takes no body and returns one field"."""
+    """MSP §8: "takes no body and returns one field"."""
     response = client.get(TIME_PATH, headers=CURRENT)
 
     assert response.status_code == 200
@@ -68,7 +68,7 @@ def test_server_time_parses_back_to_the_instant_it_named(
     """The string is not merely well-shaped; it is the right moment.
 
     A formatter that dropped the offset would still match the pattern above while
-    publishing a clock wrong by the host's local offset â€” which is exactly the
+    publishing a clock wrong by the host's local offset — which is exactly the
     failure every station's offset estimate would then inherit.
     """
     fixed = datetime(2026, 8, 14, 9, 31, 2, 123456, tzinfo=UTC)
@@ -80,7 +80,7 @@ def test_server_time_parses_back_to_the_instant_it_named(
 
 
 def test_it_needs_no_authentication(client: TestClient) -> None:
-    """MSP Â§8: unauthenticated, because a station that lost its token still needs
+    """MSP §8: unauthenticated, because a station that lost its token still needs
     a clock offset before it can rotate its credential."""
     assert client.get(TIME_PATH, headers=CURRENT).status_code == 200
 
@@ -89,20 +89,20 @@ def test_it_touches_no_database(client: TestClient) -> None:
     """The fixture's DATABASE_URL points at a closed port.
 
     If this endpoint ever acquires a query, this test fails rather than becoming
-    slow â€” which is the failure mode worth having, since the endpoint's whole
+    slow — which is the failure mode worth having, since the endpoint's whole
     justification is that it answers without reading a row.
     """
     assert client.get(TIME_PATH, headers=CURRENT).status_code == 200
 
 
-# --- MSP Â§7, version handling -------------------------------------------------
+# --- MSP §7, version handling -------------------------------------------------
 
 
 def test_a_missing_version_is_unsupported_version(client: TestClient) -> None:
-    """MSP Â§7: "A missing header is `unsupported_version`".
+    """MSP §7: "A missing header is `unsupported_version`".
 
     Not `malformed`. The distinction is in the specification and is easy to get
-    wrong â€” `malformed` is about the body.
+    wrong — `malformed` is about the body.
     """
     response = client.get(TIME_PATH)
 
@@ -130,7 +130,7 @@ def test_an_unsupported_major_is_rejected(client: TestClient, value: str) -> Non
 def test_any_minor_within_a_supported_major_is_accepted(
     client: TestClient, value: str
 ) -> None:
-    """MSP Â§7: "an unrecognised minor within a supported major is accepted,
+    """MSP §7: "an unrecognised minor within a supported major is accepted,
     because minor versions are additive by definition".
 
     This is the rule most likely to be implemented as an equality check against
@@ -140,7 +140,7 @@ def test_any_minor_within_a_supported_major_is_accepted(
     assert client.get(TIME_PATH, headers={"MSP-Version": value}).status_code == 200
 
 
-# --- MSP Â§6, the error body ---------------------------------------------------
+# --- MSP §6, the error body ---------------------------------------------------
 
 
 def test_the_error_body_has_exactly_two_flat_string_fields(client: TestClient) -> None:
@@ -171,17 +171,28 @@ def test_no_error_response_leaks_a_header_value_back(client: TestClient) -> None
     assert secret not in response.text
 
 
-def test_an_unbuilt_msp_path_is_not_served(client: TestClient) -> None:
-    """MSP Â§8 binds four endpoints. `observations` is not built yet.
+def test_every_endpoint_msp_binds_is_mounted() -> None:
+    """MSP §8 binds four endpoints, and the router package mounts all four.
 
-    It must 404 rather than 200 â€” a station probing for it needs to learn it is
-    absent rather than get an empty success it will misread as agreement.
+    This test read the other way around for most of the project's life — "what
+    is not built stays unserved" — and named `heartbeat`, then `observations`,
+    as each one was still missing. With Stage 9 there is nothing left to be
+    absent, so it inverts.
 
-    This test named `heartbeat` until `heartbeat` was implemented, and failing
-    at that moment is exactly what it is for: the assertion is "what is not
-    built stays unserved", so it has to be edited whenever something is built.
-    `heartbeat` now has its own conformance file.
+    Asserted against the published schema rather than by calling each path:
+    three of the four open a database connection, and a routing claim should not
+    be answered by whether a connection to a closed port times out.
     """
-    response = client.post("/msp/v0/observations", json={}, headers=CURRENT)
+    paths = create_app().openapi()["paths"]
+    mounted = {
+        f"{method.upper()} {path}"
+        for path, operations in paths.items()
+        for method in operations
+    }
 
-    assert response.status_code == 404
+    assert {
+        "GET /msp/v0/time",
+        "POST /msp/v0/register",
+        "POST /msp/v0/heartbeat",
+        "POST /msp/v0/observations",
+    } <= mounted

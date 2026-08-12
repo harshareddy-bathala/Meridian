@@ -12,7 +12,7 @@ decision belongs to a service, the service makes it — ``register`` calls
 calls :mod:`meridian.observations.ingest`, and neither route decides anything
 those services already decide.
 
-MSP §8 binds four endpoints to this prefix; `observations` is not built yet.
+MSP §8 binds four endpoints to this prefix, and all four are served here.
 
 Reference: docs/MSP-SPEC.md §4.1, §4.2, §4.3, §4.4, §7, §8.
 """
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from meridian.api.msp import heartbeat, register, server_time
+from meridian.api.msp import heartbeat, observations, register, server_time
 from meridian.api.versioning import require_msp_version
 
 __all__ = ["router"]
@@ -39,3 +39,4 @@ router = APIRouter(
 router.include_router(server_time.router)
 router.include_router(register.router)
 router.include_router(heartbeat.router)
+router.include_router(observations.router)
