@@ -1635,6 +1635,91 @@ D-073's reason for stopping was that a backlog should not be hammered through in
 
 ---
 
+## D-075 — A virtual station's identity comes from its index, not its station id
+
+**2026-08-12 · accepted** · *`simulator/config.py`, Stage 10*
+
+The roadmap gives the seed derivation as `station_seed = deterministic_hash(master_seed, station_id)`. It cannot work. `station_id` is minted by the platform during registration, and the seed is needed *before* that — the station's location, altitude and declared capabilities are all generated from it, and all three are in the registration body.
+
+**The derivation is from a one-based station index:** `station_seed = sha256(f"{master_seed}:{index}")`.
+
+This also makes the roadmap's own requirement true by construction rather than by care. "Increasing the station count must not alter station 1's behaviour" holds because station 1's seed never mentioned the count, or any other station, or anything the platform assigned.
+
+*Rejected: seeding from `station_id` once registration has returned.* It inverts the dependency — a station would have to register before it could decide what to register as — and it would make a station's identity depend on the order the platform happened to admit it in, so a re-run against a fresh database could produce different stations from the same seed.
+
+---
+
+## D-076 — N stations share one thread, and the supervisor ticks each in turn
+
+**2026-08-12 · accepted** · *`simulator/supervisor.py`, Stage 10*
+
+`StationLoop.run()` blocks on `_sleep` between ticks, and D-069 states that nothing may block the loop. Running several stations in one process therefore needs something other than N calls to `run()`.
+
+**The supervisor never calls `run()`.** It holds N loops, calls `tick(now)` on each in turn, and sleeps once per round, scheduling on `time.monotonic` under `_next_due_at`'s existing skip-don't-queue rule. A station whose tick returns a `stop_reason` is retired from the round; the others continue, and the supervisor exits when every station has stopped.
+
+*Rejected: a thread, or an asyncio task, per station.* Fifty threads to make fifty HTTP calls of a few milliseconds each buys nothing at this scale, and it costs the property the stage exists to establish: with concurrency, a determinism failure depends on scheduling order and stops being reproducible. One thread also means a test can drive N stations through an exact number of ticks with no synchronisation, no timeouts and no flakiness.
+
+Scale is Stage 21's, and this shape is what it will measure. If fifty stations on one thread turn out not to keep up, that is a finding Stage 21 is built to produce rather than a problem to pre-solve here.
+
+---
+
+## D-077 — What "deterministic" is allowed to claim, and the two tests that prove it
+
+**2026-08-12 · accepted** · *`simulator/outcomes.py`, `simulator/executor.py`, Stage 10*
+
+The roadmap asks that "the same seed produces identical canonical observations". Read literally it is unachievable, and it is worth saying why rather than quietly testing something weaker. An observation carries `started_at` and `ended_at`; those come from an assignment window, which comes from a real pass computed over a real element set at a real wall-clock moment. Two runs a day apart cannot produce the same bytes, whatever the seed says.
+
+**Two assertions are made, and the difference between them is recorded.**
+
+1. **Frozen inputs, byte-identical bodies.** With the element sets and the clock pinned, two runs at one seed produce byte-identical observation bodies, checked by a single hash. This needs no platform: the test hands the executor its assignments directly and compares `build_observation_body` output.
+2. **The decision sequence, against a live platform.** Where the clock cannot be pinned, the hash covers what the simulator *chose* — outcome, detection offset, peak SNR, Doppler series — per assignment, excluding the instants it did not choose.
+
+The first is the real claim. The second is the cheap check that can run end to end, and it proves less: it would not catch a station making the right decisions about the wrong passes. Both are stated so that a reader of the test suite knows which one they are looking at.
+
+---
+
+## D-078 — Simulated observations are excluded from training and evaluation sets
+
+**2026-08-12 · accepted** · *`simulator/outcomes.py`, `docs/EVALUATION.md`, Stage 10*
+
+`EVALUATION.md` §10 already forbids aggregating simulated results with measured ones in any reported figure. **That rule is not sufficient once this stage exists**, and the gap is created by a choice made here.
+
+The simulator draws outcomes from elevation, because traffic uncorrelated with geometry would be a weak test of the scheduler and of the reliability layer — the two things it exists to exercise. Elevation is also the prediction model's strongest single feature. A model trained or evaluated on simulated observations would therefore be rediscovering the simulator's own generative rule, and would score well for a reason that means nothing.
+
+The dangerous part is that it would happen *invisibly*: no reported figure would mix simulated and measured data, so the existing rule would be satisfied throughout, and the number that came out would look like a result.
+
+**Simulated observations are excluded from every model training set and every evaluation set, not merely from reported aggregates.** Stages 15 and 17 enforce it where the datasets are built; the decision is recorded now, in the same stage as the code that creates the hazard, because a methodological threat discovered later is one that has already contaminated something.
+
+*Rejected: making outcomes arbitrary so the hazard cannot arise.* Drawing outcomes from the seed alone, uncorrelated with geometry, closes the hole completely. It also produces a network whose passes succeed and fail at random, against which a scheduler that ranks by elevation performs exactly as well as one that ranks by coin flip — so the simulator would stop being able to test the thing it was built to test.
+
+---
+
+## D-079 — The local catalogue is loaded from a file, and the simulator never writes it
+
+**2026-08-12 · accepted** · *`meridian/cli_catalogue.py`, `meridian/store/satellites.py`, Stage 10*
+
+Stage 10's completion gate needs an assignment to exist, and the chain behind one is satellites and transmitters, then element sets, then `passes generate`, then `schedule`. The last two are built. **Nothing can supply the first three**: there is no catalogue command, no seed migration, and `store/satellites.py` is read-only. `insert_element_set` exists and is called by nothing outside the tests. Stage 14 is archive *ingest*, which is a network path and deliberately later.
+
+**`meridian catalogue load --file <path>` inserts satellites, transmitters and element sets from one local JSON document**, idempotently — loading twice writes nothing the second time, matching `insert_element_set`'s contract and D-063's rule for pass generation.
+
+One command rather than three, because the three are one fact: this is the catalogue this deployment can see. A local file rather than a fetch, because the independence test says the standalone path is built first and external archives are enrichment on top of it — and because a gate that depends on a third party being reachable is a gate that fails for reasons that have nothing to do with our software.
+
+**The simulator does not call it.** `element_sets.source` admits `'simulator'` and that value stays unused: a simulator that wrote its own orbits would be testing the platform against passes that do not exist. Geometry is real and only outcomes are synthetic, which is the property that makes the simulator evidence rather than decoration.
+
+---
+
+## D-080 — Where a virtual station's state lives, and what a restart keeps
+
+**2026-08-12 · accepted** · *`simulator/virtual_station.py`, Stage 10*
+
+Each virtual station owns `<state-dir>/<index>/`, holding `credentials.json`, `registration.key`, `held.json` and `outbox/` — the same four things a real station keeps, in the same formats, because it is the same client code writing them.
+
+**Keyed on the station index, not on the run id.** The roadmap requires that a restart preserve credentials and queues, and a path containing a per-run identifier would defeat that on the first restart: every station would find an empty directory, register again, and consume a fresh invite. A run id that changes per run cannot name state that must outlive the run.
+
+The consequence worth stating: two runs with *different master seeds* against one state directory will find credentials belonging to stations generated from the other seed. That is a misuse rather than a case to handle — a new seed is a new network — and the run configuration records the seed alongside the state so the mismatch is visible rather than silent.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
