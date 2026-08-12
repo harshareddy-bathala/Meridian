@@ -39,12 +39,12 @@ The sections below describe each module's responsibility in the finished system.
 
 | Module | On disk today |
 |---|---|
-| `platform/orbit`, `registry`, `store`, `api` | Implemented, and still growing. The API serves MSP `/time`, `/register` and `/heartbeat`; the public read API is Stage 11. |
+| `platform/orbit`, `registry`, `store`, `api` | Implemented, and still growing. The API serves all four MSP endpoints; the public read API is Stage 11. |
 | `platform/scheduler` | Value types, and the two baselines that exist to be beaten (Stage 7). The constrained optimiser and the retrospective oracle are Stage 18. |
 | `platform/prediction` | Its interface and nothing else — Stage 17. |
-| `platform/observations` | Its interface and nothing else — Stage 9. |
+| `platform/observations` | Ingest and the canonical body a revision is compared against (Stage 9). |
 | `platform/reliability` | Its interface and nothing else — Stage 20. |
-| `client`, `simulator` | Clock offset, the MSP transport, and one virtual station. Completed in Stages 10 and 13. |
+| `client`, `simulator` | A station that registers, holds work, executes it and delivers observations from a durable queue; one virtual station. Completed in Stages 10 and 13. |
 | `dashboard`, `ingest` | No directory yet — Stages 11 and 14. |
 | `firmware` | No directory yet, and excluded from the software roadmap: it is built alongside the antenna and rotator rather than in a software stage. |
 

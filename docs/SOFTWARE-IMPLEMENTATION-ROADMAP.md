@@ -46,13 +46,13 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-08-10. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-08-11. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stages 0–7 are done.** Stage 0's specification gaps are closed as decisions D-023 through D-032; the store, the shared MSP infrastructure and the registry are in place; `/msp/v0/time`, `/register` and `/heartbeat` serve; orbit propagation and the element-set archive shipped with pass identity; and pass generation now feeds the two baseline schedulers.
+**Stages 0–9 are done.** Stage 0's specification gaps are closed as decisions D-023 through D-032; the store, the shared MSP infrastructure and the registry are in place; orbit propagation and the element-set archive shipped with pass identity; and pass generation now feeds the two baseline schedulers.
 
-**Stage 8 is in progress** — assignment delivery and heartbeat reconciliation.
+**All four MSP endpoints serve.** `/time`, `/register`, `/heartbeat` and `/observations`, one module each under `meridian.api.msp`. A registered station holds assignments across a reboot, executes them, and delivers the result from a durable on-disk queue that survives an outage at any point — D-070 through D-073 record the decisions that took.
 
-**Stage 9 onward has not started.** `meridian.observations`, `meridian.prediction` and `meridian.reliability` are interfaces and nothing else, which is deliberate: `CLAUDE.md` asks that they not be scaffolded ahead of the stage that needs them.
+**Stage 10 is next.** `meridian.prediction` and `meridian.reliability` are still interfaces and nothing else, which is deliberate: `CLAUDE.md` asks that they not be scaffolded ahead of the stage that needs them. Nothing yet produces a real observation either — `execution.NullExecutor` has no radio and reports nothing, and the first executor that yields results is the simulator's.
 
 ---
 
