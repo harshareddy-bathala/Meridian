@@ -101,13 +101,35 @@ uv run pytest -m integration
 
 ## Running a simulated station
 
+A station needs three things before it can do anything: a catalogue to be
+scheduled against, an invite to join with, and somewhere to keep its identity.
+
 ```bash
-uv run python -m meridian_sim.station --count 1 --seed 4471
+# What this deployment tracks. Idempotent — running it twice writes nothing.
+uv run meridian catalogue load --file deploy/catalogue/development.json
+
+# One invite per station. Tokens go to stdout, one per line.
+uv run meridian invite create --label sim --count 1 > invites.txt
+
+# Passes can only be generated for stations that already exist, so this comes
+# after the first run registers them.
+uv run python -m meridian_sim.station --count 1 --seed 4471 \
+    --invites invites.txt --state-dir ./sim-state
 ```
 
-*(A shell today — it parses its arguments and reports which stage implements it. See `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 10.)*
+Or let compose do all of it: `docker compose -f deploy/docker-compose.yml
+--profile sim up` brings up the seeding, the fleet and a loop that keeps
+generating passes for it.
 
-Simulated stations speak real MSP to the real platform. They are indistinguishable from physical stations at the protocol level — and labelled as simulated in every record, response and display.
+Simulated stations speak real MSP to the real platform, through the same client
+a physical station runs. They are indistinguishable from physical stations at
+the protocol level — and labelled as simulated in every record, response and
+display.
+
+Everything about a run is derived from its seed: the same seed produces the same
+stations in the same places hearing the same things, and `--scenario` injects
+faults that are as reproducible as a clean run. What that claim does and does not
+cover is `docs/DECISIONS.md` D-077.
 
 ---
 

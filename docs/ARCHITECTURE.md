@@ -44,7 +44,7 @@ The sections below describe each module's responsibility in the finished system.
 | `platform/prediction` | Its interface and nothing else — Stage 17. |
 | `platform/observations` | Ingest and the canonical body a revision is compared against (Stage 9). |
 | `platform/reliability` | Its interface and nothing else — Stage 20. |
-| `client`, `simulator` | A station that registers, holds work, executes it and delivers observations from a durable queue; one virtual station. Completed in Stages 10 and 13. |
+| `client`, `simulator` | A station that registers, holds work, executes it and delivers observations from a durable queue, and a deterministic fleet of virtual ones that drives it over real MSP (Stage 10). The receiver and decoder behind the client's execution seam are Stage 13. |
 | `dashboard`, `ingest` | No directory yet — Stages 11 and 14. |
 | `firmware` | No directory yet, and excluded from the software roadmap: it is built alongside the antenna and rotator rather than in a software stage. |
 
@@ -97,9 +97,11 @@ Reference station client. Polls heartbeat, receives assignments, drives the rece
 Must survive: network loss mid-pass (continue, queue results), power loss (rejoin cleanly), and clock skew (report offset). Knows nothing about the database.
 
 ### `simulator`
-Virtual stations speaking real MSP over the real network stack to the real platform. Deterministic from a seed. Outcome distributions fitted to real archive data.
+Virtual stations speaking real MSP over the real network stack to the real platform. Deterministic from a seed, and from each station's own index — raising the station count leaves station 1 unchanged (D-075). Geometry is real: it propagates real catalogue element sets, so only its *outcomes* are synthetic.
 
-Not a mock. It is a client implementation, and it is what makes software-first development possible.
+Not a mock. It is a client implementation — the same transport, held-work record, upload queue and loop the reference station runs, with a decision model where a real station puts a radio — and it is what makes software-first development possible.
+
+Outcomes are elevation-driven, which is what makes simulated traffic worth generating and is also why **simulated observations are excluded from every model training and evaluation set**, not merely from reported aggregates (D-078). Distributions fitted to real archive data are Stage 14's, once there is an archive to fit them to.
 
 ### `firmware`
 Arduino rotator controller. Stepper control, homing, limit switches, network command interface.

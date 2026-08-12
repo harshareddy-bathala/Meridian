@@ -46,13 +46,15 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-08-11. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-08-12. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stages 0–9 are done.** Stage 0's specification gaps are closed as decisions D-023 through D-032; the store, the shared MSP infrastructure and the registry are in place; orbit propagation and the element-set archive shipped with pass identity; and pass generation now feeds the two baseline schedulers.
+**Stages 0–10 are done.** Stage 0's specification gaps are closed as decisions D-023 through D-032; the store, the shared MSP infrastructure and the registry are in place; orbit propagation and the element-set archive shipped with pass identity; and pass generation now feeds the two baseline schedulers.
 
 **All four MSP endpoints serve.** `/time`, `/register`, `/heartbeat` and `/observations`, one module each under `meridian.api.msp`. A registered station holds assignments across a reboot, executes them, and delivers the result from a durable on-disk queue that survives an outage at any point — D-070 through D-073 record the decisions that took.
 
-**Stage 10 is next.** `meridian.prediction` and `meridian.reliability` are still interfaces and nothing else, which is deliberate: `CLAUDE.md` asks that they not be scaffolded ahead of the stage that needs them. Nothing yet produces a real observation either — `execution.NullExecutor` has no radio and reports nothing, and the first executor that yields results is the simulator's.
+**The simulator is real, and something finally produces observations.** A deterministic fleet registers over MSP through the reference client, is scheduled real passes over real orbital geometry, and reports what it heard — with five faults that can be injected as reproducibly as a clean run. D-075 through D-080 record what that took, including the correction to this document's own seed formula: a station's identity comes from its index, not from a `station_id` the platform has not minted yet. `meridian catalogue load` arrived with it, because nothing could put a satellite in the database before.
+
+**Stage 11 is next** — the public read API and the dashboard, and with them the Phase 1 exit criterion: a virtual station visible on the public site from outside the college network. `meridian.prediction` and `meridian.reliability` are still interfaces and nothing else, which is deliberate: `CLAUDE.md` asks that they not be scaffolded ahead of the stage that needs them. The receiver and decoder behind the client's execution seam remain Stage 13 — `execution.NullExecutor` still has no radio and still reports nothing.
 
 ---
 
