@@ -1,0 +1,42 @@
+{
+  "satellites": [
+    {
+      "satellite_id": "norad:57166",
+      "name": "Meteor-M2-3",
+      "orbital_regime": "leo",
+      "transmitters": [
+        {
+          "centre_freq_hz": 137100000,
+          "mode": "lrpt",
+          "polarisation": "rhcp",
+          "bandwidth_hz": 150000
+        }
+      ],
+      "element_sets": [
+        {
+          "line1": "1 57166U 23091A   26223.50000000  .00000100  00000-0  50000-4 0  9990",
+          "line2": "2 57166  98.7041 210.4322 0002726  80.4113 279.7297 14.22000000160126"
+        }
+      ]
+    },
+    {
+      "satellite_id": "norad:59051",
+      "name": "Meteor-M2-4",
+      "orbital_regime": "leo",
+      "transmitters": [
+        {
+          "centre_freq_hz": 137900000,
+          "mode": "lrpt",
+          "polarisation": "rhcp",
+          "bandwidth_hz": 150000
+        }
+      ],
+      "element_sets": [
+        {
+          "line1": "1 59051U 24039A   26223.50000000  .00000100  00000-0  50000-4 0  9998",
+          "line2": "2 59051  98.6215  95.1180 0003410 120.7742 239.3688 14.22000000 90128"
+        }
+      ]
+    }
+  ]
+}
