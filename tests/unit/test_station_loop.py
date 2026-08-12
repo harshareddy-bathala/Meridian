@@ -8,7 +8,8 @@ loop's own sequencing rather than a rehearsal of it.
 Marked as a unit test by living in ``tests/unit``: a temporary directory is not
 infrastructure.
 
-Reference: docs/MSP-SPEC.md §4.2; docs/DECISIONS.md D-003, D-024, D-069.
+Reference: docs/MSP-SPEC.md §4.2, §4.4, §6; docs/DECISIONS.md D-003, D-024,
+D-069, D-073.
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ from meridian_client.assignment_message import Assignment
 from meridian_client.credentials import StationCredentials
 from meridian_client.execution import NullExecutor
 from meridian_client.held_assignments import AssignmentRecord
+from meridian_client.observation_message import ObservationResult, Signal
+from meridian_client.observation_queue import ObservationQueue
 from meridian_client.station_loop import (
     StationLoop,
     retry_policy_attempts_for,
@@ -74,6 +77,8 @@ class ScriptedTransport:
     def __init__(self, responses: list[Any]) -> None:
         self._responses = list(responses)
         self.sent: list[dict[str, Any]] = []
+        self.submitted: list[dict[str, Any]] = []
+        self.observation_answers: dict[str, Any] = {}
 
     def heartbeat(self, body: dict[str, Any]) -> dict[str, Any]:
         """Record the body, then return or raise whatever was queued next."""
@@ -85,13 +90,38 @@ class ScriptedTransport:
         response.setdefault("server_time", NOW.isoformat())
         return response
 
+    def observations(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Record the submission, then answer as the platform would.
+
+        Acknowledges whatever it is sent unless ``observation_answers`` holds
+        something for that assignment — a queued exception to raise, or a body
+        to return in place of a valid acknowledgement.
+        """
+        self.submitted.append(body)
+        assignment_id = str(body["assignment_id"])
+        answer = self.observation_answers.pop(assignment_id, None)
+        if isinstance(answer, Exception):
+            raise answer
+        if answer is not None:
+            return answer
+        return {
+            "observation_id": "ob_05601bd09768",
+            "assignment_id": assignment_id,
+            "superseded": False,
+        }
+
 
 class RecordingExecutor:
-    """A :class:`PassExecutor` that writes down what it was asked to do."""
+    """A :class:`PassExecutor` that writes down what it was asked to do.
+
+    ``ready`` stands in for a decoder that has finished: whatever is put there
+    is handed over on the next drain, exactly once.
+    """
 
     def __init__(self) -> None:
         self.begun: list[str] = []
         self.ended: list[str] = []
+        self.ready: list[ObservationResult] = []
 
     def begin(self, assignment: Assignment) -> None:
         """Note a start."""
@@ -101,16 +131,23 @@ class RecordingExecutor:
         """Note a stop."""
         self.ended.append(assignment.assignment_id)
 
+    def take_completed(self) -> tuple[ObservationResult, ...]:
+        """Hand over what is ready, and hand it over only once."""
+        completed = tuple(self.ready)
+        self.ready.clear()
+        return completed
+
 
 def build_loop(
     tmp_path: Path, responses: list[Any]
 ) -> tuple[StationLoop, ScriptedTransport, RecordingExecutor]:
-    """A loop over a real on-disk record and a scripted platform."""
+    """A loop over a real on-disk record, a real queue, and a scripted platform."""
     transport = ScriptedTransport(responses)
     executor = RecordingExecutor()
     record = AssignmentRecord(tmp_path / "held.json")
+    queue = ObservationQueue(tmp_path / "outbox")
     return (
-        StationLoop(transport, CREDENTIALS, record, executor),  # type: ignore[arg-type]
+        StationLoop(transport, CREDENTIALS, record, executor, queue),  # type: ignore[arg-type]
         transport,
         executor,
     )
@@ -392,6 +429,7 @@ def test_an_overrun_tick_is_skipped_rather_than_queued(
         CREDENTIALS,
         AssignmentRecord(tmp_path / "held.json"),
         NullExecutor(),
+        ObservationQueue(tmp_path / "outbox"),
     )
 
     loop.run(stop_after_ticks=2)
@@ -430,9 +468,285 @@ def test_the_null_executor_satisfies_the_protocol(tmp_path: Path) -> None:
         CREDENTIALS,
         AssignmentRecord(tmp_path / "held.json"),
         NullExecutor(),
+        ObservationQueue(tmp_path / "outbox"),
     )
 
     loop.tick(NOW)
     loop.tick(NOW + timedelta(minutes=2))
 
     assert transport.sent[1]["state"] == "listening"
+
+
+# --- MSP §4.4, delivering what the station produced ---------------------------
+
+
+def result_for(assignment_id: str) -> ObservationResult:
+    """A finished observation, as an executor with a decoder would produce one."""
+    return ObservationResult(
+        assignment_id=assignment_id,
+        started_at=NOW,
+        ended_at=NOW + timedelta(minutes=11),
+        outcome="no_signal",
+        signal=Signal(detected=False),
+    )
+
+
+def test_a_finished_observation_is_on_disk_before_anything_is_sent(
+    tmp_path: Path,
+) -> None:
+    """D-073: the queue write comes first, so a failed request cannot lose it.
+
+    The heartbeat raises, so nothing is submitted on this tick — and the file is
+    there anyway.
+    """
+    loop, transport, executor = build_loop(tmp_path, [httpx.ConnectError("down")])
+    executor.ready.append(result_for("as_a"))
+
+    outcome = loop.tick(NOW)
+
+    assert not outcome.heartbeat_sent
+    assert outcome.submitted == ()
+    assert transport.submitted == []
+    assert (tmp_path / "outbox" / "as_a.json").exists()
+
+
+def test_a_queued_observation_is_submitted_after_the_heartbeat(
+    tmp_path: Path,
+) -> None:
+    """The ordinary path: produced, queued, delivered, forgotten."""
+    loop, transport, executor = build_loop(tmp_path, [{}])
+    executor.ready.append(result_for("as_a"))
+
+    outcome = loop.tick(NOW)
+
+    assert outcome.submitted == ("as_a",)
+    assert [one["assignment_id"] for one in transport.submitted] == ["as_a"]
+    assert not (tmp_path / "outbox" / "as_a.json").exists()
+
+
+def test_an_outage_delays_delivery_and_never_costs_the_result(
+    tmp_path: Path,
+) -> None:
+    """MSP §6: a queued observation is submitted later, with its own timestamps.
+
+    The station produces during the outage, cannot reach the platform, and
+    delivers on the tick after it comes back — carrying the instants the pass
+    actually had, not the ones it was finally sent at.
+    """
+    loop, transport, executor = build_loop(tmp_path, [httpx.ConnectError("down"), {}])
+    executor.ready.append(result_for("as_a"))
+
+    first = loop.tick(NOW)
+    second = loop.tick(NOW + timedelta(seconds=30))
+
+    assert first.submitted == ()
+    assert second.submitted == ("as_a",)
+    assert transport.submitted[0]["started_at"] == "2026-08-14T09:31:02Z"
+
+
+def test_an_observation_the_platform_refuses_permanently_is_set_aside(
+    tmp_path: Path,
+) -> None:
+    """`malformed` will be `malformed` next time too, so it is not retried.
+
+    The payload is kept, because a body the platform refused is the evidence of
+    whatever produced it.
+    """
+    loop, transport, executor = build_loop(tmp_path, [{}, {}])
+    executor.ready.append(result_for("as_a"))
+    transport.observation_answers["as_a"] = ProtocolError(400, "malformed", "no")
+
+    first = loop.tick(NOW)
+    second = loop.tick(NOW + timedelta(seconds=30))
+
+    assert first.submitted == ()
+    assert second.submitted == ()
+    assert len(transport.submitted) == 1
+    assert (tmp_path / "outbox" / "failed" / "as_a.json").exists()
+
+
+def test_a_server_error_leaves_the_observation_queued_for_the_next_tick(
+    tmp_path: Path,
+) -> None:
+    """A 500 is the platform's problem, and the station simply asks again."""
+    loop, transport, executor = build_loop(tmp_path, [{}, {}])
+    executor.ready.append(result_for("as_a"))
+    transport.observation_answers["as_a"] = ProtocolError(500, "server_error", "oops")
+
+    first = loop.tick(NOW)
+    second = loop.tick(NOW + timedelta(seconds=30))
+
+    assert first.submitted == ()
+    assert second.submitted == ("as_a",)
+
+
+def test_an_unintelligible_acknowledgement_keeps_the_observation_queued(
+    tmp_path: Path,
+) -> None:
+    """The station cannot tell whether it landed, so it must assume it did not.
+
+    Resubmitting costs nothing: the platform appends a revision only when the
+    content changed (D-015), so an unnecessary retry is a no-op there.
+    """
+    loop, transport, executor = build_loop(tmp_path, [{}, {}])
+    executor.ready.append(result_for("as_a"))
+    transport.observation_answers["as_a"] = {"observation_id": "not-an-id"}
+
+    first = loop.tick(NOW)
+    second = loop.tick(NOW + timedelta(seconds=30))
+
+    assert first.submitted == ()
+    assert second.submitted == ("as_a",)
+
+
+def test_a_revoked_token_during_submission_stops_the_loop(tmp_path: Path) -> None:
+    """D-024 applies wherever the 401 arrives, not only on the heartbeat."""
+    loop, transport, executor = build_loop(tmp_path, [{}])
+    executor.ready.append(result_for("as_a"))
+    transport.observation_answers["as_a"] = ProtocolError(401, "unauthorized", "no")
+
+    outcome = loop.tick(NOW)
+
+    assert outcome.stop_reason == "unauthorized"
+    assert outcome.submitted == ()
+
+
+def test_a_backlog_drains_in_pass_order(tmp_path: Path) -> None:
+    """Oldest first, so submission-delay figures read in the order they happened."""
+    loop, _, executor = build_loop(tmp_path, [{}])
+    executor.ready.append(
+        ObservationResult(
+            assignment_id="as_later",
+            started_at=NOW + timedelta(hours=2),
+            ended_at=NOW + timedelta(hours=2, minutes=11),
+            outcome="no_signal",
+            signal=Signal(detected=False),
+        )
+    )
+    executor.ready.append(result_for("as_earlier"))
+
+    outcome = loop.tick(NOW)
+
+    assert outcome.submitted == ("as_earlier", "as_later")
+
+
+def test_one_refused_observation_does_not_block_the_ones_behind_it(
+    tmp_path: Path,
+) -> None:
+    """D-074, and the reason it exists.
+
+    A body the platform answers but will not take must not stop the queue. If it
+    did, the station would go on heartbeating and go on reporting `listening`
+    while delivering nothing — and a station that was listening and sent no
+    observation is a missed pass under CLAUDE.md rule 7. One stuck entry would
+    quietly manufacture false misses for every pass after it.
+    """
+    loop, transport, executor = build_loop(tmp_path, [{}])
+    executor.ready.append(result_for("as_stuck"))
+    executor.ready.append(
+        ObservationResult(
+            assignment_id="as_behind_it",
+            started_at=NOW + timedelta(hours=2),
+            ended_at=NOW + timedelta(hours=2, minutes=11),
+            outcome="no_signal",
+            signal=Signal(detected=False),
+        )
+    )
+    transport.observation_answers["as_stuck"] = ProtocolError(500, "server_error", "no")
+
+    outcome = loop.tick(NOW)
+
+    assert outcome.submitted == ("as_behind_it",)
+    assert (tmp_path / "outbox" / "as_stuck.json").exists()
+
+
+def test_an_unreachable_platform_still_ends_the_drain_at_one_request(
+    tmp_path: Path,
+) -> None:
+    """The half of D-073 that survives D-074.
+
+    Nothing was refused and nothing was answered, so every remaining entry would
+    fail identically. Trying them anyway is a burst aimed at a platform that is
+    already down.
+    """
+    loop, transport, executor = build_loop(tmp_path, [{}])
+    executor.ready.append(result_for("as_first"))
+    executor.ready.append(
+        ObservationResult(
+            assignment_id="as_second",
+            started_at=NOW + timedelta(hours=2),
+            ended_at=NOW + timedelta(hours=2, minutes=11),
+            outcome="no_signal",
+            signal=Signal(detected=False),
+        )
+    )
+    transport.observation_answers["as_first"] = httpx.ConnectError("down")
+
+    outcome = loop.tick(NOW)
+
+    assert outcome.submitted == ()
+    assert len(transport.submitted) == 1
+
+
+def test_an_observation_older_than_the_platform_accepts_is_set_aside(
+    tmp_path: Path,
+) -> None:
+    """D-074: an entry past D-013's window is refused every time it is sent.
+
+    Quarantined rather than retried for the same reason a `malformed` body is —
+    it can never be delivered — and without an attempt counter, because the
+    queue already carries the fact in its own `started_at`.
+    """
+    loop, transport, executor = build_loop(tmp_path, [{}])
+    long_ago = NOW - timedelta(days=31)
+    executor.ready.append(
+        ObservationResult(
+            assignment_id="as_ancient",
+            started_at=long_ago,
+            ended_at=long_ago + timedelta(minutes=11),
+            outcome="no_signal",
+            signal=Signal(detected=False),
+        )
+    )
+
+    outcome = loop.tick(NOW)
+
+    assert outcome.submitted == ()
+    assert transport.submitted == []
+    assert (tmp_path / "outbox" / "failed" / "as_ancient.json").exists()
+
+
+def test_the_executor_is_drained_once_and_not_asked_twice(tmp_path: Path) -> None:
+    """A result the loop has taken is the loop's responsibility from then on.
+
+    Handing it over again would submit the same observation on every tick for
+    the rest of the station's life.
+    """
+    loop, transport, executor = build_loop(tmp_path, [{}, {}])
+    executor.ready.append(result_for("as_a"))
+
+    loop.tick(NOW)
+    loop.tick(NOW + timedelta(seconds=30))
+
+    assert len(transport.submitted) == 1
+
+
+def test_a_station_with_no_radio_submits_nothing(tmp_path: Path) -> None:
+    """`NullExecutor` produces no observations, and inventing one would be worse.
+
+    A `no_signal` row from a station with no receiver is a measurement nothing
+    measured, and every reliability figure downstream would inherit it.
+    """
+    transport = ScriptedTransport([{}])
+    loop = StationLoop(
+        transport,  # type: ignore[arg-type]
+        CREDENTIALS,
+        AssignmentRecord(tmp_path / "held.json"),
+        NullExecutor(),
+        ObservationQueue(tmp_path / "outbox"),
+    )
+
+    outcome = loop.tick(NOW)
+
+    assert outcome.submitted == ()
+    assert transport.submitted == []

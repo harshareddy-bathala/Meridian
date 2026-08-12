@@ -23,6 +23,7 @@ import logging
 from typing import Protocol
 
 from meridian_client.assignment_message import Assignment
+from meridian_client.observation_message import ObservationResult
 
 __all__ = ["NullExecutor", "PassExecutor"]
 
@@ -50,6 +51,23 @@ class PassExecutor(Protocol):
 
     def end(self, assignment: Assignment) -> None:
         """Stop receiving ``assignment``, whether or not its window has closed."""
+        ...
+
+    def take_completed(self) -> tuple[ObservationResult, ...]:
+        """Observations that became ready since the last call. Never blocks.
+
+        Drained by the loop on every tick and handed straight to the upload
+        queue, so an implementation may return work that finished long after the
+        pass it belongs to.
+
+        **Returned once.** A result the loop has taken is a result the loop is
+        now responsible for, and returning it again would submit it twice.
+
+        A drain rather than a value returned from :meth:`end` because a real
+        executor is not finished when capture stops: Stage 13's runs a decoder
+        subprocess afterwards, which takes time this loop must not spend
+        waiting. An executor with nothing ready returns ``()`` (D-073).
+        """
         ...
 
 
@@ -80,3 +98,18 @@ class NullExecutor:
     def end(self, assignment: Assignment) -> None:
         """Note the end of that window."""
         _log.info("would stop receiving %s", assignment.assignment_id)
+
+    def take_completed(self) -> tuple[ObservationResult, ...]:
+        """Nothing, always.
+
+        A station with no radio attached did not hear anything and did not fail
+        to hear anything either — it was never in a position to say. Reporting
+        ``no_signal`` here would put a measurement into the system of record
+        that no receiver produced, and every reliability figure derived from the
+        observation store would inherit it.
+
+        The first executor that returns anything is the simulator's, which
+        declares itself simulated at registration so its rows are labelled all
+        the way through (MSP §5).
+        """
+        return ()
