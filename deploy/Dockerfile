@@ -51,6 +51,13 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# Where a simulated fleet keeps its credentials, held work and outboxes
+# (docs/DECISIONS.md D-080). Created here rather than left to the volume mount:
+# Docker copies an image directory's ownership into a fresh named volume, and
+# invents a root-owned one when the path is absent — which this container, which
+# is deliberately not root, then cannot write a single file to.
+RUN install -d -o meridian -g meridian /var/lib/meridian-sim
+
 USER meridian
 EXPOSE 8000
 
