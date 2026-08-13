@@ -1,6 +1,6 @@
 # Meridian Station Protocol (MSP)
 
-**Version 0.1**
+**Version 0.2**
 
 An open protocol for satellite ground stations to join a scheduling network.
 
@@ -97,6 +97,7 @@ Station → platform. Once, on first join.
   "name": "nec-rooftop-01",
   "operator": "NTTF NEC",
   "location": { "lat": 12.9716, "lon": 77.5946, "alt_m": 920 },
+  "location_precision_decimals": 2,
   "simulated": false,
   "capabilities": [
     {
@@ -127,6 +128,11 @@ Response:
 
 - `min_elevation_deg` is the station's declared floor, not its measured horizon — the platform learns the real obstruction profile from observation history and may override this downward per azimuth. Altitude is required: it materially affects pass geometry.
 - `location` is **ISO 6709**: `lat` in −90..+90, `lon` in −180..+180, `alt_m` in metres above the ellipsoid. A longitude outside that range is `malformed`, including one expressed as 0..360 — 200 is not accepted as a spelling of −160, because a platform that silently rewrote it would be guessing which convention a station meant. Stated because the ranges were previously left implicit and the reference implementation accepted 0..360 for longitude by mistake; see `docs/DECISIONS.md` D-052.
+- `location_precision_decimals` is **optional**, is **top-level** rather than inside `location` — which stays purely ISO 6709 — and governs **publication only**. It is an integer from 1 to 6; anything else, including a string, is `malformed`. Whatever it says, the platform stores the full precision the station sent and schedules against it: a rounded coordinate reaching pass geometry would shift predicted acquisition by seconds, and the station would be scheduled for a place it is not.
+
+  Decimal places rather than a distance in metres, because rounding a coordinate is then one operation with no geodesy in it — a metre figure would need a `cos(latitude)` term and would have to say what it meant at the poles. At the equator: 1 ≈ 11 km, 2 ≈ 1.1 km, 3 ≈ 110 m, 4 ≈ 11 m, 5 ≈ 1.1 m, 6 ≈ 11 cm. Longitude's true ground distance *shrinks* with `cos(latitude)`, so the declared figure is an upper bound on what is disclosed and never a lower one — which is the safe direction for a privacy control. There is no "exact" value, only a finest one: 6 decimal places is finer than any fix an operator types in by hand.
+
+  **Omitting the field means 2**, roughly 1.1 km — a map pin that lands on the right campus rather than the right building. A station that never stated a preference has not consented to having its rooftop published, so the default sits at the conservative end. Only the operator knows whether the installation is a university roof or a home address, which is why this is declared per station instead of fixed by the platform. Altitude is always published to the nearest metre regardless: sub-metre altitude is instrument noise, not an address. See `docs/DECISIONS.md` D-082.
 - `horizon_mask` is **optional** and azimuth-resolved: an obstruction the operator already knows about, because they can see the building. The platform applies `max(declared, learned)` per azimuth bin, so a declaration constrains scheduling immediately but never overwrites a measurement and never becomes training data for the learned profile. A station that omits it is not claiming a clear horizon, only that it has not measured one. See `docs/DECISIONS.md` D-031.
 - `simulated` is **required** and **top-level**, alongside `name` and `location`. It is a property of the station, not of the client implementation — a physical station may run the simulator's client build for testing, and a simulated station may be driven by the reference client. See §5 and `docs/DECISIONS.md` D-005.
 - `invite_token` is consumed by a successful registration. A rejected or reused token returns `403` with error code `invalid_invite`.
@@ -405,7 +411,9 @@ These are stated in the protocol rather than left to the deployment because a st
 
 ## 7. Versioning
 
-`MSP-Version: 0.1` header on every request. The platform supports the current major version and one previous. Breaking changes increment the major version.
+`MSP-Version: 0.2` header on every request. The platform supports the current major version and one previous. Breaking changes increment the major version.
+
+**The current minor is 0.2, and 0.1 is still accepted.** 0.2 added one optional field to `register` (§4.1). That is additive, which this section says is a minor bump, so a 0.1 station omits the field, receives the default, and needs no change — see `docs/DECISIONS.md` D-082. This is the rule's first real exercise rather than a hypothetical, and the document version moved with the text so that "0.1" continues to name exactly one document.
 
 The header carries `major.minor`; the path carries the major only, so `MSP-Version: 0.1` is served at `/msp/v0/`. "Current major and one previous" is a statement about the major component. A request whose major falls outside the supported range gets `unsupported_version`; an unrecognised **minor** within a supported major is accepted, because minor versions are additive by definition and a station built against 0.1 must keep working when the platform speaks 0.2. A missing header is `unsupported_version` — sending it is one line of client code, and requiring it is what makes deprecation possible later.
 
@@ -469,4 +477,6 @@ Four endpoints is deliberate. A protocol a student can implement on a microcontr
 
 ---
 
-*Version 0.1, frozen 2026-08-01 by the decision log rather than by a review meeting, and completed on 2026-08-02 when D-023 through D-032 closed the last undefined recovery paths and the four open questions. Every module depends on this document; changes go through a `spec(msp):` pull request with a `D-` entry behind them.*
+*Version 0.1 was frozen 2026-08-01 by the decision log rather than by a review meeting, and completed on 2026-08-02 when D-023 through D-032 closed the last undefined recovery paths and the four open questions. Every module depends on this document; changes go through a `spec(msp):` pull request with a `D-` entry behind them.*
+
+*Version 0.2, 2026-08-12: `location_precision_decimals` added to `register` (§4.1, D-082). The first change since the freeze to add a field rather than clarify one, and therefore the first to move the version — additively, under §7's own rule, so every 0.1 station keeps working untouched.*
