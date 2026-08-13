@@ -38,12 +38,17 @@ __all__ = [
     "RetryPolicy",
 ]
 
-MSP_VERSION = "0.1"
+MSP_VERSION = "0.2"
 """The version this client speaks, sent on every request (MSP §7).
 
 Sent rather than omitted even though the platform's rule accepts any minor within
 a supported major: MSP §7 requires the header, and a client that relies on a
 server being lenient is a client that breaks against a stricter one.
+
+0.2 because this client sends `location_precision_decimals`, which 0.1 does not
+define (D-082). The bump is honesty about what is in the body, not a demand: the
+field is optional and the minor is additive, so this client still works against a
+0.1 platform, which ignores the field and applies its own default.
 """
 
 CONNECT_TIMEOUT_S = 5.0

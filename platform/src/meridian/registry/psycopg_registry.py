@@ -241,6 +241,7 @@ class PsycopgRegistry:
                 self._pepper, request.registration_key
             ),
             simulated=request.simulated,
+            location_precision_decimals=request.location_precision_decimals,
             simulator_run_id=request.simulator_run_id,
             seed=request.seed,
             client_implementation=request.client_implementation,

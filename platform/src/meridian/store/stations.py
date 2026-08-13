@@ -96,6 +96,11 @@ class NewStation:
     token_sha256: bytes
     registration_key_sha256: bytes
     simulated: bool
+    # Decimal places for *publishing* this station's coordinates (D-082). The
+    # row still stores every digit the station sent, and every reader here
+    # returns them unrounded; the rounding happens once, when a public response
+    # is serialised.
+    location_precision_decimals: int
     simulator_run_id: str | None
     seed: int | None
     client_implementation: str | None
@@ -133,8 +138,9 @@ def _insert_station_row(cur: Cursor, station: NewStation) -> None:
         insert into stations
             (station_id, name, operator, lat_deg, lon_deg, alt_m,
              token_sha256, registration_key_sha256, simulated,
+             location_precision_decimals,
              simulator_run_id, seed, client_implementation, client_version)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             station.station_id,
@@ -146,6 +152,7 @@ def _insert_station_row(cur: Cursor, station: NewStation) -> None:
             station.token_sha256,
             station.registration_key_sha256,
             station.simulated,
+            station.location_precision_decimals,
             station.simulator_run_id,
             station.seed,
             station.client_implementation,

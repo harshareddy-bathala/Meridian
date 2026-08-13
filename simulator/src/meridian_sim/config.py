@@ -117,6 +117,22 @@ harder to read than the whole rest of the run.
 """
 
 
+_COARSEST_PUBLISHED_DECIMALS = 1
+_FINEST_PUBLISHED_DECIMALS = _COORDINATE_DECIMALS - 1
+"""The range a virtual station's declared publication precision is drawn from.
+
+MSP §4.1 permits 1 to 6. The fleet deliberately stops one decimal short of the
+precision its own coordinates are generated at, so that rounding always changes
+the published value: at 4 or finer the published coordinate would equal the
+stored one, and a fleet where the two agree cannot show that the rounding ran.
+
+Drawn per station rather than fixed because the operator's choice is the thing
+being modelled, and a fleet that all declare the same figure exercises one value
+many times. A virtual station has no privacy to protect — this is a fixture for
+the publication path, not a claim about any real site.
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class RunConfig:
     """One simulator run, as the CLI resolved it.
@@ -252,6 +268,9 @@ def profile_for_station(index: int, seed: int, run_id: str) -> StationProfile:
         lon_deg=_coordinate(stream, 180.0),
         alt_m=round(stream.uniform(0.0, MAX_ALTITUDE_M), 1),
         capabilities=(_receive_chain(stream),),
+        location_precision_decimals=stream.randint(
+            _COARSEST_PUBLISHED_DECIMALS, _FINEST_PUBLISHED_DECIMALS
+        ),
         simulated=True,
         simulator_run_id=run_id,
         seed=seed,
