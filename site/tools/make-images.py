@@ -5,6 +5,7 @@ Four groups, selectable with --what:
   og      the social card, og-image.png
   icons   favicon.ico, apple-touch-icon.png, and the web manifest's icons
   brand   site/brand/ — the marketing exports, including the profile picture
+  banner  the README banner, one SVG per theme. Needs fontTools, not Pillow.
   globe   the still globe, spliced into index.html as inline SVG. This is the
           one output that is not an image file: it is the picture the home page
           shows when main.js cannot run.
@@ -25,6 +26,22 @@ from __future__ import annotations
 import argparse
 import math
 from pathlib import Path
+
+from orthographic_projection import (
+    DEG,
+    TAU,
+    Camera,
+    CircularOrbit,
+    elevation_rad,
+    graticule,
+    is_behind_limb,
+    orbit_track,
+    project_orthographic,
+    satellite_position,
+    svg_path_data,
+    unit_sphere_point,
+    visible_runs,
+)
 
 # Optional, and deliberately so. Every raster output needs Pillow; the still
 # globe is SVG and needs nothing but this file. CI checks that the block spliced
@@ -53,105 +70,25 @@ SIGNAL = (107, 184, 138)
 PAPER = (250, 249, 247)
 INK_DARK = (20, 22, 27)
 
-DEG = math.pi / 180
-TAU = math.tau
-
 CX, CY, R = 985.0, 250.0, 268.0  # globe: upper right, bleeding off both edges
-CAM_LAT, CAM_LON = 18 * DEG, 102.6 * DEG  # matches main.js settled camera
+CAMERA = Camera(18 * DEG, 102.6 * DEG)  # matches main.js settled camera
 
 STATION_LAT, STATION_LON = 12.9716 * DEG, 77.5946 * DEG
+STATION = unit_sphere_point(STATION_LAT, STATION_LON)
 R_SAT = (6371 + 800) / 6371
 INCL = 98 * DEG
 
 
 # --------------------------------------------------------------- geometry --
-
-
-def ll(lat: float, lon: float, r: float = 1.0):
-    c = math.cos(lat) * r
-    return c * math.cos(lon), c * math.sin(lon), r * math.sin(lat)
-
-
-def project(v):
-    """Orthographic. Returns (depth, screen-right, screen-up); depth > 0 is near."""
-    x, y, z = v
-    s_lat, c_lat = math.sin(CAM_LAT), math.cos(CAM_LAT)
-    s_lon, c_lon = math.sin(CAM_LON), math.cos(CAM_LON)
-    x1 = x * c_lon + y * s_lon
-    y1 = -x * s_lon + y * c_lon
-    return x1 * c_lat + z * s_lat, y1, -x1 * s_lat + z * c_lat
-
-
-def hidden(d: float, h: float, v: float) -> bool:
-    return d < 0 and math.hypot(h, v) < 1
+#
+# The projection itself lives in orthographic_projection.py, which the README
+# banner draws from as well. What stays here is this card's own frame: where
+# the globe sits on it, and which moment of which orbit it shows.
 
 
 def screen(h: float, v: float):
+    """Projected (right, up) to card pixels. v is up, the card's y is down."""
     return CX + h * R, CY - v * R
-
-
-def runs(lines, *, near: bool, to_screen=screen):
-    """Split polylines into contiguous runs on one side of the limb.
-
-    `to_screen` maps a projected (h, v) pair to output coordinates. It defaults
-    to the card's own frame; the SVG still globe passes its own, because that
-    drawing is 200 units square and this one is 1200 by 630. Everything before
-    the mapping — the projection and the limb test — is shared, which is the
-    point: there is one orthographic projection in this file, not two.
-    """
-    out = []
-    for pts in lines:
-        run = []
-        for p in pts:
-            d, h, v = project(p)
-            if hidden(d, h, v) == near:
-                if len(run) > 1:
-                    out.append(run)
-                run = []
-                continue
-            run.append(to_screen(h, v))
-        if len(run) > 1:
-            out.append(run)
-    return out
-
-
-def graticule(step_deg: int = 3):
-    """A 15-degree graticule, sampled every `step_deg` along each line.
-
-    The sampling step is a straight trade of file size against how polygonal
-    the curves look. A chord subtending `step_deg` on a circle of radius R
-    departs from it by R(1 - cos(step_deg / 2)): at 3 degrees and 268 px that
-    is 0.09 px, and at 15 degrees and 86 px it is 0.74 px. The card is a raster
-    and can afford 3; the SVG ships inside index.html and cannot.
-    """
-    lines = []
-    for lon in range(-180, 180, 15):
-        lines.append([ll(lat * DEG, lon * DEG) for lat in range(-90, 91, step_deg)])
-    for lat in range(-75, 76, 15):
-        lines.append([ll(lat * DEG, lon * DEG) for lon in range(-180, 181, step_deg)])
-    return lines
-
-
-def sat_at(raan: float, u: float):
-    ci, si = math.cos(INCL), math.sin(INCL)
-    co, so = math.cos(raan), math.sin(raan)
-    cu, su = math.cos(u), math.sin(u)
-    return (
-        R_SAT * (co * cu - so * su * ci),
-        R_SAT * (so * cu + co * su * ci),
-        R_SAT * su * si,
-    )
-
-
-def orbit(raan: float, steps: int = 360):
-    return [sat_at(raan, i / steps * TAU) for i in range(steps + 1)]
-
-
-def elevation(p) -> float:
-    s = ll(STATION_LAT, STATION_LON)
-    d = (p[0] - s[0], p[1] - s[1], p[2] - s[2])
-    n = math.hypot(*d)
-    return math.asin((s[0] * d[0] + s[1] * d[1] + s[2] * d[2]) / n)
 
 
 # Pick an orbit plane and phase putting the satellite mid-pass rather than at
@@ -162,27 +99,29 @@ TARGET_EL = 32 * DEG
 _best = (0.0, 0.0, -1.0)
 for _i in range(360):
     _raan = _i / 360 * TAU
+    _candidate = CircularOrbit(_raan, INCL, R_SAT)
     for _j in range(720):
         _u = _j / 720 * TAU
-        _p = sat_at(_raan, _u)
-        if abs(elevation(_p) - TARGET_EL) > 0.6 * DEG:
+        _p = satellite_position(_candidate, _u)
+        if abs(elevation_rad(_p, STATION) - TARGET_EL) > 0.6 * DEG:
             continue
-        _d, _h, _v = project(_p)
-        if hidden(_d, _h, _v):
+        _d, _h, _v = project_orthographic(_p, CAMERA)
+        if is_behind_limb(_d, _h, _v):
             continue
-        _sd, _sh, _sv = project(ll(STATION_LAT, STATION_LON))
+        _sd, _sh, _sv = project_orthographic(STATION, CAMERA)
         if _sd < 0.25:  # station must sit well inside the disc
             continue
         _sep = math.hypot(_h - _sh, _v - _sv)
         if _sep > _best[2]:
             _best = (_raan, _u, _sep)
 RAAN, U_SAT, _ = _best
-SAT = sat_at(RAAN, U_SAT)
-PEAK_EL = elevation(SAT)
+ORBIT = CircularOrbit(RAAN, INCL, R_SAT)
+SAT = satellite_position(ORBIT, U_SAT)
+PEAK_EL = elevation_rad(SAT, STATION)
 
-_sd, _sh, _sv = project(ll(STATION_LAT, STATION_LON))
+_sd, _sh, _sv = project_orthographic(STATION, CAMERA)
 STX, STY = screen(_sh, _sv)
-_pd, _ph, _pv = project(SAT)
+_pd, _ph, _pv = project_orthographic(SAT, CAMERA)
 PTX, PTY = screen(_ph, _pv)
 
 
@@ -235,9 +174,9 @@ def write_png() -> Path:
     s = lambda v: v * SS  # noqa: E731
     poly = lambda run: [(x * SS, y * SS) for x, y in run]  # noqa: E731
 
-    for run in runs(graticule(), near=False):
+    for run in visible_runs(graticule(), CAMERA, screen, near=False):
         dr.line(poly(run), fill=blend(RULE, 0.35), width=SS)
-    for run in runs(graticule(), near=True):
+    for run in visible_runs(graticule(), CAMERA, screen, near=True):
         dr.line(poly(run), fill=blend(RULE, 0.95), width=SS)
 
     dr.ellipse(
@@ -246,9 +185,9 @@ def write_png() -> Path:
         width=SS,
     )
 
-    for run in runs([orbit(RAAN)], near=False):
+    for run in visible_runs([orbit_track(ORBIT)], CAMERA, screen, near=False):
         dr.line(poly(run), fill=blend(RULE, 0.45), width=SS)
-    for run in runs([orbit(RAAN)], near=True):
+    for run in visible_runs([orbit_track(ORBIT)], CAMERA, screen, near=True):
         dr.line(poly(run), fill=blend(MUTED, 0.6), width=SS)
 
     dr.line([(s(STX), s(STY)), (s(PTX), s(PTY))], fill=blend(SIGNAL, 0.9), width=SS)
@@ -322,26 +261,10 @@ def svg_screen(h: float, v: float):
     return SVG_BOX / 2 + h * SVG_R, SVG_BOX / 2 - v * SVG_R
 
 
-def path_d(polylines) -> str:
-    """SVG path data for a set of runs, one moveto per run.
-
-    Coordinates are rounded to one decimal — 0.1 of a 200-unit box is a
-    twentieth of a pixel at the size this is ever drawn — and the pairs after
-    the first take SVG's implicit-lineto form, which is what keeps the whole
-    graticule inside index.html rather than beside it.
-    """
-    parts = []
-    for run in polylines:
-        head, *tail = run
-        pairs = " ".join(f"{x:.1f} {y:.1f}" for x, y in tail)
-        parts.append(f"M{head[0]:.1f} {head[1]:.1f}L{pairs}")
-    return "".join(parts)
-
-
 def globe_svg_markup() -> str:
     """The still globe, as one <svg> element. Pure — no files are touched."""
     grat = graticule(step_deg=15)
-    ring = [orbit(RAAN, steps=180)]
+    ring = [orbit_track(ORBIT, steps=180)]
     to = svg_screen
 
     stx, sty = svg_screen(_sh, _sv)
@@ -351,13 +274,15 @@ def globe_svg_markup() -> str:
         f'<svg class="scene-still" viewBox="0 0 {SVG_BOX:.0f} {SVG_BOX:.0f}" '
         'aria-hidden="true" focusable="false">'
         f'<path class="gs-wire gs-back" '
-        f'd="{path_d(runs(grat, near=False, to_screen=to))}"/>'
-        f'<path class="gs-wire" d="{path_d(runs(grat, near=True, to_screen=to))}"/>'
+        f'd="{svg_path_data(visible_runs(grat, CAMERA, to, near=False))}"/>'
+        f'<path class="gs-wire" '
+        f'd="{svg_path_data(visible_runs(grat, CAMERA, to, near=True))}"/>'
         f'<circle class="gs-limb" cx="{SVG_BOX / 2:.0f}" '
         f'cy="{SVG_BOX / 2:.0f}" r="{SVG_R:.0f}"/>'
         f'<path class="gs-wire gs-back" '
-        f'd="{path_d(runs(ring, near=False, to_screen=to))}"/>'
-        f'<path class="gs-orbit" d="{path_d(runs(ring, near=True, to_screen=to))}"/>'
+        f'd="{svg_path_data(visible_runs(ring, CAMERA, to, near=False))}"/>'
+        f'<path class="gs-orbit" '
+        f'd="{svg_path_data(visible_runs(ring, CAMERA, to, near=True))}"/>'
         f'<line class="gs-link" x1="{stx:.1f}" y1="{sty:.1f}" '
         f'x2="{ptx:.1f}" y2="{pty:.1f}"/>'
         # Radii in viewBox units, so the markers scale with the globe. The
@@ -552,7 +477,9 @@ def write_brand() -> list[Path]:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
-        "--what", choices=["all", "og", "icons", "brand", "globe"], default="all"
+        "--what",
+        choices=["all", "og", "icons", "brand", "globe", "banner"],
+        default="all",
     )
     what = ap.parse_args().what
 
@@ -570,6 +497,13 @@ if __name__ == "__main__":
         outputs += write_icons()
     if what in ("all", "brand"):
         outputs += write_brand()
+    if what in ("all", "banner"):
+        # Imported here rather than at module scope: the banner is the one
+        # output that needs fontTools, and `--what globe` is meant to run with
+        # nothing installed at all.
+        from banner_svg import write_banners
+
+        outputs += write_banners()
 
     for p in outputs:
         print(f"{p.relative_to(SITE.parent)}  {p.stat().st_size / 1024:.1f} KB")
