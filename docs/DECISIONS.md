@@ -1890,6 +1890,12 @@ The repository is the first thing an outside contributor sees, and it opened wit
 
 **`README.md`'s opening sentence changed with it.** It described Meridian as "a control platform for satellite ground stations", which is the thing `CLAUDE.md` opens by saying this project is not. The banner's subline and that sentence now say the same thing.
 
+**Amended 2026-08-13.** Two parts of the entry above no longer describe what ships.
+
+The satellite is gone. It crossed the banner in a straight line and read as a stray mark on the image rather than as something in the sky; nine meteors on near-parallel diagonal tracks replace it. Nothing on the banner is a satellite now, which is a real loss for a project about receiving them and was still the right call — a thing that has to be explained before it reads correctly is not working.
+
+**"The nebula is almost colourless on purpose" is now true of the dark theme only.** The light theme is no longer the dark one with the sky removed: it carries the same star field and the same shower in near-black on warm paper, over a wash of cornflower, dusty rose and lilac. That is the first colour in the brand that is neither ink nor semantic, and it is worth being explicit that it was added deliberately rather than by drift. It stays clear of `--signal`, `--alert` and `--trace`, which still mean *above horizon*, *below horizon* and *predicted* and are still unavailable as decoration. The globe's graticule and the subline darkened at the same time: the paper palette in `site/style.css` was drawn for hairlines on a flat ground, and a coloured wash underneath eats contrast that a flat ground does not.
+
 ---
 
 ## Open

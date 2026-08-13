@@ -62,6 +62,11 @@ KEEP_OUT_MARGIN = 18.0
 class Theme:
     """One theme's palette. Every colour the banner uses is on here.
 
+    Both themes draw the same sky. They differ in which way round it is: on
+    the dark ground the stars are warm off-white against near-black, and on
+    the light ground they are near-black against warm paper — the same field,
+    the same seed, the same positions, inverted.
+
     Attributes:
         name: Goes in the filename, and nowhere else.
         ground: The background. Never pure black or pure white — both of the
@@ -71,9 +76,15 @@ class Theme:
         wire_near: Graticule on the hemisphere facing us.
         wire_far: Graticule on the far side, showing through.
         limb: The globe's outline.
-        has_deep_field: Whether to draw the nebula and stars. The light theme
-            does not: a star field on warm paper reads as dust on the page,
-            and the wireframe globe carries the drawing on its own.
+        star: Stars and meteors.
+        nebula: Three wash colours, drawn in the order they are listed.
+        nebula_opacity: Opacity at each wash's centre, falling to nothing at
+            its edge. The light theme carries more, because a pale wash on
+            paper has much less room to be seen in than a dark one has
+            against black.
+        has_limb_glow: Whether the globe gets an atmosphere. Only the dark
+            theme does — a glow is light spilling past an edge, which needs a
+            ground darker than the glow to be visible at all.
     """
 
     name: str
@@ -83,7 +94,10 @@ class Theme:
     wire_near: str
     wire_far: str
     limb: str
-    has_deep_field: bool
+    star: str
+    nebula: tuple[str, str, str]
+    nebula_opacity: float
+    has_limb_glow: bool
 
 
 DARK = Theme(
@@ -94,18 +108,35 @@ DARK = Theme(
     wire_near="#2F3746",
     wire_far="#191E27",
     limb="#59637A",
-    has_deep_field=True,
+    star="#E8E6E1",
+    # Near-black indigo and violet: depth, rather than a fourth brand colour.
+    nebula=("#16203A", "#1D1B33", "#20242E"),
+    nebula_opacity=0.62,
+    has_limb_glow=True,
 )
 
+# The light theme's wireframe and subline are darker and cooler than the
+# paper palette in site/style.css. That palette was drawn for hairlines on
+# flat paper; here they sit on top of a coloured wash, which eats contrast
+# a flat ground does not.
 LIGHT = Theme(
     name="light",
     ground="#FAF9F7",
     ink="#14161B",
-    muted="#5A6069",
-    wire_near="#C9C2B6",
-    wire_far="#E4DFD6",
-    limb="#A79E8F",
-    has_deep_field=False,
+    muted="#454B57",
+    wire_near="#7E879B",
+    # Lighter than a straight inversion would give. The far-side lines converge
+    # at the pole in the bottom-right corner, and at the near side's weight
+    # they moire against each other there.
+    wire_far="#C6CCD8",
+    limb="#4E566A",
+    star="#14161B",
+    # Milky Way in daylight: cornflower, dusty rose and a lilac between them.
+    # Pale enough that the paper still reads as the ground, and kept clear of
+    # the three signal colours, which mean something and are not decoration.
+    nebula=("#8FB4E6", "#EBB6CE", "#BFAEE0"),
+    nebula_opacity=0.75,
+    has_limb_glow=False,
 )
 
 # ------------------------------------------------------------------ globe --
@@ -149,7 +180,7 @@ def _limb_glow(theme: Theme) -> str:
     renders the file. Two strokes cost nothing and are close enough at this
     size.
     """
-    if not theme.has_deep_field:
+    if not theme.has_limb_glow:
         return ""
     return (
         f'<circle class="limb-glow" cx="{GLOBE_CX}" cy="{GLOBE_CY}" '
@@ -186,10 +217,8 @@ def keep_out_test(lockup: Lockup) -> Callable[[float, float], bool]:
 
 def starfield_markup(theme: Theme, lockup: Lockup) -> str:
     """Every star as one circle, the brightest layer carrying a twinkle."""
-    if not theme.has_deep_field:
-        return ""
     stars = star_field(WIDTH, HEIGHT, keep_out_test(lockup))
-    return f'<g fill="{theme.ink}">{"".join(_star_markup(s) for s in stars)}</g>'
+    return f'<g fill="{theme.star}">{"".join(_star_markup(s) for s in stars)}</g>'
 
 
 def _star_markup(star: Star) -> str:
@@ -209,54 +238,39 @@ def _star_markup(star: Star) -> str:
     )
 
 
+# Where the three washes sit and how large each is: centre x, centre y, then
+# the two radii. All three are kept away from the middle of the frame, because
+# a wash directly behind the wordmark reads as a stain on the type rather than
+# as distance behind it.
+NEBULA_SHAPES = (
+    (210.0, 430.0, 620.0, 280.0),
+    (1180.0, 90.0, 520.0, 300.0),
+    (700.0, 470.0, 420.0, 150.0),
+)
+
+
 def nebula_markup(theme: Theme) -> str:
     """Three overlapping washes, drifting as one.
 
-    Deliberately almost colourless. The brand is two inks and three semantic
-    signal colours that mean *above horizon*, *below horizon* and *predicted*,
-    and none of those may appear in a logo treatment — so the nebula is built
-    from near-black indigo and violet that read as depth rather than as a
-    fourth brand colour.
+    The colours come from the theme: near-black indigo and violet on the dark
+    ground, cornflower and dusty rose on the light one. Neither set goes near
+    the three signal colours, which mean *above horizon*, *below horizon* and
+    *predicted* and are not available as decoration.
     """
-    if not theme.has_deep_field:
-        return ""
-    # Kept away from the middle of the frame: a wash directly behind the
-    # wordmark reads as a stain on the type rather than as distance behind it.
-    washes = (
-        ("nebula-a", "#16203A", 210.0, 430.0, 620.0, 280.0),
-        ("nebula-b", "#1D1B33", 1180.0, 90.0, 520.0, 300.0),
-        ("nebula-c", "#20242E", 700.0, 470.0, 420.0, 150.0),
-    )
     gradients = "".join(
-        f'<radialGradient id="{name}">'
-        f'<stop offset="0" stop-color="{colour}" stop-opacity="0.62"/>'
+        f'<radialGradient id="nebula-{index}">'
+        f'<stop offset="0" stop-color="{colour}" '
+        f'stop-opacity="{theme.nebula_opacity:.2f}"/>'
         f'<stop offset="1" stop-color="{colour}" stop-opacity="0"/>'
         "</radialGradient>"
-        for name, colour, *_ in washes
+        for index, colour in enumerate(theme.nebula)
     )
     ellipses = "".join(
-        f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" fill="url(#{name})"/>'
-        for name, _, cx, cy, rx, ry in washes
+        f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" '
+        f'fill="url(#nebula-{index})"/>'
+        for index, (cx, cy, rx, ry) in enumerate(NEBULA_SHAPES)
     )
     return f'<defs>{gradients}</defs><g class="drift">{ellipses}</g>'
-
-
-def transit_markup(theme: Theme) -> str:
-    """One satellite crossing the frame, with a short trail behind it.
-
-    Slower than any meteor and on a much shallower track, because that is the
-    difference on a real sky: a meteor is gone in a second, a pass takes
-    minutes to cross. Its static transform is where it rests when a viewer has
-    asked for reduced motion — mid-sky, rather than at the origin, which is
-    the corner of the frame.
-    """
-    return (
-        f'<g class="transit" transform="translate(760 60)" stroke="{theme.ink}" '
-        f'fill="{theme.ink}" opacity="0.5">'
-        '<line x1="-34" y1="1.3" x2="0" y2="0" stroke-width="1.1" opacity="0.45"/>'
-        '<circle cx="0" cy="0" r="2.2"/>'
-        "</g>"
-    )
 
 
 def meteors_markup(theme: Theme, meteors: list[Meteor]) -> str:
@@ -269,10 +283,8 @@ def meteors_markup(theme: Theme, meteors: list[Meteor]) -> str:
     units, not in the shape's own bounding box, which for a horizontal line
     has no height to measure.
     """
-    if not theme.has_deep_field:
-        return ""
     return "".join(
-        _one_meteor_markup(index, meteor, theme.ink)
+        _one_meteor_markup(index, meteor, theme.star)
         for index, meteor in enumerate(meteors)
     )
 
@@ -308,10 +320,7 @@ def banner_svg(theme: Theme, lockup: Lockup) -> str:
     Returns:
         A complete standalone SVG, ready to be written to disk.
     """
-    # Empty on the light theme, which takes the stylesheet down to the fixed
-    # rules — there are no meteors on paper for the same reason there are no
-    # stars.
-    meteors = meteor_shower(HEIGHT) if theme.has_deep_field else []
+    meteors = meteor_shower(HEIGHT)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH:.0f} '
         f'{HEIGHT:.0f}" width="{WIDTH:.0f}" height="{HEIGHT:.0f}" role="img" '
@@ -328,7 +337,6 @@ def banner_svg(theme: Theme, lockup: Lockup) -> str:
         f"{starfield_markup(theme, lockup)}"
         f"{globe_markup(theme)}"
         f"{meteors_markup(theme, meteors)}"
-        f"{transit_markup(theme)}"
         f"{lockup_markup(lockup, theme.ink, theme.muted)}"
         "</svg>"
     )
