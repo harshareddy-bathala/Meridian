@@ -1720,6 +1720,68 @@ The consequence worth stating: two runs with *different master seeds* against on
 
 ---
 
+## D-081 — The dashboard is TypeScript, Vite, React and Leaflet, served by the platform
+
+**2026-08-13 · accepted** · *`dashboard/`, `meridian/api/app.py`, Stage 11*
+
+D-036 split the public site from the dashboard and deliberately left the dashboard's stack open, because choosing a framework for a page with one heading would have prejudged it. Stage 11 is the stage that has to choose.
+
+**TypeScript, Vite, React and Leaflet, in `dashboard/`, built into the image and served by FastAPI at the same origin as the API.**
+
+Same origin is the load-bearing half. `dash.meridian.org.in` already resolves to the tunnel, so the built assets and `/api/v1` arrive from one host — which means **no CORS middleware exists anywhere in this repository**, no preflight, no second hostname, and no second deploy target. A cross-origin dashboard would have bought nothing and cost a security control that has to be right.
+
+*Rejected: FastAPI templates plus HTMX.* Genuinely cheaper, and the honest argument for it is real — no Node, no build step. It loses on the screen that matters: `PROJECT.md` §13 describes a map cross-filtered against a pass queue and a scheduling-reason panel, and under HTMX every interaction is a round trip to a Raspberry Pi behind a tunnel. The map is Leaflet either way, so the "no JavaScript build" saving was never as large as it looked.
+
+*Rejected: Cloudflare Pages for the dashboard.* It contradicts D-036, which places `dash.` on the tunnel precisely because the dashboard is a view onto the observation store and should be down when the platform is down.
+
+*Rejected: Mapbox or Google Maps.* An API key is a runtime dependency on an external service, on the one surface SC-6 is stated against. The independence test applies to the map tiles too: a tile failure degrades to a graticule with the markers still drawn.
+
+`CLAUDE.local.md`'s size, naming and complexity limits apply to TypeScript as much as to Python. `ruff` and `mypy` cannot reach it, so eslint carries `max-lines`, `max-lines-per-function` and `complexity` set to the same numbers — otherwise the standards stop at the language boundary, which is where a second codebase quietly grows different rules.
+
+---
+
+## D-082 — A station declares how precisely its location may be published
+
+**2026-08-13 · accepted** · *`docs/MSP-SPEC.md` §4.1, `meridian/api/public/coordinate_privacy.py`, Stage 11*
+
+The roadmap's do-not-expose list ends with "unrestricted raw station coordinates **if privacy policy later requires approximation**" — a conditional nobody had resolved, and Stage 11 is the stage that publishes coordinates. Registration stores what the operator typed, to six decimal places if they typed six.
+
+**`location_precision_decimals`, an optional integer from 1 to 6, top-level in the `register` body, defaulting to 2.** It governs **publication only**: the platform stores the full precision the station sent and schedules against it, always.
+
+Top-level rather than inside `location`, because `location` is ISO 6709 and should stay purely a coordinate; this is a property of the station, which is the same argument §4.1 already makes for `simulated`.
+
+Decimal places rather than a distance in metres. Rounding is then one operation with no geodesy in it — a metre figure needs a `cos(latitude)` term and has to say what it means at the poles. At the equator: 1 ≈ 11 km, 2 ≈ 1.1 km, 3 ≈ 110 m, 4 ≈ 11 m, 5 ≈ 1.1 m, 6 ≈ 11 cm. Longitude's true ground distance *shrinks* with `cos(latitude)`, so a declared figure is an upper bound on what is disclosed and never a lower one, which is the safe direction for a privacy control.
+
+**There is no `exact` value, only a finest one**, and that is the point rather than a simplification. An `exact` sentinel requires a branch — publish raw, or round — and the branch is a live code path that emits full-precision coordinates. With a bounded integer every publication goes through `round(value_deg, decimals)` and full-precision disclosure stops being a state the code can reach. Six decimal places is finer than any fix an operator types by hand, so nothing is lost.
+
+**The default is 2, and the migration's column default is the backfill** — one statement, applied by Postgres to every station registered before the field existed. The default lands on operators who never read the specification and therefore consented to nothing, so it sits at the conservative end.
+
+Altitude is always published to the nearest metre, independent of the field: sub-metre altitude is instrument noise, not an address, and coupling it would be one more thing to reason about.
+
+**The rounding happens at serialisation, in the public response model, and nowhere else.** Not in the store, because `pass_generation`, `orbit` and the scheduler read the same rows through `find_receiving_stations` and must see full precision — a rounded latitude shifts every predicted acquisition. Not in SQL, because one query cannot serve both readers and a `round()` in a `select` is a second place the rule lives. The boundary is enforced mechanically: `meridian.api` becomes a banned import outside `platform/src/meridian/api/**`, which also closes the general rule `ARCHITECTURE.md` already claims.
+
+**MSP goes to 0.2.** An optional field added to a request is additive, and §7 says additive changes are a minor bump. This is the first change since the 0.1 freeze to add a field rather than clarify one, so it is §7's first real exercise: a 0.1 station omits the field, receives the default, and needs no change, because the platform already accepts an unrecognised minor within a supported major. The document version moves with the text so that "0.1" continues to name exactly one document.
+
+*Rejected: a platform-wide rounding policy.* An operator on a university rooftop and one at a home address have different exposure, and only they know which they are.
+
+*Rejected: `"exact"` / `"approximate"`.* Two values, which reads simply and fails twice. The name carries no unit, which `CLAUDE.local.md` §4 does not permit — the field never states how approximate it is. And two postures do not deliver the choice this decision claims to give: an operator wanting 11 km cannot have it, and one happy at 110 m must pick between 1.1 km and their exact roof. The first operator who wants a third value forces another spec change.
+
+---
+
+## D-083 — The public read API is `/api/v1`, and makes no compatibility promise
+
+**2026-08-13 · accepted** · *`meridian/api/public/`, Stage 11*
+
+MSP is `/msp/v0` with a required `MSP-Version` header because it is a published protocol that strangers implement, and §7 makes them an explicit deprecation promise. The read API is a different kind of thing and should not borrow the shape of that promise by accident.
+
+**`/api/v1`, versioned in the path, with no version header and no compatibility guarantee beyond "the dashboard at this commit works against it."** A breaking change becomes `/api/v2`, served beside `v1` for as long as anything third-party is known to use it — which is currently nothing.
+
+Not `/public/v0`: "public" describes who may call it, not what it is, and a `v0` alongside `/msp/v0` invites a reader to assume MSP's promise applies here too.
+
+No version header, for a reason specific to this deployment: the dashboard is shipped *by* the platform, from the same image, so a header would encode a version skew that same-origin deployment makes impossible. It would also break `curl https://dash.meridian.org.in/api/v1/stations`, which is a thing an examiner does, and the version stays in the path so it survives being pasted into a chat window.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
