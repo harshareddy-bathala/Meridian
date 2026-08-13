@@ -1720,6 +1720,150 @@ The consequence worth stating: two runs with *different master seeds* against on
 
 ---
 
+## D-081 — The dashboard is TypeScript, Vite, React and Leaflet, served by the platform
+
+**2026-08-13 · accepted** · *`dashboard/`, `meridian/api/app.py`, Stage 11*
+
+D-036 split the public site from the dashboard and deliberately left the dashboard's stack open, because choosing a framework for a page with one heading would have prejudged it. Stage 11 is the stage that has to choose.
+
+**TypeScript, Vite, React and Leaflet, in `dashboard/`, built into the image and served by FastAPI at the same origin as the API.**
+
+Same origin is the load-bearing half. `dash.meridian.org.in` already resolves to the tunnel, so the built assets and `/api/v1` arrive from one host — which means **no CORS middleware exists anywhere in this repository**, no preflight, no second hostname, and no second deploy target. A cross-origin dashboard would have bought nothing and cost a security control that has to be right.
+
+*Rejected: FastAPI templates plus HTMX.* Genuinely cheaper, and the honest argument for it is real — no Node, no build step. It loses on the screen that matters: `PROJECT.md` §13 describes a map cross-filtered against a pass queue and a scheduling-reason panel, and under HTMX every interaction is a round trip to a Raspberry Pi behind a tunnel. The map is Leaflet either way, so the "no JavaScript build" saving was never as large as it looked.
+
+*Rejected: Cloudflare Pages for the dashboard.* It contradicts D-036, which places `dash.` on the tunnel precisely because the dashboard is a view onto the observation store and should be down when the platform is down.
+
+*Rejected: Mapbox or Google Maps.* An API key is a runtime dependency on an external service, on the one surface SC-6 is stated against. The independence test applies to the map tiles too: a tile failure degrades to a graticule with the markers still drawn.
+
+`CLAUDE.local.md`'s size, naming and complexity limits apply to TypeScript as much as to Python. `ruff` and `mypy` cannot reach it, so eslint carries `max-lines`, `max-lines-per-function` and `complexity` set to the same numbers — otherwise the standards stop at the language boundary, which is where a second codebase quietly grows different rules.
+
+---
+
+## D-082 — A station declares how precisely its location may be published
+
+**2026-08-13 · accepted** · *`docs/MSP-SPEC.md` §4.1, `meridian/api/public/coordinate_privacy.py`, Stage 11*
+
+The roadmap's do-not-expose list ends with "unrestricted raw station coordinates **if privacy policy later requires approximation**" — a conditional nobody had resolved, and Stage 11 is the stage that publishes coordinates. Registration stores what the operator typed, to six decimal places if they typed six.
+
+**`location_precision_decimals`, an optional integer from 1 to 6, top-level in the `register` body, defaulting to 2.** It governs **publication only**: the platform stores the full precision the station sent and schedules against it, always.
+
+Top-level rather than inside `location`, because `location` is ISO 6709 and should stay purely a coordinate; this is a property of the station, which is the same argument §4.1 already makes for `simulated`.
+
+Decimal places rather than a distance in metres. Rounding is then one operation with no geodesy in it — a metre figure needs a `cos(latitude)` term and has to say what it means at the poles. At the equator: 1 ≈ 11 km, 2 ≈ 1.1 km, 3 ≈ 110 m, 4 ≈ 11 m, 5 ≈ 1.1 m, 6 ≈ 11 cm. Longitude's true ground distance *shrinks* with `cos(latitude)`, so a declared figure is an upper bound on what is disclosed and never a lower one, which is the safe direction for a privacy control.
+
+**There is no `exact` value, only a finest one**, and that is the point rather than a simplification. An `exact` sentinel requires a branch — publish raw, or round — and the branch is a live code path that emits full-precision coordinates. With a bounded integer every publication goes through `round(value_deg, decimals)` and full-precision disclosure stops being a state the code can reach. Six decimal places is finer than any fix an operator types by hand, so nothing is lost.
+
+**The default is 2, and the migration's column default is the backfill** — one statement, applied by Postgres to every station registered before the field existed. The default lands on operators who never read the specification and therefore consented to nothing, so it sits at the conservative end.
+
+Altitude is always published to the nearest metre, independent of the field: sub-metre altitude is instrument noise, not an address, and coupling it would be one more thing to reason about.
+
+**The rounding happens at serialisation, in the public response model, and nowhere else.** Not in the store, because `pass_generation`, `orbit` and the scheduler read the same rows through `find_receiving_stations` and must see full precision — a rounded latitude shifts every predicted acquisition. Not in SQL, because one query cannot serve both readers and a `round()` in a `select` is a second place the rule lives. The boundary is enforced mechanically: `meridian.api` becomes a banned import outside `platform/src/meridian/api/**`, which also closes the general rule `ARCHITECTURE.md` already claims.
+
+**MSP goes to 0.2.** An optional field added to a request is additive, and §7 says additive changes are a minor bump. This is the first change since the 0.1 freeze to add a field rather than clarify one, so it is §7's first real exercise: a 0.1 station omits the field, receives the default, and needs no change, because the platform already accepts an unrecognised minor within a supported major. The document version moves with the text so that "0.1" continues to name exactly one document.
+
+*Rejected: a platform-wide rounding policy.* An operator on a university rooftop and one at a home address have different exposure, and only they know which they are.
+
+*Rejected: `"exact"` / `"approximate"`.* Two values, which reads simply and fails twice. The name carries no unit, which `CLAUDE.local.md` §4 does not permit — the field never states how approximate it is. And two postures do not deliver the choice this decision claims to give: an operator wanting 11 km cannot have it, and one happy at 110 m must pick between 1.1 km and their exact roof. The first operator who wants a third value forces another spec change.
+
+---
+
+## D-083 — The public read API is `/api/v1`, and makes no compatibility promise
+
+**2026-08-13 · accepted** · *`meridian/api/public/`, Stage 11*
+
+MSP is `/msp/v0` with a required `MSP-Version` header because it is a published protocol that strangers implement, and §7 makes them an explicit deprecation promise. The read API is a different kind of thing and should not borrow the shape of that promise by accident.
+
+**`/api/v1`, versioned in the path, with no version header and no compatibility guarantee beyond "the dashboard at this commit works against it."** A breaking change becomes `/api/v2`, served beside `v1` for as long as anything third-party is known to use it — which is currently nothing.
+
+Not `/public/v0`: "public" describes who may call it, not what it is, and a `v0` alongside `/msp/v0` invites a reader to assume MSP's promise applies here too.
+
+No version header, for a reason specific to this deployment: the dashboard is shipped *by* the platform, from the same image, so a header would encode a version skew that same-origin deployment makes impossible. It would also break `curl https://dash.meridian.org.in/api/v1/stations`, which is a thing an examiner does, and the version stays in the path so it survives being pasted into a chat window.
+
+---
+
+## D-084 — The public surface has its own error vocabulary, and MSP §6 stays closed
+
+**2026-08-13 · accepted** · *`meridian/api/public/envelope.py`, `meridian/api/errors.py`, Stage 11*
+
+`install_error_handlers` is registered on the application, not on the MSP router, so it already governs every path the platform serves. The public API therefore inherits MSP §6's handlers whether or not that was intended — and MSP §6 has no code for "no such station".
+
+**A second code table, in its own module, reusing the same body shape.** `{"error": ..., "message": ...}` stays exactly as it is — two flat strings, one error shape in the repository — while the *vocabulary* differs: `not_found`, `invalid_query`, `server_error`, each with its own status mapping and its own `PublicError` that refuses a code absent from the table.
+
+**MSP §6's eight codes are not widened.** That table's docstring says a code absent from it cannot be sent, which is what stops an endpoint inventing a ninth; adding `not_found` would make the table stop being "every code MSP §6 defines", and an implementer reading the reference implementation would find a code the published specification does not list. `tests/msp_conformance` asserts the envelope's exact shape, and it should keep passing for the reason it was written rather than because it was edited.
+
+The two shared handlers — `RequestValidationError` and the catch-all `Exception` — each gain one guard clause on which surface the path belongs to. `is_public_surface` compares against the prefix exactly or with a trailing slash, never a bare `startswith`, so `/api/v10/...` is not mistaken for a public path.
+
+*Rejected: mounting the public API as a sub-application.* It would give each surface its own handler stack for free, which is the right shape. Inside a `Mount`, `request.app` is the sub-application, and `get_connection` and `get_settings` read `request.app.state.pool` — the pool would not be there. A structural win that breaks the dependency every route needs is not a win.
+
+---
+
+## D-085 — Public list endpoints paginate by keyset, never by offset
+
+**2026-08-13 · accepted** · *`meridian/api/public/pagination.py`, Stage 11*
+
+Nothing in the platform paginates yet. `MAX_ASSIGNMENTS_PER_RESPONSE` looks like a page size and its own docstring says it is not one — D-035 caps eligible assignments rather than paging them, because held work is redelivered and the earliest eight of nine would be the same eight forever.
+
+**Every public list endpoint takes `limit` and an opaque `cursor`, and the cursor encodes the last row's sort key.** Default 50, maximum 200. The route asks the store for `limit + 1` rows and trims, so "is there another page" is computed rather than guessed, and the trimming is a pure function rather than a `limit + 1` buried in SQL.
+
+Keyset rather than offset, for a reason specific to this data. `observations` and `heartbeats` are hypertables with compression policies; `offset 10000` reads and discards ten thousand rows, decompressing chunks to do it, on a Pi's NVMe. Worse, offset pagination **duplicates and skips rows on a live feed** — a dashboard paging observations while a station is reporting would show one twice and hide another. A project whose stated rule is that every published number is regenerable cannot ship a pagination scheme returning a different set depending on when the page was turned.
+
+The prerequisite already holds: every store read carries a total, stable `order by` — `station_id asc`, `aos asc, id asc` — because those orderings were chosen for reproducibility. Keyset needs exactly that, so the cost is a tiebreaker column where one is missing, not a redesign.
+
+`limit` defaults to 50 because that is the fleet size the project demonstrates, so the station map fits one page at the scale it is shown at. 200 caps what one query costs the Pi.
+
+---
+
+## D-086 — An endpoint with no computation behind it says so, and publishes no numbers
+
+**2026-08-13 · accepted** · *`meridian/api/public/reliability.py`, `meridian/api/public/aggregates.py`, Stage 11*
+
+Stage 11 fixes the public URL surface, but `meridian.reliability` and `meridian.prediction` are docstring-only stubs and nothing registers a metric anywhere. Two of the roadmap's endpoint groups have nothing to call.
+
+**They answer `200` with `{"status": "not_yet_computed", "reason": ..., "available_from_stage": N}` and no numeric field of any kind.** Safety comes from *absence*, not from a sentinel: a chart reaching for a value gets nothing back and draws nothing. `status` is a `Literal`, so mypy pins it and it appears in the schema as a discriminator; the eventual real response carries `"status": "computed"` beside its data, and the dashboard's single branch survives the transition.
+
+`simulated` is deliberately **not** on this body. There is no data, so there is no provenance to state — which is what "every *applicable* response carries `simulated`" means, said out loud so the omission reads as deliberate rather than forgotten.
+
+*Rejected: `{"value": null}` or `{"value": 0, "computed": false}`.* Both leave a number-shaped hole exactly where a chart will read, and a zero that means "not measured" is the precise failure this project exists to avoid.
+
+*Rejected: `501`.* Unambiguous at the HTTP layer, and wrong in practice: it routes the *normal* case through the dashboard's error path, so the branch that should mean "the platform is broken" fires on every page load, and every load logs a failure at the edge. A status that fires constantly stops being read.
+
+*Rejected: omitting the endpoints.* The URL surface would then move when the computation lands, which is the thing fixing it now is meant to prevent.
+
+---
+
+## D-087 — `/metrics` requires a bearer token and answers 404 without one
+
+**2026-08-13 · accepted** · *`meridian/api/metrics_access.py`, `deploy/prometheus/prometheus.yml`, Stage 11*
+
+`/metrics` has been unauthenticated since it was added, which was correct while the platform was only reachable on a laptop. Stage 11 puts the platform behind a tunnel on a public hostname, and the endpoint goes with it.
+
+**A bearer token compared with `secrets.compare_digest`, and a `404` byte-identical to any unmatched path when it is absent or wrong.** `METRICS_TOKEN` joins `TOKEN_HASH_PEPPER` in the public-mode placeholder refusal, so a public deployment cannot start with `change-me` on it. Prometheus authenticates with a credentials file inside the compose network.
+
+404 rather than 401: a 401 confirms the endpoint exists and invites a second guess. The rejection is logged at warning with its reason, so a misconfigured scrape is diagnosable from the platform's log rather than from the response.
+
+*Rejected: a peer-address allowlist.* This is D-051's own argument inverted — a tunnelled request presents the tunnel container's address, which is inside the compose network, so no address rule can separate the tunnel from Prometheus.
+
+*Rejected: a second port.* Structurally the cleanest answer, and premature: the endpoint currently emits only default process collectors, so a separate process would report the wrong process, and doing it properly needs the multiprocess registry that arrives with Stage 12's domain metrics.
+
+*Rejected: excluding the path at the tunnel and nothing else.* Unverifiable from the repository, which is exactly how D-041's three recorded remedies were still unapplied when D-042 checked them a day later.
+
+---
+
+## D-088 — Rate limiting is applied at the Cloudflare edge, and verified by a script
+
+**2026-08-13 · accepted** · *`deploy/tools/verify_public_surface.py`, Stage 11* · *Resolves D-051*
+
+D-051 deferred rate limiting and named its own revisit trigger: "the first time the platform is reachable from outside the college network for longer than a demonstration." Stage 11 is that moment.
+
+**A rate-limit rule on the tunnel hostname, in Cloudflare, and nothing in the process.** Every argument D-051 made against an in-process limiter still holds and now serves as the justification rather than the deferral: the client address is the tunnel's, `CF-Connecting-IP` is forgeable on the port compose also publishes, and the edge is the only place that sees the real caller.
+
+**The part that matters is the verification, not the rule.** A control living outside the repository is a control nobody can prove is on, and this project has already run that experiment: D-041 recorded three Cloudflare remedies and D-042 found all three unapplied. So the rule ships with `deploy/tools/verify_public_surface.py` — stdlib only, like `site/tools/verify_site.py` — which asserts from outside that `/metrics` is 404, that a station listing carries `simulated` on every item and no key matching `token|invite|health|seed|registration_key`, and that a burst of requests eventually returns `429`. That last assertion is the executable proof the rule exists. Its transcript is pasted into this entry when the rule is applied, exactly as D-042 pasted `curl` output.
+
+It cannot run in CI — a fork PR has no public hostname — so it is an operator tool, run against a deployment, and re-running it is one command.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
