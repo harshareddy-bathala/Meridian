@@ -1,6 +1,13 @@
-# Meridian
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="site/brand/meridian-banner-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="site/brand/meridian-banner-light.svg">
+    <img src="site/brand/meridian-banner-light.svg" width="100%"
+         alt="Meridian — predictive scheduling and reliability for satellite ground stations">
+  </picture>
+</p>
 
-A control platform for satellite ground stations, and an open protocol for stations to join a network.
+Predictive scheduling and reliability for satellite ground stations, and an open protocol for stations to join a network.
 
 Satellites in low Earth orbit are visible for eight to fifteen minutes at a time, a few times a day. A pass that is missed is lost permanently — there is no retry. Yet the decision of which pass to receive is almost universally made on geometry alone: whichever satellite goes highest.
 
