@@ -1864,6 +1864,34 @@ It cannot run in CI — a fork PR has no public hostname — so it is an operato
 
 ---
 
+## D-089 — The README banner is a generated SVG pair, and the type is outlines
+
+**2026-08-13 · accepted** · *`site/tools/{banner_svg,starfield,wordmark_outlines,orthographic_projection}.py`, `site/brand/meridian-banner-*.svg`, `README.md`*
+
+The repository is the first thing an outside contributor sees, and it opened with a heading. The site has had an identity since D-036; the README had none of it.
+
+**One drawing, generated into two themes, selected by `<picture>` and `prefers-color-scheme`** — the mark and wordmark over a seeded star field, with Earth rising into the top-right corner. 1500×500, so the same file serves the README, the social preview and a profile header rather than three variants that drift.
+
+**The text ships as outlines, not as a `font-family`.** A README image is rendered in a context that blocks external fonts, stylesheets and scripts. `font-family="IBM Plex Sans"` would render in IBM Plex on the three machines that have it installed and in something else everywhere else, at a different width — which moves everything positioned against it, and the lockup is measured rather than eyeballed. `wordmark_outlines.py` reads the `.woff2` files already in `site/fonts`, so there is still exactly one copy of the typeface in the repository.
+
+**Motion is CSS, not SMIL.** Both survive being embedded as an image; only CSS can be switched off by `prefers-reduced-motion`, because an `<img>` runs no script and there is nothing else to gate it with. Everything moves slowly and the satellite rests mid-sky rather than at the origin when motion is declined.
+
+**The projection is the one already in the repository.** `orthographic_projection.py` is lifted out of `make-images.py` and now serves the social card, the still globe inside `index.html` and the banner. The extraction was verified by regenerating both existing outputs and confirming they were byte-identical.
+
+`make-images.py` goes from 575 lines to 509 with it. That is still over the 400-line module limit, which D-044 deliberately does not enforce on `site/tools/` — but the limit exists because a long module does not get read, and that applies to a build script as much as to anything else. The remainder is the social card's own drawing code, and extracting it is a separate piece of work. Recorded here rather than left to be found later. The five modules added by this entry are all inside the limit.
+
+**The nebula is almost colourless on purpose.** `site/brand/README.md` reserves `--signal`, `--alert` and `--trace` as semantic — *above horizon*, *below horizon*, *predicted* — and forbids them in a logo treatment. The wash is near-black indigo and violet, which reads as depth rather than as a fourth brand colour.
+
+*Rejected: a raster banner.* The lockup PNG already exists and could have been cropped. It cannot carry two themes without two exports that then drift, it is soft at any width but the one it was rendered at, and at 1500×500 it is larger than both SVGs together.
+
+*Rejected: hand-writing the SVG.* Faster, and it would have been the only brand asset that could not be regenerated — which `site/brand/README.md` forbids for the PNGs for exactly the reason that would apply here.
+
+*Rejected: a system font stack as a fallback.* There is no fallback worth having: the drawing is centred on measured widths, so a substituted face does not degrade it, it breaks it.
+
+**`README.md`'s opening sentence changed with it.** It described Meridian as "a control platform for satellite ground stations", which is the thing `CLAUDE.md` opens by saying this project is not. The banner's subline and that sentence now say the same thing.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
