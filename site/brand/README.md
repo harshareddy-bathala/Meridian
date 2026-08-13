@@ -25,7 +25,9 @@ Two files, one drawing: the lockup and a subline over a star field, with Earth r
 
 `README.md` picks between them with `<picture>` and `prefers-color-scheme`, so the banner follows the reader's GitHub theme.
 
-**SVG, and self-contained.** A README image is rendered in a context that blocks external fonts, stylesheets and scripts, so the file carries everything it needs: the type is outlines rather than a `font-family`, and the motion — a slow twinkle, a drifting wash, one satellite crossing every 24 seconds — is CSS inside the document, switched off for anyone who has asked for reduced motion.
+**SVG, and self-contained.** A README image is rendered in a context that blocks external fonts, stylesheets and scripts, so the file carries everything it needs: the type is outlines rather than a `font-family`, and the motion — a slow twinkle, a drifting wash, and a meteor every couple of seconds on one of nine tracks — is CSS inside the document, switched off for anyone who has asked for reduced motion.
+
+**Both themes draw the same sky**, inverted: warm off-white stars on near-black, or near-black stars on warm paper. The washes behind them are the one thing that is not a straight inversion — near-black indigo and violet on the dark ground, cornflower and dusty rose on the light one.
 
 Regenerating it needs `fonttools` and `brotli`, which is how the letters are read out of the shipped `.woff2` files:
 

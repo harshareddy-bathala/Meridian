@@ -23,9 +23,7 @@ from __future__ import annotations
 
 from meteor_tracks import Meteor
 
-# Motion that is always present, whatever is drawn over it. `.transit` is the
-# satellite: slower than any meteor, and on a shallow track, because that is
-# what a pass looks like from the ground.
+# Motion that is always present, whatever is drawn over it.
 BASE_CSS = """
 @keyframes twinkle { 0%, 100% { opacity: 1 } 50% { opacity: 0.25 } }
 @keyframes drift {
@@ -33,17 +31,10 @@ BASE_CSS = """
   to   { transform: translate(28px, -16px) scale(1.06) }
 }
 @keyframes glow { from { opacity: 0.06 } to { opacity: 0.18 } }
-@keyframes transit {
-  0%   { transform: translate(-160px, 96px); opacity: 0 }
-  7%   { opacity: 0.5 }
-  93%  { opacity: 0.5 }
-  100% { transform: translate(1680px, 26px); opacity: 0 }
-}
 .twinkle { animation: twinkle 7s ease-in-out infinite }
 .drift { animation: drift 64s ease-in-out infinite alternate;
          transform-origin: 750px 250px }
 .limb-glow { animation: glow 11s ease-in-out infinite alternate }
-.transit { animation: transit 28s linear infinite }
 """
 
 # A meteor holds at its end point, invisible, for the rest of its period. The
@@ -54,7 +45,7 @@ FADE_FROM = 0.62
 
 REDUCED_MOTION_CSS = """
 @media (prefers-reduced-motion: reduce) {
-  .twinkle, .drift, .limb-glow, .transit, .meteor { animation: none }
+  .twinkle, .drift, .limb-glow, .meteor { animation: none }
   .meteor { opacity: 0 }
 }
 """
@@ -66,8 +57,7 @@ def motion_css(meteors: list[Meteor]) -> str:
     The fixed rules first, then one keyframe per meteor.
 
     Args:
-        meteors: The placed shower. An empty list is normal — the light theme
-            has no meteors, and then this is just the fixed rules.
+        meteors: The placed shower.
 
     Returns:
         CSS, ready to go inside a <style> element.
