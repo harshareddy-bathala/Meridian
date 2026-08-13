@@ -31,6 +31,12 @@ from meridian.store.invites import hash_invite_token
 from meridian_client.assignment_message import Assignment
 from meridian_client.credentials import StationCredentials, save_credentials
 from meridian_client.held_assignments import AssignmentRecord
+from meridian_client.observation_message import (
+    ObservationResult,
+    Signal,
+    build_observation_body,
+)
+from meridian_client.observation_queue import ObservationQueue
 from meridian_client.registration import ReceiveChain, StationProfile, register
 from meridian_client.station_loop import StationLoop
 from meridian_client.transport import MspTransport
@@ -66,6 +72,7 @@ class RecordingExecutor:
     def __init__(self) -> None:
         self.begun: list[str] = []
         self.ended: list[str] = []
+        self.ready: list[ObservationResult] = []
 
     def begin(self, assignment: Assignment) -> None:
         """Note a start."""
@@ -74,6 +81,12 @@ class RecordingExecutor:
     def end(self, assignment: Assignment) -> None:
         """Note a stop."""
         self.ended.append(assignment.assignment_id)
+
+    def take_completed(self) -> tuple[ObservationResult, ...]:
+        """Hand over what a test put in ``ready``, once."""
+        completed = tuple(self.ready)
+        self.ready.clear()
+        return completed
 
 
 @pytest.fixture
@@ -192,7 +205,8 @@ def loop_for(
     )
     executor = RecordingExecutor()
     record = AssignmentRecord(tmp_path / "held.json")
-    return StationLoop(transport, credentials, record, executor), executor
+    queue = ObservationQueue(tmp_path / "outbox")
+    return StationLoop(transport, credentials, record, executor, queue), executor
 
 
 def test_a_station_receives_holds_executes_and_survives_an_outage(
@@ -256,7 +270,11 @@ def test_reception_continues_while_the_platform_is_unreachable(
         "http://127.0.0.1:1", bearer_token=credentials.bearer_token
     )
     offline = StationLoop(
-        unreachable, credentials, AssignmentRecord(tmp_path / "held.json"), executor
+        unreachable,
+        credentials,
+        AssignmentRecord(tmp_path / "held.json"),
+        executor,
+        ObservationQueue(tmp_path / "outbox"),
     )
     with unreachable:
         outcome = offline.tick(now + timedelta(minutes=3))
@@ -316,3 +334,141 @@ def test_the_offline_transport_reports_a_transport_failure_not_a_refusal() -> No
         pytest.raises(httpx.HTTPError),
     ):
         unreachable.heartbeat({"station_id": "st_x"})
+
+
+# --- Stage 9's gate: no duplicate current observations, and no lost results ---
+
+
+def observation_revisions(rollback: Any, assignment_id: str) -> list[tuple[int, str]]:
+    """Every revision on file for one assignment, oldest first."""
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select revision, observation_id from observations"
+            " where assignment_id = %s order by revision",
+            (assignment_id,),
+        )
+        return [(int(revision), str(oid)) for revision, oid in cur.fetchall()]
+
+
+def current_observations(rollback: Any, assignment_id: str) -> int:
+    """How many rows the current-observation view holds for one assignment."""
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select count(*) from observations_current where assignment_id = %s",
+            (assignment_id,),
+        )
+        (count,) = cur.fetchone()
+    return int(count)
+
+
+def a_finished_pass() -> ObservationResult:
+    """What an executor hands over once a pass is done and decoded."""
+    now = datetime.now(UTC)
+    return ObservationResult(
+        assignment_id="as_gate",
+        started_at=now - timedelta(minutes=11),
+        ended_at=now,
+        outcome="no_signal",
+        signal=Signal(detected=False),
+    )
+
+
+def test_a_station_produces_queues_and_delivers_an_observation(
+    started: Any, rollback: Any, tmp_path: Path
+) -> None:
+    """The whole Stage 9 path, through the real client and the real endpoint."""
+    credentials = admit_station(started, rollback, tmp_path)
+    schedule_a_pass(rollback, credentials.station_id, opens_in_minutes=1)
+    loop, executor = loop_for(started, credentials, tmp_path)
+    now = datetime.now(UTC)
+
+    loop.tick(now)
+    loop.tick(now + timedelta(minutes=2))
+    executor.ready.append(a_finished_pass())
+    outcome = loop.tick(now + timedelta(minutes=3))
+
+    assert outcome.submitted == ("as_gate",)
+    assert current_observations(rollback, "as_gate") == 1
+    assert state_of(rollback, "as_gate") == "reported"
+
+
+def test_a_lost_acknowledgement_does_not_produce_a_second_observation(
+    started: Any, rollback: Any, tmp_path: Path
+) -> None:
+    """The gate's first half: stopping anywhere cannot duplicate a current result.
+
+    The platform is given the submission directly and its answer is thrown away,
+    which is exactly what a station sees when the connection drops after the row
+    was written. The station still holds the queued observation, so its next tick
+    resubmits — and must land on the same observation rather than a second one.
+    """
+    credentials = admit_station(started, rollback, tmp_path)
+    schedule_a_pass(rollback, credentials.station_id, opens_in_minutes=1)
+    loop, _ = loop_for(started, credentials, tmp_path)
+    now = datetime.now(UTC)
+    loop.tick(now)
+    loop.tick(now + timedelta(minutes=2))
+
+    # Queued directly rather than through the executor, so the test controls the
+    # exact body the platform is about to be given twice.
+    queue = ObservationQueue(tmp_path / "outbox")
+    queue.enqueue(build_observation_body(a_finished_pass(), credentials.station_id))
+    (queued,) = queue.pending()
+
+    # The submission the station never saw the answer to.
+    lost = started.post(
+        "/msp/v0/observations",
+        json=queued.body,
+        headers={
+            "MSP-Version": "0.1",
+            "Authorization": f"Bearer {credentials.bearer_token}",
+        },
+    )
+    assert lost.status_code == 200, lost.text
+
+    outcome = loop.tick(now + timedelta(minutes=3))
+
+    assert outcome.submitted == ("as_gate",)
+    assert current_observations(rollback, "as_gate") == 1
+    assert len(observation_revisions(rollback, "as_gate")) == 1
+    assert (
+        observation_revisions(rollback, "as_gate")[0][1]
+        == lost.json()["observation_id"]
+    )
+
+
+def test_a_station_restarted_before_delivery_still_delivers(
+    started: Any, rollback: Any, tmp_path: Path
+) -> None:
+    """The gate's second half: stopping anywhere cannot lose a completed result.
+
+    The observation is produced while the platform is unreachable, so it reaches
+    only the queue. A second loop is then built over the same directory — the
+    station coming back after a crash — and delivers it.
+    """
+    credentials = admit_station(started, rollback, tmp_path)
+    schedule_a_pass(rollback, credentials.station_id, opens_in_minutes=1)
+    now = datetime.now(UTC)
+
+    unreachable = MspTransport(
+        "http://127.0.0.1:1", bearer_token=credentials.bearer_token
+    )
+    doomed = RecordingExecutor()
+    doomed.ready.append(a_finished_pass())
+    with unreachable:
+        StationLoop(
+            unreachable,
+            credentials,
+            AssignmentRecord(tmp_path / "held.json"),
+            doomed,
+            ObservationQueue(tmp_path / "outbox"),
+        ).tick(now)
+
+    assert len(ObservationQueue(tmp_path / "outbox").pending()) == 1
+
+    restarted, _ = loop_for(started, credentials, tmp_path)
+    outcome = restarted.tick(now + timedelta(seconds=30))
+
+    assert outcome.submitted == ("as_gate",)
+    assert current_observations(rollback, "as_gate") == 1
+    assert ObservationQueue(tmp_path / "outbox").pending() == ()

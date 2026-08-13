@@ -131,6 +131,51 @@ services:
     ports:
       - "${GRAFANA_PORT:-3001}:3000"
 
+  # Three services make up `--profile sim`, and the split is the dependency
+  # order the chain actually has: something must load a catalogue and mint
+  # invites before a station can register, and passes can only be generated for
+  # stations that already exist. See docs/DECISIONS.md D-079.
+  sim-seed:
+    profiles: ["sim"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+      SIMULATOR_STATION_COUNT: ${SIMULATOR_STATION_COUNT:-1}
+    volumes:
+      - sim-state:/var/lib/meridian-sim
+    # One invite per station, written where the simulator will look for them.
+    #
+    # Re-running is safe, and both halves of that matter. The catalogue load is
+    # idempotent by design (D-079). The invites are topped up to the station
+    # count rather than reissued: an invite is single-use, so minting a fresh
+    # set on every bounce would leave unconsumed rows behind each time — and
+    # minting none at all would strand stations 2..N the first time somebody
+    # raises SIMULATOR_STATION_COUNT. Station k takes line k, and stations that
+    # already registered consume nothing, so appending is the whole fix.
+    #
+    # `$$` is an escaped `$`: compose interpolates the single form itself, and
+    # everything here is meant for the shell inside the container.
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        meridian catalogue load --file deploy/catalogue/development.json
+        invites=/var/lib/meridian-sim/invites.txt
+        have=0
+        if [ -f "$$invites" ]; then have=$$(wc -l < "$$invites"); fi
+        need=$$(( $${SIMULATOR_STATION_COUNT:-1} - have ))
+        if [ "$$need" -gt 0 ]; then
+          echo "issuing $$need invite(s); $$have already on file"
+          meridian invite create --label sim --count "$$need" >> "$$invites"
+        fi
+    restart: "no"
+
   simulator:
     profiles: ["sim"]
     build:
@@ -139,22 +184,63 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      sim-seed:
+        condition: service_completed_successfully
     environment:
       MERIDIAN_BASE_URL: http://api:8000
-      REGISTRATION_INVITE_TOKEN: ${REGISTRATION_INVITE_TOKEN:-change-me}
       SIMULATOR_SEED: ${SIMULATOR_SEED:-4471}
       SIMULATOR_STATION_COUNT: ${SIMULATOR_STATION_COUNT:-1}
+      SIMULATOR_SCENARIO: ${SIMULATOR_SCENARIO:-clean}
+      SIMULATOR_STATE_DIR: /var/lib/meridian-sim
+      SIMULATOR_INVITES_FILE: /var/lib/meridian-sim/invites.txt
+    volumes:
+      # Credentials, held work and outboxes outlive the container. Without this
+      # every station re-registers on every bounce and burns an invite doing it
+      # (docs/DECISIONS.md D-080).
+      - sim-state:/var/lib/meridian-sim
     command:
       - python
       - -m
       - meridian_sim.station
-    # `no` while the module is a shell (Stage 10 implements it). Restarting a
-    # container whose command reports "not implemented" and exits just produces
-    # the same message every few seconds forever. This becomes `unless-stopped`
-    # when there is a heartbeat loop worth keeping alive.
-    restart: "no"
+    restart: unless-stopped
+
+  sim-scheduler:
+    profiles: ["sim"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+      # After the catalogue, or the first few runs would propagate nothing and
+      # say so — harmless, since the loop retries, and confusing to read.
+      sim-seed:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+    # Periodic rather than one-shot, because new passes appear as time advances
+    # and a schedule computed once at start-up runs out. A loop and `sleep` is
+    # not the eventual answer — Stage 12 owns scheduled jobs — and it is written
+    # here rather than left to an operator's cron so that `--profile sim up`
+    # keeps producing work without anybody watching it.
+    #
+    # Both commands are idempotent over a horizon (D-063, D-066), so the overlap
+    # between one run's window and the next writes nothing twice.
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          from=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          to=$$(date -u -d '+6 hours' +%Y-%m-%dT%H:%M:%SZ)
+          meridian passes generate --from "$$from" --to "$$to" || true
+          meridian schedule --from "$$from" --to "$$to" --config A || true
+          sleep "${SIMULATOR_SCHEDULE_INTERVAL_S:-300}"
+        done
+    restart: unless-stopped
 
 volumes:
   db-data:
   prometheus-data:
   grafana-data:
+  sim-state:

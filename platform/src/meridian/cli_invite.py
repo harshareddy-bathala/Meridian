@@ -55,26 +55,48 @@ def run_invite(args: argparse.Namespace) -> int:
 
 
 def _invite_create(conn: invites.Connection, args: argparse.Namespace) -> int:
-    """Handle ``meridian invite create``."""
+    """Handle ``meridian invite create``, for one invite or for many.
+
+    **Tokens go to stdout, one per line, and everything else goes to stderr.**
+    That split is what makes ``--count 50 > invites.txt`` produce a file of
+    fifty tokens and nothing else, which is how a fleet of stations is
+    provisioned without anyone parsing a sentence. One invite prints one line
+    under the same rule, so there is one output shape rather than two.
+    """
     expires_at = invites.expiry_from_days(args.expires_in_days, now=datetime.now(UTC))
-    try:
-        token = invites.create_invite(
-            conn,
-            label=args.label,
-            expires_at=expires_at,
-            issued_for_station_id=args.for_station,
-        )
-    except psycopg.errors.ForeignKeyViolation:
-        print(  # noqa: T201 — this is a CLI; stderr is the interface
-            f"meridian invite create: no such station: {args.for_station}",
-            file=sys.stderr,
-        )
-        return EXIT_FAILED
-    print(f"Invite for {args.label!r}: {token}")  # noqa: T201
+    for label in _labels_for(args.label, args.count):
+        try:
+            token = invites.create_invite(
+                conn,
+                label=label,
+                expires_at=expires_at,
+                issued_for_station_id=args.for_station,
+            )
+        except psycopg.errors.ForeignKeyViolation:
+            print(  # noqa: T201 — this is a CLI; stderr is the interface
+                f"meridian invite create: no such station: {args.for_station}",
+                file=sys.stderr,
+            )
+            return EXIT_FAILED
+        print(f"issued {label!r}", file=sys.stderr)  # noqa: T201
+        print(token)  # noqa: T201
+
     print(  # noqa: T201
-        "This is shown once. It will not be displayed again.", file=sys.stderr
+        "Shown once. They will not be displayed again.", file=sys.stderr
     )
     return 0
+
+
+def _labels_for(label: str, count: int) -> list[str]:
+    """The label each of ``count`` invites is issued under.
+
+    One invite keeps the label exactly as given; several are numbered from one,
+    because ``invites.label`` is how an operator later finds or revokes a
+    specific invite and fifty rows sharing a name cannot be told apart.
+    """
+    if count == 1:
+        return [label]
+    return [f"{label}-{index}" for index in range(1, count + 1)]
 
 
 def _invite_list(conn: invites.Connection) -> int:

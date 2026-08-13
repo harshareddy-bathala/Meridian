@@ -138,10 +138,20 @@ def test_invite_create_without_a_database_fails_cleanly() -> None:
 
 
 def test_simulator_station_runs_as_a_module() -> None:
-    """`python -m meridian_sim.station` is what compose runs under `--profile sim`."""
+    """`python -m meridian_sim.station` is what compose runs under `--profile sim`.
+
+    A fleet with no credentials and no invites cannot start, and that is the
+    case under test: it has to end in a sentence and an exit code rather than a
+    traceback, because compose restarts this container and a crash loop reports
+    the same stack trace to nobody every few seconds.
+
+    This test asserted `not implemented yet` for as long as the module was a
+    shell. Stage 10 filled it in, so it now asserts the failure an operator who
+    forgot the invites would actually see.
+    """
     result = _run("-m", "meridian_sim.station", "--count", "1", "--seed", "4471")
-    assert result.returncode == 2
-    assert "not implemented yet" in result.stderr
+    assert result.returncode == 1
+    assert "no invite was offered" in result.stderr
     assert "Traceback" not in result.stderr
 
 
@@ -189,20 +199,25 @@ def test_readme_does_not_reference_the_pre_d012_module_path() -> None:
     assert "meridian_sim.station" in readme
 
 
-def test_simulator_reads_its_compose_environment() -> None:
-    """compose passes MERIDIAN_BASE_URL and SIMULATOR_SEED, and no flags at all.
+def test_simulator_reports_an_unreachable_platform_rather_than_crashing(
+    tmp_path: Path,
+) -> None:
+    """compose passes MERIDIAN_BASE_URL and no flags at all.
 
-    A parser that ignored them would run against the wrong host while printing
-    the right one — the kind of mismatch that is only noticed after an hour of
-    wondering why nothing registered.
+    A parser that ignored it would run against the wrong host while reporting
+    the right one — the kind of mismatch only noticed after an hour of wondering
+    why nothing registered. Pointed at port 1, where nothing listens, so the URL
+    that reaches the message is the URL that was dialled.
     """
     import os
 
+    invites = tmp_path / "invites.txt"
+    invites.write_text("never-valid\n", encoding="utf-8")
     env = {
         **os.environ,
-        "MERIDIAN_BASE_URL": "http://api:8000",
-        "SIMULATOR_SEED": "9137",
-        "SIMULATOR_STATION_COUNT": "5",
+        "MERIDIAN_BASE_URL": "http://127.0.0.1:1",
+        "SIMULATOR_STATE_DIR": str(tmp_path / "state"),
+        "SIMULATOR_INVITES_FILE": str(invites),
     }
     result = subprocess.run(
         [sys.executable, "-m", "meridian_sim.station"],
@@ -212,9 +227,10 @@ def test_simulator_reads_its_compose_environment() -> None:
         env=env,
         check=False,
     )
-    assert "http://api:8000" in result.stderr
-    assert "9137" in result.stderr
-    assert "5 station(s)" in result.stderr
+
+    assert result.returncode == 1
+    assert "http://127.0.0.1:1" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_a_bare_station_prints_its_actions_rather_than_running_one() -> None:

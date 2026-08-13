@@ -1,23 +1,28 @@
 """The loop that runs a station unattended.
 
 One thread, one heartbeat at a time. Each tick the station drops work whose
-window has closed, starts work whose window has opened, states what it holds,
-and takes delivery of whatever the platform sends back. Nothing here decides
-what to receive — the platform scheduled that — and nothing here receives
-anything, which is :mod:`meridian_client.execution`'s job.
+window has closed, starts work whose window has opened, queues whatever finished,
+states what it holds, takes delivery of what the platform sends back, and
+delivers what it owes. Nothing here decides what to receive — the platform
+scheduled that — nothing here receives anything, which is
+:mod:`meridian_client.execution`'s job, and nothing here decides what a refused
+submission means, which is :mod:`meridian_client.observation_submission`'s.
 
-Two properties are worth stating because they are what the loop is *for*:
+Three properties are worth stating because they are what the loop is *for*:
 
 * **Reception does not depend on the platform being reachable.** Work is started
   from the on-disk record, never from a response, so an outage during a pass
   changes nothing the station does. A heartbeat is how a station reports, not
   how it decides.
+* **Reporting does not depend on it either.** A finished observation is written
+  to the queue before any request is attempted, so an outage delays delivery and
+  never costs the result.
 * **A tick that overran is skipped, not queued.** Catching up after an outage
   sends a burst, and fifty stations catching up send it together — which looks
   to the platform exactly like the incident that caused it.
 
-Reference: docs/MSP-SPEC.md §4.2; docs/DECISIONS.md D-003, D-024, D-030, D-068,
-D-069.
+Reference: docs/MSP-SPEC.md §4.2, §4.4, §6; docs/DECISIONS.md D-003, D-024,
+D-030, D-068, D-069, D-073.
 """
 
 from __future__ import annotations
@@ -40,7 +45,15 @@ from meridian_client.heartbeat import (
     parse_heartbeat_response,
 )
 from meridian_client.held_assignments import AssignmentRecord, due_now
-from meridian_client.transport import READ_TIMEOUT_S, MspTransport, ProtocolError
+from meridian_client.observation_message import build_observation_body
+from meridian_client.observation_queue import ObservationQueue
+from meridian_client.observation_submission import submit_pending
+from meridian_client.transport import (
+    READ_TIMEOUT_S,
+    UNAUTHORIZED,
+    MspTransport,
+    ProtocolError,
+)
 
 __all__ = [
     "StationLoop",
@@ -49,15 +62,6 @@ __all__ = [
 ]
 
 _log = logging.getLogger(__name__)
-
-UNAUTHORIZED = "unauthorized"
-"""MSP §6's code for a token that is missing, unknown or revoked.
-
-The one error that stops the loop rather than being retried (D-024): a station
-looping on a revoked token every thirty seconds against a publicly reachable
-endpoint is a denial of service the network inflicts on itself, and with fifty
-simulated stations it is one with a multiplier.
-"""
 
 
 def retry_policy_attempts_for(interval_s: float) -> int:
@@ -98,6 +102,13 @@ class TickOutcome:
     began: str | None
     ended: str | None
 
+    submitted: tuple[str, ...] = ()
+    """Observations the platform acknowledged on this tick, oldest first.
+
+    Empty is the normal case: a station produces one of these per pass, not one
+    per heartbeat.
+    """
+
     stop_reason: str | None = None
     """Set only when the loop must not continue — today, only a revoked token."""
 
@@ -114,6 +125,7 @@ class StationLoop:
         record: Where held assignments live between ticks and across reboots.
         executor: What actually receives. :class:`~meridian_client.execution.
             NullExecutor` for a station with no radio attached.
+        queue: Where finished observations wait until the platform has them.
     """
 
     def __init__(
@@ -122,12 +134,14 @@ class StationLoop:
         credentials: StationCredentials,
         record: AssignmentRecord,
         executor: PassExecutor,
+        queue: ObservationQueue,
     ) -> None:
         """Wire a station together. Nothing is sent until :meth:`tick`."""
         self._transport = transport
         self._credentials = credentials
         self._record = record
         self._executor = executor
+        self._queue = queue
         self._executing: Assignment | None = None
 
     def executing(self) -> Assignment | None:
@@ -150,9 +164,16 @@ class StationLoop:
             that starts it rather than the one after. At a thirty-second cadence
             the difference is thirty seconds of an eight-minute pass, and it is
             the part carrying the rise.
+
+            **Finished work is written to the queue before the heartbeat and
+            submitted after it.** Queueing first means an observation is on disk
+            even if the request that follows never returns; submitting after
+            means the tick has already told the platform the station is alive,
+            which is the message that matters most when a backlog is draining.
         """
         ended = self._stop_finished_work(now)
         began = self._start_due_work(now)
+        self._queue_completed_work()
 
         try:
             response = self._send_heartbeat(now)
@@ -160,13 +181,20 @@ class StationLoop:
             return self._outcome_for_protocol_error(exc, began, ended)
         except httpx.HTTPError as exc:
             # Unreachable, not refused. The station keeps executing and keeps
-            # what it holds; the next tick carries the same statement.
+            # what it holds; the next tick carries the same statement. Nothing is
+            # submitted either — the queue is on disk and loses nothing by waiting.
             _log.warning("heartbeat could not reach the platform: %s", exc)
             return TickOutcome(False, (), began, ended)
 
         accepted = self._record.accept(response.assignments)
+        run = submit_pending(self._transport, self._queue, now)
         return TickOutcome(
-            True, tuple(one.assignment_id for one in accepted), began, ended
+            True,
+            tuple(one.assignment_id for one in accepted),
+            began,
+            ended,
+            submitted=run.submitted,
+            stop_reason=run.stop_reason,
         )
 
     def run(self, *, stop_after_ticks: int | None = None) -> str | None:
@@ -220,6 +248,27 @@ class StationLoop:
         self._executor.begin(candidate)
         self._executing = candidate
         return candidate.assignment_id
+
+    def _queue_completed_work(self) -> None:
+        """Take whatever the executor has finished and write it down.
+
+        Note:
+            An observation exists only in memory between the executor producing
+            it and this write returning, and a crash in that window loses it.
+            Nothing closes the window without making the executor responsible
+            for durability, which would hide the handover from the loop
+            entirely — so it is logged as a real loss rather than swallowed
+            (D-073).
+        """
+        for result in self._executor.take_completed():
+            body = build_observation_body(result, self._credentials.station_id)
+            try:
+                self._queue.enqueue(body)
+            except (OSError, ValueError):
+                _log.exception(
+                    "observation for %s could not be queued and is lost",
+                    result.assignment_id,
+                )
 
     def _send_heartbeat(self, now: datetime) -> HeartbeatResponse:
         """Build and send one §4.2 heartbeat, returning the parsed response."""

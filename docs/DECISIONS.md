@@ -1545,6 +1545,181 @@ A station holds three pieces of durable state: a registration key, a bearer toke
 
 ---
 
+## D-070 — The canonical body is the record we store, and only the platform computes it
+
+**2026-08-11 · accepted** · *`meridian/observations/canonical_body.py`, Stage 9*
+
+D-015 makes a byte-identical resubmission write nothing by comparing `content_sha256` "over the canonical body", and `DATA-MODEL.md` repeats the phrase. Neither says what canonical means. The roadmap's Stage 9 brief lists the sub-questions — key ordering, timestamp format, numeric values, omitted fields versus `null`, array ordering — and answers none of them. There is no database behaviour to fall back on either: unlike `element_sets.content_sha256`, this column is `bytea not null` with no default and no generated expression, so something in Python has to decide.
+
+**The hash is taken over the record the platform stores, after deriving `satellite_id` and `simulated` — not over the bytes the station sent.** Keys sorted; no whitespace; timestamps in the `…Z` millisecond form the API already emits; arrays in submitted order; `revision`, `submitted_at` and `observation_id` excluded, since they are assigned by the platform and including them would make every retry a change.
+
+Two of those follow from something rather than being chosen. **Omitted and explicit `null` hash identically** because both reach the column as `None`, and canonicalising the stored record gets that for free instead of leaving it as a rule someone has to remember. **Array order is significant** because `doppler_samples` is a time series: two orderings are two different measurements, and sorting them would make a corrupted upload indistinguishable from the original.
+
+*Rejected: hashing the received bytes.* Tempting, because it is one line and exactly matches the words "byte-identical". It fails on regenerability — `CLAUDE.md` rule 8 requires every number in a report to be reproducible from a dataset snapshot, and a snapshot of `observations` could not verify its own hashes without also storing every request body, which we do not. It also makes whitespace and key order significant, so a client that re-serialised the same facts on a retry would append a revision recording no change at all.
+
+*Rejected: RFC 8785 (JSON Canonicalization Scheme) via a dependency.* JCS exists to make two different languages agree on one byte string. **Nothing here needs that agreement**: the hash appears in no message, no acknowledgement and no table a station can read, so the platform is the only thing that ever computes one. Paying for a dependency whose float rules are ECMAScript's `Number::toString` — which no reviewer here could check by eye — buys a property we have no use for. `json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)` is the whole implementation, and floats render through Python's `repr`, which is the shortest string that round-trips to the same IEEE-754 double.
+
+---
+
+## D-071 — A submission serialises on its assignment row, and a late one still lands
+
+**2026-08-11 · accepted** · *`meridian/store/observations.py`, `meridian/observations/ingest.py`, Stage 9*
+
+Two gaps, both found by tracing a queued observation back to the platform.
+
+**Concurrency: the lock is the assignment row.** Two submissions for one assignment arriving together must not both append a revision, and the roadmap asks for "a row or advisory lock" to stop it. Nothing in this repository locks anything today — there is no `select … for update` and no advisory lock in any module. Ingest has to read the assignment regardless, to check ownership and to derive `satellite_id` through the join to `passes`, so **that read becomes `select … for update`** and costs one clause on a query already required. The assignment row is the right object: it is what the revisions are keyed to, it is a plain table rather than a hypertable, and locking it needs no isolation-level change for the rest of the system. This is D-020's reasoning applied a second time — a row lock is the serialisation point available without making every other transaction pay for it.
+
+**A late observation is stored, and its assignment stays `expired`.** D-067 stopped an assignment expiring while the station still names it, but that only covers a station that is still talking. One that goes offline for a day comes back holding a queued observation for a row the platform has since expired — and D-008 has no arc from `expired` to `reported`.
+
+Refusing it is the wrong answer twice over: it destroys a completed result, which is the one thing Stage 9's completion gate forbids, and it does so precisely for the station that had the worst outage, which is where the reliability data is most interesting. **So the observation is written and no state transition is attempted.**
+
+**The mirror case is `issued`, and it does transition.** A station that took delivery, lost the network before its next heartbeat, executed the pass from its on-disk record and submitted afterwards was never seen to hold anything — D-008 draws no arc from `issued` to `reported` either, but here the tidy answer and the correct one agree. Leaving the row `issued` keeps it eligible for delivery under D-026, so the platform would keep offering a pass it has already been told about. The transition therefore runs from `issued`, `held` or `in_progress`, and only `expired` is left alone.
+
+*Rejected: adding the `expired → reported` arc.* It would tidy the state machine and lose the evidence. `expired` records that the station stopped naming the work — the decline case D-003 defines — and an observation arriving afterwards does not undo that; it makes the pair *anomalous*, which is exactly what `meridian.reliability` must be able to see. CLAUDE.md rule 7 rests on being able to distinguish a station that was listening from one that was not, and overwriting the first half of that record to make a diagram symmetric is not a trade worth making. The combination is logged at warning, so the anomaly is visible rather than merely queryable.
+
+---
+
+## D-072 — Which observation bodies are refused, and which are merely stored
+
+**2026-08-11 · accepted** · *`meridian/api/models/observation.py`, Stage 9*
+
+MSP §4.4 defines the message; the roadmap says validation must check that "signal fields are consistent" and that "Doppler and products are bounded" without saying what either means.
+
+**Refused as `malformed` by the Pydantic model, before any of it reaches a service:** `started_at` after `ended_at`; more than 512 `doppler_samples` (D-032); a non-finite float anywhere, since JSON has no `NaN` literal but a parser will hand one back for `1e400`; a `signal` block whose `detected` disagrees with the presence of `first_detection_at`; and an `outcome` that contradicts `detected` — `decoded` and `signal_no_decode` require a detection, `no_signal` and `not_attempted` require its absence, and `aborted` may be either because a station can abort at any point in a pass.
+
+**D-013's window on `started_at` — `[now − 30 days, now + 1 hour]` — is checked at the route instead**, against the same `utc_now()` the response is stamped with. It is the one rule here that needs a clock, and a model that reads one cannot be tested at a fixed instant. Everything above is a statement about the body alone and stays where the body is parsed.
+
+The detection rule is already a `CHECK` on the table. It is restated in the model because a constraint violation surfaces as a `500`, and telling a station its own body was malformed is both true and more useful than telling it the platform broke.
+
+**`products` is bounded by the 256 KiB body cap and by nothing else.** MSP §4.4 says a product carries `kind`, `uri`, `sha256` "and whatever else the product type warrants", so any per-element schema we invented now would reject valid submissions from a station type we have not built yet. D-018 stores the array verbatim in `products_json` until the `products` table lands at Stage 19, and D-029 settles that the artefacts themselves never travel this path — so the array is metadata whose size is already constrained by the request.
+
+---
+
+## D-073 — Finished work crosses the execution seam by drain, and the queue is the first durable point
+
+**2026-08-11 · accepted** · *`client/execution.py`, `client/observation_queue.py`, Stage 9*
+
+`PassExecutor` is `begin()` and `end()`, and nothing crosses it — D-069 shipped the seam before there was anything to hand over. An observation now has to get from whatever received the pass to the upload queue.
+
+**It gains a third call, `take_completed()`, returning whatever became ready since the last one.** The loop drains it each tick and writes what it gets to the queue.
+
+*Rejected: `end()` returning the observation.* Fewer calls, impossible to forget, and wrong at the next stage. Stage 13's pipeline is capture, stop, **run the decoder subprocess**, extract metrics, build the observation — the decode happens after `end()` and takes real time, and D-069 already forbids either call blocking the single-threaded loop. A synchronous return forces the decode inside `end()` and gets redesigned the moment a real decoder exists. A drain costs the same one method and lets a slow executor answer three ticks later.
+
+*Rejected: giving the executor the queue.* It hides the control flow inside an implementation the loop cannot see, makes every executor responsible for durability, and stops a loop test asserting what was produced.
+
+**The queue file is the first durable point, and the window before it is a stated limit.** An observation exists in memory from the moment the decoder finishes until `enqueue` returns; a crash in that window loses it. Nothing closes that window except the producer writing to disk itself, which is the option rejected above. At Stage 13 the decoder's own output files survive the crash and make the observation reconstructible; until then the exposure is a fake executor's in-memory value. This is written down rather than left implicit, because the alternative is a system that reads as crash-safe end to end and is not.
+
+**An unreadable queue entry is set aside, not raised — the opposite of D-068.** That entry says a file that exists and cannot be read *raises*, and this one says it is moved to `failed/`, logged at error, and stepped over. The difference is what the file is. An unreadable credential or assignment record may describe a pass the station is supposed to be receiving right now, so continuing would mean acting on a state it cannot see. An unreadable queue entry is an observation that is already lost, and refusing to go on would strand every *other* queued observation behind it — turning one damaged file into a station that permanently reports nothing. Setting it aside is not silent: the file is still on disk, in a directory whose name says what happened.
+
+**Submission failures do not get a retry mechanism of their own.** The transport already retries `429` and the `5xx` family and then raises, so a failed upload simply stays queued and goes again on the next tick — which is also what an outage looks like, so there is one path rather than two. `malformed`, `not_owner` and `unknown_assignment` are permanent: retrying them changes nothing, so the payload moves to a `failed/` directory where an operator can find it, rather than looping forever against a platform that has already refused it. `unauthorized` stops the loop, as it does everywhere else (D-024).
+
+---
+
+## D-074 — One undeliverable observation must not stop a station reporting
+
+**2026-08-12 · accepted** · *`client/observation_submission.py`, `client/observation_queue.py`, Stage 9*
+
+D-073 said the drain stops at the first entry the platform did not take, and that submission failures need no retry mechanism of their own because a failed upload simply waits for the next tick. Reviewing the finished code against its own reasoning found the hole: an entry that fails the *same way every time* is never given up on and never stepped over, so the queue never moves past it.
+
+The harm is not the lost observation. It is that the station goes on heartbeating and goes on reporting `listening`, so the platform sees a healthy station that was listening and sent nothing — which is the definition of a missed pass under `CLAUDE.md` rule 7. **A stuck queue manufactures false misses in the one number this project exists to publish**, and nothing anywhere detects it.
+
+**The drain now stops only when the platform could not be reached, and steps over an entry when the platform answered.** A transport failure says nothing about the entry and everything about the network, so the tick ends there as before. An answer — an MSP error, or an acknowledgement the station cannot parse — is evidence about that one exchange, and the next entry may well be fine.
+
+D-073's reason for stopping was that a backlog should not be hammered through in one tick. That reason survives, because it never applied to the case being changed: **a station's queue holds one entry per pass**, six to fifteen a day rather than thousands, and during a real outage the first entry fails with a transport error and the drain still stops at one request. The burst it guarded against cannot be reached from here.
+
+**An entry whose `started_at` has fallen outside the platform's thirty-day acceptance window is moved to `failed/` instead of being sent.** This needs no attempt counter and no new state, because the queue already carries the fact: D-013's window is what the platform checks, so an entry older than it will be refused as `malformed` on every future tick for the rest of the station's life. It is quarantined for the same reason the three permanent MSP codes are — it is a payload that can never be delivered — and the threshold is not a new number, it is the platform's own, mirrored the way `MAX_DOPPLER_SAMPLES` already is.
+
+*Rejected: counting attempts and quarantining at a threshold.* The obvious answer, and it fails on both storage and calibration. Storing the count in the entry breaks D-068's property that the queued file is exactly the body that will be sent; storing it beside the entry adds a second piece of state that can disagree with the directory; holding it in memory resets on the restart an operator reaches for first. And any threshold small enough to act promptly is one a ten-minute platform incident burns through, quarantining every queued observation on the network at once — turning a brief outage into permanent data loss across fifty stations. Stepping over the entry gets the same outcome without needing a number nobody can calibrate.
+
+*Rejected: distinguishing a body-specific `500` from an overloaded platform.* There is no signal that separates them — a `500` caused by one payload and a `500` caused by load are the same response. Treating both as "the platform answered, try the next" is correct for each: if the platform is genuinely struggling, the next entry fails too and the tick costs a handful of requests rather than one.
+
+---
+
+## D-075 — A virtual station's identity comes from its index, not its station id
+
+**2026-08-12 · accepted** · *`simulator/config.py`, Stage 10*
+
+The roadmap gives the seed derivation as `station_seed = deterministic_hash(master_seed, station_id)`. It cannot work. `station_id` is minted by the platform during registration, and the seed is needed *before* that — the station's location, altitude and declared capabilities are all generated from it, and all three are in the registration body.
+
+**The derivation is from a one-based station index:** `station_seed = sha256(f"{master_seed}:{index}")`.
+
+This also makes the roadmap's own requirement true by construction rather than by care. "Increasing the station count must not alter station 1's behaviour" holds because station 1's seed never mentioned the count, or any other station, or anything the platform assigned.
+
+*Rejected: seeding from `station_id` once registration has returned.* It inverts the dependency — a station would have to register before it could decide what to register as — and it would make a station's identity depend on the order the platform happened to admit it in, so a re-run against a fresh database could produce different stations from the same seed.
+
+---
+
+## D-076 — N stations share one thread, and the supervisor ticks each in turn
+
+**2026-08-12 · accepted** · *`simulator/supervisor.py`, Stage 10*
+
+`StationLoop.run()` blocks on `_sleep` between ticks, and D-069 states that nothing may block the loop. Running several stations in one process therefore needs something other than N calls to `run()`.
+
+**The supervisor never calls `run()`.** It holds N loops, calls `tick(now)` on each in turn, and sleeps once per round, scheduling on `time.monotonic` under `_next_due_at`'s existing skip-don't-queue rule. A station whose tick returns a `stop_reason` is retired from the round; the others continue, and the supervisor exits when every station has stopped.
+
+*Rejected: a thread, or an asyncio task, per station.* Fifty threads to make fifty HTTP calls of a few milliseconds each buys nothing at this scale, and it costs the property the stage exists to establish: with concurrency, a determinism failure depends on scheduling order and stops being reproducible. One thread also means a test can drive N stations through an exact number of ticks with no synchronisation, no timeouts and no flakiness.
+
+Scale is Stage 21's, and this shape is what it will measure. If fifty stations on one thread turn out not to keep up, that is a finding Stage 21 is built to produce rather than a problem to pre-solve here.
+
+---
+
+## D-077 — What "deterministic" is allowed to claim, and the two tests that prove it
+
+**2026-08-12 · accepted** · *`simulator/outcomes.py`, `simulator/executor.py`, Stage 10*
+
+The roadmap asks that "the same seed produces identical canonical observations". Read literally it is unachievable, and it is worth saying why rather than quietly testing something weaker. An observation carries `started_at` and `ended_at`; those come from an assignment window, which comes from a real pass computed over a real element set at a real wall-clock moment. Two runs a day apart cannot produce the same bytes, whatever the seed says.
+
+**Two assertions are made, and the difference between them is recorded.**
+
+1. **Frozen inputs, byte-identical bodies.** With the element sets and the clock pinned, two runs at one seed produce byte-identical observation bodies, checked by a single hash. This needs no platform: the test hands the executor its assignments directly and compares `build_observation_body` output.
+2. **The decision sequence, against a live platform.** Where the clock cannot be pinned, the hash covers what the simulator *chose* — outcome, detection offset, peak SNR, Doppler series — per assignment, excluding the instants it did not choose.
+
+The first is the real claim. The second is the cheap check that can run end to end, and it proves less: it would not catch a station making the right decisions about the wrong passes. Both are stated so that a reader of the test suite knows which one they are looking at.
+
+---
+
+## D-078 — Simulated observations are excluded from training and evaluation sets
+
+**2026-08-12 · accepted** · *`simulator/outcomes.py`, `docs/EVALUATION.md`, Stage 10*
+
+`EVALUATION.md` §10 already forbids aggregating simulated results with measured ones in any reported figure. **That rule is not sufficient once this stage exists**, and the gap is created by a choice made here.
+
+The simulator draws outcomes from elevation, because traffic uncorrelated with geometry would be a weak test of the scheduler and of the reliability layer — the two things it exists to exercise. Elevation is also the prediction model's strongest single feature. A model trained or evaluated on simulated observations would therefore be rediscovering the simulator's own generative rule, and would score well for a reason that means nothing.
+
+The dangerous part is that it would happen *invisibly*: no reported figure would mix simulated and measured data, so the existing rule would be satisfied throughout, and the number that came out would look like a result.
+
+**Simulated observations are excluded from every model training set and every evaluation set, not merely from reported aggregates.** Stages 15 and 17 enforce it where the datasets are built; the decision is recorded now, in the same stage as the code that creates the hazard, because a methodological threat discovered later is one that has already contaminated something.
+
+*Rejected: making outcomes arbitrary so the hazard cannot arise.* Drawing outcomes from the seed alone, uncorrelated with geometry, closes the hole completely. It also produces a network whose passes succeed and fail at random, against which a scheduler that ranks by elevation performs exactly as well as one that ranks by coin flip — so the simulator would stop being able to test the thing it was built to test.
+
+---
+
+## D-079 — The local catalogue is loaded from a file, and the simulator never writes it
+
+**2026-08-12 · accepted** · *`meridian/cli_catalogue.py`, `meridian/store/satellites.py`, Stage 10*
+
+Stage 10's completion gate needs an assignment to exist, and the chain behind one is satellites and transmitters, then element sets, then `passes generate`, then `schedule`. The last two are built. **Nothing can supply the first three**: there is no catalogue command, no seed migration, and `store/satellites.py` is read-only. `insert_element_set` exists and is called by nothing outside the tests. Stage 14 is archive *ingest*, which is a network path and deliberately later.
+
+**`meridian catalogue load --file <path>` inserts satellites, transmitters and element sets from one local JSON document**, idempotently — loading twice writes nothing the second time, matching `insert_element_set`'s contract and D-063's rule for pass generation.
+
+One command rather than three, because the three are one fact: this is the catalogue this deployment can see. A local file rather than a fetch, because the independence test says the standalone path is built first and external archives are enrichment on top of it — and because a gate that depends on a third party being reachable is a gate that fails for reasons that have nothing to do with our software.
+
+**The simulator does not call it.** `element_sets.source` admits `'simulator'` and that value stays unused: a simulator that wrote its own orbits would be testing the platform against passes that do not exist. Geometry is real and only outcomes are synthetic, which is the property that makes the simulator evidence rather than decoration.
+
+---
+
+## D-080 — Where a virtual station's state lives, and what a restart keeps
+
+**2026-08-12 · accepted** · *`simulator/virtual_station.py`, Stage 10*
+
+Each virtual station owns `<state-dir>/<index>/`, holding `credentials.json`, `registration.key`, `held.json` and `outbox/` — the same four things a real station keeps, in the same formats, because it is the same client code writing them.
+
+**Keyed on the station index, not on the run id.** The roadmap requires that a restart preserve credentials and queues, and a path containing a per-run identifier would defeat that on the first restart: every station would find an empty directory, register again, and consume a fresh invite. A run id that changes per run cannot name state that must outlive the run.
+
+The consequence worth stating: two runs with *different master seeds* against one state directory will find credentials belonging to stations generated from the other seed. That is a misuse rather than a case to handle — a new seed is a new network — and the run configuration records the seed alongside the state so the mismatch is visible rather than silent.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

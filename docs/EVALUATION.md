@@ -184,7 +184,7 @@ Analysis scripts write these three things into their output alongside the result
 ## 10. Reporting rules
 
 - **Report what we measure, including nulls.** If the ablation shows no improvement, that is the finding.
-- **Never aggregate simulated with measured data** in any reported figure.
+- **Never aggregate simulated with measured data** in any reported figure. **And never train or evaluate a model on simulated observations at all** — the simulator draws outcomes from elevation, which is the model's strongest feature, so a model fitted to them rediscovers the generator and scores well for a reason that means nothing. The aggregation rule alone would not catch that: no reported figure would have mixed the two. See `docs/DECISIONS.md` D-078.
 - **State sample size and confidence intervals** on every number.
 - **State the completeness ratio** on every archive-derived result.
 - If SC-1 is not met, §9 of the project document applies: a calibrated model is a result in its own right, and an honestly reported small gain beats a loosely claimed large one.

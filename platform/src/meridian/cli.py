@@ -31,6 +31,7 @@ from dataclasses import dataclass
 import psycopg
 
 from meridian import __version__
+from meridian.cli_catalogue import run_catalogue
 from meridian.cli_invite import run_invite
 from meridian.cli_passes import run_passes
 from meridian.cli_schedule import configurations, run_scheduler
@@ -159,6 +160,16 @@ def _add_invite_parser(
     create.add_argument("--label", required=True, help="who this invite is for")
     create.add_argument("--expires-in-days", type=int, default=None)
     create.add_argument(
+        "--count",
+        type=int,
+        default=1,
+        help=(
+            "issue this many invites, numbered from the label. Tokens go to "
+            "stdout one per line, so a fleet is provisioned by redirecting them "
+            "to a file"
+        ),
+    )
+    create.add_argument(
         "--for-station",
         default=None,
         metavar="STATION_ID",
@@ -171,6 +182,32 @@ def _add_invite_parser(
     invite_actions.add_parser("list", help="show invites and their consumption state")
     revoke = invite_actions.add_parser("revoke", help="withdraw an unconsumed invite")
     revoke.add_argument("--label", required=True)
+
+
+def _add_catalogue_parser(
+    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """Wire ``meridian catalogue`` and its one action."""
+    catalogue = subcommands.add_parser(
+        "catalogue",
+        help="load the satellites this deployment tracks",
+        description=(
+            "Reads satellites, downlinks and element sets from one local file "
+            "and writes whatever the archive does not already hold. A local "
+            "file rather than a fetch, so a deployment can schedule and receive "
+            "with every external service down (D-079)."
+        ),
+    )
+    catalogue_actions = catalogue.add_subparsers(dest="action", metavar="<action>")
+    load = catalogue_actions.add_parser(
+        "load", help="add a catalogue document's contents to the archive"
+    )
+    load.add_argument(
+        "--file",
+        required=True,
+        metavar="PATH",
+        help="the catalogue document; see deploy/catalogue/README.md",
+    )
 
 
 def _add_station_parser(
@@ -269,6 +306,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", metavar="<command>")
 
     _add_invite_parser(subcommands)
+    _add_catalogue_parser(subcommands)
     _add_station_parser(subcommands)
     _add_passes_parser(subcommands)
     _add_schedule_parser(subcommands)
@@ -277,7 +315,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-NEEDS_ACTION = frozenset({"invite", "passes", "station"})
+NEEDS_ACTION = frozenset({"catalogue", "invite", "passes", "station"})
 """Commands that are a noun and mean nothing without a verb after them.
 
 ``meridian schedule`` is a verb already and carries its arguments directly, so
@@ -287,6 +325,7 @@ unrunnable.
 
 
 IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
+    "catalogue": run_catalogue,
     "invite": run_invite,
     "passes": run_passes,
     "schedule": run_scheduler,

@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from meridian.api import msp
+from meridian.api import platform_clock
 from meridian.api.app import create_app
 
 TIME_PATH = "/msp/v0/time"
@@ -72,7 +72,7 @@ def test_server_time_parses_back_to_the_instant_it_named(
     failure every station's offset estimate would then inherit.
     """
     fixed = datetime(2026, 8, 14, 9, 31, 2, 123456, tzinfo=UTC)
-    monkeypatch.setattr(msp, "utc_now", lambda: fixed)
+    monkeypatch.setattr(platform_clock, "utc_now", lambda: fixed)
 
     body = client.get(TIME_PATH, headers=CURRENT).json()
 
@@ -171,17 +171,28 @@ def test_no_error_response_leaks_a_header_value_back(client: TestClient) -> None
     assert secret not in response.text
 
 
-def test_an_unbuilt_msp_path_is_not_served(client: TestClient) -> None:
-    """MSP §8 binds four endpoints. `observations` is not built yet.
+def test_every_endpoint_msp_binds_is_mounted() -> None:
+    """MSP §8 binds four endpoints, and the router package mounts all four.
 
-    It must 404 rather than 200 — a station probing for it needs to learn it is
-    absent rather than get an empty success it will misread as agreement.
+    This test read the other way around for most of the project's life — "what
+    is not built stays unserved" — and named `heartbeat`, then `observations`,
+    as each one was still missing. With Stage 9 there is nothing left to be
+    absent, so it inverts.
 
-    This test named `heartbeat` until `heartbeat` was implemented, and failing
-    at that moment is exactly what it is for: the assertion is "what is not
-    built stays unserved", so it has to be edited whenever something is built.
-    `heartbeat` now has its own conformance file.
+    Asserted against the published schema rather than by calling each path:
+    three of the four open a database connection, and a routing claim should not
+    be answered by whether a connection to a closed port times out.
     """
-    response = client.post("/msp/v0/observations", json={}, headers=CURRENT)
+    paths = create_app().openapi()["paths"]
+    mounted = {
+        f"{method.upper()} {path}"
+        for path, operations in paths.items()
+        for method in operations
+    }
 
-    assert response.status_code == 404
+    assert {
+        "GET /msp/v0/time",
+        "POST /msp/v0/register",
+        "POST /msp/v0/heartbeat",
+        "POST /msp/v0/observations",
+    } <= mounted

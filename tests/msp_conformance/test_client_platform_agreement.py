@@ -22,9 +22,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from meridian.api import msp
+from meridian.api import platform_clock
 from meridian.api.app import create_app
-from meridian.api.msp import format_server_time
+from meridian.api.platform_clock import format_server_time
 from meridian_client.clock import estimate_clock_offset, parse_server_time
 
 INSTANTS = [
@@ -79,7 +79,7 @@ def test_a_station_with_a_fast_clock_reports_a_negative_offset_end_to_end(
     — which is the whole convention, and the thing a sign error inverts silently.
     """
     platform_now = datetime(2026, 8, 14, 9, 31, 2, tzinfo=UTC)
-    monkeypatch.setattr(msp, "utc_now", lambda: platform_now)
+    monkeypatch.setattr(platform_clock, "utc_now", lambda: platform_now)
     # Port 1: a database nothing can connect to. MSP §8 says `/time` touches no
     # database, and pointing the app at an unreachable one is what holds that to
     # account — if the endpoint ever grew a query, this test would stop passing

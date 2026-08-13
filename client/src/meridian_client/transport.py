@@ -110,6 +110,15 @@ class RetryPolicy:
         return random.uniform(0.0, ceiling)
 
 
+UNAUTHORIZED = "unauthorized"
+"""MSP §6's code for a token that is missing, unknown or revoked.
+
+Named beside the statuses below because it is the counterpart to them: those say
+what is worth trying again, and this is the one answer a station must never
+retry. What a caller *does* about it — stop, and tell the operator — is the
+caller's decision (D-024).
+"""
+
 # 429 and 5xx are worth retrying; a 4xx is the station's fault and will fail again
 # identically. MSP §6 says a station receiving 401 stops rather than looping — a
 # revoked token retried every thirty seconds by fifty stations is a denial of
@@ -236,6 +245,30 @@ class MspTransport:
                 station reports, not how it decides what to do.
         """
         response = self.post_json("/msp/v0/heartbeat", body)
+        decoded = response.json()
+        return dict(decoded)
+
+    def observations(self, body: Mapping[str, object]) -> dict[str, object]:
+        """Submit one MSP §4.4 observation and return the decoded acknowledgement.
+
+        Args:
+            body: A body from
+                ``meridian_client.observation_message.build_observation_body``,
+                or one read back unchanged from the upload queue.
+
+        Returns:
+            The acknowledgement object, for ``parse_observation_ack`` to check.
+
+        Raises:
+            ProtocolError: The platform returned an MSP error. ``malformed``,
+                ``not_owner`` and ``unknown_assignment`` are permanent and the
+                payload should be set aside rather than retried; ``unauthorized``
+                means stop and tell the operator (D-024).
+            httpx.HTTPError: The platform could not be reached. The caller leaves
+                the observation queued — it is on disk, and the next tick will
+                try again with the original timestamps intact (MSP §6).
+        """
+        response = self.post_json("/msp/v0/observations", body)
         decoded = response.json()
         return dict(decoded)
 
