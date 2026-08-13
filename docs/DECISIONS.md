@@ -1782,6 +1782,88 @@ No version header, for a reason specific to this deployment: the dashboard is sh
 
 ---
 
+## D-084 — The public surface has its own error vocabulary, and MSP §6 stays closed
+
+**2026-08-13 · accepted** · *`meridian/api/public/envelope.py`, `meridian/api/errors.py`, Stage 11*
+
+`install_error_handlers` is registered on the application, not on the MSP router, so it already governs every path the platform serves. The public API therefore inherits MSP §6's handlers whether or not that was intended — and MSP §6 has no code for "no such station".
+
+**A second code table, in its own module, reusing the same body shape.** `{"error": ..., "message": ...}` stays exactly as it is — two flat strings, one error shape in the repository — while the *vocabulary* differs: `not_found`, `invalid_query`, `server_error`, each with its own status mapping and its own `PublicError` that refuses a code absent from the table.
+
+**MSP §6's eight codes are not widened.** That table's docstring says a code absent from it cannot be sent, which is what stops an endpoint inventing a ninth; adding `not_found` would make the table stop being "every code MSP §6 defines", and an implementer reading the reference implementation would find a code the published specification does not list. `tests/msp_conformance` asserts the envelope's exact shape, and it should keep passing for the reason it was written rather than because it was edited.
+
+The two shared handlers — `RequestValidationError` and the catch-all `Exception` — each gain one guard clause on which surface the path belongs to. `is_public_surface` compares against the prefix exactly or with a trailing slash, never a bare `startswith`, so `/api/v10/...` is not mistaken for a public path.
+
+*Rejected: mounting the public API as a sub-application.* It would give each surface its own handler stack for free, which is the right shape. Inside a `Mount`, `request.app` is the sub-application, and `get_connection` and `get_settings` read `request.app.state.pool` — the pool would not be there. A structural win that breaks the dependency every route needs is not a win.
+
+---
+
+## D-085 — Public list endpoints paginate by keyset, never by offset
+
+**2026-08-13 · accepted** · *`meridian/api/public/pagination.py`, Stage 11*
+
+Nothing in the platform paginates yet. `MAX_ASSIGNMENTS_PER_RESPONSE` looks like a page size and its own docstring says it is not one — D-035 caps eligible assignments rather than paging them, because held work is redelivered and the earliest eight of nine would be the same eight forever.
+
+**Every public list endpoint takes `limit` and an opaque `cursor`, and the cursor encodes the last row's sort key.** Default 50, maximum 200. The route asks the store for `limit + 1` rows and trims, so "is there another page" is computed rather than guessed, and the trimming is a pure function rather than a `limit + 1` buried in SQL.
+
+Keyset rather than offset, for a reason specific to this data. `observations` and `heartbeats` are hypertables with compression policies; `offset 10000` reads and discards ten thousand rows, decompressing chunks to do it, on a Pi's NVMe. Worse, offset pagination **duplicates and skips rows on a live feed** — a dashboard paging observations while a station is reporting would show one twice and hide another. A project whose stated rule is that every published number is regenerable cannot ship a pagination scheme returning a different set depending on when the page was turned.
+
+The prerequisite already holds: every store read carries a total, stable `order by` — `station_id asc`, `aos asc, id asc` — because those orderings were chosen for reproducibility. Keyset needs exactly that, so the cost is a tiebreaker column where one is missing, not a redesign.
+
+`limit` defaults to 50 because that is the fleet size the project demonstrates, so the station map fits one page at the scale it is shown at. 200 caps what one query costs the Pi.
+
+---
+
+## D-086 — An endpoint with no computation behind it says so, and publishes no numbers
+
+**2026-08-13 · accepted** · *`meridian/api/public/reliability.py`, `meridian/api/public/aggregates.py`, Stage 11*
+
+Stage 11 fixes the public URL surface, but `meridian.reliability` and `meridian.prediction` are docstring-only stubs and nothing registers a metric anywhere. Two of the roadmap's endpoint groups have nothing to call.
+
+**They answer `200` with `{"status": "not_yet_computed", "reason": ..., "available_from_stage": N}` and no numeric field of any kind.** Safety comes from *absence*, not from a sentinel: a chart reaching for a value gets nothing back and draws nothing. `status` is a `Literal`, so mypy pins it and it appears in the schema as a discriminator; the eventual real response carries `"status": "computed"` beside its data, and the dashboard's single branch survives the transition.
+
+`simulated` is deliberately **not** on this body. There is no data, so there is no provenance to state — which is what "every *applicable* response carries `simulated`" means, said out loud so the omission reads as deliberate rather than forgotten.
+
+*Rejected: `{"value": null}` or `{"value": 0, "computed": false}`.* Both leave a number-shaped hole exactly where a chart will read, and a zero that means "not measured" is the precise failure this project exists to avoid.
+
+*Rejected: `501`.* Unambiguous at the HTTP layer, and wrong in practice: it routes the *normal* case through the dashboard's error path, so the branch that should mean "the platform is broken" fires on every page load, and every load logs a failure at the edge. A status that fires constantly stops being read.
+
+*Rejected: omitting the endpoints.* The URL surface would then move when the computation lands, which is the thing fixing it now is meant to prevent.
+
+---
+
+## D-087 — `/metrics` requires a bearer token and answers 404 without one
+
+**2026-08-13 · accepted** · *`meridian/api/metrics_access.py`, `deploy/prometheus/prometheus.yml`, Stage 11*
+
+`/metrics` has been unauthenticated since it was added, which was correct while the platform was only reachable on a laptop. Stage 11 puts the platform behind a tunnel on a public hostname, and the endpoint goes with it.
+
+**A bearer token compared with `secrets.compare_digest`, and a `404` byte-identical to any unmatched path when it is absent or wrong.** `METRICS_TOKEN` joins `TOKEN_HASH_PEPPER` in the public-mode placeholder refusal, so a public deployment cannot start with `change-me` on it. Prometheus authenticates with a credentials file inside the compose network.
+
+404 rather than 401: a 401 confirms the endpoint exists and invites a second guess. The rejection is logged at warning with its reason, so a misconfigured scrape is diagnosable from the platform's log rather than from the response.
+
+*Rejected: a peer-address allowlist.* This is D-051's own argument inverted — a tunnelled request presents the tunnel container's address, which is inside the compose network, so no address rule can separate the tunnel from Prometheus.
+
+*Rejected: a second port.* Structurally the cleanest answer, and premature: the endpoint currently emits only default process collectors, so a separate process would report the wrong process, and doing it properly needs the multiprocess registry that arrives with Stage 12's domain metrics.
+
+*Rejected: excluding the path at the tunnel and nothing else.* Unverifiable from the repository, which is exactly how D-041's three recorded remedies were still unapplied when D-042 checked them a day later.
+
+---
+
+## D-088 — Rate limiting is applied at the Cloudflare edge, and verified by a script
+
+**2026-08-13 · accepted** · *`deploy/tools/verify_public_surface.py`, Stage 11* · *Resolves D-051*
+
+D-051 deferred rate limiting and named its own revisit trigger: "the first time the platform is reachable from outside the college network for longer than a demonstration." Stage 11 is that moment.
+
+**A rate-limit rule on the tunnel hostname, in Cloudflare, and nothing in the process.** Every argument D-051 made against an in-process limiter still holds and now serves as the justification rather than the deferral: the client address is the tunnel's, `CF-Connecting-IP` is forgeable on the port compose also publishes, and the edge is the only place that sees the real caller.
+
+**The part that matters is the verification, not the rule.** A control living outside the repository is a control nobody can prove is on, and this project has already run that experiment: D-041 recorded three Cloudflare remedies and D-042 found all three unapplied. So the rule ships with `deploy/tools/verify_public_surface.py` — stdlib only, like `site/tools/verify_site.py` — which asserts from outside that `/metrics` is 404, that a station listing carries `simulated` on every item and no key matching `token|invite|health|seed|registration_key`, and that a burst of requests eventually returns `429`. That last assertion is the executable proof the rule exists. Its transcript is pasted into this entry when the rule is applied, exactly as D-042 pasted `curl` output.
+
+It cannot run in CI — a fork PR has no public hostname — so it is an operator tool, run against a deployment, and re-running it is one command.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
