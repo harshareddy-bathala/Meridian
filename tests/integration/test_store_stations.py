@@ -27,6 +27,7 @@ from meridian.store.station_tokens import (  # noqa: E402
 from meridian.store.stations import (  # noqa: E402
     Capability,
     NewStation,
+    find_receiving_stations,
     find_station_for_recovery,
     find_station_heartbeat,
     find_station_provenance,
@@ -74,6 +75,7 @@ def sample_station(
             else bytes(32)
         ),
         simulated=False,
+        location_precision_decimals=2,
         simulator_run_id=None,
         seed=None,
         client_implementation="meridian-reference",
@@ -517,3 +519,38 @@ def test_a_soft_deleted_station_reads_as_absent_not_offline(rollback: Any) -> No
         )
 
     assert find_station_heartbeat(rollback, "st_gone") is None
+
+
+def test_a_coarse_publication_choice_never_reaches_pass_geometry(
+    rollback: Any,
+) -> None:
+    """The station the scheduler sees is the station at its real coordinates.
+
+    `find_receiving_stations` is what `pass_generation` and the scheduler build a
+    `GroundSite` from, so it is the one reader for which rounding would be a
+    correctness bug rather than a privacy setting: a latitude coarsened to one
+    decimal moves the site by up to 11 km, which shifts predicted acquisition by
+    seconds and books the station for a place it is not.
+
+    D-082 puts the rounding at serialisation and nowhere else, and this asserts
+    the "nowhere else" half. The station below asks for the coarsest publication
+    the protocol allows while sitting at six decimal places, so any rounding
+    that had leaked into the write or the read would be visible here.
+    """
+    private = replace(
+        sample_station("st_coarse", token_sha256=bytes([7]) * 32),
+        lat_deg=12.971598,
+        lon_deg=77.594562,
+        location_precision_decimals=1,
+    )
+    insert_station(rollback, private, [SAMPLE_CAPABILITY])
+
+    found = [
+        station
+        for station in find_receiving_stations(rollback)
+        if station.station_id == "st_coarse"
+    ]
+
+    assert len(found) == 1
+    assert found[0].lat_deg == 12.971598
+    assert found[0].lon_deg == 77.594562

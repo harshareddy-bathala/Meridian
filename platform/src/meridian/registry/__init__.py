@@ -103,6 +103,11 @@ class RegistrationRequest:
     lon_deg: float
     alt_m: float
     simulated: bool
+    # MSP §4.1's optional `location_precision_decimals`, already defaulted to 2
+    # by the wire model when the station omitted it. Carried through so the
+    # operator's choice reaches the row; it never affects the coordinates
+    # stored above, which stay at full precision (D-082).
+    location_precision_decimals: int
     simulator_run_id: str | None
     seed: int | None
     capabilities: Sequence[Capability]

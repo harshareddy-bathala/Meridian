@@ -53,6 +53,7 @@ def sample_station(station_id: str) -> NewStation:
         token_sha256=bytes(32),
         registration_key_sha256=bytes(32),
         simulated=False,
+        location_precision_decimals=2,
         simulator_run_id=None,
         seed=None,
         client_implementation="meridian-reference",
