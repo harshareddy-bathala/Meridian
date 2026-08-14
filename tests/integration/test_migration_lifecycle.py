@@ -249,3 +249,48 @@ def test_0007_refuses_a_longitude_outside_iso_6709(
         cur.execute(
             INSERT_STATION, ("st-bad", "Bad", 200.0, SECOND_TOKEN_HASH, KEY_HASH)
         )
+
+
+def test_0014_backfills_a_station_registered_before_the_column_existed(
+    scratch_database: str, monkeypatch
+) -> None:
+    """D-082: the column default *is* the backfill, and nothing else runs.
+
+    Migration 0014 adds `location_precision_decimals` with `not null default 2`
+    and no separate `update`. That is only correct if Postgres applies the
+    default to rows already present — so this steps to 0013, writes a station the
+    way registration did before MSP 0.2 defined the field, and only then upgrades.
+
+    `test_empty_database_reaches_head` cannot prove this: 0014 runs against zero
+    station rows there, so a revision that added the column *without* a default
+    would pass it and leave every existing station null.
+
+    The coordinates are asserted too. The declared precision governs publication
+    only, and a migration that rounded the stored values while adding the column
+    would be the exact failure D-082 exists to prevent — invisible until a pass
+    was predicted for the wrong place.
+    """
+    monkeypatch.setenv("DATABASE_URL", scratch_database)
+    _upgrade_to(scratch_database, "0013")
+
+    with psycopg.connect(scratch_database) as conn, conn.cursor() as cur:
+        cur.execute(
+            INSERT_STATION, ("st-before", "Before", 77.594562, TOKEN_HASH, KEY_HASH)
+        )
+        conn.commit()
+
+    _upgrade_to_head(scratch_database)
+
+    with psycopg.connect(scratch_database) as conn, conn.cursor() as cur:
+        cur.execute(
+            "select location_precision_decimals, lat_deg, lon_deg"
+            " from stations where station_id = 'st-before'"
+        )
+        row = cur.fetchone()
+
+    assert row is not None
+    # 2 is the conservative end: roughly 1.1 km, the right campus rather than
+    # the right building. It lands on operators who registered before the field
+    # existed and therefore consented to nothing.
+    assert row[0] == 2
+    assert (row[1], row[2]) == (12.9716, 77.594562)
