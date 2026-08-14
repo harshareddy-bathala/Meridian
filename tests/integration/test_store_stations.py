@@ -19,6 +19,9 @@ psycopg = pytest.importorskip("psycopg")
 
 from meridian.cli import EXIT_FAILED, _station_revoke  # noqa: E402
 from meridian.store.invites import consume_invite  # noqa: E402 — after importorskip
+from meridian.store.receiving_stations import (  # noqa: E402
+    find_receiving_stations,
+)
 from meridian.store.station_tokens import (  # noqa: E402
     find_station_id_by_token_hash,
     revoke_station_token,
@@ -27,7 +30,6 @@ from meridian.store.station_tokens import (  # noqa: E402
 from meridian.store.stations import (  # noqa: E402
     Capability,
     NewStation,
-    find_receiving_stations,
     find_station_for_recovery,
     find_station_heartbeat,
     find_station_provenance,
