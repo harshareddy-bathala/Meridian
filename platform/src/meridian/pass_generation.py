@@ -51,13 +51,13 @@ from meridian.registry.capability_match import (
 )
 from meridian.store.element_sets import StoredElementSet, find_element_set_current_at
 from meridian.store.passes import NewPass, insert_pass
-from meridian.store.satellites import StoredTransmitter, find_active_transmitters
-from meridian.store.station_capabilities import find_capabilities_for_station
-from meridian.store.stations import (
-    Connection,
+from meridian.store.receiving_stations import (
     ReceivingStation,
     find_receiving_stations,
 )
+from meridian.store.satellites import StoredTransmitter, find_active_transmitters
+from meridian.store.station_capabilities import find_capabilities_for_station
+from meridian.store.stations import Connection
 
 __all__ = [
     "GenerationHorizon",

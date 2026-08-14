@@ -43,17 +43,17 @@ from meridian.scheduler.priority_baseline import (
 from meridian.store.assignments import insert_assignments
 from meridian.store.element_sets import find_element_set_by_id
 from meridian.store.passes import StoredPass, find_passes_in_horizon
+from meridian.store.receiving_stations import (
+    ReceivingStation,
+    find_receiving_stations,
+)
 from meridian.store.satellites import (
     StoredTransmitter,
     find_active_transmitters,
     find_satellite_priorities,
 )
 from meridian.store.station_capabilities import find_capabilities_for_station
-from meridian.store.stations import (
-    Connection,
-    ReceivingStation,
-    find_receiving_stations,
-)
+from meridian.store.stations import Connection
 
 __all__ = [
     "RANKERS",
