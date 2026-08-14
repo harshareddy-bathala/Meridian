@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from meridian.api.public import stations
+from meridian.api.public import satellites, stations
 from meridian.api.public.envelope import API_PREFIX
 
 __all__ = ["router"]
@@ -27,3 +27,4 @@ __all__ = ["router"]
 router = APIRouter(prefix=API_PREFIX, tags=["public"])
 
 router.include_router(stations.router)
+router.include_router(satellites.router)
