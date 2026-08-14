@@ -1898,6 +1898,30 @@ The satellite is gone. It crossed the banner in a straight line and read as a st
 
 ---
 
+## D-090 — An unknown URL is answered in the two-field envelope, on every surface
+
+**2026-08-13 · accepted** · *`meridian/api/errors.py`, `meridian/api/public/envelope.py`, Stage 11*
+
+Every failure the platform raises deliberately leaves in `{"error": ..., "message": ...}`, and D-004 records why: a microcontroller client extracts both fields with a substring scan and never needs a JSON tree walker. **A request to a path no route matches leaves in `{"detail": "Not Found"}` instead** — FastAPI's built-in handler, which nothing in this repository had replaced. The same is true of a wrong method, which answers `{"detail": "Method Not Allowed"}`. Neither is either surface's shape, and the module docstring in `api/errors.py` claiming to own "the one shape every error response takes" was simply wrong about the two cases a client author hits most while their code is still wrong.
+
+**Both are answered in the two-field envelope, with `not_found` (404) and `method_not_allowed` (405), on every path the platform serves.**
+
+**MSP §6 is not widened to provide the code, because §6 does not govern this case.** Its eight codes each describe an MSP *operation* failing — a bad invite, an unowned assignment, an unparseable body. A request to `/msp/v0/registr` never became an operation: it never matched a route, no version header was checked, no body was read. Answering it is a transport-level act that happens before the protocol starts, so the closed table D-084 defended stays closed and an implementer reading the reference implementation still finds exactly the eight codes the specification lists.
+
+That argument is what makes one vocabulary acceptable across both surfaces. A station receiving `not_found` is not receiving an MSP §6 code it cannot look up; it is receiving the platform's statement that the URL it asked for is not part of any API here.
+
+**The two codes live in `STATUS_FOR_PUBLIC_CODE` rather than in a third table, and this is the weakest part of the decision.** That table is documented as the public read API's vocabulary, and it is now also the platform's transport vocabulary — one table serving two ideas. A third table would be conceptually cleaner and would mean three code tables in a project with two surfaces, which is worse in every way a reader would experience. Recorded as a tension rather than resolved, so whoever adds a fourth code knows which of the two ideas they are extending.
+
+**It also settles what D-087 has to match.** That decision requires `/metrics` without a bearer token to return a 404 "byte-identical to an unmatched path", which was unimplementable while an unmatched path returned whatever FastAPI happened to produce. It is now a fixed, tested shape.
+
+*Rejected: fixing only `/api/v1` and leaving MSP paths as they are.* The smallest change, and it makes the two surfaces disagree about their most common error. D-004's promise is to the microcontroller client, which is on the MSP side — fixing the surface that promise was not made about, and not the one it was, inverts the reason the promise exists.
+
+*Rejected: adding `not_found` to MSP §6 as version 0.3.* Explicit, and it spends a protocol version and a conformance-test revision on an error no client branches on, three days after D-084 argued the table should not grow. If §6 gains a ninth code it should be for an operation that can fail in a new way.
+
+*Rejected: accepting `{"detail": ...}` as the platform's 404 and pointing D-087 at it.* Costs nothing and keeps a third body shape in a repository whose error handling is otherwise uniform, permanently, so that one FastAPI default never has to be overridden.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
