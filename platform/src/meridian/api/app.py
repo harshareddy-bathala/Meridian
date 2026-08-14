@@ -11,14 +11,15 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import psycopg
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Header, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from meridian import __version__
-from meridian.api.errors import install_error_handlers
+from meridian.api.errors import install_error_handlers, no_such_endpoint_response
+from meridian.api.metrics_access import is_metrics_scrape_authorised
 from meridian.api.msp import router as msp_router
 from meridian.api.request_limits import RequestSizeLimitMiddleware
 from meridian.config import Settings, load_settings
@@ -112,8 +113,18 @@ def create_app() -> FastAPI:
         return JSONResponse(body, status_code=200 if database_ok else 503)
 
     @app.get("/metrics")
-    def metrics() -> Response:
-        """Prometheus scrape endpoint."""
+    def metrics(authorization: str | None = Header(default=None)) -> Response:
+        """Prometheus scrape endpoint, for a caller holding the bearer token.
+
+        Without a valid token this answers exactly as an unrouted path does
+        (D-087): the endpoint's existence is not confirmed to anyone who cannot
+        already read it. The reason is in the platform's log, which is where an
+        operator debugging a scrape should be looking anyway.
+        """
+        if not is_metrics_scrape_authorised(
+            authorization, app.state.settings.metrics_token
+        ):
+            return no_such_endpoint_response()
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     return app
