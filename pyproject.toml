@@ -154,6 +154,9 @@ convention = "google"
 "site/tools/make-images.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "site/tools/stamp_assets.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "site/tools/verify_site.py" = ["T201", "D", "ANN", "PLR", "C90"]
+# Same shape as the site checker above: a stdlib script whose whole output is
+# printed, run by hand against a deployed hostname (D-088).
+"deploy/tools/verify_public_surface.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
 # The ban below is global; this is the one module exempt from it, so the boundary
 # is checked by CI rather than remembered by a reviewer.
