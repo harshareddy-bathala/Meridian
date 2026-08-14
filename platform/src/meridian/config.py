@@ -48,6 +48,15 @@ class Settings:
     registration_recovery_window_s: int
     heartbeat_interval_s: int
 
+    metrics_token: str
+    """Bearer token the ``/metrics`` scrape must present (D-087).
+
+    The endpoint carries process internals and is served from the same public
+    hostname as everything else, so it is closed by default rather than opened
+    when someone notices. Prometheus reads the same value from a credentials
+    file inside the compose network.
+    """
+
     public_base_url: str
     tunnel_hostname: str
     public_mode: bool
@@ -227,6 +236,7 @@ def load_settings() -> Settings:
         # this window does not govern (D-034).
         registration_recovery_window_s=_int_env("REGISTRATION_RECOVERY_WINDOW_S", 3600),
         heartbeat_interval_s=_int_env("HEARTBEAT_INTERVAL_S", 30),
+        metrics_token=os.environ.get("METRICS_TOKEN", PLACEHOLDER),
         public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"),
         tunnel_hostname=os.environ.get("TUNNEL_HOSTNAME", "").strip(),
         public_mode=_bool_env("MERIDIAN_PUBLIC", False),
@@ -284,6 +294,11 @@ def _refuse_placeholder_secrets(settings: Settings) -> None:
             ("REGISTRATION_INVITE_TOKEN", settings.registration_invite_token),
             ("DATABASE_URL password", settings.database_password),
             ("GRAFANA_ADMIN_PASSWORD", settings.grafana_admin_password),
+            # D-087. A placeholder here is worse than a placeholder elsewhere:
+            # the token is the only thing standing between a public hostname and
+            # the process internals, and `change-me` is the first value anyone
+            # guessing would try.
+            ("METRICS_TOKEN", settings.metrics_token),
         )
         if value == PLACEHOLDER
     ]

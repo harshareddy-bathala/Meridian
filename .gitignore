@@ -17,6 +17,11 @@ htmlcov/
 *.env
 !deploy/.env.example
 
+# The bearer token Prometheus presents to /metrics (D-087). Prometheus expands
+# no environment variables in its own config, so this one secret has to exist as
+# a file; the .example beside it is tracked and carries the placeholder.
+deploy/prometheus/metrics_token
+
 # Data. Nothing in the observation lineage belongs in git.
 *.db
 *.sqlite3
