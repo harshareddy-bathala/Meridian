@@ -167,6 +167,12 @@ convention = "google"
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "sgp4".msg = "Only meridian.orbit may import propagation libraries (ARCHITECTURE.md rule 2)."
 "skyfield".msg = "Only meridian.orbit may import propagation libraries (ARCHITECTURE.md rule 2)."
+# D-082's `meridian.api` ban is deliberately *not* here. `banned-api` is one rule
+# for every banned name, and `per-file-ignores` can only switch the whole rule
+# off — so exempting the twenty test modules that import `meridian.api` would
+# also stop this file's skyfield ban applying to tests, which is a boundary that
+# already has a documented exception marking it. Enforced by the "meridian.api
+# stays behind the API layer" step in .github/workflows/ci.yml instead.
 
 [tool.mypy]
 python_version = "3.11"

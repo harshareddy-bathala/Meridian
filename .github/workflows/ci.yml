@@ -61,6 +61,34 @@ jobs:
             exit 1
           fi
 
+      - name: meridian.api stays behind the API layer
+        # D-082: a station may declare that its coordinates be published less
+        # precisely than they are stored, and that rounding happens when a public
+        # response is serialised — nowhere else. The store, the scheduler and
+        # pass generation read the same rows and must keep seeing full precision,
+        # so the package holding the rounding has to be unreachable from them.
+        #
+        # A shell check rather than ruff's `banned-api`: that setting is one rule
+        # covering every banned name, and `per-file-ignores` can only disable the
+        # whole rule per path. Exempting the test modules that legitimately import
+        # `meridian.api` would therefore also stop the `skyfield` ban applying to
+        # tests, trading an enforced boundary away to add one.
+        #
+        # Scoped to the three distributions. `platform/src/meridian/api/**` is
+        # excluded because its own modules import each other; tests are out of
+        # scope by the same argument the 400-line check uses.
+        run: |
+          set -euo pipefail
+          crossings=$(git ls-files 'platform/*.py' 'client/*.py' 'simulator/*.py' \
+            | grep -v '^platform/src/meridian/api/' \
+            | xargs grep -n -E '^\s*(from|import)\s+meridian\.api' || true)
+          if [ -n "$crossings" ]; then
+            echo "$crossings" | while read -r line; do echo "::error::$line"; done
+            echo "docs/DECISIONS.md D-082: only meridian.api may import meridian.api."
+            echo "Coordinate rounding is a serialisation rule; the store and scheduler must not reach it."
+            exit 1
+          fi
+
   site:
     # The static site had no CI at all, and site/README.md documented rules that
     # nothing enforced. Both scripts are stdlib-only and need no dependencies —
