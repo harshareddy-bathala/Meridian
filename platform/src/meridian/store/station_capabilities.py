@@ -33,22 +33,43 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class StoredCapability:
-    """One declared antenna and receiver chain, as scheduling needs it.
+    """One declared antenna and receiver chain, as a station described it.
 
-    Four of the nine columns. ``band`` is a label over the frequency range
-    rather than a constraint of its own; ``polarisation``, ``tracking`` and
-    ``horizon_mask_json`` bear on how well a pass is received rather than
-    whether it can be attempted, and nothing decides anything with them yet.
-    They stay in the table, unread, until something does — a narrower read is
-    honest about what the scheduler currently uses.
+    This read was four columns while the scheduler was its only caller, on the
+    stated condition that the rest stayed unread "until something does". Stage 11
+    is that something: the public API publishes what a station declared, and a
+    reader deciding whether a station could plausibly have received a pass needs
+    the polarisation and the declared obstruction as much as the frequencies.
+
+    The scheduler still decides with four of them. ``band`` is a label over the
+    frequency range rather than a constraint of its own, and ``polarisation``,
+    ``tracking`` and ``horizon_mask_json`` bear on how *well* a pass is received
+    rather than whether it can be attempted at all.
     """
 
+    band: str
     freq_min_hz: int
     freq_max_hz: int
     modes: list[str]
     """Postgres ``text[]``, so psycopg hands back a list rather than a tuple."""
 
+    polarisation: str
+    tracking: bool
     min_elevation_deg: float
+    """The station's **declared** floor, not its measured horizon (D-031)."""
+
+    horizon_mask: list[dict[str, float]]
+    """The declared obstruction, empty when the operator described none.
+
+    Already decoded: the column is ``jsonb`` and psycopg returns it as Python
+    objects, so there is no text here to parse and no choice about it. Selected
+    under an alias because the column is ``horizon_mask_json`` and that name
+    would promise a string this field has never held.
+
+    The keys are the stored ones D-031 fixed — ``az_deg`` and ``min_el_deg`` —
+    and translating them into names that spell themselves out is the API layer's
+    job, the same boundary that encodes them on the way in.
+    """
 
 
 def find_capabilities_for_station(
@@ -82,7 +103,9 @@ def find_capabilities_for_station(
     with conn.cursor(row_factory=class_row(StoredCapability)) as cur:
         cur.execute(
             """
-            select freq_min_hz, freq_max_hz, modes, min_elevation_deg
+            select band, freq_min_hz, freq_max_hz, modes,
+                   polarisation, tracking, min_elevation_deg,
+                   horizon_mask_json as horizon_mask
             from station_capabilities
             where station_id = %s
               and deleted_at is null
