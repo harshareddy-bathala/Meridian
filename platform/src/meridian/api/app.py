@@ -21,6 +21,7 @@ from meridian import __version__
 from meridian.api.errors import install_error_handlers, no_such_endpoint_response
 from meridian.api.metrics_access import is_metrics_scrape_authorised
 from meridian.api.msp import router as msp_router
+from meridian.api.public.surface import router as public_router
 from meridian.api.request_limits import RequestSizeLimitMiddleware
 from meridian.config import Settings, load_settings
 from meridian.store.invites import seed_bootstrap_invite
@@ -92,6 +93,10 @@ def create_app() -> FastAPI:
     # rather than in FastAPI's default 422 or a bare 500.
     install_error_handlers(app)
     app.include_router(msp_router)
+    # The public read API (D-083). Mounted beside MSP rather than as a
+    # sub-application: inside a `Mount`, `request.app` is the sub-application, and
+    # every route's connection and settings dependencies read `app.state` (D-084).
+    app.include_router(public_router)
 
     @app.get("/healthz")
     def healthz() -> JSONResponse:
