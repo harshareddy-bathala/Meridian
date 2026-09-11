@@ -1,9 +1,10 @@
 """``/api/v1/stations`` — the directory, and what is known about one station.
 
-Four read endpoints: the paged list, one station, the hardware it declared, and
-its liveness on its own. Every one of them is thin by rule — it reads through
-``meridian.store``, hands the rows to a model in ``meridian.api.public.models``,
-and returns. No decision about what a station *is* is made here.
+Five read endpoints: the paged list, one station, the hardware it declared, its
+liveness on its own, and the heartbeats it has sent. Every one of them is thin by
+rule — it reads through ``meridian.store``, hands the rows to a model in
+``meridian.api.public.models``, and returns. No decision about what a station
+*is* is made here.
 
 The clock is read once per request and passed down, so every station in a page is
 classified against the same instant (D-054). Paging is keyset: the route asks for
@@ -15,14 +16,17 @@ Reference: docs/DECISIONS.md D-082, D-083, D-084, D-085; docs/PROJECT.md §13.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends
 
 from meridian.api import platform_clock
 from meridian.api.dependencies import get_connection
-from meridian.api.public.envelope import NOT_FOUND, PublicError
+from meridian.api.public.envelope import INVALID_QUERY, NOT_FOUND, PublicError
 from meridian.api.public.models import (
     Page,
     PublicCapability,
+    PublicHeartbeat,
     PublicStation,
 )
 from meridian.api.public.models.stations import StationLiveness
@@ -32,6 +36,7 @@ from meridian.api.public.pagination import (
     page_request,
     trim_overfetch,
 )
+from meridian.store.heartbeats import find_heartbeats_before
 from meridian.store.station_capabilities import find_capabilities_for_station
 from meridian.store.station_directory import (
     DirectoryStation,
@@ -46,11 +51,29 @@ router = APIRouter()
 
 
 def _station_or_404(conn: Connection, station_id: str) -> DirectoryStation:
-    """Load one station, or raise the error the three detail routes share."""
+    """Load one station, or raise the error the four detail routes share."""
     station = find_station(conn, station_id)
     if station is None:
         raise PublicError(NOT_FOUND, "No station with that id.")
     return station
+
+
+def _heartbeat_cursor(key: tuple[str, ...] | None) -> tuple[datetime, int] | None:
+    """Read a heartbeat cursor's two parts back into the types the store wants.
+
+    ``decode_cursor`` returns strings, because a cursor is text on the wire and
+    only the endpoint that issued one knows what its parts meant. Parsing them
+    here is where a cursor that decoded cleanly but carries nonsense — a station
+    cursor pasted onto this endpoint, say — becomes ``invalid_query`` rather than
+    a 500 from deep inside psycopg.
+    """
+    if key is None:
+        return None
+    try:
+        received_at, row_id = key
+        return datetime.fromisoformat(received_at), int(row_id)
+    except ValueError as exc:
+        raise PublicError(INVALID_QUERY, "cursor is not a valid cursor.") from exc
 
 
 @router.get("/stations")
@@ -159,3 +182,48 @@ def get_station_liveness(
     """
     row = _station_or_404(conn, station_id)
     return StationLiveness.from_row(row, now=platform_clock.utc_now())
+
+
+@router.get("/stations/{station_id}/heartbeats")
+def list_station_heartbeats(
+    station_id: str,
+    conn: Connection = Depends(get_connection),
+    page: PageRequest = Depends(page_request),
+) -> Page[PublicHeartbeat]:
+    """One station's recent heartbeats, newest first.
+
+    Args:
+        station_id: The station whose reports to read.
+        conn: A pooled connection, injected.
+        page: ``limit`` and ``cursor``, already validated and decoded.
+
+    Returns:
+        One page of heartbeats, each without the station's opaque ``health``
+        blob — the store read never selects it.
+
+    Raises:
+        PublicError: ``not_found`` when there is no such station. An empty page
+            means a real station that has never reported, which is a different
+            answer and a commissioning problem rather than a bad URL.
+
+    Note:
+        The cursor carries ``(received_at, id)`` rather than the timestamp alone.
+        A simulated fleet ticks together, so fifty heartbeats can share a
+        millisecond, and a cursor on the timestamp would drop whichever of them
+        happened to sort after the page boundary.
+    """
+    _station_or_404(conn, station_id)
+
+    before = _heartbeat_cursor(page.cursor_key)
+    fetched = find_heartbeats_before(conn, station_id, before, page.limit + 1)
+    trimmed = trim_overfetch(fetched, page.limit)
+
+    next_cursor = None
+    if trimmed.has_more_rows and trimmed.rows:
+        last = trimmed.rows[-1]
+        next_cursor = encode_cursor((last.received_at.isoformat(), str(last.id)))
+
+    return Page(
+        items=[PublicHeartbeat.from_row(row) for row in trimmed.rows],
+        next_cursor=next_cursor,
+    )

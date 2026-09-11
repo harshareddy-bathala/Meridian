@@ -18,6 +18,7 @@ a response that skips this package.
 from __future__ import annotations
 
 from meridian.api.public.models.capabilities import HorizonMaskPoint, PublicCapability
+from meridian.api.public.models.heartbeats import ListeningBlock, PublicHeartbeat
 from meridian.api.public.models.stations import (
     Page,
     PublicStation,
@@ -27,8 +28,10 @@ from meridian.api.public.models.stations import (
 
 __all__ = [
     "HorizonMaskPoint",
+    "ListeningBlock",
     "Page",
     "PublicCapability",
+    "PublicHeartbeat",
     "PublicStation",
     "PublishedLocation",
     "StationLiveness",

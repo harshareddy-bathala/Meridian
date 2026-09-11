@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -23,6 +24,11 @@ psycopg = pytest.importorskip("psycopg")
 
 from meridian.api.app import create_app  # noqa: E402
 from meridian.api.dependencies import get_connection  # noqa: E402
+from meridian.store.heartbeats import (  # noqa: E402
+    ListeningReport,
+    NewHeartbeat,
+    insert_heartbeat,
+)
 from meridian.store.stations import (  # noqa: E402
     Capability,
     NewStation,
@@ -214,3 +220,125 @@ def test_liveness_is_served_without_the_rest_of_the_station(
         "last_heartbeat_at": None,
         "simulated": True,
     }
+
+
+def beat(rollback: Any, station_id: str, **overrides: Any) -> None:
+    """Record one heartbeat, with a health blob that must never be published."""
+    base = NewHeartbeat(
+        station_id=station_id,
+        sent_at=datetime.now(UTC),
+        state="listening",
+        held_assignments=["as_held_1"],
+        listening=None,
+        health_json='{"secret_disk_path": "/home/operator/keys"}',
+        simulated=False,
+        clock_offset_s=0.25,
+        clock_uncertainty_s=0.1,
+    )
+    insert_heartbeat(rollback, replace(base, **overrides))
+
+
+def test_a_published_heartbeat_never_carries_the_health_blob(
+    client: TestClient, rollback: Any
+) -> None:
+    """The column is opaque, station-supplied and stored verbatim.
+
+    It is dropped in the store read rather than filtered at serialisation, so
+    this asserts against the response a reader actually receives — the place the
+    two approaches would look identical right up until one of them failed.
+    """
+    add(rollback, "st_hb1")
+    beat(rollback, "st_hb1")
+
+    body = client.get("/api/v1/stations/st_hb1/heartbeats").text
+
+    assert "secret_disk_path" not in body
+    assert "health" not in body
+
+
+def test_heartbeats_come_back_newest_first(client: TestClient, rollback: Any) -> None:
+    """A reader opening a station wants what it is doing now, not in week one."""
+    add(rollback, "st_hb2")
+    for _ in range(3):
+        beat(rollback, "st_hb2")
+
+    items = client.get("/api/v1/stations/st_hb2/heartbeats").json()["items"]
+
+    received = [item["received_at"] for item in items]
+    assert received == sorted(received, reverse=True)
+
+
+def test_the_listening_block_travels_whole_or_not_at_all(
+    client: TestClient, rollback: Any
+) -> None:
+    """Its presence is what turns silence into a confirmed miss (rule 7).
+
+    A partial block cannot support that assertion, so the response has one
+    object or `null` — never four fields a reader has to check individually.
+    """
+    add(rollback, "st_hb3")
+    beat(rollback, "st_hb3")
+    beat(
+        rollback,
+        "st_hb3",
+        listening=ListeningReport(
+            assignment_id="as_listen_1",
+            satellite_id="sat-1",
+            centre_freq_hz=137_100_000,
+            mode="lrpt",
+        ),
+    )
+
+    items = client.get("/api/v1/stations/st_hb3/heartbeats").json()["items"]
+
+    blocks = [item["listening"] for item in items]
+    assert {
+        "assignment_id": "as_listen_1",
+        "satellite_id": "sat-1",
+        "centre_freq_hz": 137_100_000,
+        "mode": "lrpt",
+    } in blocks
+    assert None in blocks
+
+
+def test_a_station_that_never_reported_gets_an_empty_page(
+    client: TestClient, rollback: Any
+) -> None:
+    """Empty is a real answer — a commissioning problem, not a bad URL."""
+    add(rollback, "st_hb4")
+
+    body = client.get("/api/v1/stations/st_hb4/heartbeats").json()
+
+    assert body["items"] == []
+    assert body["next_cursor"] is None
+
+
+def test_heartbeats_for_an_unknown_station_are_not_found(client: TestClient) -> None:
+    """Told apart from a real station that has simply never reported."""
+    response = client.get("/api/v1/stations/st_nope/heartbeats")
+
+    assert response.status_code == 404
+
+
+def test_a_station_cursor_pasted_onto_heartbeats_is_invalid_query(
+    client: TestClient, rollback: Any
+) -> None:
+    """A cursor from another endpoint decodes cleanly and means nothing here.
+
+    It carries one part where this endpoint needs two, so unpacking it raises —
+    and the route turns that into `invalid_query` rather than letting a
+    ValueError reach the catch-all as a 500.
+    """
+    add(rollback, "st_hb5")
+    add(rollback, "st_hb6")
+
+    # Two stations, so the list genuinely issues a cursor rather than `null`.
+    stations_cursor = client.get("/api/v1/stations?limit=1").json()["next_cursor"]
+    assert stations_cursor is not None
+
+    response = client.get(
+        f"/api/v1/stations/st_hb5/heartbeats?cursor={stations_cursor}"
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_query"
