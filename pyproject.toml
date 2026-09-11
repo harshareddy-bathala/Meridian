@@ -207,9 +207,15 @@ ignore_missing_imports = true
 # cannot avoid, plugin or not. pydantic's own mypy plugin exists to resolve
 # this properly, but its shipped pydantic 2.13.4 build crashes importing
 # mypy.expandtype.ExpandTypeVisitor under mypy 2.3.0 (verified directly, not
-# assumed) — adopt it once the two are compatible, not before. Scoped to
-# api/models/ rather than global, so every other module keeps the check.
-module = ["meridian.api.models.*"]
+# assumed) — adopt it once the two are compatible, not before. Scoped to the two
+# directories that hold response and request models, rather than global, so every
+# other module keeps the check.
+#
+# `meridian.api.public.models.*` is listed before it exists. The relaxation is the
+# same one for the same reason, and naming it here means the first public response
+# model lands as a model rather than as a mypy failure that invites someone to
+# widen the exemption in a hurry.
+module = ["meridian.api.models.*", "meridian.api.public.models.*"]
 disallow_any_explicit = false
 
 [tool.pytest.ini_options]
