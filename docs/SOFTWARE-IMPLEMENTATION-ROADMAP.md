@@ -46,7 +46,23 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-08-12. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-09-11. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stage 11 is half built.** Its decisions are all recorded, D-081 through D-088, with D-090 added for what the platform answers at an unknown URL. The public read API serves under `/api/v1`, with its own error vocabulary, keyset cursors, and coordinates rounded to the precision each station declares under MSP 0.2:
+- `/stations`, one station, its hardware, liveness and heartbeats;
+- `/satellites` and their transmitters.
+
+`/metrics` now requires a bearer token, and `deploy/tools/verify_public_surface.py` exists to prove the public surface from outside.
+
+**What remains of Stage 11:**
+- the dashboard (D-081);
+- read endpoints for passes, assignments and their reasons, and observations;
+- the `not_yet_computed` reliability and aggregate endpoints (D-086);
+- the Cloudflare rate-limit rule, and the checker's transcript pasted into D-088.
+
+The Phase 1 exit criterion is met only when that last step passes against the public hostname.
+
+The rest of this section is the 2026-08-12 snapshot, left as written.
 
 **Stages 0–10 are done.** Stage 0's specification gaps are closed as decisions D-023 through D-032; the store, the shared MSP infrastructure and the registry are in place; orbit propagation and the element-set archive shipped with pass identity; and pass generation now feeds the two baseline schedulers.
 

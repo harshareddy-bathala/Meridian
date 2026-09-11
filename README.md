@@ -23,9 +23,13 @@ Meridian predicts which reception opportunities are worth taking, schedules them
 
 Done when a virtual station is visible on the public site from outside the college network.
 
-Not yet started: prediction models, scheduler, reliability layer, hardware.
+Built so far: the store and its migrations, the orbit service and element-set archive, all four MSP endpoints, the station registry, pass generation, the two baseline schedulers, append-only observations, a deterministic fleet of virtual stations that speaks MSP through the reference client, and the first half of the public read API under `/api/v1`: stations, their hardware, liveness and heartbeats, and the satellite catalogue.
 
-[**meridian.org.in**](https://meridian.org.in) — the static public site, in `site/`: the front page plus the architecture, protocol, documentation and about pages. It is deliberately not the dashboard: the exit criterion above is met by the live dashboard on `dash.meridian.org.in`, tunnelled from the station, which is a separate surface with a separate uptime story. See D-036, D-037 and D-038 for the two-theme system and the move to five pages, and D-039 and D-040 for the contrast pass and the document rail.
+What remains for the exit criterion: the dashboard, and running `deploy/tools/verify_public_surface.py` against the public hostname once the edge rate limit is on (D-088).
+
+Not yet started: prediction models, the constrained scheduler that beats the baselines, the reliability layer, hardware. `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` says which stage each belongs to.
+
+[**meridian.org.in**](https://meridian.org.in) — the static public site, in `site/`: the front page plus the architecture, protocol, documentation and about pages. It is deliberately not the dashboard: the exit criterion above will be met by the live dashboard on `dash.meridian.org.in`, tunnelled from the station, which is a separate surface with a separate uptime story. See D-036, D-037 and D-038 for the two-theme system and the move to five pages, and D-039 and D-040 for the contrast pass and the document rail.
 
 Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](https://github.com/harshareddy-bathala/Meridian/issues) and [discussions](https://github.com/harshareddy-bathala/Meridian/discussions) for anything technical.
 
@@ -84,9 +88,9 @@ Tests are organised by what they need to run, one directory per marker:
 | `uv run pytest -m "not integration and not e2e and not msp_conformance"` | nothing | yes |
 | `uv run pytest -m integration` | TimescaleDB | yes |
 | `uv run pytest -m msp_conformance` | nothing — it drives the app in-process | yes, from `GET /msp/v0/time` |
-| `uv run pytest -m e2e` | the full compose stack | **not yet** — Stage 10 |
+| `uv run pytest -m e2e` | TimescaleDB — it drives the platform and the simulator in-process | yes, from Stage 10's completion gate |
 
-`e2e/` exists with its marker wired and no tests in it, so that command currently selects nothing and pytest exits `5`. That is the expected state until there is a stack to drive — the directory is there first so the marker wiring is settled before anyone writes an end-to-end test, rather than being invented alongside one. CI runs the marker anyway, tolerating exit `5` and nothing else, so the first end-to-end test to land executes rather than sitting collected-but-never-run.
+The one end-to-end test runs Stage 10's gate for real, from catalogue load through pass generation, scheduling, MSP delivery and the reference client to a stored observation, with only the platform's clock stubbed. CI still tolerates exit `5` on that marker, a leftover from when the directory was empty.
 
 Conformance tests assert the **bytes** `docs/MSP-SPEC.md` promises — field names, exact error bodies, status codes, version handling — rather than that an operation works. They are what a third-party station implementation would be tested against, which is why they spell out expected bodies in full instead of computing them from the code under test.
 
