@@ -180,6 +180,26 @@ def test_an_unknown_station_is_not_found(client: TestClient) -> None:
     }
 
 
+def test_capabilities_come_back_with_the_declared_mask(
+    client: TestClient, rollback: Any
+) -> None:
+    """The five columns the scheduler ignores are the ones a reader wants.
+
+    The mask's keys are the assertion that matters. They are stored as `az_deg`
+    and `min_el_deg` (D-031) and published spelled out, so a body carrying the
+    stored spellings would mean the rename was skipped — and the endpoint would
+    still look like it worked.
+    """
+    add(rollback, "st_caps")
+
+    body = client.get("/api/v1/stations/st_caps/capabilities").json()
+
+    assert len(body) == 1
+    assert body[0]["polarisation"] == "rhcp"
+    assert body[0]["tracking"] is False
+    assert body[0]["horizon_mask"] == [{"azimuth_deg": 90.0, "min_elevation_deg": 15.0}]
+
+
 def test_liveness_is_served_without_the_rest_of_the_station(
     client: TestClient, rollback: Any
 ) -> None:
