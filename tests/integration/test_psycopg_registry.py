@@ -74,6 +74,7 @@ def sample_request(
         lon_deg=77.5946,
         alt_m=920.0,
         simulated=simulated,
+        location_precision_decimals=2,
         simulator_run_id=None,
         seed=None,
         capabilities=[SAMPLE_CAPABILITY],

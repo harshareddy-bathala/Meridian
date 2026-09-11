@@ -77,6 +77,15 @@ class StationProfile:
 
     capabilities: tuple[ReceiveChain, ...]
 
+    location_precision_decimals: int = 2
+    """Decimal places the operator permits ``lat_deg`` and ``lon_deg`` to be
+    *published* at, 1 to 6 (MSP §4.1). It changes nothing the station does: the
+    full coordinates above are still sent, and the platform still schedules
+    against them. At the equator 1 is roughly 11 km and 6 roughly 11 cm.
+
+    Declared here rather than beside the coordinates only because a field with a
+    default cannot precede one without."""
+
     simulated: bool = False
     simulator_run_id: str | None = None
     seed: int | None = None
@@ -142,6 +151,11 @@ def build_register_body(
             "alt_m": profile.alt_m,
         },
         "simulated": profile.simulated,
+        # Sent even when it matches the platform's default. The two disagreeing
+        # later is a silent change of what a station consented to publish, and
+        # stating it on every registration means the row records the operator's
+        # choice rather than whatever the platform's default happened to be.
+        "location_precision_decimals": profile.location_precision_decimals,
         "capabilities": [_capability_payload(one) for one in profile.capabilities],
         "client": {"impl": CLIENT_IMPLEMENTATION, "version": __version__},
     }

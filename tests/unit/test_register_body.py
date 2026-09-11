@@ -48,7 +48,7 @@ def profile(**overrides: object) -> StationProfile:
 
 
 def test_the_body_carries_every_field_msp_4_1_requires() -> None:
-    """The ten top-level keys of §4.1's request, and no others."""
+    """§4.1's top-level keys for a measured station, and no others."""
     body = build_register_body(profile(), "an-invite", "a-key")
 
     assert set(body) == {
@@ -58,9 +58,45 @@ def test_the_body_carries_every_field_msp_4_1_requires() -> None:
         "operator",
         "location",
         "simulated",
+        "location_precision_decimals",
         "capabilities",
         "client",
     }
+
+
+def test_location_precision_travels_even_at_its_default() -> None:
+    """A station states what it consented to publish rather than inferring it.
+
+    The platform defaults an absent field to 2 as well, so omitting it would
+    reach the same row today. Sending it means the two can be changed
+    independently without silently altering what existing stations publish.
+    """
+    body = build_register_body(profile(), "an-invite", "a-key")
+
+    assert body["location_precision_decimals"] == 2
+
+
+def test_location_precision_is_the_operators_figure_not_a_fixed_one() -> None:
+    """The operator's choice reaches the wire unaltered (D-082)."""
+    body = build_register_body(
+        profile(location_precision_decimals=5), "an-invite", "a-key"
+    )
+
+    assert body["location_precision_decimals"] == 5
+
+
+def test_declaring_a_precision_does_not_coarsen_the_coordinates_sent() -> None:
+    """The field governs publication only, and the client is not a publisher.
+
+    A station declaring 1 still sends its full coordinates: the platform
+    schedules against them, and a rounded latitude on the wire would move
+    predicted acquisition for a site the station never moved to.
+    """
+    body = build_register_body(
+        profile(location_precision_decimals=1), "an-invite", "a-key"
+    )
+
+    assert body["location"] == {"lat": 12.9716, "lon": 77.5946, "alt_m": 920.0}
 
 
 def test_location_uses_the_short_wire_names() -> None:

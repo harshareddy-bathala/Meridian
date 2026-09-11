@@ -129,6 +129,17 @@ class RegisterRequestBody(BaseModel):
     operator: str
     location: Location
     simulated: bool
+    # Top-level rather than inside `location`, which stays purely ISO 6709.
+    # This is a property of the station, the same argument §4.1 already makes
+    # for `simulated`. Absent means 2 — a station that never stated a
+    # preference should not have its rooftop published on an assumption.
+    #
+    # `strict` because §4.1 says a string is `malformed`, and this is the one
+    # field in the message where that sentence is load bearing: it replaced a
+    # rejected `"exact"`/`"approximate"` enum, so `"2"` from an implementation
+    # written against an early draft must be corrected rather than coerced.
+    # The neighbouring integers are lax, which is why this says so out loud.
+    location_precision_decimals: int = Field(default=2, ge=1, le=6, strict=True)
     simulator_run_id: str | None = None
     seed: int | None = None
     capabilities: list[CapabilityPayload] = Field(min_length=1)
@@ -167,6 +178,7 @@ class RegisterRequestBody(BaseModel):
             lon_deg=self.location.lon_deg,
             alt_m=self.location.alt_m,
             simulated=self.simulated,
+            location_precision_decimals=self.location_precision_decimals,
             simulator_run_id=self.simulator_run_id,
             seed=self.seed,
             capabilities=[
