@@ -1922,6 +1922,320 @@ That argument is what makes one vocabulary acceptable across both surfaces. A st
 
 ---
 
+## D-091 — The post-reception layer adds no hardware and no budget
+
+**2026-09-13 · accepted** · *synopsis review*
+
+At the synopsis review the faculty panel asked what Meridian does with data after receiving it. The request already before the department is ₹27,600 for Tiers 1 and 2, and an answer that needed another purchase would be an answer to a different question.
+
+**The hardware for this work is what `PROJECT.md` §17 already requests: one SDR and a fixed 137 MHz antenna.** No L-band chain, no second SDR, no dish. Tier 3 tracking stays optional exactly as §17 states it, and nothing in modules 13–17 (D-092) depends on it — every one of them reads a reception the fixed antenna already produces, or a simulated one.
+
+The line is held here because the viva needs measured numbers. Each capability below is proven on data the funded station and the simulator produce; one that needed new hardware to prove would arrive after the week-15 hardware gate at best, and unproven at worst.
+
+*A tension this entry does not resolve.* D-053's closing paragraph, "Hardware this assumes", describes the full ₹43,500 build with tracking "funded rather than optional". §17, and D-066's zero turnaround for a fixed antenna, say otherwise. This entry relies on §17 and does not supersede D-053; which of the two describes the station the team intends to build is listed under Open (D-105).
+
+*Rejected: an L-band receiving path as part of this answer.* It is the obvious way to receive more from the same satellites, and it needs a dish, a feed, an LNA and tracking. It is recorded as a candidate for later work (D-098), not as a response to the panel.
+
+---
+
+## D-092 — After reception: five capabilities, numbered 13 to 17
+
+**2026-09-13 · accepted** · *synopsis review*
+
+The panel's question found a real gap, not a presentational one. The platform predicts, schedules, and from Stage 20 counts misses — but an observation that arrives is stored and nothing further is concluded from it. A station owner cannot tell whether last night's pass was usable, why the one before it failed, or that their cable is going.
+
+**Five capabilities, numbered 13 to 17 in the submission module list:**
+
+| # | Capability | The question it answers |
+|---|---|---|
+| 13 | reception verdict | How likely is this reception to be usable? |
+| 14 | loss diagnosis | If it failed or was partial, what most likely caused it? |
+| 15 | station health watch | Is this station's receive chain degrading before reception fails? |
+| 16 | owner reports | What does the station's owner need to know, in plain language? |
+| 17 | evidence dataset | Can someone who was not in the room check all of the above? |
+
+The answer had to meet three requirements, and these five meet them for stated reasons:
+
+- **Any data type, including nothing.** None of the five reads image content. The verdict reads decoder statistics and signal measurements that an LRPT image, a LoRa telemetry frame and an empty pass all produce. A pass that received nothing still has an outcome, heartbeat evidence and a noise floor, and those are what loss diagnosis reads.
+- **A measured number in the viva.** The verdict has a reliability diagram and a Brier score; diagnosis has a per-cause confusion matrix; the health watch has detection delay and false-alarm rate; the evidence dataset regenerates to an identical hash. **Owner reports are the exception** and are proven by working end to end in the demonstration. That is said plainly rather than dressed up with a metric nobody would defend.
+- **No hardware and no budget** (D-091).
+
+**In prose they are lowercase — the reception verdict, loss diagnosis — and never proper nouns.** `CLAUDE.md` permits two. The numbers belong to the submission module list, which is kept outside this repository, and appear only where that list is referenced.
+
+They extend planned work rather than sitting beside it: the verdict uses `EVALUATION.md` §7's calibration discipline, diagnosis builds on Stage 20's miss classification, the health watch and diagnosis read the profiles Stage 19 creates, and the evidence dataset uses Stage 15's snapshot manifest. Placement is D-099, storage D-101, and the build order Stages 25–30 of the roadmap — after Stage 24, so that no existing stage number moves.
+
+---
+
+## D-093 — The microcontroller station stays a LoRa satellite receiver
+
+**2026-09-13 · accepted** · *synopsis review*
+
+The earlier proposal would have turned Tier 2 into a field sensor product. It stays what `PROJECT.md` §5.3 and D-053 describe: an ESP32-class station with a LoRa transceiver, receiving LoRa-modulated satellite telemetry and speaking MSP.
+
+Its purpose is to prove the protocol boundary on hardware two orders of magnitude smaller than the Pi, and a sensor product would change what it proves. A node reporting field readings has no pass, assignment or listening block to exercise — it would show that MSP can carry arbitrary telemetry, which is not something MSP §1 claims or needs.
+
+It also serves the post-reception layer directly: a LoRa telemetry pass is the second data type the reception verdict and loss diagnosis must handle, so "any data type" is tested on real hardware rather than asserted.
+
+§5.3's fallback — a microcontroller without LoRa joining as a non-receiving station that reports its own environmental and power telemetry — is the station reporting on itself, not a sensing product, and is unchanged.
+
+---
+
+## D-094 — What was dropped from the earlier proposal
+
+**2026-09-13 · accepted** · *synopsis review*
+
+Recorded so that none of these is later found in a draft and taken for planned work. None is documented anywhere as planned:
+
+- mission engine;
+- research mission;
+- area-change detection;
+- personal node workspace;
+- farmer sensor node;
+- WhatsApp delivery;
+- any paid AI service;
+- a public orbital-data trust page.
+
+Each fails at least one of the three requirements in D-092: it needs hardware or a recurring cost that D-091 rules out, it has no measured proof reachable in the project's time, or it serves people outside the network before the network has anything verified to tell them. Three have specific reasons worth keeping. **WhatsApp** business messaging is charged per conversation. **A paid AI service** is a recurring cost, an external dependency on the report path, and an output no one can regenerate from a snapshot, a configuration and a seed (`CLAUDE.md` rule 8). **A trust page** rating public element sets would publish a judgement of orbital-data accuracy before SC-3 has measured it — a claim ahead of its evidence.
+
+Area-change detection returns only as a gated, validated candidate in D-098, after the reception verdict exists to gate it.
+
+---
+
+## D-095 — Owner reports are templates, sent by email or Telegram
+
+**2026-09-13 · accepted** · *synopsis review*
+
+After each pass, the station's owner receives a plain-language message: what was received and its verdict, or the diagnosed cause of the loss. Once a week, a station health summary. **Every message is rendered from a versioned template filled with stored results. There is no language model anywhere on this path.**
+
+- **Regenerable.** The same stored verdict, diagnosis and template version produce the same text, and the delivery record keeps its content hash. A generated paragraph is neither reproducible nor something a team member can walk a reviewer through line by line (`GIT-WORKFLOW.md` Rule 10).
+- **It cannot say more than the evidence.** A report is a statement the platform makes to a person. A template can only print what is stored, including "undetermined"; a generated summary can round an undetermined cause up into a confident one.
+- **No cost, no new dependency** (D-091, D-094).
+
+**Delivery is email, and a Telegram bot is acceptable because it is free.** Both are outbound and optional under the independence test: a failed delivery is recorded and retried, and never delays or changes scheduling, reception or any stored result. The report is a notification; the dashboard remains the place the record is read.
+
+*Rejected: dashboard only.* The owner has to go looking, which is the thing this capability exists to remove. *Rejected: SMS.* Charged per message.
+
+Where the owner's address comes from is not settled — it is personal data, and `PROJECT.md` §16 says none is held. See D-104.
+
+---
+
+## D-096 — The novelty claim is narrow, and is written narrowly
+
+**2026-09-13 · accepted** · *synopsis review*
+
+SatNOGS already rates observations — manually, as *with signal*, *without signal* or *unknown*, and through automatic rating rules. A claim that nobody assesses receptions would be false, and it is the kind of claim an examiner checks.
+
+**Meridian claims two things:**
+
+1. an automatic, **calibrated** confidence for every reception — a probability whose stated values are tested against observed frequencies with a reliability diagram and a Brier score; and
+2. an automatic **attribution of cause** for every loss, which says "undetermined" when the evidence does not support a cause, and is scored per cause against known causes.
+
+A label is not a probability, and a rule is not a calibrated one. That difference is the whole claim, and it is measurable, which is why it is the one made.
+
+**No document, page, report or slide says "nobody else does this"**, "the first" or anything equivalent. `PROJECT.md` §3.2 already takes this posture for scheduling, and the same care applies here.
+
+---
+
+## D-097 — SC-3's measurement method carries a risk, and is tested before it is relied on
+
+**2026-09-13 · accepted** · *the risk is recorded; the choice of method is open*
+
+**SC-3 is not changed.** It states what is claimed — that the stated 1σ timing uncertainty is honest — and changing a target before the method has been measured would be fitting the claim to a worry.
+
+**The size of the effect SC-3 measures.** Public element sets are roughly 1 km accurate at epoch and drift about 1–2 km per day. At 7.5 km/s along track, each day of age adds about 0.13–0.27 s of timing. D-060's prior deliberately takes the top of the published 1–3 km/day range, but on any reading the orbital contribution is sub-second for a fresh set and a few seconds after a week.
+
+**What `first_detection_at` depends on besides the orbit.** It is the instant the station first detected the signal, so it moves with the horizon and obstruction in the acquisition direction, with link margin, and with the detector's threshold. Near the horizon elevation changes slowly: for an overhead pass at 850 km, the first 10° of elevation spans 8.4° of orbital arc, which takes 2.4 minutes at 3.54°/min — about 14 s per degree. A detection elevation that varies by two degrees from pass to pass moves `first_detection_at` by roughly half a minute, which is tens of times the effect being measured. SC-3's coverage could then be met or missed for reasons that have nothing to do with the element set.
+
+**Decision.**
+
+1. The risk is written into `EVALUATION.md` §6.3 and `PROJECT.md` §14.
+2. **Before SC-3 relies on `first_detection_at`, the measurement is tested on archive data.** Take receptions whose element set was under a day old, where the orbital contribution is known to be sub-second, and measure the spread of first-detection offset. If that spread is larger than the effect SC-3 exists to detect, the method is not fit as it stands, and that is reported rather than worked around.
+3. **An alternative is noted, not adopted: timing from the Doppler curve.** Range rate passes through zero at closest approach, mid-pass and high in the sky, where horizon and acquisition link margin do not apply. A constant receiver frequency offset shifts the curve's literal zero crossing, but not the point of steepest slope, so that is the offset-robust form. Oscillator drift during a pass, `EVALUATION.md` §6.2's objection, still applies.
+
+*Open question.* Which method SC-3 is measured by, decided after step 2's result. A third option is recorded with its flaw: comparing against the predicted crossing of the station's learned horizon profile instead of geometric AOS removes the obstruction term but not link margin, and the profile is learned from the same detections, so it is circular unless learned on a disjoint period.
+
+---
+
+## D-098 — Phase 2 is a list of candidates, not a commitment
+
+**2026-09-13 · accepted** · *synopsis review*
+
+`PROJECT.md` §21, "Phase 2 candidates — not committed", records two directions: HRPT reception from the Meteor-M satellites already in the catalogue, and area alerts for people who do not run a station. **Nothing in it is planned work.** It has no roadmap stage, no success criterion and no line in the budget.
+
+**Phase 2 starts only when both hold:** the Phase 1 post-reception stages (roadmap Stages 25–30) have passed their completion gates, and the tracking tier is approved. The first condition is not ceremony: an area alert is only safe if the reception verdict can stop a bad pass from raising one, so the gate has to exist and be measured first. The second is physical — the HRPT dish must track.
+
+**Every alert type needs an external validation source before it is built** — NASA FIRMS detections for fire, MODIS or Sentinel-2 vegetation indices for greenness change. They are used offline to score alerts and never sit on the path that raises one, which is the independence test applied in advance to a product that does not exist.
+
+**A naming clash, stated rather than left to be found.** "Phase 1" and "Phase 2" here mean this project's committed scope and what may follow it. They are not `PROJECT.md` §12's Phase 1 (Foundations, weeks 1–7) and Phase 2 (Intelligence, weeks 8–14). The terms came from the synopsis response and §21 says so in its first paragraph; a rename is listed under Open (D-105).
+
+---
+
+## D-099 — Where the five capabilities live
+
+**2026-09-13 · accepted** · *`docs/ARCHITECTURE.md`*
+
+Placement follows `ARCHITECTURE.md`'s rules: boundaries are firm, only `platform/reliability` decides what counts as a miss, `platform/prediction` knows nothing about MSP, and the scheduler does not read the observation store.
+
+| Capability | Owner | Why there |
+|---|---|---|
+| 13 reception verdict | `platform/prediction` | It is a calibrated probability model, and prediction already owns calibration, temporal evaluation and model versioning (Stage 17). It reads stored observation fields through `platform/observations`' interface and never an MSP body, so prediction still knows nothing about MSP. |
+| 14 loss diagnosis | `platform/reliability` | A cause cannot be attributed without first deciding whether the station was listening — "station not listening" *is* that decision. Rule 3 puts it in one place; a diagnoser anywhere else would restate it. |
+| 15 station health watch | `platform/reliability` | It detects degradation before loss and feeds the same alerting and loss accounting as Stage 20. It reads signal measurements from observations and elevation from `platform/orbit`, each through its interface. |
+| 16 owner reports | **new** `platform/notifications` | It composes outputs from three modules and sends them through external services. Inside any one of those modules it would make that module depend on the other two *and* gain an outbound network dependency. Kept separate, the external dependency lives in one place, like `ingest`, and its failure degrades nothing else. |
+| 17 evidence dataset | **new** `platform/datasets` | It shares Stage 15's snapshot manifest and content hashing, and reads stored rows through `store` — it never recomputes a verdict or a diagnosis, which is what keeps its hash stable. Placed in `platform/observations`, the system of record would depend on prediction and reliability, which both read it: a cycle. |
+
+**Not the registry, for the health watch.** The registry's health is liveness and the reported `health` object, both derived from heartbeats alone. D-013 already found three meanings heading for the word "health"; a receive-chain trend computed from observations and geometry would be a fourth.
+
+**The verdict is not the yield prediction.** Yield is estimated before a pass — `P(decode | station, pass)`, for the scheduler. The verdict is estimated after it — `P(usable | what was received)`. A pass's own verdict must never be a feature of the yield prediction for that pass; past verdicts may inform station history under a temporal split.
+
+**The verdict informs; reliability decides.** Whether a decoded reception with a low verdict counts as captured for SC-4 is reliability's rule, set in Stage 27, not the verdict's.
+
+**Runtime evidence is Meridian's own.** Loss diagnosis reads the station's heartbeats, the network's own contemporaneous receptions and the catalogue's `satellite_transmitters.active`. Archive observations cross-check silent satellites in evaluation, as `EVALUATION.md` §5 already does, and not at runtime — `CLAUDE.md` says external data is training input only. Whether archive rows already ingested locally may count as runtime evidence is open (D-105). *The consequence, stated:* with one physical station, "satellite silent" is attributable for a measured reception only when the catalogue marks the transmitter inactive, and is otherwise undetermined. **Simulated receptions are never evidence for a measured station's diagnosis.**
+
+**Two new modules mean two new commit scopes**, `notifications` and `datasets`, in `GIT-WORKFLOW.md` Rule 3 and the CI `conventions` pattern. They are added in the change that creates each module, not here: `CLAUDE.md` asks that no directory exist before its stage, and a scope with no module behind it sends the same signal.
+
+*Rejected: one `platform/post_reception` module holding all five.* It groups code by when it runs rather than by what it decides, and would put a second miss decision outside reliability and a second calibration pipeline outside prediction.
+
+*Rejected: the evidence dataset in `analysis/`.* That directory holds the report's evaluation scripts. The dataset is published for outside researchers, so it is produced by the platform's own command with the same manifest Stage 15 defines.
+
+---
+
+## D-100 — Proposed: optional reception evidence fields for MSP 0.3
+
+**2026-09-13 · open** · *a proposal; `MSP-SPEC.md` is not edited by this entry*
+
+**First, whether §4.4 as of 0.2 is already enough.**
+
+| The capabilities need | In MSP 0.2 |
+|---|---|
+| outcome, detection, first detection, peak SNR, Doppler | yes, typed |
+| listening evidence and clock offset | yes, from the heartbeat |
+| frames decoded | only as `products[].frames` — untyped, and D-072 deliberately validates no per-product schema |
+| noise floor | no |
+| SNR across the pass | no — only its peak |
+
+**With 0.2 alone, all five still work, and two are weaker.** The verdict runs without a frames ratio. The health watch compares `peak_snr_db` against the pass's maximum elevation — one point per pass, which is coarse. Loss diagnosis cannot attribute interference at all and returns "undetermined" for it. A model feature cannot rest on `products[].frames`, a field no station is obliged to send in any particular shape.
+
+**Proposal — three optional, additive parts of the observation body:**
+
+```json
+"signal": {
+  "detected": true,
+  "peak_snr_db": 11.4,
+  "noise_floor_dbfs": -52.3,
+  "receiver_gain_db": 32.8,
+  "snr_samples": [ { "t": "2026-08-14T09:41:53Z", "snr_db": 3.1 } ]
+},
+"decode": {
+  "decoder": "satdump",
+  "decoder_version": "1.2.2",
+  "frames_decoded": 412,
+  "frames_failed": 37
+}
+```
+
+- **`noise_floor_dbfs` with `receiver_gain_db`.** Relative to full scale, at a stated gain, rather than dBm: RF calibration is outside the software roadmap, and a relative figure at a known gain is what a station can report honestly. Interference is judged against the same station's own history, where a relative figure is sufficient — and only at the same gain, which is why the gain travels with it.
+- **`snr_samples`, capped at 512** like `doppler_samples` (D-032). The health watch maps each instant to an elevation through the orbit service, which turns one point per pass into a curve.
+- **`decode` as its own flat block.** Decoder name and version, because a decoder upgrade shifts every statistic and calibration has to be segmented by it; frames decoded and failed as plain integers. **Frames *expected* is not sent** — the platform computes it from the pass and the transmitter's nominal frame interval (D-101), so every station's ratio has one definition.
+
+**Version impact.** Every field is optional and additive, so under §7 this is a minor bump to **0.3**, the rule's second exercise after D-082. Stations built against 0.1 or 0.2 need no change. A microcontroller omits the arrays and sends, at most, three flat numbers. Two full 512-sample arrays are about 50 KiB, inside D-028's 256 KiB observation cap.
+
+**Process.** `GIT-WORKFLOW.md` Rule 9: a `spec(msp):` change with its conformance tests merges first, and Stage 25 implements against the merged text. The status is `open` because this changes a published protocol, and that is for the team to review before the specification pull request is written.
+
+*Rejected: promoting `products[].frames`.* One decode can produce several products — an image and a frames file — so per-product counts double-count. Decoder statistics describe the decode, not an artefact of it.
+
+*Rejected: the noise floor inside the heartbeat's `health` object.* It is opaque, capped at 4 KiB, and describes the station at an instant rather than a pass.
+
+---
+
+## D-101 — What the post-reception layer stores
+
+**2026-09-13 · accepted** · *`docs/DATA-MODEL.md`; describes, no migration*
+
+Six planned tables — `reception_verdicts`, `loss_diagnoses`, `signal_baselines`, `receive_chain_warnings`, `report_deliveries`, `dataset_exports` — are described in `DATA-MODEL.md`. The rules they share are settled here, because each is the kind of rule a migration makes permanent.
+
+**Append-only, and bound to an observation revision.** A verdict is for `(assignment_id, revision)`. A new revision gets a new verdict and the old one stays, as D-015 keeps the old observation. Re-running with a new model version appends too: the evidence dataset has to be able to say which version concluded what.
+
+**Every row names the method that produced it**, as a versioned string, following D-060's `method`. **`simulated` is copied from the station's registry record**, as for every table that can hold simulated data.
+
+**Loss diagnosis covers** every failed or partial reception — an observation whose outcome is not `decoded`, or whose verdict falls below the partial threshold — and every held assignment whose window passed with no observation. **Not an `expired` assignment**: that is a decline, which D-008 keeps distinct from any reception. So a diagnosis is keyed on the assignment, with the observation revision nullable. The partial threshold is configuration, recorded with every run, and its value is chosen at Stage 26 from the calibrated verdict rather than in advance.
+
+**The deferred tables are reused, not duplicated.** `noise_measurements` gains observation-sourced rows from each reception's noise floor; `interference_profiles` is the baseline a "raised" noise floor is judged against; `horizon_profiles` is the obstruction evidence; `products` is referenced by hash from the evidence dataset.
+
+**"Health" stays out of every new name.** D-013 separated `state`, `health` and liveness; the health watch's tables are `signal_baselines` and `receive_chain_warnings`.
+
+**Two gaps found in the existing model.**
+
+- `noise_measurements.noise_floor_dbm` presumes absolute calibration the roadmap excludes. If D-100 is accepted, the stored value is dBFS with its gain and is named for it; settled when Stage 19 writes that migration.
+- Frames expected needs the transmitter's **nominal frame interval**, which `satellite_transmitters` does not carry. It is added as a nullable attribute; where it is unknown the verdict omits the ratio rather than guessing one.
+
+**The evidence dataset writes measured and simulated receptions to separate files**, with the flag on every row as well, and **exports measured receptions only unless simulated ones are asked for by name.** D-078's hazard does not end at the platform's edge: a researcher training on the package should not be able to mix the two by accident.
+
+**Simulator ground truth never enters these tables** (D-102).
+
+---
+
+## D-102 — Simulated faults prove diagnosis and the health watch; D-078 still binds the verdict
+
+**2026-09-13 · accepted** · *clarifies D-078*
+
+D-078 excludes simulated observations from every training and evaluation set, because the simulator draws outcomes from elevation and a model would rediscover the generator. Loss diagnosis and the health watch are proven on simulator faults — on the face of it, exactly what D-078 forbids.
+
+**The distinction is what the number claims.** D-078 guards against a result that looks like a fact about the world and is a fact about the simulator. A confusion matrix over injected faults claims something narrower, and true: given evidence of the shape a fault produces, the diagnoser names the fault. That tests the attribution logic, and it is the only source of ground truth for causes nobody labels in real data.
+
+- **SC-8 and SC-9 are simulated results.** Labelled at every layer, reported separately from any real labelled cases, and never pooled with them.
+- **They claim correct attribution of simulated faults, not real-world accuracy**, and the report says so beside the number. Real cases the team labels are reported as their own count, however small.
+- **The reception verdict gets no such exception.** It is a calibrated probability, D-078's hazard applies to it unchanged, and it is trained and evaluated on measured receptions only.
+- **Ground truth never travels through MSP or into the platform's database.** The simulator writes the injected cause into its own run record beside the seed, and the evaluation joins it to diagnoses afterwards. If the label travelled with the observation, a diagnoser able to read it would score perfectly and prove nothing.
+
+*The circularity, stated.* The same team writes the simulator's fault effects and the diagnoser, so the two could agree by construction. Two mitigations: the fault effects are specified in Stage 25 before the diagnoser exists in Stage 27, and they are reviewed by a team member other than the diagnoser's author. Stage 21's existing "degraded decoder" fault is a cause diagnosis has no category for, so it serves as a negative control — the right answer to it is "undetermined".
+
+---
+
+## D-103 — What "usable" means for the reception verdict
+
+**2026-09-13 · open**
+
+A calibrated probability needs a label, and the label must not be built from the verdict's own inputs. If "usable" were defined as, say, frames decoded above some fraction of frames expected, the verdict would be predicting a threshold on a number it reads, and a perfect Brier score would prove arithmetic.
+
+Candidates, none decided:
+
+- **A human rating of each product, made blind to the verdict.** Independent of every input; slow, and at six to fifteen passes a day from one station it bounds the sample the team can rate.
+- **Agreement with another reception of the same pass**, by another station or in an archive. Independent, but sparse while the network has one physical station.
+- **A product-level check that uses no verdict input**, such as line continuity in a decoded image. Cheap, but it may correlate with the frames ratio closely enough to reintroduce the circularity.
+- **SatNOGS vetting ratings on archive observations, as additional training labels.** Permitted as external training input; but *with signal* is not *usable*, and they rate a different network's receptions.
+
+To be settled before Stage 26 begins, together with SC-7's target. **SC-7 cannot be measured until it is.**
+
+---
+
+## D-104 — An owner's contact address is personal data, and `PROJECT.md` §16 says none is held
+
+**2026-09-13 · open**
+
+§16: *"No personal data is collected, stored or processed."* Owner reports (D-095) need an email address or a Telegram chat identifier. `stations.operator` is a display name taken from MSP §4.1, not a contact.
+
+- **(a)** Collect a contact out of band when an operator is issued an invite, with consent, never published, deleted on request — and amend §16 to say so.
+- **(b)** Send reports only to stations the team operates, where the address is the team's own, and leave §16 as it stands. This proves delivery in the demonstration without holding anyone else's data.
+- **(c)** No contact at all: an owner reads reports on an authenticated page. Holds nothing, and puts back the need to go looking.
+
+**In no option is the contact an MSP field.** A microcontroller has no use for it, and a contact address on the wire goes wherever a station's request logs go.
+
+Until the team decides, Stage 29 is built to option (b), which is the only one consistent with §16 as written.
+
+---
+
+## D-105 — Four smaller questions this work leaves open
+
+**2026-09-13 · open**
+
+1. **Archive rows as runtime diagnosis evidence.** D-099 limits runtime evidence to Meridian's own data, because `CLAUDE.md` calls external data training input only. Archive observations already ingested locally are not a runtime dependency on an external service, and would make "satellite silent" attributable for a one-station network. Allowing it widens a hard rule's wording, so it is the team's call.
+2. **D-053 against `PROJECT.md` §17.** D-053 assumes the ₹43,500 build with tracking funded; §17 requests ₹27,600 with tracking optional, and D-066 relies on the fixed antenna. D-091 follows §17 for this work. The record should say once which station is being built.
+3. **"Phase 1" and "Phase 2" mean two different things** — §12's build phases, and the committed scope versus D-098's candidates. A rename of the second pair, such as "this project" and "follow-on candidates", would remove the clash.
+4. **Where Stages 25–30 fall in §12's weeks.** They need measured receptions, which exist only from Phase 4, and they follow Stage 24 in the roadmap only so that no stage number moves. Their calendar placement is not agreed.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -1934,6 +2248,16 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | **O-4** | Cap `doppler_samples` by count, or transmit a compressed curve fit? | D-032 — capped at 512 by count |
 
 **Nothing is now unrecorded.** `GIT-WORKFLOW.md` Rule 10's question — whether AI-assisted commits are marked — was carried as outstanding through every previous pass and is settled by **D-043**: a `Co-Authored-By` trailer from that entry forward, with existing history left alone. That was the last Stage 0 item.
+
+**Opened 2026-09-13 by the post-reception layer**, each waiting on the team rather than on evidence the documents already hold:
+
+| | Question | Blocks |
+|---|---|---|
+| **D-097** | Which method SC-3 is measured by, after `first_detection_at` is tested on archive data | SC-3's analysis in Stage 22 |
+| **D-100** | Whether MSP 0.3 adds optional noise floor, SNR samples and decoder statistics | Stage 25 |
+| **D-103** | What label "usable" is, independent of the verdict's inputs | Stage 26 and SC-7 |
+| **D-104** | Whether an owner's contact is held, and how §16 of `PROJECT.md` changes | Stage 29 beyond team-operated stations |
+| **D-105** | Archive rows as runtime evidence; D-053 against §17; phase naming; calendar placement | — |
 
 ---
 
