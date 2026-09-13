@@ -138,6 +138,8 @@ jobs:
         run: npm run lint
       - name: tsc
         run: npm run typecheck
+      - name: vitest
+        run: npm test
       - name: vite build
         run: npm run build
 
