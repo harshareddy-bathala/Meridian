@@ -20,12 +20,14 @@ REAL_PEPPER = "0f9a" * 16
 REAL_INVITE = "7c31" * 16
 REAL_PASSWORD = "e41b" * 16
 REAL_GRAFANA_PASSWORD = "b28d" * 16
+REAL_METRICS_TOKEN = "5ae6" * 16
 
 BASE_ENV = {
     "DATABASE_URL": "postgresql://meridian:change-me@db:5432/meridian",
     "TOKEN_HASH_PEPPER": "change-me",
     "REGISTRATION_INVITE_TOKEN": "change-me",
     "GRAFANA_ADMIN_PASSWORD": "change-me",
+    "METRICS_TOKEN": "change-me",
 }
 
 MANAGED = (
@@ -41,6 +43,7 @@ MANAGED = (
     "API_PORT",
     "HEARTBEAT_INTERVAL_S",
     "GRAFANA_ADMIN_PASSWORD",
+    "METRICS_TOKEN",
 )
 
 
@@ -64,6 +67,7 @@ def _secure(**overrides: str) -> dict[str, str]:
         "TOKEN_HASH_PEPPER": REAL_PEPPER,
         "REGISTRATION_INVITE_TOKEN": REAL_INVITE,
         "GRAFANA_ADMIN_PASSWORD": REAL_GRAFANA_PASSWORD,
+        "METRICS_TOKEN": REAL_METRICS_TOKEN,
         **overrides,
     }
 
@@ -90,6 +94,43 @@ def test_placeholders_are_refused_on_a_public_address(
     assert "REGISTRATION_INVITE_TOKEN" in message
     assert "DATABASE_URL password" in message
     assert "GRAFANA_ADMIN_PASSWORD" in message
+    assert "METRICS_TOKEN" in message
+
+
+def test_a_placeholder_metrics_token_alone_refuses_a_public_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every other secret real, and the platform still must not start.
+
+    `/metrics` publishes process internals and is served from the same public
+    hostname as everything else (D-087). `change-me` is the first value anyone
+    probing would try, so a deployment carrying it is not meaningfully closed —
+    which makes this the same position D-006 refuses, one step removed.
+    """
+    with pytest.raises(InsecureConfigurationError) as excinfo:
+        _load(
+            monkeypatch,
+            **_secure(METRICS_TOKEN="change-me"),
+            PUBLIC_BASE_URL="https://meridian.example.org",
+        )
+
+    message = str(excinfo.value)
+    assert "METRICS_TOKEN" in message
+    assert "TOKEN_HASH_PEPPER" not in message
+
+
+def test_a_placeholder_metrics_token_is_fine_on_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cp .env.example .env && docker compose up` must still work untouched.
+
+    A /metrics reachable only from the machine it runs on exposes nothing, and
+    the ten-minute bring-up depends on the shipped defaults being usable.
+    """
+    settings = _load(monkeypatch, PUBLIC_BASE_URL="http://localhost:8000")
+
+    assert settings.metrics_token == "change-me"
+    assert not settings.is_public
 
 
 def test_a_tunnel_hostname_alone_counts_as_public(

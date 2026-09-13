@@ -5,5 +5,14 @@ global:
 scrape_configs:
   - job_name: meridian
     metrics_path: /metrics
+    # /metrics answers 404 without a bearer token (D-087), and that 404 is
+    # byte-identical to the one an unrouted path returns — so a missing or
+    # mismatched token here does not look like an authentication failure. It
+    # looks like the endpoint is not there, and the target simply reads down.
+    # If this job is down, check that metrics_token matches METRICS_TOKEN in
+    # .env before looking anywhere else.
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/metrics_token
     static_configs:
       - targets: ["api:8000"]

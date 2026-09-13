@@ -78,6 +78,11 @@ services:
       # published on host :3001 and the refusal is the only thing standing
       # between a public deployment and an admin console on `admin/change-me`.
       GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      # The bearer token /metrics requires (D-087). Prometheus reads the same
+      # value from ./prometheus/metrics_token, and the two must agree — a scrape
+      # against a mismatched token gets the same 404 as a wrong URL, so the
+      # symptom is a target that is simply down.
+      METRICS_TOKEN: ${METRICS_TOKEN:-change-me}
       # Derived from the tunnel token, not set by hand. `--profile public` starts
       # the tunnel whenever CLOUDFLARE_TUNNEL_TOKEN is set, and it will do that
       # with TUNNEL_HOSTNAME and PUBLIC_BASE_URL both left at their development
@@ -114,6 +119,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Prometheus does not expand environment variables in its own config, so
+      # the bearer token reaches it as a file rather than as a variable. Copy
+      # metrics_token.example to metrics_token and put the same value in it as
+      # METRICS_TOKEN in .env — the file is gitignored, the example is not.
+      - ./prometheus/metrics_token:/etc/prometheus/metrics_token:ro
       - prometheus-data:/prometheus
     expose:
       - "9090"
