@@ -18,6 +18,7 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from meridian import __version__
+from meridian.api.dashboard import dashboard_directory, mount_dashboard
 from meridian.api.errors import install_error_handlers, no_such_endpoint_response
 from meridian.api.metrics_access import is_metrics_scrape_authorised
 from meridian.api.msp import router as msp_router
@@ -131,6 +132,11 @@ def create_app() -> FastAPI:
         ):
             return no_such_endpoint_response()
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    # Last, so reading the routes top to bottom gives the API before the page
+    # that consumes it. Order does not protect the API here — D-091 does, by
+    # adding no catch-all for anything to shadow.
+    mount_dashboard(app, dashboard_directory())
 
     return app
 

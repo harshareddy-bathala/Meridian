@@ -1924,6 +1924,24 @@ That argument is what makes one vocabulary acceptable across both surfaces. A st
 
 ---
 
+## D-091 — The dashboard is served at `/` and `/assets/` only, with no catch-all
+
+**2026-09-13 · accepted** · *`meridian/api/dashboard.py`, `deploy/Dockerfile`, Stage 11*
+
+D-081 puts the built dashboard at the same origin as the API. The usual way to do that is a static mount at `/` with a single-page-app fallback: any path no route claimed gets `index.html`, and the browser's router takes it from there. **That fallback contradicts D-090, and it does so in two places.**
+
+The obvious one: `/api/v1/statoins` would answer `200` with an HTML page instead of `not_found`, so a client author's typo stops being an error. The subtle one is Starlette's matching order. A route whose path matches but whose method does not is only a *partial* match, and the router keeps looking — so a mount at `/`, which fully matches every path, wins. `GET /msp/v0/register` would stop answering `405 method_not_allowed` and start answering whatever the static mount says. Mounting it *after* the routers, as D-081 anticipated, does not help, because order only decides between two full matches.
+
+**So the dashboard gets exactly two routes: `GET /` serves `index.html`, and `/assets/` serves Vite's hashed build output. Every other path is unrouted, and answers as D-090 says.** A missing asset raises Starlette's own 404, which the routing handler already turns into the envelope. When the dashboard adds views, they are addressed by URL fragment (`/#/stations/st_…`), which never reaches the server.
+
+The build lives in the image at the path `DASHBOARD_DIR` names. It is read when the application is constructed rather than through `Settings`, because routes have to exist before the lifespan that loads settings runs. When the variable is unset, or the directory holds no `index.html`, no dashboard route is added — a developer running `uvicorn` from a checkout without Node gets the API alone, not a startup failure.
+
+*Rejected: a fallback that excludes `/api/`, `/msp/`, `/healthz` and `/metrics` by prefix.* It fixes the typo case and not the 405 case unless it reimplements method matching, and it is a second list of the platform's surfaces that every new one has to be added to.
+
+*Rejected: HTML5 history routing with the fallback limited to paths without a dot.* Nicer URLs, and it still answers `200` for `/anything-at-all`, which is a page telling a caller that a URL exists when it does not.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
