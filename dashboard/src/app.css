@@ -1,20 +1,116 @@
+/* The site's grounds and ink (site/brand/README.md). The signal colours there
+   mean above horizon, below horizon and predicted, so liveness does not borrow
+   them: it has its own tokens, and always a text label beside the colour. */
 :root {
   color-scheme: light dark;
   font-family: system-ui, sans-serif;
+  --bg: #faf9f7;
+  --surface: #f2f0eb;
+  --rule: #c9c2b6;
+  --ink: #14161b;
+  --dim: #5a6069;
+  --online: #1f6f8b;
+  --stale: #8a5a00;
+  --offline: #6b6f76;
+  --simulated: #5b3fa0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #08090d;
+    --surface: #101319;
+    --rule: #333944;
+    --ink: #e8e6e1;
+    --dim: #a9a6a0;
+    --online: #6fb7d1;
+    --stale: #d9a441;
+    --offline: #9aa0a8;
+    --simulated: #b9a3ec;
+  }
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
 }
 
 main {
-  max-width: 60rem;
+  max-width: 72rem;
   margin: 0 auto;
   padding-inline: 1rem;
 }
 
-dl {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
+.dim {
+  color: var(--dim);
 }
 
-dd {
-  margin: 0;
+.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+caption {
+  text-align: start;
+  padding-block: 0.5rem;
+  color: var(--dim);
+}
+
+th,
+td {
+  text-align: start;
+  vertical-align: top;
+  padding: 0.5rem 0.75rem 0.5rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border: 1px solid currentcolor;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.badge-simulated {
+  color: var(--simulated);
+}
+
+.liveness::before {
+  content: "";
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  margin-inline-end: 0.4rem;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.liveness-online {
+  color: var(--online);
+}
+
+.liveness-stale {
+  color: var(--stale);
+}
+
+.liveness-offline,
+.liveness-never_seen {
+  color: var(--offline);
+}
+
+.liveness-never_seen::before {
+  background: transparent;
+  border: 1px solid currentcolor;
 }

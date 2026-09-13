@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { fetchPlatformHealth, type PlatformHealth } from "./health";
+import { StationList } from "./StationList";
+import { useStations } from "./useStations";
 
 type Load =
   | { kind: "loading" }
@@ -30,29 +32,48 @@ function usePlatformHealth(): Load {
 function PlatformStatus({ load }: { load: Load }) {
   switch (load.kind) {
     case "loading":
-      return <p>Contacting the platform…</p>;
+      return <p className="dim">Contacting the platform…</p>;
     case "failed":
       return <p role="alert">The platform could not be reached: {load.reason}</p>;
     case "loaded":
       return (
-        <dl>
-          <dt>Platform</dt>
-          <dd>{load.health.status}</dd>
-          <dt>Version</dt>
-          <dd>{load.health.version}</dd>
-          <dt>Database</dt>
-          <dd>{load.health.database}</dd>
-        </dl>
+        <p className="dim">
+          Platform {load.health.status} · version {load.health.version} · database{" "}
+          {load.health.database}
+        </p>
       );
   }
+}
+
+function Stations() {
+  const { stations, fetchedAt, error } = useStations();
+  return (
+    <section aria-labelledby="stations-heading">
+      <h2 id="stations-heading">Stations</h2>
+      {error !== null && (
+        <p role="alert">
+          The station directory could not be refreshed: {error}
+          {fetchedAt !== null && ` Showing the list as of ${fetchedAt.toLocaleTimeString()}.`}
+        </p>
+      )}
+      {stations === null || fetchedAt === null ? (
+        error === null && <p className="dim">Loading the station directory…</p>
+      ) : (
+        <StationList stations={stations} now={fetchedAt} />
+      )}
+    </section>
+  );
 }
 
 export function App() {
   const load = usePlatformHealth();
   return (
     <main>
-      <h1>Meridian</h1>
-      <PlatformStatus load={load} />
+      <header>
+        <h1>Meridian</h1>
+        <PlatformStatus load={load} />
+      </header>
+      <Stations />
     </main>
   );
 }
