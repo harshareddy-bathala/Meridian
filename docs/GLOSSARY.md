@@ -122,6 +122,24 @@ Where silent bugs live. These are not interchangeable, and converting between th
 
 ---
 
+## After reception
+
+What the platform concludes once a pass is over — modules 13 to 17 in the submission list. Plain descriptions, not proper nouns.
+
+**Reception verdict** — a calibrated probability, for every reception, that it is usable. Computed after the pass from decoder statistics, frames decoded against frames expected, signal strength, the outcome and listening evidence. Not the same as **yield**, which is predicted *before* a pass. A reception that received nothing still gets a verdict.
+
+**Partial reception** — a reception that decoded something, but whose verdict falls below a configured threshold. Treated as a loss for diagnosis.
+
+**Loss diagnosis** — for every failed or partial reception, the most likely cause: satellite silent, station not listening, obstruction, interference, or a timing or clock fault. Says **undetermined** when the evidence does not support a cause, which is a real answer and not a gap. A declined assignment is not a reception and is never diagnosed.
+
+**Station health watch** — a comparison of a station's signal strength at each elevation against its own history, warning that the receive chain — antenna, cable, LNA — is degrading before reception fails. Its output is a **receive-chain warning**. Not the station's liveness, and not the `health` object a heartbeat carries.
+
+**Owner report** — a plain-language message to a station's owner after each pass, saying what was received and its verdict or the diagnosed cause of loss, plus a weekly station summary. Rendered from versioned templates; no language model is involved.
+
+**Evidence dataset** — an exported package of receptions with their verdict, diagnosed cause and full provenance — station, element set, simulated flag, content hash. Regenerating it from the same snapshot, configuration and seed gives the identical hash.
+
+---
+
 ## Conventional short names in code
 
 Not domain terms, but recorded so the "no abbreviations outside this glossary" rule in `CLAUDE.local.md` §4 is honest in both directions. These are permitted as local variable names only, never as part of a public name.
