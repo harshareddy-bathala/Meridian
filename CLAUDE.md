@@ -119,7 +119,7 @@ meridian/
 ├── site/                 the static public website
 ├── deploy/               compose files, migrations, config, dashboards
 ├── firmware/             (planned) Arduino rotator controller
-├── dashboard/            (planned) web front end
+├── dashboard/            web front end, served by the platform
 ├── ingest/               (planned) external archive adapters
 └── analysis/             (planned) notebooks and evaluation scripts
 ```

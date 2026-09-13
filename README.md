@@ -52,6 +52,7 @@ Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](http
 | `ATTRIBUTION.md` | Log of ideas read from other projects |
 | `site/` | The static site at `meridian.org.in`. No build step — the directory is what gets served. |
 | `site/brand/` | Logo exports for marketing. Generated; see `site/brand/README.md`. |
+| `dashboard/` | The live dashboard: TypeScript, Vite and React, built into the platform image and served at the API's own origin (D-081, D-091). |
 
 ---
 
@@ -79,6 +80,14 @@ uv sync --dev
 uv run ruff check . && uv run ruff format --check . && uv lock --check
 uv run mypy platform/src client/src simulator/src
 uv run pytest -m "not integration and not e2e and not msp_conformance"
+```
+
+The dashboard needs Node 24. `npm run dev` proxies `/api` and `/healthz` to a platform on `:8000` (or `MERIDIAN_PLATFORM_URL`), so development is same-origin just as production is:
+
+```bash
+cd dashboard && npm ci
+npm run lint && npm run typecheck && npm run build
+npm run dev
 ```
 
 Tests are organised by what they need to run, one directory per marker:
