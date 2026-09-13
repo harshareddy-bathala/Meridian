@@ -186,6 +186,9 @@ jobs:
     # works unchanged on a fork PR. The multi-arch build and the GHCR push the Pi
     # pulls from arrive with the deployment stage.
     runs-on: ubuntu-latest
+    # A cold bring-up is asserted under ten minutes below, so thirty is generous.
+    # Without a cap a hung step runs to GitHub's six-hour default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -256,12 +259,29 @@ jobs:
           docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint "" \
             api python -c "import meridian, meridian.cli, meridian_sim.station"
 
-      - name: The sim profile reports instead of crash-looping
+      - name: The sim profile registers a station and stays up
+        # Written when the simulator was a shell that exited 2, so it waited for
+        # the container to exit. Since Stage 10 the fleet runs until stopped, and
+        # that wait never ended: every run since #10 sat here until GitHub killed
+        # the job at six hours. Success is now a simulated station in the
+        # registry and a simulator that is still running and never restarted.
+        timeout-minutes: 5
         run: |
           set -euo pipefail
-          docker compose -f deploy/docker-compose.yml --profile sim up simulator \
-            --exit-code-from simulator || test $? -eq 2
-          test "$(docker inspect meridian-simulator-1 --format '{{.RestartCount}}')" = "0"
+          compose="docker compose -f deploy/docker-compose.yml --profile sim"
+          $compose up -d simulator
+          registered=0
+          for _ in $(seq 1 60); do
+            registered=$($compose exec -T db sh -c \
+              'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select count(*) from stations where simulated"' \
+              || echo 0)
+            if [ "$registered" -ge 1 ]; then break; fi
+            sleep 2
+          done
+          echo "simulated stations registered: $registered"
+          test "$registered" -ge 1
+          test "$(docker inspect meridian-simulator-1 \
+            --format '{{.State.Running}} {{.RestartCount}}')" = "true 0"
 
       - name: Stack logs on failure
         if: failure()
