@@ -3,6 +3,8 @@
 PostgreSQL with TimescaleDB. Observations and heartbeats are hypertables.
 
 > **Phase 1 scope.** D-018 builds eight of the tables below plus `invite_tokens` (D-020) and `satellite_transmitters` (D-021). `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles` are deferred — see D-018 for why each one waits. The derived views wait with them; Phase 1 does not produce the data they read.
+>
+> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below and are **planned, not built**. Nothing here is a migration; the rules they share are D-104.
 
 ---
 
@@ -59,6 +61,8 @@ Catalogue identity, name, orbital regime, and observed activity status. The last
 `(satellite_id, centre_freq_hz, mode, polarisation, bandwidth_hz, active, source)`
 
 A satellite's known transmitters, as a child table rather than a column on `satellites`. The scheduler selects a transmitter by joining it against a station capability's frequency range — `freq_min_hz <= centre_freq_hz <= freq_max_hz` — and that predicate is not indexable inside a JSON blob. `active` carries the silent-satellite status. See D-021.
+
+**Planned: a nullable nominal frame interval per transmitter.** The reception verdict compares frames decoded against frames *expected*, and expected is the pass's duration over the transmitter's frame interval — computed by the platform, so every station's ratio has one definition. Where the interval is unknown the column is null and the verdict omits that ratio rather than guessing it (D-104).
 
 ### `passes`
 Computed pass windows — **not** observations. A pass exists whether or not anyone observed it, which is exactly what the completeness ratio in the evaluation methodology requires.
@@ -173,6 +177,10 @@ Measured noise floor per station, azimuth bin and time.
 
 `source` distinguishes a measurement taken during an observation from one taken by a dedicated survey sweep — the two have different duty cycles and the model should be able to weight them differently.
 
+**Observation-sourced rows are how loss diagnosis sees interference.** Each reception's noise floor lands here with `source` marking it as taken during that observation, and a floor raised against the station's `interference_profiles` cell is the evidence for the interference cause. That needs a noise floor in the observation body, which MSP 0.2 does not carry; D-103 proposes it.
+
+*A unit gap, recorded before the migration is written.* `noise_floor_dbm` presumes absolute calibration, and RF calibration is outside the software roadmap. A station can honestly report dBFS at a stated receiver gain, and interference is judged against the same station's own history, where a relative figure suffices. If D-103 is accepted, the stored value is dBFS with its gain and the column is named for what it holds; Stage 19 settles it (D-104).
+
 ### `interference_profiles`
 Derived per station: noise floor by azimuth bin **and hour of day**, with the sample count behind each cell.
 
@@ -181,6 +189,63 @@ Derived per station: noise floor by azimuth bin **and hour of day**, with the sa
 Versioned exactly as `horizon_profiles` is, and for the same reason: a prediction must be traceable to the profile that produced it. See `docs/DECISIONS.md` D-009.
 
 *Hour of day matters and a single aggregate would hide it — a rooftop in a city has a different noise floor at 8 a.m. than at 8 p.m., which is the whole reason this feature exists.*
+
+---
+
+## Post-reception tables *(planned)*
+
+Six tables for modules 13–17. None exists, and the column tuples are the intent, settled finally when each stage writes its migration. What they share is decided in D-104:
+
+- **Append-only, bound to what they describe.** A verdict belongs to one observation revision; a new revision gets a new verdict and the old one stays, exactly as D-015 keeps the old observation.
+- **Every row names the method that produced it** — a versioned string, as `method` on the orbit service's uncertainty (D-060). A new model version appends; it never rewrites an earlier conclusion, because the evidence dataset must be able to say which version concluded what.
+- **`simulated` is copied from the station's registry record**, never inferred, as for every table that can hold simulated data.
+- **Simulator ground truth is in none of them.** An injected fault's cause lives in the simulator's own run record and is joined only at evaluation (D-105).
+- **The word "health" appears in none of their names** — D-013 already separated `state`, `health` and liveness.
+
+### `reception_verdicts`
+`(assignment_id, revision, station_id, probability_usable, method, inputs_sha256, computed_at, simulated)`
+
+One row per observation revision per method. `probability_usable` is `0..1` and is a **calibrated probability**, not a score. `inputs_sha256` hashes the exact inputs the verdict read — outcome, `peak_snr_db`, decoder statistics, the frames ratio, listening evidence — so a verdict can be traced to what it saw and regenerated from a snapshot. Every reception gets one, including a pass that received nothing, whose verdict is near zero and which then goes to loss diagnosis.
+
+A plain table rather than a hypertable: its volume is the observation count, not the heartbeat count. It references `observations`' key, which TimescaleDB 2.29 permits (D-015's correction).
+
+### `loss_diagnoses`
+`(id, assignment_id, revision, cause, candidates_json, evidence_json, method, computed_at, simulated)`
+
+Written for every **failed or partial reception** — an observation whose outcome is not `decoded`, or whose verdict falls below the configured partial threshold — and for every held assignment whose window passed with **no observation at all**, which is why `revision` is nullable. An `expired` assignment is a decline and gets no row (D-008).
+
+`cause` is exactly one of:
+
+| Value | Meaning | Evidence it rests on |
+|---|---|---|
+| `satellite_silent` | The transmitter was not transmitting | catalogue `active` status; the network's other receptions of the same pass |
+| `station_not_listening` | Registry evidence does not confirm the station was listening — Stage 15's "station not confirmed listening" label, under one name | `heartbeats` listening blocks, via `Registry.was_listening()` |
+| `obstruction` | Signal lost in a direction the horizon profile marks obstructed | `horizon_profiles`, pass azimuth track |
+| `interference` | The noise floor was raised against this station's profile | observation-sourced `noise_measurements` against `interference_profiles` |
+| `timing_fault` | The station's clock or recording window did not match the pass | `clock_offset_s`, `clock_uncertainty_s`, recording start against assignment window |
+| `undetermined` | The evidence does not support any cause | — |
+
+`undetermined` is a value, never a null: "we looked and cannot say" and "we have not looked" must stay distinguishable. `candidates_json` keeps every cause considered with its support, and `evidence_json` records what each test found, so an owner report and the evidence dataset can both show *why*, not only *what*.
+
+### `signal_baselines`
+`(id, station_id, capability_id, elevation_bin_deg, snr_db_median, snr_db_p10, sample_count, trained_from, trained_to, method, computed_at, simulated)`
+
+A station's own signal strength by elevation, per receive chain — two antennas on one station degrade separately. Versioned exactly as `horizon_profiles` is, so a warning can be traced to the baseline it was raised against. Built from `peak_snr_db` against maximum elevation under MSP 0.2, and from per-sample SNR if D-103's `snr_samples` is accepted.
+
+### `receive_chain_warnings`
+`(id, station_id, capability_id, baseline_id, raised_at, cleared_at, shortfall_db, affected_bins_json, method, simulated)`
+
+A warning that a receive chain is degrading, raised before reception fails. `cleared_at` is written once, when the shortfall recovers. **Warnings are never deleted**: SC-9's detection delay and false-alarm rate are computed from exactly these rows, and a deleted false alarm is a false-alarm rate that improves itself.
+
+### `report_deliveries`
+`(id, station_id, kind, assignment_id, period_start, channel, template_version, content_sha256, queued_at, sent_at, failed_at, attempts, error, simulated)`
+
+`kind` is `pass` (with `assignment_id`) or `weekly` (with `period_start`); `channel` is `email` or `telegram`. The rendered text is not stored — `template_version` and the stored results it read regenerate it, and `content_sha256` proves the regeneration matches. **No recipient address is held in this table**; where one is held at all is D-107's open question. A simulated station's report is rendered and recorded like any other and delivered only to a test sink, never to a person.
+
+### `dataset_exports`
+`(export_id, snapshot_id, snapshot_sha256, config_sha256, seed, code_version, includes_simulated, row_counts_json, content_sha256, created_at)`
+
+One row per evidence-dataset package; the package itself is files, as `products` are. `content_sha256` is the hash that regenerating from the same `snapshot_sha256`, `config_sha256` and `seed` must reproduce (`CLAUDE.md` rule 8). Measured and simulated receptions are separate files inside the package, and `includes_simulated` is false unless simulated ones were requested by name. Products are referenced by their `sha256`, not bundled, so the hash covers the records whatever the image store holds.
 
 ---
 
@@ -228,6 +293,9 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `station_capabilities.band` | `vhf`, `uhf`, `l`, `s`, `other` |
 | `station_capabilities.polarisation` | `rhcp`, `lhcp`, `linear_v`, `linear_h`, `linear`, `none` |
 | `station_capabilities.modes` | free-text lowercase array in Phase 1 — decoder naming varies too much to freeze |
+| `loss_diagnoses.cause` *(planned)* | `satellite_silent`, `station_not_listening`, `obstruction`, `interference`, `timing_fault`, `undetermined` — D-104 |
+| `report_deliveries.kind` *(planned)* | `pass`, `weekly` — D-098 |
+| `report_deliveries.channel` *(planned)* | `email`, `telegram` — D-098 |
 
 ---
 
