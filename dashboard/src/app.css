@@ -114,3 +114,51 @@ td {
   background: transparent;
   border: 1px solid currentcolor;
 }
+
+/* The map (D-092). Paths take their colour from the same liveness classes as
+   the list, so the two can never disagree about what a colour means. */
+.station-map {
+  margin: 0 0 1.5rem;
+}
+
+.station-map-canvas {
+  height: min(60vh, 28rem);
+  border: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.graticule {
+  stroke: var(--rule);
+  fill: none;
+}
+
+.graticule-minor {
+  stroke-width: 0.5;
+}
+
+.graticule-major {
+  stroke-width: 1;
+}
+
+.graticule-primary {
+  stroke-width: 1.75;
+}
+
+.marker {
+  stroke: currentcolor;
+  stroke-width: 2;
+  fill: currentcolor;
+  fill-opacity: 0.6;
+}
+
+/* Simulated stations are hollow and dashed, so the difference survives
+   greyscale and colour blindness, and the tooltip says it in words. */
+.marker-simulated {
+  fill-opacity: 0.1;
+  stroke-dasharray: 4 3;
+}
+
+/* Hollow, as in the list: nothing has been heard from it. */
+.marker.liveness-never_seen {
+  fill-opacity: 0;
+}

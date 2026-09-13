@@ -1942,6 +1942,24 @@ The build lives in the image at the path `DASHBOARD_DIR` names. It is read when 
 
 ---
 
+## D-092 — The station map draws its own graticule; tiles are optional decoration from OpenStreetMap
+
+**2026-09-13 · accepted** · *`dashboard/src/StationMap.tsx`, Stage 11*
+
+D-081 rejected keyed map providers and required that "a tile failure degrades to a graticule with the markers still drawn". It did not name where tiles come from, and a tile server is an external service on the surface SC-6 is judged on — so that choice is recorded rather than made in a config file.
+
+**The map is built so that tiles are never load-bearing.** The graticule (every 10°, heavier every 30° and heaviest at the equator and prime meridian) and the station markers are Leaflet vector layers drawn from data the platform served. Tiles are a layer underneath them. If no tile ever loads — offline, blocked, rate-limited, or the provider gone — the page says so in one line and the map is still a correct map of where the stations are, at the precision each operator permitted.
+
+**Tiles come from the OpenStreetMap Foundation's standard tile server by default, with its attribution, and `VITE_MAP_TILE_URL` replaces or disables them at build time.** No key, no account, nothing to rotate. An empty value builds a dashboard that makes no third-party request at all, which is the build to use wherever the independence test is being demonstrated rather than asserted.
+
+The OSM tile usage policy permits light, attributed use and forbids heavy use. A dashboard polled by a handful of viewers is the first; if the public dashboard ever draws real traffic, the answer is a self-hosted tile set or a raster served from `/assets/`, and this entry is where to change it.
+
+*Rejected: no base map at all, graticule only.* Honest and fully independent, and a station at 12.97°N 77.59°E drawn on a blank grid tells a reader nothing until they look the coordinates up. The tiles are what make the map a map; the design only has to make sure they are not what makes it *work*.
+
+*Rejected: bundling a coastline dataset (Natural Earth, 110 m) as a vector layer.* Independent and recognisable, and roughly 100 kB of GeoJSON added to every page load to draw an outline tiles already provide. Worth revisiting if the tile policy ever becomes the constraint.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

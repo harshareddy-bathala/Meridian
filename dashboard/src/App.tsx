@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { fetchPlatformHealth, type PlatformHealth } from "./health";
 import { StationList } from "./StationList";
+import { StationMap } from "./StationMap";
 import { useStations } from "./useStations";
 
 type Load =
@@ -59,7 +60,10 @@ function Stations() {
       {stations === null || fetchedAt === null ? (
         error === null && <p className="dim">Loading the station directory…</p>
       ) : (
-        <StationList stations={stations} now={fetchedAt} />
+        <>
+          <StationMap stations={stations} />
+          <StationList stations={stations} now={fetchedAt} />
+        </>
       )}
     </section>
   );
