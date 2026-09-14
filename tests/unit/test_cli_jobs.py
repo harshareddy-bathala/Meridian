@@ -12,6 +12,8 @@ Reference: docs/DECISIONS.md D-109, D-110.
 from __future__ import annotations
 
 import argparse
+import subprocess
+import sys
 
 import pytest
 
@@ -34,6 +36,29 @@ def _no_real_work(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("a refused configuration must not build its tasks")
 
     monkeypatch.setattr(cli_jobs, "_rounds", refuse)
+
+
+def test_the_command_tree_does_not_load_the_jobs_metrics() -> None:
+    """API workers must never register the jobs process's series.
+
+    ``meridian serve`` spawns each worker by re-importing the command tree. When
+    ``cli_jobs`` imported ``meridian.jobs`` at the top, every worker registered
+    ``meridian_passes_computed`` and the API published it as 0 once per worker —
+    a zero from a process that never computes passes (D-086). A fresh
+    interpreter, because this test process may have imported them already.
+    """
+    probe = (
+        "import sys, meridian.cli; "
+        "print(sorted(m for m in sys.modules if m.startswith('meridian.jobs')))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == "[]"
 
 
 @pytest.mark.parametrize(

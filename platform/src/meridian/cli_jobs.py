@@ -10,6 +10,15 @@ wait and the process exits after the task in hand. Its metrics are served on
 task failed — which is what an operator uses to fill a horizon by hand and what
 the tests use to exercise the real wiring.
 
+**The jobs modules are imported inside the handler, not at the top.** ``meridian
+serve`` is reached through the same command tree, and uvicorn starts each API
+worker by spawning a fresh interpreter that re-imports it. A top-level import
+here put ``meridian.jobs.job_metrics`` in every API worker, whose multiprocess
+metrics directory then published ``meridian_passes_computed 0`` once per worker
+— a zero from a process that never computes passes, which D-086 refuses.
+``tests/unit/test_cli_jobs.py`` pins that importing the command tree loads none
+of them.
+
 Reference: docs/DECISIONS.md D-066, D-109, D-110.
 """
 
@@ -22,22 +31,19 @@ import signal
 import sys
 import threading
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import psycopg
 
 from meridian.cli_schedule import PHASE_1_TURNAROUND_S
 from meridian.cli_serve import LOG_LEVELS, logging_configuration
 from meridian.config import Settings, load_settings
-from meridian.jobs.metrics_listener import start_metrics_listener
-from meridian.jobs.rounds import (
-    DatabaseRoundWork,
-    RoundPlan,
-    run_round,
-    run_until_stopped,
-)
 from meridian.metrics.exposition import MULTIPROCESS_DIRECTORY_VARIABLE
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.store.pool import CONNECT_TIMEOUT_S
+
+if TYPE_CHECKING:
+    from meridian.jobs.rounds import DatabaseRoundWork
 
 __all__ = ["JOBS_MODEL_CONFIG", "add_jobs_parser", "run_jobs"]
 
@@ -104,6 +110,9 @@ def _refusal(settings: Settings) -> str | None:
 
 def _rounds(settings: Settings) -> DatabaseRoundWork:
     """The real tasks, connecting as every other ``meridian`` command does."""
+    # Inside the function: see the module docstring.
+    from meridian.jobs.rounds import DatabaseRoundWork  # noqa: PLC0415
+
     url = settings.psycopg_url
     return DatabaseRoundWork(
         lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
@@ -113,6 +122,14 @@ def _rounds(settings: Settings) -> DatabaseRoundWork:
 
 def run_jobs(args: argparse.Namespace) -> int:
     """Handle ``meridian jobs run``."""
+    # Inside the function: see the module docstring.
+    from meridian.jobs.metrics_listener import start_metrics_listener  # noqa: PLC0415
+    from meridian.jobs.rounds import (  # noqa: PLC0415
+        RoundPlan,
+        run_round,
+        run_until_stopped,
+    )
+
     settings = load_settings()
     refusal = _refusal(settings)
     if refusal is not None:
