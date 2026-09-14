@@ -67,6 +67,11 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
       API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
+      # Two by default, the shape D-051 expects on the Pi. More than one needs the
+      # multiprocess directory below, or every scrape reports whichever worker
+      # answered; `meridian serve` refuses to start without it (D-109).
+      API_WORKERS: ${API_WORKERS:-2}
+      PROMETHEUS_MULTIPROC_DIR: /run/meridian/metrics
       TOKEN_HASH_PEPPER: ${TOKEN_HASH_PEPPER:-change-me}
       REGISTRATION_INVITE_TOKEN: ${REGISTRATION_INVITE_TOKEN:-change-me}
       REGISTRATION_RECOVERY_WINDOW_S: ${REGISTRATION_RECOVERY_WINDOW_S:-3600}
@@ -93,6 +98,11 @@ services:
       MERIDIAN_PUBLIC: ${CLOUDFLARE_TUNNEL_TOKEN:+1}
     ports:
       - "${API_PORT:-8000}:8000"
+    # In memory, and emptied by `meridian serve` at start: counter files from a
+    # previous run must not be summed into this one. World-writable because a
+    # tmpfs mount is created root-owned and the platform does not run as root.
+    tmpfs:
+      - /run/meridian/metrics:mode=1777
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).status==200 else 1)\""]
       interval: 10s

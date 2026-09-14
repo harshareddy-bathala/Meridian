@@ -12,6 +12,8 @@ that was being read.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from meridian.config import InsecureConfigurationError, Settings, load_settings
@@ -44,6 +46,10 @@ MANAGED = (
     "HEARTBEAT_INTERVAL_S",
     "GRAFANA_ADMIN_PASSWORD",
     "METRICS_TOKEN",
+    "METRICS_TOKEN_FILE",
+    "TOKEN_HASH_PEPPER_FILE",
+    "REGISTRATION_INVITE_TOKEN_FILE",
+    "API_WORKERS",
 )
 
 
@@ -306,3 +312,59 @@ def test_the_default_heartbeat_interval_is_accepted(
     settings = _load(monkeypatch, PUBLIC_BASE_URL="http://localhost:8000")
 
     assert settings.heartbeat_interval_s == 30
+
+
+def test_a_secret_file_wins_over_the_variable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Mounting a file overrides a value left in ``.env`` (D-114).
+
+    The trailing newline ``openssl rand -hex 32 > file`` writes is not part of
+    the secret.
+    """
+    secret = tmp_path / "metrics_token"
+    secret.write_text(REAL_METRICS_TOKEN + "\n", encoding="utf-8")
+
+    settings = _load(
+        monkeypatch,
+        METRICS_TOKEN="a-value-left-in-env",
+        METRICS_TOKEN_FILE=str(secret),
+    )
+
+    assert settings.metrics_token == REAL_METRICS_TOKEN
+
+
+def test_a_placeholder_read_from_a_file_is_still_refused_publicly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The refusal applies to what was read, whichever way it arrived."""
+    pepper = tmp_path / "pepper"
+    pepper.write_text("change-me\n", encoding="utf-8")
+
+    with pytest.raises(InsecureConfigurationError, match="TOKEN_HASH_PEPPER"):
+        _load(
+            monkeypatch,
+            **_secure(
+                TOKEN_HASH_PEPPER_FILE=str(pepper),
+                PUBLIC_BASE_URL="https://meridian.example.org",
+            ),
+        )
+
+
+@pytest.mark.parametrize("contents", [None, "", "   \n"])
+def test_an_unreadable_or_empty_secret_file_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, contents: str | None
+) -> None:
+    """Falling back to the variable would start on a secret believed replaced."""
+    secret = tmp_path / "invite"
+    if contents is not None:
+        secret.write_text(contents, encoding="utf-8")
+
+    with pytest.raises(InsecureConfigurationError, match="REGISTRATION_INVITE_TOKEN"):
+        _load(monkeypatch, REGISTRATION_INVITE_TOKEN_FILE=str(secret))
+
+
+def test_the_worker_count_defaults_to_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One worker needs no multiprocess directory, so it is the safe default."""
+    assert _load(monkeypatch).api_workers == 1
+    assert _load(monkeypatch, API_WORKERS="3").api_workers == 3

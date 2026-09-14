@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 from meridian.registry.liveness import (
@@ -42,6 +43,8 @@ class Settings:
     database_url: str
     api_port: int
     api_log_level: str
+    api_workers: int
+    """How many processes ``meridian serve`` runs the API in (D-109)."""
 
     token_hash_pepper: str
     registration_invite_token: str
@@ -184,6 +187,39 @@ def _int_env(name: str, default: int) -> int:
         ) from exc
 
 
+_FILE_SUFFIX = "_FILE"
+
+
+def _secret_env(name: str, default: str) -> str:
+    """Read a secret from ``<name>_FILE`` when that is set, else from ``<name>``.
+
+    The file form keeps a secret out of the process environment, where
+    ``docker inspect`` and ``/proc/<pid>/environ`` show it to anyone on the host
+    (D-114). The file wins when both are set, so mounting one is enough to
+    override a value left behind in ``.env``.
+
+    Surrounding whitespace is removed, because ``openssl rand -hex 32 > file``
+    ends the file with a newline that is not part of the secret.
+
+    Raises:
+        InsecureConfigurationError: The named file cannot be read, or is empty.
+            Falling back to the variable would start the platform on a secret
+            the operator believes they replaced.
+    """
+    path = os.environ.get(name + _FILE_SUFFIX, "").strip()
+    if not path:
+        return os.environ.get(name, default)
+    try:
+        value = Path(path).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise InsecureConfigurationError(
+            f"{name}{_FILE_SUFFIX} names {path!r}, which cannot be read: {exc.strerror}"
+        ) from exc
+    if not value:
+        raise InsecureConfigurationError(f"{name}{_FILE_SUFFIX} names an empty file")
+    return value
+
+
 def _database_url() -> str:
     """``DATABASE_URL`` if set, else one assembled from the ``POSTGRES_*`` parts."""
     url = os.environ.get("DATABASE_URL", "").strip()
@@ -225,10 +261,9 @@ def load_settings() -> Settings:
         database_url=_database_url(),
         api_port=_int_env("API_PORT", 8000),
         api_log_level=os.environ.get("API_LOG_LEVEL", "info"),
-        token_hash_pepper=os.environ.get("TOKEN_HASH_PEPPER", PLACEHOLDER),
-        registration_invite_token=os.environ.get(
-            "REGISTRATION_INVITE_TOKEN", PLACEHOLDER
-        ),
+        api_workers=_int_env("API_WORKERS", 1),
+        token_hash_pepper=_secret_env("TOKEN_HASH_PEPPER", PLACEHOLDER),
+        registration_invite_token=_secret_env("REGISTRATION_INVITE_TOKEN", PLACEHOLDER),
         # D-023: how long after registering a station may still recover a lost
         # bearer token by re-presenting its invite and registration key. One hour
         # by default, AND only while no heartbeat has arrived — both conditions.
@@ -236,7 +271,7 @@ def load_settings() -> Settings:
         # this window does not govern (D-034).
         registration_recovery_window_s=_int_env("REGISTRATION_RECOVERY_WINDOW_S", 3600),
         heartbeat_interval_s=_int_env("HEARTBEAT_INTERVAL_S", 30),
-        metrics_token=os.environ.get("METRICS_TOKEN", PLACEHOLDER),
+        metrics_token=_secret_env("METRICS_TOKEN", PLACEHOLDER),
         public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"),
         tunnel_hostname=os.environ.get("TUNNEL_HOSTNAME", "").strip(),
         public_mode=_bool_env("MERIDIAN_PUBLIC", False),

@@ -79,4 +79,6 @@ USER meridian
 EXPOSE 8000
 
 # No transmit code paths anywhere, and no shell in the default command.
-CMD ["uvicorn", "meridian.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# `meridian serve` rather than uvicorn directly: it applies API_LOG_LEVEL and
+# API_WORKERS, and refuses several workers without a metrics directory (D-109).
+CMD ["meridian", "serve", "--host", "0.0.0.0", "--port", "8000"]

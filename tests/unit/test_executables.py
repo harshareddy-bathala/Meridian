@@ -63,22 +63,22 @@ def test_meridian_version_succeeds() -> None:
     assert __version__ in result.stdout
 
 
-@pytest.mark.parametrize("args", [["serve"]])
-def test_unimplemented_subcommands_report_instead_of_raising(args: list[str]) -> None:
-    """Exit 2 with a message naming the stage, never a traceback.
+def test_serve_refuses_several_workers_without_a_metrics_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exit 1 with the reason, never a traceback and never a started server.
 
-    A stub that raises is discovered by whoever needed the command, at the moment
-    they needed it. A stub that answers is discovered by reading its output.
-
-    ``serve`` is the last one. ``passes generate`` was here until Stage 7 built
-    it, and it is now covered by
-    :func:`test_passes_generate_rejects_a_local_time_horizon` and by
-    tests/integration/test_pass_generation.py.
+    ``serve`` was the last placeholder here until Stage 12 built it. What is
+    worth pinning about the real command without starting a server is its
+    refusal: two workers with no multiprocess directory would publish a
+    different count on every scrape (D-109).
     """
-    result = _run("-m", "meridian.cli", *args)
-    assert result.returncode == 2
-    assert "not implemented yet" in result.stderr
-    assert "Stage" in result.stderr
+    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
+
+    result = _run("-m", "meridian.cli", "serve", "--workers", "2")
+
+    assert result.returncode == 1
+    assert "PROMETHEUS_MULTIPROC_DIR" in result.stderr
     assert "Traceback" not in result.stderr
 
 
