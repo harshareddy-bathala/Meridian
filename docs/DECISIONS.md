@@ -2386,10 +2386,10 @@ It runs as a `jobs` service in the **default** profile, and `sim-scheduler` is r
 - observation outcome;
 - assignment state;
 - liveness;
-- job name;
+- scheduled task (`task`, never `job`: Prometheus sets `job` from the scrape configuration and would rename a metric's own `job` label to `exported_job`);
 - `simulated`.
 
-No station, satellite, assignment or token identifier is ever a label (Stage 3). An unmatched path is labelled `unmatched`, never with its raw path, so a scan cannot create series. Every series that could mix simulated and measured stations carries `simulated` (Hard rule 5).
+No station, satellite, assignment or token identifier is ever a label (Stage 3). A path no route matches is labelled `unrouted`, never with its raw path, so a scan cannot create series. Every series that could mix simulated and measured stations carries `simulated` (Hard rule 5).
 
 **Not published until Stage 20: confirmed misses, indeterminate outcomes and loss budget remaining.** The roadmap lists all three under Stage 12, and none of them can be computed yet. Only `platform/reliability` decides a miss, and it is still a docstring. A series held at zero would say "no misses" where the truth is "not measured", which D-086 already refuses for the public API. The loss-budget alert waits with them, and the rules file marks where it goes.
 
