@@ -2337,6 +2337,149 @@ Until the team decides, Stage 29 is built to option (b), which is the only one c
 
 ---
 
+## D-109 — Metrics are counted where they happen, and counted from the database at scrape time
+
+**2026-09-14 · accepted** · *`meridian/metrics/`, `meridian/api/app.py`, `deploy/prometheus/prometheus.yml`, Stage 12*
+
+Until now `/metrics` served only `prometheus_client`'s process collectors, and Stage 3's request and protocol metrics were never added. Stage 12 needs Meridian's own numbers, and they come from three different places. Each place gets the collection method that suits it.
+
+- **Events inside a request are counted in the API process.** This covers requests, MSP error codes, heartbeats, observations, registrations and their delays. When `PROMETHEUS_MULTIPROC_DIR` is set, `prometheus_client` runs in multiprocess mode, because D-051 expects more than one worker on the Pi and a per-process counter would then answer differently on every scrape. With the variable unset, as in tests and development, the default registry is used.
+- **State the database already holds is read at scrape time.** A custom collector computes stations by liveness, assignments by state, overdue assignments, database reachability, pool use and schema currency. It stores nothing, so no gauge can go stale, and liveness is still derived only by `registry/liveness.py` (D-054). When the database cannot be reached, the collector emits `meridian_database_reachable 0` and no counts, so a zero is never published to mean "unknown" (D-086).
+- **Scheduled jobs count themselves in their own process** (D-110), and serve those counts on a listener inside the compose network. Prometheus scrapes it as a second target. It requires the same bearer token as `/metrics` and answers an unauthorised scrape the same way. The token check moves from `meridian.api` to `meridian.metrics`, so both processes use one implementation. This is the separate process D-087 called premature while there was nothing for it to report.
+
+*Rejected: a Pushgateway.* Another container on the Pi, and a job that dies keeps reporting its last success until someone deletes the series, which is the opposite of what an alert on a stopped scheduler needs.
+
+*Rejected: a job-runs table read by the API.* It would be a migration and a retention question created only for monitoring, and it would put scheduler timings in the system of record.
+
+---
+
+## D-110 — Pass generation and scheduling run as a supervised process in the default profile
+
+**2026-09-14 · accepted** · *`meridian/jobs/`, `deploy/docker-compose.yml`, Stage 12*
+
+Passes and assignments are only produced when someone runs `meridian passes generate` and `meridian schedule`. The only thing that runs them on a timer is a shell loop in the `sim` profile, whose own comment says "Stage 12 owns scheduled jobs". A deployment without the simulator therefore schedules nothing. That fails the independence test: Meridian must schedule using its own station alone.
+
+**`meridian jobs run` is a long-running process.** Each round generates passes and then schedules with configuration A over a six-hour horizon starting now, and the rounds repeat every `SCHEDULE_INTERVAL_S` (default 300).
+- Both steps are idempotent over a horizon (D-063, D-066), so overlapping rounds write nothing twice.
+- A failed round is logged and counted; it does not stop the process.
+- SIGTERM ends the wait between rounds at once, and lets a running round finish its transaction.
+
+It runs as a `jobs` service in the **default** profile, and `sim-scheduler` is removed. Configuration A stays until Stage 18 supplies a constrained scheduler to switch to.
+
+*Rejected: cron, inside the container or on the host.* A host crontab is outside the repository and fails the clean-machine requirement. In-container cron needs root, and it hides a failing run in cron's own mail rather than in a metric.
+
+*Rejected: running the jobs inside the API process.* Several workers would each schedule, and a slow optimisation would compete with heartbeats for the same event loop.
+
+---
+
+## D-111 — The metric catalogue, and the three the roadmap lists that Stage 12 does not publish
+
+**2026-09-14 · accepted** · *`meridian/metrics/`, `deploy/prometheus/rules/`, Stage 12, Stage 20*
+
+**Names.** Every name starts with `meridian_` and carries its unit as a suffix, as the Prometheus convention requires and `CLAUDE.local.md` §4 already asks of Python names.
+
+**Labels.** Only these labels, each with a bounded set of values:
+- route template;
+- method;
+- status class (`2xx`…`5xx`);
+- MSP error code;
+- observation outcome;
+- assignment state;
+- liveness;
+- job name;
+- `simulated`.
+
+No station, satellite, assignment or token identifier is ever a label (Stage 3). An unmatched path is labelled `unmatched`, never with its raw path, so a scan cannot create series. Every series that could mix simulated and measured stations carries `simulated` (Hard rule 5).
+
+**Not published until Stage 20: confirmed misses, indeterminate outcomes and loss budget remaining.** The roadmap lists all three under Stage 12, and none of them can be computed yet. Only `platform/reliability` decides a miss, and it is still a docstring. A series held at zero would say "no misses" where the truth is "not measured", which D-086 already refuses for the public API. The loss-budget alert waits with them, and the rules file marks where it goes.
+
+**The "observation queue growing" alert watches what the platform can see.** A station's upload queue is on the station, and MSP 0.2 heartbeats do not report its depth. The platform can see an assignment that is still `held` or `in_progress` when its window ended more than `OVERDUE_AFTER_S` ago. `meridian_assignments_overdue` counts those.
+
+This counts reports that have not arrived; it does not count misses, and nothing is classified from it. A queue-depth field in the heartbeat would be a separate `spec(msp)` change under Rule 9.
+
+---
+
+## D-112 — Alerts are Prometheus rules with unit tests, routed by Alertmanager
+
+**2026-09-14 · accepted** · *`deploy/prometheus/rules/`, `deploy/alertmanager/`, `deploy/grafana/provisioning/`, Stage 12*
+
+**Rules.** The alert rules are files under `deploy/prometheus/rules/`. Each alert has a `promtool test rules` case that proves it fires and a case that proves it stays silent, and CI runs them.
+
+An alert that has never been seen to fire is a claim, and the demonstration in `PROJECT.md` §13 depends on one firing within ninety seconds.
+
+**Routing.** An Alertmanager container joins the `metrics` profile. The tracked configuration routes everything to a receiver that sends nothing. A deployment that wants email or a webhook supplies its own configuration from an untracked file, which a tracked example shows how to write. No address is committed or held by the platform (D-107).
+
+**Grafana** is provisioned from files: the Prometheus datasource, and one platform dashboard as JSON. Its admin password keeps the existing placeholder refusal.
+
+*Rejected: Grafana-managed alerting.* Rules would live in Grafana's database, or in provisioning YAML that no tool in this repository can evaluate against sample data, so "the alert works" could only be shown by breaking something live. It would also save only one small container.
+
+---
+
+## D-113 — The platform image is built for amd64 and arm64 and published to GHCR from `main`
+
+**2026-09-14 · accepted** · *`.github/workflows/`, `deploy/Dockerfile`, `deploy/docker-compose.yml`, Stage 12*
+
+The Dockerfile's header has promised this since Stage 1: the Pi pulls, it does not build. Compiling the dependency set on a Pi is how the ten-minute bring-up becomes forty.
+
+**Build and push.** A workflow on push to `main` builds `linux/amd64` and `linux/arm64` with buildx and pushes to `ghcr.io/harshareddy-bathala/meridian`.
+- The tags are `sha-<short>` and `main`.
+- It never runs on a pull request, so a fork needs no credentials and the existing `image` job stays the per-PR check.
+
+**Compose.** Every platform service gets `image: ${MERIDIAN_IMAGE:-ghcr.io/harshareddy-bathala/meridian:main}` beside its `build:`. `docker compose pull && docker compose up` is then the Pi's path, and `up --build` is still a laptop's.
+
+**Base images** are pinned by digest as well as tag, so the build that passed CI and the build on the Pi start from the same bytes.
+
+*Rejected: building on the Pi.* It fails the ten-minute requirement on the hardware it is stated for.
+
+*Rejected: Docker Hub.* A second account and a second secret, with GHCR already beside the repository.
+
+---
+
+## D-114 — Every container's logs are capped, and secrets can be read from files
+
+**2026-09-14 · accepted** · *`deploy/docker-compose.yml`, `meridian/config.py`, `meridian/cli_serve.py`, Stage 12*
+
+**Logs.** No service has a `logging:` block, so Docker's default `json-file` driver grows without limit on a 256 GB card that also holds the database. Every service now uses `json-file` with `max-size: 10m` and `max-file: 3`, from one YAML anchor.
+
+`API_LOG_LEVEL` has been loaded since Stage 1 and read by nothing. `meridian serve` applies it, with one plain-text line format across uvicorn's loggers and Meridian's. The format stays plain because `docker compose logs` is the operator's first tool.
+
+**Secrets.** `METRICS_TOKEN`, `TOKEN_HASH_PEPPER` and `REGISTRATION_INVITE_TOKEN` each also accept a `*_FILE` variant naming a file to read. The file wins when both are set, and the placeholder refusal applies to its contents.
+
+**Tunnel token.** The tunnel reads its token from the `TUNNEL_TOKEN` environment variable instead of `--token` on the command line, where `ps` and `docker inspect` show it to anyone on the host.
+
+Rotation, redaction and least-privilege database users remain Stage 23's.
+
+---
+
+## D-115 — Backup and restore are host tools, and restore refuses what it cannot restore faithfully
+
+**2026-09-14 · accepted** · *`deploy/tools/backup.py`, `deploy/tools/restore.py`, Stage 12, Stage 23*
+
+**Where they run.** `pg_dump` and `pg_restore` are not in the platform image, which carries no PostgreSQL client and should not grow one. Both run on the host, drive `docker compose exec -T db`, and use the stdlib only, like `verify_public_surface.py`.
+
+**Backup** streams `pg_dump --format=custom` to a file. Beside it, it writes a manifest with:
+- the file's sha256;
+- the TimescaleDB extension version;
+- the alembic revision;
+- the creation time.
+
+**Restore.**
+1. Refuse on a checksum mismatch.
+2. Refuse when the running TimescaleDB version differs from the manifest's. A TimescaleDB dump restored into another extension version is not supported upstream.
+3. Stop `api` and `jobs`, then recreate the database.
+4. Run `timescaledb_pre_restore()`, then `pg_restore`, then `timescaledb_post_restore()`.
+5. Run `migrate`, start `api` and `jobs` again, and wait for `/healthz`.
+
+CI performs the round trip: back up, drop the database, restore, and compare row counts.
+
+*Rejected: `meridian db backup`.* It would need the PostgreSQL client in the platform image, or a database connection that cannot run `pg_dump` at all.
+
+*Rejected: copying the volume.* It only works with the database stopped, and it is tied to the host's filesystem and architecture.
+
+A backup schedule, retention, and a restore drill on the real deployment are Stage 23's.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
