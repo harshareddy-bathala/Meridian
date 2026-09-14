@@ -29,6 +29,7 @@ from meridian_client.assignment_message import (
     Assignment,
     MalformedAssignmentError,
     parse_assignment,
+    render_assignment,
 )
 
 __all__ = [
@@ -174,7 +175,8 @@ def _write(path: Path, held: Sequence[Assignment]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(path.name + ".partial")
     partial.write_text(
-        json.dumps([_to_stored(one) for one in held], indent=2) + "\n", encoding="utf-8"
+        json.dumps([render_assignment(one) for one in held], indent=2) + "\n",
+        encoding="utf-8",
     )
     os.replace(partial, path)  # noqa: PTH105 — Path.replace is the same call
 
@@ -197,29 +199,3 @@ def _read(path: Path) -> tuple[Assignment, ...]:
         raise MalformedAssignmentError(
             f"{path} is not a readable record: {exc}"
         ) from exc
-
-
-def _to_stored(one: Assignment) -> dict[str, object]:
-    """One assignment in the same shape MSP §4.3 delivered it.
-
-    The wire format is reused as the file format so that reading a record and
-    reading a response are the same code path — a second representation would be
-    a second parser, and the two would drift.
-    """
-    return {
-        "assignment_id": one.assignment_id,
-        "satellite_id": one.satellite_id,
-        "start_at": one.start_at.isoformat(),
-        "end_at": one.end_at.isoformat(),
-        "centre_freq_hz": one.centre_freq_hz,
-        "mode": one.mode,
-        "expected_max_elevation_deg": one.expected_max_elevation_deg,
-        "predicted_yield": one.predicted_yield,
-        "element_set": {
-            "epoch": one.element_set.epoch.isoformat(),
-            "line1": one.element_set.line1,
-            "line2": one.element_set.line2,
-        },
-        "timing_uncertainty_s": one.timing_uncertainty_s,
-        "priority": one.priority,
-    }
