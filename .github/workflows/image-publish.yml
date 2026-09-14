@@ -1,0 +1,120 @@
+name: Image publish
+
+# Builds the platform image for amd64 and arm64 and publishes it to GHCR, so a
+# Raspberry Pi runs `docker compose pull` instead of compiling on the device
+# (D-113). CI's `image` job stays the per-pull-request check; this only ever
+# publishes what already passed it.
+#
+# Order matters, and each step exists to protect the one after it:
+#
+#   1. CI succeeded on a push to main. Triggered by the push itself, this would
+#      run beside CI and could publish a commit whose tests, cold bring-up or
+#      restore round trip then failed.
+#   2. Build both architectures and push them under sha-<commit> only.
+#   3. Pull that tag and run its entry points on each architecture.
+#   4. Only then point `main` at it. The tag a Pi pulls never names an image
+#      that failed to import on the Pi's own architecture.
+#
+# A new GHCR package is private. docs/OPERATIONS.md has the one-time step of
+# making it public, or logging the Pi in.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+# One publish at a time, oldest first, so `main` never moves back to an older
+# commit whose run happened to finish last.
+concurrency:
+  group: image-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # `branches: [main]` above also matches a pull request whose head branch is
+    # named main, so the event is checked too.
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    # The Python stages run under arm64 emulation. The dependency set installs
+    # from wheels, so this is minutes rather than hours, but a hung build must
+    # not hold the runner to GitHub's six-hour default.
+    timeout-minutes: 60
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commit CI tested, not whatever main points at by now.
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Name the image
+        # GHCR repository names must be lowercase; an owner name need not be.
+        run: |
+          set -euo pipefail
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/${owner}/meridian" >> "$GITHUB_ENV"
+          echo "SHORT_SHA=${SHA::7}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          # The immutable tag only. `main` is added after the smoke test below.
+          tags: |
+            type=raw,value=sha-${{ env.SHORT_SHA }}
+          labels: |
+            org.opencontainers.image.revision=${{ env.SHA }}
+
+      - name: Build and push sha-${{ env.SHORT_SHA }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: The pushed image runs on both architectures
+        # From the registry, per platform: this is what a Pi will pull. The
+        # imports are the same ones CI's `image` job checks natively.
+        run: |
+          set -euo pipefail
+          for platform in linux/amd64 linux/arm64; do
+            echo "--- ${platform}"
+            docker run --rm --pull always --platform "$platform" "$IMAGE:sha-$SHORT_SHA" \
+              meridian --version
+            docker run --rm --platform "$platform" "$IMAGE:sha-$SHORT_SHA" \
+              python -c "import meridian.api.app, meridian.cli, meridian_sim.station"
+          done
+
+      - name: Point main at sha-${{ env.SHORT_SHA }}
+        # A new tag on the existing index, not a rebuild: `main` and
+        # `sha-<commit>` are then the same bytes, down to the digest.
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "$IMAGE:main" "$IMAGE:sha-$SHORT_SHA"
+          docker buildx imagetools inspect "$IMAGE:main"

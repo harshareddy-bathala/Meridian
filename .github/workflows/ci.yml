@@ -284,7 +284,8 @@ jobs:
     #
     # Build and smoke test only, no registry push: no credentials means this
     # works unchanged on a fork PR. The multi-arch build and the GHCR push the Pi
-    # pulls from arrive with the deployment stage.
+    # pulls from are image-publish.yml, which runs only once this workflow has
+    # succeeded on main (D-113).
     runs-on: ubuntu-latest
     # A cold bring-up is asserted under ten minutes below, so thirty is generous.
     # Without a cap a hung step runs to GitHub's six-hour default.
