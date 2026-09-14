@@ -46,7 +46,36 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-08-12. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-09-14. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stage 11's software is built.** Its decisions are D-081 through D-093. The public read API under `/api/v1` serves:
+- stations, with their hardware, liveness and heartbeats, located no more precisely than each declared (D-082);
+- the satellite catalogue and its transmitters;
+- upcoming passes, and scheduling decisions — scheduled and skipped — with their reasons;
+- observation history at each report's latest revision, and simulator runs;
+- `reliability` and `aggregates`, which answer `not_yet_computed` and publish no number (D-086).
+
+Pass, assignment and observation windows leave widened to whole minutes and their angles as whole degrees, so a public schedule cannot be inverted into a station's exact position (D-093).
+
+The dashboard is served from the platform's own origin (D-081, D-091). It shows:
+- a station map that works without tiles (D-092);
+- the station list with liveness and a simulated badge;
+- for a selected station, what it is listening to and its upcoming assignments with their reasons.
+
+`/metrics` needs a bearer token. `deploy/tools/verify_public_surface.py` checks the exit criterion from outside.
+
+**Rehearsed locally on 2026-09-14.** `docker compose --profile sim up --build` on a laptop registered a virtual station through the reference client, generated and scheduled its passes, and served it on the dashboard. The verifier passed every check that can run against `localhost`; its transcript is in D-088, labelled as the rehearsal it is.
+
+**What remains for the Phase 1 exit criterion is operational, not code:**
+1. Create the Cloudflare tunnel for `dash.meridian.org.in`, which has no DNS record yet.
+2. On the host, set real secrets and `CLOUDFLARE_TUNNEL_TOKEN`, then run `docker compose --profile public --profile sim up -d`.
+3. Apply the edge rate-limit rule (D-088).
+4. From a network outside the college, run `python deploy/tools/verify_public_surface.py https://dash.meridian.org.in --burst 300`.
+5. Paste that transcript into D-088.
+
+The criterion is met when step 4 passes. This note says so only once it has.
+
+The rest of this section is the 2026-08-12 snapshot, left as written.
 
 **Stages 0–10 are done.** Stage 0's specification gaps are closed as decisions D-023 through D-032; the store, the shared MSP infrastructure and the registry are in place; orbit propagation and the element-set archive shipped with pass identity; and pass generation now feeds the two baseline schedulers.
 

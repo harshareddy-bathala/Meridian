@@ -10,6 +10,19 @@
 # the difference surfaces as an unreproducible failure weeks later. Digest
 # pinning arrives with the multi-arch push.
 
+# The dashboard (D-081). Pinned to the build platform: the output is HTML, CSS
+# and JavaScript, identical for every target, so a multi-arch build compiles it
+# once natively instead of running npm under arm64 emulation.
+FROM --platform=$BUILDPLATFORM node:24.21.0-bookworm-slim AS dashboard
+
+WORKDIR /dashboard
+# The lockfile first, for the same reason uv.lock goes first below.
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY dashboard/ ./
+RUN npm run build
+
+
 FROM python:3.11.15-slim-bookworm AS build
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.20 /uv /usr/local/bin/uv
@@ -46,10 +59,14 @@ RUN useradd --create-home --uid 10001 meridian
 WORKDIR /app
 COPY --from=build --chown=meridian:meridian /app/.venv /app/.venv
 COPY --chown=meridian:meridian deploy/ deploy/
+# Owned by root and not writable by the platform: nothing at runtime has any
+# business changing the page it serves.
+COPY --from=dashboard /dashboard/dist /app/dashboard
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    DASHBOARD_DIR=/app/dashboard
 
 # Where a simulated fleet keeps its credentials, held work and outboxes
 # (docs/DECISIONS.md D-080). Created here rather than left to the volume mount:

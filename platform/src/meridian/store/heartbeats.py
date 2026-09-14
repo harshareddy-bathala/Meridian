@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from psycopg.rows import scalar_row
+from psycopg.rows import class_row, scalar_row
 
 from meridian.store.stations import Connection
 
@@ -31,6 +31,8 @@ __all__ = [
     "ListeningEvidenceQuery",
     "ListeningReport",
     "NewHeartbeat",
+    "RecordedHeartbeat",
+    "find_heartbeats_before",
     "has_listening_evidence",
     "insert_heartbeat",
     "touch_last_heartbeat",
@@ -205,3 +207,95 @@ def has_listening_evidence(conn: Connection, query: ListeningEvidenceQuery) -> b
             ),
         )
         return bool(cur.fetchone())
+
+
+@dataclass(frozen=True, slots=True)
+class RecordedHeartbeat:
+    """One stored heartbeat, as a reader may see it.
+
+    **``health_json`` is absent, and its absence is the point.** That column is
+    an opaque blob a station wrote, stored verbatim and capped only in size — the
+    platform has never inspected its contents, so publishing it would republish
+    whatever a station chose to put there, to anyone. Every other column is
+    either the platform's own record or a field MSP §4.2 defines the meaning of.
+
+    ``received_at`` is the platform's clock; ``sent_at`` is the station's and is
+    untrusted (D-013). Both are served, because the gap between them is what a
+    reader diagnosing a station with a bad clock is looking for.
+    """
+
+    id: int
+    station_id: str
+    sent_at: datetime
+    received_at: datetime
+    state: str
+    held_assignments: list[str]
+
+    listening_assignment_id: str | None
+    listening_satellite_id: str | None
+    listening_freq_hz: int | None
+    listening_mode: str | None
+    """The four listening fields, present together or not at all.
+
+    Together they are the platform's evidence that a station was tuned to a
+    named target at a named frequency — which is what turns "reported nothing"
+    into a confirmed miss rather than an unexplained silence (CLAUDE.md rule 7).
+    """
+
+    clock_offset_s: float | None
+    clock_uncertainty_s: float | None
+    simulated: bool
+
+
+def find_heartbeats_before(
+    conn: Connection,
+    station_id: str,
+    before: tuple[datetime, int] | None,
+    limit: int,
+) -> list[RecordedHeartbeat]:
+    """One page of a station's heartbeats, newest first.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+        station_id: The station whose heartbeats to read.
+        before: The ``(received_at, id)`` of the last row on the previous page,
+            or ``None`` for the first page. Both parts are needed: fifty
+            simulated stations reporting on one tick land in the same
+            millisecond, and a cursor on the timestamp alone would skip whichever
+            of them sorted after the page boundary.
+        limit: The most rows to return. Callers ask for one more than the page
+            needs and trim (D-085).
+
+    Returns:
+        The station's heartbeats in descending ``received_at`` order, empty when
+        the station has never reported or the cursor has passed its first one.
+
+    Note:
+        Ordered and paged on ``received_at`` rather than ``sent_at``. A station
+        with a wrong clock would otherwise sort its own reports arbitrarily, and
+        one reporting from 1970 would sit at the end of every page forever.
+        ``received_at`` is also the hypertable's partitioning column, so the scan
+        follows the index rather than fighting it.
+    """
+    with conn.cursor(row_factory=class_row(RecordedHeartbeat)) as cur:
+        cur.execute(
+            """
+            select id, station_id, sent_at, received_at, state, held_assignments,
+                   listening_assignment_id, listening_satellite_id,
+                   listening_freq_hz, listening_mode,
+                   clock_offset_s, clock_uncertainty_s, simulated
+            from heartbeats
+            where station_id = %s
+              and (%s::timestamptz is null or (received_at, id) < (%s, %s))
+            order by received_at desc, id desc
+            limit %s
+            """,
+            (
+                station_id,
+                before[0] if before else None,
+                before[0] if before else None,
+                before[1] if before else None,
+                limit,
+            ),
+        )
+        return cur.fetchall()

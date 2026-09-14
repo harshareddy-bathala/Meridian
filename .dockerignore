@@ -26,6 +26,11 @@ __pycache__/
 build/
 dist/
 
+# The dashboard is built inside the image from the lockfile. A host node_modules
+# holds host-platform binaries, and a host dist/ could be a stale build.
+**/node_modules/
+dashboard/dist/
+
 # Tool caches
 .ruff_cache/
 .mypy_cache/

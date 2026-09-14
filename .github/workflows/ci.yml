@@ -116,6 +116,33 @@ jobs:
         # relies on inline CSS or JS that the CSP forbids.
         run: python site/tools/verify_site.py
 
+  dashboard:
+    # D-081's front end. The image job builds it too, but only as far as Vite
+    # will compile it — type errors and the size limits eslint restates from
+    # pyproject.toml would pass straight through a build, so they are checked
+    # here, where the failure names the rule rather than a layer.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # The same release deploy/Dockerfile builds with.
+          node-version: "24.21.0"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: eslint
+        run: npm run lint
+      - name: tsc
+        run: npm run typecheck
+      - name: vitest
+        run: npm test
+      - name: vite build
+        run: npm run build
+
   types:
     runs-on: ubuntu-latest
     steps:
@@ -256,6 +283,18 @@ jobs:
           cat /tmp/health.json
           grep -q '"status":"ok"' /tmp/health.json
           grep -q '"database":"ok"' /tmp/health.json
+
+      - name: The image serves the dashboard beside the API
+        # The platform starts without a dashboard when DASHBOARD_DIR holds no
+        # build (D-091), so a broken COPY in the Dockerfile would still pass the
+        # health check above. The asset is fetched too: an index.html whose
+        # hashed script 404s is a blank page that answered 200.
+        run: |
+          set -euo pipefail
+          curl -fsS http://localhost:8000/ > /tmp/index.html
+          grep -q '<div id="root"></div>' /tmp/index.html
+          script=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' /tmp/index.html)
+          curl -fsS -o /dev/null "http://localhost:8000${script}"
 
       - name: The bring-up took under ten minutes
         # "docker compose up brings the whole platform up on a clean machine in

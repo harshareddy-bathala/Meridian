@@ -1862,6 +1862,20 @@ D-051 deferred rate limiting and named its own revisit trigger: "the first time 
 
 It cannot run in CI — a fork PR has no public hostname — so it is an operator tool, run against a deployment, and re-running it is one command.
 
+**Rehearsal, 2026-09-14 — against `localhost`, not the public hostname.** A cold `docker compose --profile sim up --build` from the Stage 11 branch, then the verifier. It proves the checks and the platform agree; it is **not** the transcript this entry asks for, which must come from outside the college network with the edge rule on and `--burst` given.
+
+```
+verifying http://localhost:8000
+
+metrics refused    PASS  refused, and indistinguishable from a path that is not there
+dashboard served   PASS  the dashboard page is served at /
+virtual station    PASS  st_b10dee is listed, simulated and online
+lists labelled     PASS  stations 1; passes 2; assignments 2; observations 0; simulator-runs 1; satellites 2
+rate limited       SKIP  not attempted; rerun with --burst N once the edge rule is on
+
+every check that can run passed
+```
+
 ---
 
 ## D-089 — The README banner is a generated SVG pair, and the type is outlines
@@ -1894,6 +1908,8 @@ The repository is the first thing an outside contributor sees, and it opened wit
 
 The satellite is gone. It crossed the banner in a straight line and read as a stray mark on the image rather than as something in the sky; nine meteors on near-parallel diagonal tracks replace it. Nothing on the banner is a satellite now, which is a real loss for a project about receiving them and was still the right call — a thing that has to be explained before it reads correctly is not working.
 
+**The module list in this entry's header is the one it was written with, and three modules have joined since.** `meteor_tracks.py` draws the shower that replaced the satellite, and the lockup and its motion moved out of `banner_svg.py` into `banner_lockup.py` and `banner_motion.py` as that file approached the 400-line limit. `starfield.py`, `wordmark_outlines.py` and `orthographic_projection.py` are unchanged and still named above. Recorded here rather than by editing the header, because an entry that is silently rewritten stops being a record of what was decided when.
+
 **"The nebula is almost colourless on purpose" is now true of the dark theme only.** The light theme is no longer the dark one with the sky removed: it carries the same star field and the same shower in near-black on warm paper, over a wash of cornflower, dusty rose and lilac. That is the first colour in the brand that is neither ink nor semantic, and it is worth being explicit that it was added deliberately rather than by drift. It stays clear of `--signal`, `--alert` and `--trace`, which still mean *above horizon*, *below horizon* and *predicted* and are still unavailable as decoration. The globe's graticule and the subline darkened at the same time: the paper palette in `site/style.css` was drawn for hairlines on a flat ground, and a coloured wash underneath eats contrast that a flat ground does not.
 
 ---
@@ -1919,6 +1935,62 @@ That argument is what makes one vocabulary acceptable across both surfaces. A st
 *Rejected: adding `not_found` to MSP §6 as version 0.3.* Explicit, and it spends a protocol version and a conformance-test revision on an error no client branches on, three days after D-084 argued the table should not grow. If §6 gains a ninth code it should be for an operation that can fail in a new way.
 
 *Rejected: accepting `{"detail": ...}` as the platform's 404 and pointing D-087 at it.* Costs nothing and keeps a third body shape in a repository whose error handling is otherwise uniform, permanently, so that one FastAPI default never has to be overridden.
+
+---
+
+## D-091 — The dashboard is served at `/` and `/assets/` only, with no catch-all
+
+**2026-09-13 · accepted** · *`meridian/api/dashboard.py`, `deploy/Dockerfile`, Stage 11*
+
+D-081 puts the built dashboard at the same origin as the API. The usual way to do that is a static mount at `/` with a single-page-app fallback: any path no route claimed gets `index.html`, and the browser's router takes it from there. **That fallback contradicts D-090, and it does so in two places.**
+
+The obvious one: `/api/v1/statoins` would answer `200` with an HTML page instead of `not_found`, so a client author's typo stops being an error. The subtle one is Starlette's matching order. A route whose path matches but whose method does not is only a *partial* match, and the router keeps looking — so a mount at `/`, which fully matches every path, wins. `GET /msp/v0/register` would stop answering `405 method_not_allowed` and start answering whatever the static mount says. Mounting it *after* the routers, as D-081 anticipated, does not help, because order only decides between two full matches.
+
+**So the dashboard gets exactly two routes: `GET /` serves `index.html`, and `/assets/` serves Vite's hashed build output. Every other path is unrouted, and answers as D-090 says.** A missing asset raises Starlette's own 404, which the routing handler already turns into the envelope. When the dashboard adds views, they are addressed by URL fragment (`/#/stations/st_…`), which never reaches the server.
+
+The build lives in the image at the path `DASHBOARD_DIR` names. It is read when the application is constructed rather than through `Settings`, because routes have to exist before the lifespan that loads settings runs. When the variable is unset, or the directory holds no `index.html`, no dashboard route is added — a developer running `uvicorn` from a checkout without Node gets the API alone, not a startup failure.
+
+*Rejected: a fallback that excludes `/api/`, `/msp/`, `/healthz` and `/metrics` by prefix.* It fixes the typo case and not the 405 case unless it reimplements method matching, and it is a second list of the platform's surfaces that every new one has to be added to.
+
+*Rejected: HTML5 history routing with the fallback limited to paths without a dot.* Nicer URLs, and it still answers `200` for `/anything-at-all`, which is a page telling a caller that a URL exists when it does not.
+
+---
+
+## D-092 — The station map draws its own graticule; tiles are optional decoration from OpenStreetMap
+
+**2026-09-13 · accepted** · *`dashboard/src/StationMap.tsx`, Stage 11*
+
+D-081 rejected keyed map providers and required that "a tile failure degrades to a graticule with the markers still drawn". It did not name where tiles come from, and a tile server is an external service on the surface SC-6 is judged on — so that choice is recorded rather than made in a config file.
+
+**The map is built so that tiles are never load-bearing.** The graticule (every 10°, heavier every 30° and heaviest at the equator and prime meridian) and the station markers are Leaflet vector layers drawn from data the platform served. Tiles are a layer underneath them. If no tile ever loads — offline, blocked, rate-limited, or the provider gone — the page says so in one line and the map is still a correct map of where the stations are, at the precision each operator permitted.
+
+**Tiles come from the OpenStreetMap Foundation's standard tile server by default, with its attribution, and `VITE_MAP_TILE_URL` replaces or disables them at build time.** No key, no account, nothing to rotate. An empty value builds a dashboard that makes no third-party request at all, which is the build to use wherever the independence test is being demonstrated rather than asserted.
+
+The OSM tile usage policy permits light, attributed use and forbids heavy use. A dashboard polled by a handful of viewers is the first; if the public dashboard ever draws real traffic, the answer is a self-hosted tile set or a raster served from `/assets/`, and this entry is where to change it.
+
+*Rejected: no base map at all, graticule only.* Honest and fully independent, and a station at 12.97°N 77.59°E drawn on a blank grid tells a reader nothing until they look the coordinates up. The tiles are what make the map a map; the design only has to make sure they are not what makes it *work*.
+
+*Rejected: bundling a coastline dataset (Natural Earth, 110 m) as a vector layer.* Independent and recognisable, and roughly 100 kB of GeoJSON added to every page load to draw an outline tiles already provide. Worth revisiting if the tile policy ever becomes the constraint.
+
+---
+
+## D-093 — Pass windows and angles are published to the minute and the degree
+
+**2026-09-14 · accepted** · *`meridian/api/public/window_privacy.py`, Stage 11*
+
+D-082 lets an operator publish their station's position no more precisely than they choose, and rounds the coordinates on the way out. Stage 11's remaining endpoints publish things **computed from the stored position** — a pass's acquisition and loss times, its peak elevation, its azimuths, and the assignment and observation windows that inherit them. At full precision those undo D-082.
+
+The leak is not hypothetical arithmetic. A kilometre of cross-track displacement moves a low-Earth-orbit pass's peak elevation by roughly a tenth of a degree and its acquisition time by a fraction of a second, and a station publishes dozens of passes a day. Anyone with the public element sets can fit the one position that reproduces them all, and recover the site far more finely than the two decimals its operator declared.
+
+**Every public window is widened to whole minutes — its start floored, its end ceiled — and every angle is published as whole degrees.** That applies to passes, assignments and observations alike, whatever precision the station declared, and it happens in one module, as D-082's rounding does.
+
+Widening rather than rounding is the point of the direction: a published window always *contains* the real one, so a reader is never told a pass ends before it does. A minute is a small fraction of an 8–15 minute pass and loses nothing a person reading a queue needs; the station itself receives exact times over MSP, which is where precision is required. Whole degrees keep "a 72° pass" meaningful while taking away the tenths an inversion would lean on.
+
+This is coarsening, not a proof of privacy. A minute and a degree make the fit far weaker than the declared precision needs; they do not make it impossible for a station publishing thousands of passes over months. An operator for whom that matters should declare coarse coordinates *and* understand that a public schedule is information — which `MSP-SPEC.md` §4.1's description of the field should say when the specification is next revised.
+
+*Rejected: scaling the coarsening to the declared precision.* It sounds more exact and is mostly bookkeeping: the relationship between decimals and seconds depends on orbit altitude and geometry, so a "matched" rule would be a guess wearing a formula. One rule is testable as a table and explainable in a sentence.
+
+*Rejected: not publishing pass geometry at all.* Stage 11 asks for upcoming passes and assignment reasons, and a scheduling reason like "peak elevation below the configured minimum" is unreadable without the elevation it refers to.
 
 ---
 
