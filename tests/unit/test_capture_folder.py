@@ -84,7 +84,7 @@ def full_manifest(tmp_path: Path) -> Manifest:
         phase="captured",
         updated_at=NOW,
         capture_started_at=START_AT,
-        tuning=Tuning(137_900_000, 1_000, 32.8),
+        tuning=Tuning(137_900_000, 1_000, 32.8, path, "u8"),
         recording=recording(path),
         recording_stamp=RecordingStamp.of(path),
         reason=None,

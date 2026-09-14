@@ -148,9 +148,10 @@ def parse_decode_report(
     stored = _object(decoded)
     frames_decoded = _count(stored, "frames_decoded")
     first_frame_offset_s = _offset(stored, "first_frame_offset_s", recording_duration_s)
-    if frames_decoded == 0 and first_frame_offset_s is not None:
+    if first_frame_offset_s is not None and not frames_decoded:
+        # An offset for a frame nobody counted fits no row of D-122's table.
         raise DecodeReportError(
-            "first_frame_offset_s names a frame, but frames_decoded is 0"
+            "first_frame_offset_s names a frame, so frames_decoded must be 1 or more"
         )
     return DecodeReport(
         decoder=_decoder(stored),

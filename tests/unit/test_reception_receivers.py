@@ -118,6 +118,8 @@ def test_a_simulated_capture_records_as_long_as_the_clock_ran(
 
     assert tuning.centre_freq_hz == METEOR_HZ
     assert tuning.gain_db is None
+    assert tuning.recording_path == tmp_path / "captures" / "as_44b2" / "recording.u8"
+    assert tuning.sample_format == "u8"
     assert not receiver.alive()
     assert recording.sample_count == 9_000
     assert (
@@ -184,6 +186,7 @@ def test_a_replay_references_the_file_in_place_on_the_capture_timeline(
     recording = receiver.stop()
 
     assert tuning.gain_db == 32.8
+    assert tuning.recording_path == path
     assert recording.path == path
     assert not (tmp_path / "captures" / "as_44b2").exists()
     assert recording.sample_count == 4_000

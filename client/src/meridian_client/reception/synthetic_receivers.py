@@ -79,7 +79,13 @@ class SimulatedReceiver:
         plan.folder.mkdir(parents=True, exist_ok=True)
         self._plan = plan
         self._started_at = self._clocks.wall()
-        return Tuning(plan.centre_freq_hz, self._sample_rate_hz, gain_db=None)
+        return Tuning(
+            plan.centre_freq_hz,
+            self._sample_rate_hz,
+            gain_db=None,
+            recording_path=plan.folder / SIMULATED_RECORDING_NAME,
+            sample_format="u8",
+        )
 
     def alive(self) -> bool:
         """Whether a capture is running. A simulated receiver never dies."""
@@ -192,7 +198,13 @@ class FileReplayReceiver:
         _require_same_target(source, plan)
         self._source = source
         self._started_at = self._clocks.wall()
-        return Tuning(source.centre_freq_hz, source.sample_rate_hz, source.gain_db)
+        return Tuning(
+            source.centre_freq_hz,
+            source.sample_rate_hz,
+            source.gain_db,
+            recording_path=source.path,
+            sample_format=source.sample_format,
+        )
 
     def alive(self) -> bool:
         """Whether a replay is running. The file is already whole, so it cannot die."""

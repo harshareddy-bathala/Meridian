@@ -213,6 +213,8 @@ def _tuning_to_stored(tuning: Tuning) -> dict[str, object]:
         "centre_freq_hz": tuning.centre_freq_hz,
         "sample_rate_hz": tuning.sample_rate_hz,
         "gain_db": tuning.gain_db,
+        "recording_path": str(tuning.recording_path),
+        "sample_format": tuning.sample_format,
     }
 
 
@@ -221,6 +223,8 @@ def _tuning_from_stored(stored: Mapping[str, object]) -> Tuning:
         centre_freq_hz=_whole(stored["centre_freq_hz"], "centre_freq_hz"),
         sample_rate_hz=_whole(stored["sample_rate_hz"], "sample_rate_hz"),
         gain_db=_optional_number(stored["gain_db"], "gain_db"),
+        recording_path=Path(_text(stored["recording_path"], "recording_path")),
+        sample_format=_sample_format(stored["sample_format"]),
     )
 
 
@@ -240,9 +244,7 @@ def _recording_to_stored(recording: Recording) -> dict[str, object]:
 
 
 def _recording_from_stored(stored: Mapping[str, object]) -> Recording:
-    sample_format = _text(stored["sample_format"], "sample_format")
-    if sample_format not in BYTES_PER_SAMPLE:
-        raise ValueError(f"unknown sample_format {sample_format!r}")
+    sample_format = _sample_format(stored["sample_format"])
     interrupted = stored["interrupted"]
     if not isinstance(interrupted, bool):
         raise TypeError(f"interrupted must be true or false, not {interrupted!r}")
@@ -262,6 +264,13 @@ def _recording_from_stored(stored: Mapping[str, object]) -> Recording:
         interrupted=interrupted,
         notes=_optional_text(stored["notes"], "notes"),
     )
+
+
+def _sample_format(value: object) -> str:
+    sample_format = _text(value, "sample_format")
+    if sample_format not in BYTES_PER_SAMPLE:
+        raise ValueError(f"unknown sample_format {sample_format!r}")
+    return sample_format
 
 
 def _instant_or_none(instant: datetime | None) -> str | None:

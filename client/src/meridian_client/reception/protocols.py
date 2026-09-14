@@ -103,6 +103,14 @@ class Tuning:
     """``None`` under automatic gain, or when the receiver cannot say. Not zero:
     zero decibels is a setting (D-117)."""
 
+    recording_path: Path
+    """Where the samples are going. Written to the manifest when capture starts,
+    so a restart after a power cut can find a recording that never reached
+    :meth:`Receiver.stop` (D-123)."""
+
+    sample_format: str
+    """One of :data:`BYTES_PER_SAMPLE`'s keys."""
+
 
 @dataclass(frozen=True, slots=True)
 class Recording:
