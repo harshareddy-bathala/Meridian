@@ -2437,7 +2437,7 @@ The Dockerfile's header has promised this since Stage 1: the Pi pulls, it does n
 
 ## D-114 — Every container's logs are capped, and secrets can be read from files
 
-**2026-09-14 · accepted** · *`deploy/docker-compose.yml`, `meridian/config.py`, `meridian/cli_serve.py`, Stage 12*
+**2026-09-14 · accepted** · *`deploy/docker-compose.yml`, `deploy/.env.example`, `meridian/config.py`, `meridian/cli_serve.py`, Stage 12*
 
 **Logs.** No service has a `logging:` block, so Docker's default `json-file` driver grows without limit on a 256 GB card that also holds the database. Every service now uses `json-file` with `max-size: 10m` and `max-file: 3`, from one YAML anchor.
 
@@ -2445,7 +2445,13 @@ The Dockerfile's header has promised this since Stage 1: the Pi pulls, it does n
 
 **Secrets.** `METRICS_TOKEN`, `TOKEN_HASH_PEPPER` and `REGISTRATION_INVITE_TOKEN` each also accept a `*_FILE` variant naming a file to read. The file wins when both are set, and the placeholder refusal applies to its contents.
 
-**Tunnel token.** The tunnel reads its token from the `TUNNEL_TOKEN` environment variable instead of `--token` on the command line, where `ps` and `docker inspect` show it to anyone on the host.
+**Tunnel token.** The tunnel reads its token from the `TUNNEL_TOKEN` environment variable instead of `--token` on the command line, where `ps` shows it to every user on the host. `docker inspect` still shows environment variables, but only to someone who can already control Docker, which is root on that host anyway.
+
+**Where `.env` lives: `deploy/.env`, beside the compose file.** Compose reads `.env` from the project directory, which is the directory of the first `-f` file. It does not read the working directory. So `docker compose -f deploy/docker-compose.yml` from the repository root never read the `.env` there, though the README, the compose header and `.env.example` all said to put it there.
+
+Every value fell back to its `${VAR:-default}`, which is why CI passed with the example copied to the wrong place. It is also why an edit to that file would have silently changed nothing.
+
+The documented location is now `deploy/.env`, which needs no flag. A deployment that already keeps its file at the root keeps working as long as it passes `--env-file .env` on every command, and the tools in `deploy/tools` accept the same flag.
 
 Rotation, redaction and least-privilege database users remain Stage 23's.
 
