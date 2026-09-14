@@ -11,11 +11,30 @@ function SimulatedBadge() {
   );
 }
 
-function StationRow({ station, now }: { station: Station; now: Date }) {
+export type Select = (stationId: string) => void;
+
+interface RowProps {
+  station: Station;
+  now: Date;
+  selected: boolean;
+  onSelect: Select;
+}
+
+function StationRow({ station, now, selected, onSelect }: RowProps) {
   return (
-    <tr>
+    <tr className={selected ? "selected" : undefined}>
       <th scope="row">
-        {station.name} {station.simulated && <SimulatedBadge />}
+        <button
+          type="button"
+          className="link"
+          aria-pressed={selected}
+          onClick={() => {
+            onSelect(station.stationId);
+          }}
+        >
+          {station.name}
+        </button>{" "}
+        {station.simulated && <SimulatedBadge />}
         <div className="dim mono">{station.stationId}</div>
       </th>
       <td>
@@ -35,7 +54,14 @@ function StationRow({ station, now }: { station: Station; now: Date }) {
   );
 }
 
-export function StationList({ stations, now }: { stations: Station[]; now: Date }) {
+interface ListProps {
+  stations: Station[];
+  now: Date;
+  selectedId: string | null;
+  onSelect: Select;
+}
+
+export function StationList({ stations, now, selectedId, onSelect }: ListProps) {
   if (stations.length === 0) {
     return <p>No station has registered yet.</p>;
   }
@@ -58,7 +84,13 @@ export function StationList({ stations, now }: { stations: Station[]; now: Date 
         </thead>
         <tbody>
           {stations.map((station) => (
-            <StationRow key={station.stationId} station={station} now={now} />
+            <StationRow
+              key={station.stationId}
+              station={station}
+              now={now}
+              selected={station.stationId === selectedId}
+              onSelect={onSelect}
+            />
           ))}
         </tbody>
       </table>

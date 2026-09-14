@@ -51,3 +51,27 @@ export function precisionLabel(decimals: number): string {
     ? `to about ${String(Math.round(metres / 1000))} km`
     : `to about ${String(Math.round(metres))} m`;
 }
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function hhmm(instant: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(instant.getUTCHours())}:${pad(instant.getUTCMinutes())}`;
+}
+
+/**
+ * "06:10–06:22 UTC, 14 Sep". Whole minutes, as the API publishes them (D-093).
+ * Built by hand rather than with Intl: ICU versions disagree about month
+ * abbreviations ("Sep" or "Sept"), and a time table should read the same in
+ * every browser.
+ */
+export function formatWindow(startIso: string, endIso: string): string {
+  const start = new Date(startIso);
+  const month = MONTHS[start.getUTCMonth()] ?? "";
+  return `${hhmm(start)}–${hhmm(new Date(endIso))} UTC, ${String(start.getUTCDate())} ${month}`;
+}
+
+/** "137.9 MHz". */
+export function formatFrequency(hz: number): string {
+  return `${String(Math.round(hz / 100_000) / 10)} MHz`;
+}

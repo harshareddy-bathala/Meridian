@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 
 import { fetchPlatformHealth, type PlatformHealth } from "./health";
+import { StationDetail } from "./StationDetail";
 import { StationList } from "./StationList";
 import { StationMap } from "./StationMap";
+import { useHashSelection } from "./useHashSelection";
 import { useStations } from "./useStations";
 
 type Load =
@@ -48,24 +50,39 @@ function PlatformStatus({ load }: { load: Load }) {
 
 function Stations() {
   const { stations, fetchedAt, error } = useStations();
+  const [selectedId, select] = useHashSelection();
+  const selected = stations?.find((station) => station.stationId === selectedId) ?? null;
   return (
-    <section aria-labelledby="stations-heading">
-      <h2 id="stations-heading">Stations</h2>
-      {error !== null && (
-        <p role="alert">
-          The station directory could not be refreshed: {error}
-          {fetchedAt !== null && ` Showing the list as of ${fetchedAt.toLocaleTimeString()}.`}
-        </p>
-      )}
-      {stations === null || fetchedAt === null ? (
-        error === null && <p className="dim">Loading the station directory…</p>
-      ) : (
-        <>
-          <StationMap stations={stations} />
-          <StationList stations={stations} now={fetchedAt} />
-        </>
-      )}
-    </section>
+    <>
+      <section aria-labelledby="stations-heading">
+        <h2 id="stations-heading">Stations</h2>
+        {error !== null && (
+          <p role="alert">
+            The station directory could not be refreshed: {error}
+            {fetchedAt !== null && ` Showing the list as of ${fetchedAt.toLocaleTimeString()}.`}
+          </p>
+        )}
+        {stations === null || fetchedAt === null ? (
+          error === null && <p className="dim">Loading the station directory…</p>
+        ) : (
+          <>
+            <StationMap stations={stations} onSelect={select} />
+            <StationList
+              stations={stations}
+              now={fetchedAt}
+              selectedId={selectedId}
+              onSelect={select}
+            />
+          </>
+        )}
+      </section>
+      <StationDetail
+        station={selected}
+        onClear={() => {
+          select(null);
+        }}
+      />
+    </>
   );
 }
 

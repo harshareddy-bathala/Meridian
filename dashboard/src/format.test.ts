@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { formatAge, livenessLabel, precisionLabel } from "./format";
+import {
+  formatAge,
+  formatFrequency,
+  formatWindow,
+  livenessLabel,
+  precisionLabel,
+} from "./format";
 
 const now = new Date("2026-09-13T12:00:00Z");
 
@@ -38,5 +44,19 @@ describe("precisionLabel", () => {
 describe("livenessLabel", () => {
   it("names the state a station has never left", () => {
     expect(livenessLabel("never_seen")).toBe("Never seen");
+  });
+});
+
+describe("formatWindow", () => {
+  it("states a window in UTC whole minutes with its day", () => {
+    expect(formatWindow("2026-09-14T06:10:00Z", "2026-09-14T06:22:00Z")).toBe(
+      "06:10–06:22 UTC, 14 Sep",
+    );
+  });
+});
+
+describe("formatFrequency", () => {
+  it("states a downlink in megahertz to one decimal", () => {
+    expect(formatFrequency(137_900_000)).toBe("137.9 MHz");
   });
 });

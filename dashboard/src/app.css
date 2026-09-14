@@ -162,3 +162,33 @@ td {
 .marker.liveness-never_seen {
   fill-opacity: 0;
 }
+
+/* Selection. A button styled as text, so the row name is keyboard-reachable. */
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+tr.selected {
+  background: var(--surface);
+}
+
+.station-detail {
+  margin-block: 2rem;
+}
+
+/* Decisions, in words beside a neutral outline: skipped is not an error. */
+.badge-scheduled {
+  color: var(--online);
+}
+
+.badge-skipped {
+  color: var(--dim);
+}

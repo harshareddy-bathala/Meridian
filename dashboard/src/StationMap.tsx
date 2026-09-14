@@ -84,8 +84,17 @@ function tooltipFor(station: Station): HTMLElement {
   return element;
 }
 
-function useStationMarkers(view: MapView | null, stations: Station[]) {
+function useStationMarkers(
+  view: MapView | null,
+  stations: Station[],
+  onSelect: (stationId: string) => void,
+) {
   const fitted = useRef(false);
+  // Through a ref, so a new callback identity does not redraw every marker.
+  const select = useRef(onSelect);
+  useEffect(() => {
+    select.current = onSelect;
+  }, [onSelect]);
   useEffect(() => {
     if (view === null) {
       return;
@@ -99,6 +108,9 @@ function useStationMarkers(view: MapView | null, stations: Station[]) {
         className: `marker ${kind} liveness-${station.liveness}`,
       })
         .bindTooltip(tooltipFor(station))
+        .on("click", () => {
+          select.current(station.stationId);
+        })
         .addTo(markers);
     }
     // Once: after that the reader owns the view, and a refresh must not move it.
@@ -117,9 +129,14 @@ const TILE_NOTE: Partial<Record<TileStatus, string>> = {
   disabled: "This build draws no map tiles. Stations are drawn on the graticule alone.",
 };
 
-export function StationMap({ stations }: { stations: Station[] }) {
+interface MapProps {
+  stations: Station[];
+  onSelect: (stationId: string) => void;
+}
+
+export function StationMap({ stations, onSelect }: MapProps) {
   const { attach, view, tileStatus } = useLeafletMap();
-  useStationMarkers(view, stations);
+  useStationMarkers(view, stations, onSelect);
   const note = TILE_NOTE[tileStatus];
   return (
     <figure className="station-map">
