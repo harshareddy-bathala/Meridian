@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = REPO_ROOT / "deploy" / "alembic.ini"
-HEAD_REVISION = "0014"
+HEAD_REVISION = "0015"
 """The newest revision, written out rather than read from the script directory.
 
 Deriving it would make these tests assert that alembic agrees with itself. Pinned,
@@ -294,3 +294,77 @@ def test_0014_backfills_a_station_registered_before_the_column_existed(
     # existed and therefore consented to nothing.
     assert row[0] == 2
     assert (row[1], row[2]) == (12.9716, 77.594562)
+
+
+def test_0015_adds_reception_evidence_across_a_compressed_chunk(
+    scratch_database: str, monkeypatch
+) -> None:
+    """D-119: 0015 lands on a hypertable that already has compressed chunks.
+
+    `test_empty_database_reaches_head` runs 0015 against an empty table, where no
+    chunk exists to be compressed — and a deployment that has run for a week has
+    compressed chunks, because 0005's policy compresses anything older than seven
+    days. So this stops at 0014, stores an observation old enough to fall in such
+    a chunk, compresses it, and only then upgrades.
+
+    Asserted afterwards: the old row still reads through `observations_current`
+    with every new column null (not measured, never zero); the view shows the new
+    columns at all; and the constraints both admit valid evidence and refuse a
+    contradiction in that same compressed time range.
+    """
+    monkeypatch.setenv("DATABASE_URL", scratch_database)
+    _upgrade_to(scratch_database, "0014")
+
+    insert_observation = (
+        "insert into observations (assignment_id, revision, started_at, ended_at,"
+        " station_id, satellite_id, outcome, content_sha256)"
+        " values (%s, 1, now() - interval '40 days', now() - interval '40 days',"
+        " 'st-old', 'norad:1', 'no_signal', %s)"
+    )
+    with psycopg.connect(scratch_database, autocommit=True) as conn:
+        conn.execute(
+            "insert into satellites (satellite_id, name) values ('norad:1', 'T')"
+        )
+        conn.execute(INSERT_STATION, ("st-old", "Old", 77.5, TOKEN_HASH, KEY_HASH))
+        conn.execute(insert_observation, ("as-old", bytes(32)))
+        chunks = conn.execute(
+            "select show_chunks('observations', older_than => interval '7 days')"
+        ).fetchall()
+        for (chunk,) in chunks:
+            conn.execute("select compress_chunk(%s)", (chunk,))
+        compressed = conn.execute(
+            "select count(*) from timescaledb_information.chunks"
+            " where hypertable_name = 'observations' and is_compressed"
+        ).fetchone()
+    assert compressed is not None and compressed[0] == 1
+
+    _upgrade_to_head(scratch_database)
+
+    with psycopg.connect(scratch_database, autocommit=True) as conn:
+        old = conn.execute(
+            "select outcome, noise_floor_dbfs, receiver_gain_db, snr_samples,"
+            " decoder, decoder_version, frames_decoded, frames_failed"
+            " from observations_current where assignment_id = 'as-old'"
+        ).fetchone()
+        assert old == ("no_signal", None, None, None, None, None, None, None)
+
+        conn.execute(
+            "insert into observations (assignment_id, revision, started_at, ended_at,"
+            " station_id, satellite_id, outcome, content_sha256, noise_floor_dbfs,"
+            " receiver_gain_db, snr_samples, decoder, frames_decoded)"
+            " values ('as-new', 1, now() - interval '39 days',"
+            " now() - interval '39 days', 'st-old', 'norad:1', 'no_signal', %s,"
+            " -52.3, 32.8, '[]'::jsonb, 'satdump', 0)",
+            (bytes(32),),
+        )
+
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "insert into observations (assignment_id, revision, started_at,"
+                " ended_at, station_id, satellite_id, outcome, content_sha256,"
+                " decoder, frames_decoded)"
+                " values ('as-bad', 1, now() - interval '39 days',"
+                " now() - interval '39 days', 'st-old', 'norad:1', 'no_signal', %s,"
+                " 'satdump', 5)",
+                (bytes(32),),
+            )
