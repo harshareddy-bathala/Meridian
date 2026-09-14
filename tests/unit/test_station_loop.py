@@ -9,11 +9,12 @@ Marked as a unit test by living in ``tests/unit``: a temporary directory is not
 infrastructure.
 
 Reference: docs/MSP-SPEC.md §4.2, §4.4, §6; docs/DECISIONS.md D-003, D-024,
-D-069, D-073.
+D-069, D-073, D-121.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,12 @@ import pytest
 from meridian_client import station_loop as loop_module
 from meridian_client.assignment_message import Assignment
 from meridian_client.credentials import StationCredentials
-from meridian_client.execution import NullExecutor
+from meridian_client.execution import (
+    CaptureWindow,
+    ExecutionStatus,
+    NullExecutor,
+    assignment_status,
+)
 from meridian_client.held_assignments import AssignmentRecord
 from meridian_client.observation_message import ObservationResult, Signal
 from meridian_client.observation_queue import ObservationQueue
@@ -115,13 +121,30 @@ class RecordingExecutor:
     """A :class:`PassExecutor` that writes down what it was asked to do.
 
     ``ready`` stands in for a decoder that has finished: whatever is put there
-    is handed over on the next drain, exactly once.
+    is handed over on the next drain, exactly once. ``widen_s``, ``state`` and
+    ``unfinished`` stand in for an executor that widens its capture and speaks
+    for itself in the heartbeat (D-121); left alone, it reports what the
+    assignment says, as ``NullExecutor`` does.
     """
 
     def __init__(self) -> None:
         self.begun: list[str] = []
         self.ended: list[str] = []
         self.ready: list[ObservationResult] = []
+        self.widen_s = 0.0
+        self.state: str | None = None
+        self.unfinished: tuple[str, ...] = ()
+
+    def capture_window(self, assignment: Assignment) -> CaptureWindow:
+        """The assignment's window, widened by ``widen_s`` at each end."""
+        margin = timedelta(seconds=self.widen_s)
+        return CaptureWindow(assignment.start_at - margin, assignment.end_at + margin)
+
+    def status(self, running: Assignment | None) -> ExecutionStatus:
+        """``state`` with no listening block if one was set, else the assignment's."""
+        if self.state is not None:
+            return ExecutionStatus(self.state, None, self.unfinished)
+        return replace(assignment_status(running), unfinished=self.unfinished)
 
     def begin(self, assignment: Assignment) -> None:
         """Note a start."""
@@ -170,6 +193,10 @@ class FakeClock:
         """Seconds since this clock started."""
         return self.elapsed_s
 
+    def wall(self) -> datetime:
+        """The wall clock, starting at ``NOW`` and moving with the monotonic one."""
+        return NOW + timedelta(seconds=self.elapsed_s)
+
     def sleep(self, seconds: float) -> None:
         """Record the wait and move the clock forward by it."""
         self.waits.append(seconds)
@@ -185,6 +212,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     """Replace the loop's clock and sleep with a fake pair."""
     fake = FakeClock()
     monkeypatch.setattr(loop_module, "_monotonic", fake.monotonic)
+    monkeypatch.setattr(loop_module, "_wall_clock", fake.wall)
     monkeypatch.setattr(loop_module, "_sleep", fake.sleep)
     return fake
 
@@ -474,6 +502,184 @@ def test_the_null_executor_satisfies_the_protocol(tmp_path: Path) -> None:
     loop.tick(NOW)
     loop.tick(NOW + timedelta(minutes=2))
 
+    assert transport.sent[1]["state"] == "listening"
+
+
+# --- D-121, capture windows and what the executor says -----------------------
+
+
+def test_a_widened_capture_begins_before_the_assignment_window(
+    tmp_path: Path,
+) -> None:
+    """MSP §4.3 asks a station to widen when it can afford the recording."""
+    loop, _, executor = build_loop(
+        tmp_path,
+        [{"assignments": [assignment_message("as_a", starts_in_minutes=1)]}, {}],
+    )
+    executor.widen_s = 60.0
+
+    loop.tick(NOW)
+    outcome = loop.tick(NOW + timedelta(seconds=30))
+
+    assert outcome.began == "as_a"
+
+
+def test_a_widened_tail_keeps_the_capture_running_and_the_work_held(
+    tmp_path: Path,
+) -> None:
+    """Past ``end_at`` but inside the tail: still recording, still named."""
+    loop, transport, executor = build_loop(
+        tmp_path,
+        [
+            {"assignments": [assignment_message("as_a", starts_in_minutes=1)]},
+            {},
+            {},
+            {},
+        ],
+    )
+    executor.widen_s = 120.0
+
+    loop.tick(NOW)
+    loop.tick(NOW + timedelta(minutes=2))
+    in_tail = loop.tick(NOW + timedelta(minutes=13))
+    after = loop.tick(NOW + timedelta(minutes=15))
+
+    assert in_tail.ended is None
+    assert transport.sent[2]["held_assignments"] == ["as_a"]
+    assert transport.sent[2]["state"] == "listening"
+    assert after.ended == "as_a"
+    assert transport.sent[3]["held_assignments"] == []
+
+
+def test_a_tail_hands_over_to_the_next_capture_on_one_tick(tmp_path: Path) -> None:
+    """One pass's tail never delays the next pass's head."""
+    loop, _, executor = build_loop(
+        tmp_path,
+        [
+            {
+                "assignments": [
+                    assignment_message("as_first", starts_in_minutes=1),
+                    assignment_message("as_second", starts_in_minutes=14),
+                ]
+            },
+            {},
+            {},
+        ],
+    )
+    executor.widen_s = 120.0
+
+    loop.tick(NOW)
+    loop.tick(NOW + timedelta(minutes=2))
+    handover = loop.tick(NOW + timedelta(minutes=12, seconds=30))
+
+    assert handover.ended == "as_first"
+    assert handover.began == "as_second"
+
+
+def test_work_being_decoded_stays_held_until_its_result_is_queued(
+    tmp_path: Path,
+) -> None:
+    """D-121: a pass still being worked is never mistaken for a decline.
+
+    And the heartbeat says ``processing`` with no ``listening`` block, because
+    the executor says so — not ``idle``, which the assignment would suggest.
+    """
+    loop, transport, executor = build_loop(
+        tmp_path,
+        [
+            {"assignments": [assignment_message("as_a", starts_in_minutes=1)]},
+            {},
+            {},
+            {},
+        ],
+    )
+
+    loop.tick(NOW)
+    loop.tick(NOW + timedelta(minutes=2))
+    executor.unfinished = ("as_a",)
+    executor.state = "processing"
+    decoding = loop.tick(NOW + timedelta(minutes=13))
+    executor.unfinished = ()
+    executor.state = None
+    executor.ready.append(result_for("as_a"))
+    handed_over = loop.tick(NOW + timedelta(minutes=14))
+
+    assert decoding.ended == "as_a"
+    assert transport.sent[2]["held_assignments"] == ["as_a"]
+    assert transport.sent[2]["state"] == "processing"
+    assert "listening" not in transport.sent[2]
+    assert handed_over.submitted == ("as_a",)
+    assert transport.sent[3]["held_assignments"] == []
+    assert executor.ended == ["as_a"]
+
+
+def test_a_held_assignment_never_begun_is_ended_when_its_capture_closes(
+    tmp_path: Path,
+) -> None:
+    """D-121: the station took the work and did not start it.
+
+    A station that slept through the window — stalled, or suspended — would
+    otherwise drop it silently, and the platform would read that as a decline.
+    Handed to ``end`` instead, whose honest report is ``not_attempted``.
+    """
+    loop, transport, executor = build_loop(
+        tmp_path,
+        [{"assignments": [assignment_message("as_a", starts_in_minutes=1)]}, {}, {}],
+    )
+
+    loop.tick(NOW)
+    missed = loop.tick(NOW + timedelta(minutes=30))
+    loop.tick(NOW + timedelta(minutes=31))
+
+    assert missed.not_begun == ("as_a",)
+    assert missed.began is None
+    assert executor.begun == []
+    assert executor.ended == ["as_a"]
+    assert transport.sent[1]["held_assignments"] == []
+
+
+def test_a_restarted_station_does_not_end_work_its_executor_is_finishing(
+    tmp_path: Path,
+) -> None:
+    """After a restart the loop remembers nothing; the executor's word is enough."""
+    first, _, _ = build_loop(
+        tmp_path,
+        [{"assignments": [assignment_message("as_a", starts_in_minutes=1)]}, {}],
+    )
+    first.tick(NOW)
+    first.tick(NOW + timedelta(minutes=2))
+
+    second, transport, executor = build_loop(tmp_path, [{}])
+    executor.unfinished = ("as_a",)
+    outcome = second.tick(NOW + timedelta(minutes=13))
+
+    assert outcome.not_begun == ()
+    assert executor.ended == []
+    assert executor.begun == []
+    assert transport.sent[0]["held_assignments"] == ["as_a"]
+
+
+def test_the_loop_wakes_at_a_capture_edge_and_keeps_its_grid(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    """Capture starts on time rather than up to one interval late (D-121).
+
+    The edge costs one extra heartbeat — the one reporting ``listening`` — and
+    the regular tick after it still lands where the grid put it.
+    """
+    loop, transport, executor = build_loop(
+        tmp_path,
+        [
+            {"assignments": [assignment_message("as_a", starts_in_minutes=10 / 60)]},
+            {},
+            {},
+        ],
+    )
+
+    loop.run(stop_after_ticks=3)
+
+    assert clock.waits[:2] == [pytest.approx(10.5), pytest.approx(19.5)]
+    assert executor.begun == ["as_a"]
     assert transport.sent[1]["state"] == "listening"
 
 
