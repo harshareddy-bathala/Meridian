@@ -228,6 +228,51 @@ jobs:
           set -euo pipefail
           uv run pytest -m e2e || test $? -eq 5
 
+  monitoring:
+    # The alert rules, Prometheus's configuration and both Alertmanager files,
+    # checked by the same tools that load them in production (D-112). A job of
+    # its own because none of it needs the platform image, so a broken rule is
+    # reported in seconds rather than after a cold build.
+    #
+    # The tool images are read from the compose file rather than written here a
+    # second time: a rule tested by one Prometheus release and loaded by another
+    # is a test of something that does not run.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the images compose runs
+        run: |
+          set -euo pipefail
+          cp deploy/.env.example deploy/.env
+          images=$(docker compose -f deploy/docker-compose.yml --profile metrics config --images)
+          echo "PROMETHEUS_IMAGE=$(echo "$images" | grep '^prom/prometheus:')" >> "$GITHUB_ENV"
+          echo "ALERTMANAGER_IMAGE=$(echo "$images" | grep '^prom/alertmanager:')" >> "$GITHUB_ENV"
+
+      - name: Every alert fires and stays silent as its tests say
+        run: |
+          docker run --rm -v "$PWD/deploy/prometheus:/p:ro" --entrypoint promtool \
+            "$PROMETHEUS_IMAGE" test rules /p/tests/meridian.test.yml
+
+      - name: Prometheus loads its configuration and rules
+        # Mounted at the paths compose uses, so `rule_files`' absolute glob and
+        # the credentials file resolve exactly as they do in the container.
+        run: |
+          set -euo pipefail
+          cp deploy/prometheus/metrics_token.example deploy/prometheus/metrics_token
+          docker run --rm \
+            -v "$PWD/deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            -v "$PWD/deploy/prometheus/rules:/etc/prometheus/rules:ro" \
+            -v "$PWD/deploy/prometheus/metrics_token:/etc/prometheus/metrics_token:ro" \
+            --entrypoint promtool "$PROMETHEUS_IMAGE" \
+            check config /etc/prometheus/prometheus.yml
+
+      - name: Alertmanager loads the default and the example
+        run: |
+          docker run --rm -v "$PWD/deploy/alertmanager:/a:ro" --entrypoint amtool \
+            "$ALERTMANAGER_IMAGE" check-config /a/alertmanager.yml /a/alertmanager.example.yml
+
   image:
     # Build the runtime image and prove the deployment artefact works.
     #
@@ -252,7 +297,10 @@ jobs:
         # moment someone is trying to bring the platform up.
         run: |
           set -euo pipefail
-          cp deploy/.env.example .env
+          # Beside the compose file, where compose reads it (D-114). Copied to
+          # the repository root, as this step once did, it was never read and
+          # every value came from the compose file's defaults.
+          cp deploy/.env.example deploy/.env
           docker compose -f deploy/docker-compose.yml config --quiet
           docker compose -f deploy/docker-compose.yml --profile metrics \
             --profile public --profile sim config --quiet
@@ -260,12 +308,16 @@ jobs:
       - name: Bring the stack up
         run: |
           set -euo pipefail
-          cp deploy/.env.example .env
-          # Stamped before the build starts and read after /healthz answers, so
-          # the figure covers what the requirement covers: image build, database
-          # initialisation, migrations and the API becoming ready.
+          cp deploy/.env.example deploy/.env
+          cp deploy/prometheus/metrics_token.example deploy/prometheus/metrics_token
+          # Stamped before the build starts and read once every service is
+          # healthy, so the figure covers what Stage 12's gate covers: image
+          # build and pulls, database initialisation, migrations, and the API,
+          # the jobs process and the monitoring stack all becoming ready.
           echo "BRING_UP_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
-          docker compose -f deploy/docker-compose.yml up -d --build
+          # The complete stack is the default profile plus metrics. The tunnel
+          # needs a real token and the simulator is exercised further down.
+          docker compose -f deploy/docker-compose.yml --profile metrics up -d --build
 
       - name: Migrations ran and the API is healthy
         run: |
@@ -295,6 +347,21 @@ jobs:
           grep -q '<div id="root"></div>' /tmp/index.html
           script=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' /tmp/index.html)
           curl -fsS -o /dev/null "http://localhost:8000${script}"
+
+      - name: Every service with a healthcheck reports healthy
+        # db, api, jobs, prometheus, alertmanager and grafana. A service that is
+        # running but unhealthy is exactly what an operator would otherwise
+        # discover from a blank Grafana panel.
+        run: |
+          set -euo pipefail
+          compose="docker compose -f deploy/docker-compose.yml --profile metrics"
+          for _ in $(seq 1 60); do
+            waiting=$($compose ps --format '{{.Service}} {{.Health}}' | grep -vE ' healthy$' || true)
+            if [ -z "$waiting" ]; then break; fi
+            sleep 3
+          done
+          $compose ps --format '{{.Service}} {{.Status}}'
+          test -z "$waiting"
 
       - name: The bring-up took under ten minutes
         # "docker compose up brings the whole platform up on a clean machine in
@@ -326,6 +393,56 @@ jobs:
           docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint "" \
             api python -c "import meridian, meridian.cli, meridian_sim.station"
 
+      - name: /metrics publishes the platform's own series, and only with the token
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer change-me" http://localhost:8000/metrics > /tmp/metrics.txt
+          grep -q '^meridian_database_reachable 1.0$' /tmp/metrics.txt
+          grep -q '^meridian_schema_up_to_date 1.0$' /tmp/metrics.txt
+          grep -q '^meridian_stations{' /tmp/metrics.txt
+          grep -q '^meridian_http_requests_total{' /tmp/metrics.txt
+          # D-086: the API never computes passes, so it must not publish a count.
+          if grep -q '^meridian_passes_computed' /tmp/metrics.txt; then
+            echo "::error::the API published meridian_passes_computed, which only the jobs process measures"
+            exit 1
+          fi
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/metrics)" = "404"
+
+      - name: Prometheus scrapes both targets, loads every rule and records scheduling
+        # The jobs process runs its first round at start, so the schedule task's
+        # last-success timestamp exists within one scrape of it finishing.
+        run: |
+          set -euo pipefail
+          prom() {
+            docker compose -f deploy/docker-compose.yml --profile metrics exec -T prometheus \
+              wget -qO- "http://127.0.0.1:9090/api/v1/$1"
+          }
+          for _ in $(seq 1 40); do
+            up=$(prom 'query?query=count(up==1)' | python3 -c \
+              'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else 0)')
+            scheduled=$(prom 'query?query=count(meridian_job_last_success_timestamp_seconds%7Btask%3D%22schedule%22%7D)' \
+              | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"]["result"]))')
+            if [ "$up" = "2" ] && [ "$scheduled" = "1" ]; then break; fi
+            sleep 3
+          done
+          echo "targets up: $up; schedule task recorded: $scheduled"
+          test "$up" = "2"
+          test "$scheduled" = "1"
+          prom rules | python3 -c '
+          import json, sys
+          rules = [r for g in json.load(sys.stdin)["data"]["groups"] for r in g["rules"]]
+          broken = [r["name"] for r in rules if r["health"] != "ok"]
+          print(f"{len(rules)} rules loaded, unhealthy: {broken}")
+          sys.exit(1 if broken or not rules else 0)
+          '
+          prom alertmanagers | grep -q 'alertmanager:9093'
+
+      - name: Grafana provisioned the platform dashboard
+        run: |
+          set -euo pipefail
+          curl -fsS -u admin:change-me http://localhost:3001/api/dashboards/uid/meridian-platform \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["meta"]["provisioned"]; print(len(d["dashboard"]["panels"]), "panels")'
+
       - name: The sim profile registers a station and stays up
         # Written when the simulator was a shell that exited 2, so it waited for
         # the container to exit. Since Stage 10 the fleet runs until stopped, and
@@ -350,13 +467,70 @@ jobs:
           test "$(docker inspect meridian-simulator-1 \
             --format '{{.State.Running}} {{.RestartCount}}')" = "true 0"
 
+      - name: The simulated station is counted online, labelled simulated
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            if curl -fsS -H "Authorization: Bearer change-me" http://localhost:8000/metrics \
+              | grep -q '^meridian_stations{liveness="online",simulated="true"} 1.0$'; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::no simulated station counted online in /metrics"
+          exit 1
+
+      - name: A backup restores to the same rows
+        # D-115's round trip, with the tools an operator runs. The simulator and
+        # the jobs process are stopped first: anything writing between the count
+        # and the backup would make the comparison measure them, not the restore.
+        # A row written after the backup proves the restore replaced the database
+        # rather than leaving it alone.
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          compose="docker compose -f deploy/docker-compose.yml --profile sim --profile metrics"
+          counts() {
+            $compose exec -T db sh -c 'psql -X -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+          select 'stations', count(*) from stations
+          union all select 'passes', count(*) from passes
+          union all select 'assignments', count(*) from assignments
+          union all select 'heartbeats', count(*) from heartbeats
+          union all select 'element_sets', count(*) from element_sets
+          union all select 'invite_tokens', count(*) from invite_tokens;
+          SQL
+          }
+          # One round now that the simulated station exists. The jobs process's
+          # first round ran before it registered, which would leave passes and
+          # assignments empty and the round trip proving nothing about them.
+          $compose exec -T jobs meridian jobs run --once
+          $compose stop simulator jobs
+          before=$(counts)
+          echo "$before"
+          python3 deploy/tools/backup.py --out "$RUNNER_TEMP/backup/meridian.dump"
+
+          $compose exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+          insert into invite_tokens (token_sha256, label) values (sha256('ci'), 'written-after-backup');
+          SQL
+          test "$(counts)" != "$before"
+
+          python3 deploy/tools/restore.py "$RUNNER_TEMP/backup/meridian.dump" --yes
+          after=$(counts)
+          diff <(echo "$before") <(echo "$after")
+          $compose exec -T api meridian db status
+
       - name: Stack logs on failure
         if: failure()
-        run: docker compose -f deploy/docker-compose.yml logs --no-color || true
+        run: |
+          docker compose -f deploy/docker-compose.yml --profile metrics --profile sim \
+            logs --no-color || true
 
       - name: Tear down
         if: always()
-        run: docker compose -f deploy/docker-compose.yml --profile sim down -v || true
+        run: |
+          docker compose -f deploy/docker-compose.yml --profile metrics --profile sim \
+            down -v || true
 
   conventions:
     # GIT-WORKFLOW.md rules 3 and 7, automated. A rule enforced only by a human
