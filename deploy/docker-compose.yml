@@ -163,9 +163,30 @@ services:
       # metrics_token.example to metrics_token and put the same value in it as
       # METRICS_TOKEN in .env — the file is gitignored, the example is not.
       - ./prometheus/metrics_token:/etc/prometheus/metrics_token:ro
+      # Alert rules only. Their tests sit in prometheus/tests/, outside the
+      # mount, because every file here is loaded as rules (D-112).
+      - ./prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     expose:
       - "9090"
+
+  alertmanager:
+    # Routes every alert to a receiver that sends nothing, unless a deployment
+    # names its own untracked configuration (D-112). Not published: alerts are
+    # read in Grafana, and the UI is one `docker compose exec` away.
+    profiles: ["metrics"]
+    image: prom/alertmanager:v0.34.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/${ALERTMANAGER_CONFIG_FILE:-alertmanager.yml}
+      - --storage.path=/alertmanager
+    volumes:
+      # The whole directory, so a local configuration finds the secret files it
+      # reads (webhook_url, smtp_password) beside it.
+      - ./alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    expose:
+      - "9093"
 
   grafana:
     profiles: ["metrics"]
@@ -177,6 +198,14 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
     volumes:
       - grafana-data:/var/lib/grafana
+      # The datasource and the platform dashboard, from files (D-112). The
+      # dashboard is read-only in the UI: an edit made there would be lost on
+      # the next restart, so it is refused instead of silently discarded.
+      # Two subdirectories rather than the whole of provisioning/, which would
+      # hide the image's own empty alerting/ and plugins/ and log an error each.
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/meridian-dashboards:ro
     ports:
       - "${GRAFANA_PORT:-3001}:3000"
 
@@ -256,5 +285,6 @@ services:
 volumes:
   db-data:
   prometheus-data:
+  alertmanager-data:
   grafana-data:
   sim-state:

@@ -1,0 +1,17 @@
+# Loads every dashboard JSON in deploy/grafana/dashboards/ (D-112).
+#
+# To change a dashboard: edit it in the UI, export it as JSON ("Export for
+# sharing externally" off), replace the file, and restart grafana. Edits saved in
+# the UI are refused, because the next restart would discard them.
+
+apiVersion: 1
+
+providers:
+  - name: meridian
+    folder: Meridian
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/meridian-dashboards
