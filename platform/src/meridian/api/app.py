@@ -19,6 +19,7 @@ from psycopg_pool import ConnectionPool
 
 from meridian import __version__
 from meridian.api.dashboard import dashboard_directory, mount_dashboard
+from meridian.api.domain_collector import DomainCollector
 from meridian.api.errors import install_error_handlers, no_such_endpoint_response
 from meridian.api.msp import router as msp_router
 from meridian.api.public.surface import router as public_router
@@ -125,7 +126,11 @@ def create_app() -> FastAPI:
         }
         return JSONResponse(body, status_code=200 if database_ok else 503)
 
-    scrape_source = build_scrape_source()
+    # The database-derived figures are read per scrape through the pool the
+    # lifespan opens, which does not exist yet — hence the lookup, not the pool.
+    scrape_source = build_scrape_source(
+        [DomainCollector(lambda: getattr(app.state, "pool", None))]
+    )
 
     @app.get("/metrics")
     def metrics(authorization: str | None = Header(default=None)) -> Response:

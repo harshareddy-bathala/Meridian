@@ -132,6 +132,22 @@ def test_a_scrape_reports_msp_errors_by_code(client: TestClient) -> None:
     assert sample_value(scrape(client), "meridian_msp_errors_total", labels)
 
 
+def test_an_unreachable_database_is_reported_and_nothing_is_guessed(
+    client: TestClient,
+) -> None:
+    """The domain collector is wired in, and silent about what it cannot read.
+
+    The fixture's database is deliberately unreachable, which is the case D-086
+    cares about: the scrape says so, and publishes no station or assignment
+    count that would read as zero.
+    """
+    text = scrape(client)
+
+    assert sample_value(text, "meridian_database_reachable", {}) == 0.0
+    assert "meridian_stations" not in text
+    assert "meridian_assignments" not in text
+
+
 def test_an_unrouted_request_never_puts_its_path_in_a_label(
     client: TestClient,
 ) -> None:
