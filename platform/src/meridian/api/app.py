@@ -13,18 +13,21 @@ from contextlib import asynccontextmanager
 import psycopg
 from fastapi import FastAPI, Header, Response
 from fastapi.responses import JSONResponse
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from meridian import __version__
 from meridian.api.dashboard import dashboard_directory, mount_dashboard
+from meridian.api.domain_collector import DomainCollector
 from meridian.api.errors import install_error_handlers, no_such_endpoint_response
-from meridian.api.metrics_access import is_metrics_scrape_authorised
 from meridian.api.msp import router as msp_router
 from meridian.api.public.surface import router as public_router
 from meridian.api.request_limits import RequestSizeLimitMiddleware
+from meridian.api.request_metrics import RequestMetricsMiddleware
 from meridian.config import Settings, load_settings
+from meridian.metrics.access import is_metrics_scrape_authorised
+from meridian.metrics.exposition import build_scrape_source, exposition
 from meridian.store.invites import seed_bootstrap_invite
 from meridian.store.pool import POOL_TIMEOUT_S, is_database_reachable, open_pool
 
@@ -85,10 +88,15 @@ def create_app() -> FastAPI:
         lifespan=_lifespan,
     )
 
-    # Outermost, so an oversized body is refused before routing, before
-    # validation and before anything allocates it — which is what MSP §6's
-    # "before the body is parsed" and D-028's "ahead of JSON parsing" require.
+    # Ahead of everything but the request metrics, so an oversized body is
+    # refused before routing, before validation and before anything allocates
+    # it — which is what MSP §6's "before the body is parsed" and D-028's "ahead
+    # of JSON parsing" require.
     app.add_middleware(RequestSizeLimitMiddleware)
+    # Added after the size limit, which makes it the outer of the two: a request
+    # refused before routing is still a request the platform answered, and an
+    # operator watching 4xx rates needs to see it (D-109).
+    app.add_middleware(RequestMetricsMiddleware)
 
     # Before the routes, so a failure inside one already leaves in MSP §6's shape
     # rather than in FastAPI's default 422 or a bare 500.
@@ -118,6 +126,12 @@ def create_app() -> FastAPI:
         }
         return JSONResponse(body, status_code=200 if database_ok else 503)
 
+    # The database-derived figures are read per scrape through the pool the
+    # lifespan opens, which does not exist yet — hence the lookup, not the pool.
+    scrape_source = build_scrape_source(
+        [DomainCollector(lambda: getattr(app.state, "pool", None))]
+    )
+
     @app.get("/metrics")
     def metrics(authorization: str | None = Header(default=None)) -> Response:
         """Prometheus scrape endpoint, for a caller holding the bearer token.
@@ -131,7 +145,7 @@ def create_app() -> FastAPI:
             authorization, app.state.settings.metrics_token
         ):
             return no_such_endpoint_response()
-        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+        return Response(exposition(scrape_source), media_type=CONTENT_TYPE_LATEST)
 
     # Last, so reading the routes top to bottom gives the API before the page
     # that consumes it. Order does not protect the API here — D-091 does, by

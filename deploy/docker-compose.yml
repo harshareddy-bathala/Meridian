@@ -1,22 +1,52 @@
 # Meridian platform.
 #
-#   cp deploy/.env.example .env && docker compose -f deploy/docker-compose.yml up
+#   cp deploy/.env.example deploy/.env
+#   docker compose -f deploy/docker-compose.yml pull     # a Pi: fetch the image
+#   docker compose -f deploy/docker-compose.yml up -d    # add --build on a laptop
+#
+# The env file sits beside this file, not at the repository root: compose reads
+# .env from the directory of the first -f file, whatever the working directory
+# (D-114). A root .env is read only with --env-file .env on every command.
 #
 # Bringing the whole platform up on a clean machine in under ten minutes is a hard
 # requirement, not an aspiration. Profiles are how that survives contact with a
 # Raspberry Pi on college wifi: the default `up` starts only what is needed to
 # serve the platform. Metrics, the tunnel and the simulator are opt-in.
 #
-#   --profile metrics   Prometheus + Grafana
+#   --profile metrics   Prometheus, Alertmanager and Grafana
 #   --profile public    Cloudflare Tunnel (needs CLOUDFLARE_TUNNEL_TOKEN)
 #   --profile sim       a simulated station
+#
+# The default profile is db, migrate, api and jobs. docs/OPERATIONS.md is the
+# runbook for everything here.
 
 name: meridian
+
+# Every service's logs, capped (D-114). Docker's json-file driver keeps growing
+# by default, on the same card that holds the database; three 10 MB files is
+# about two days of the API at info level with fifty simulated stations.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+# The platform image: pulled from GHCR on a Pi, built from this checkout on a
+# laptop with `up --build` (D-113). Five services run the same image with
+# different commands, so this is written once. MERIDIAN_IMAGE pins a release, or
+# names a locally built tag.
+x-platform: &platform
+  image: ${MERIDIAN_IMAGE:-ghcr.io/harshareddy-bathala/meridian:main}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  logging: *logging
 
 services:
   db:
     image: timescale/timescaledb:2.29.0-pg16
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-meridian}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
@@ -40,9 +70,7 @@ services:
       - "5432"
 
   migrate:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    <<: *platform
     depends_on:
       db:
         condition: service_healthy
@@ -55,9 +83,7 @@ services:
     restart: "no"
 
   api:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    <<: *platform
     restart: unless-stopped
     depends_on:
       db:
@@ -67,6 +93,11 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
       API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
+      # Two by default, the shape D-051 expects on the Pi. More than one needs the
+      # multiprocess directory below, or every scrape reports whichever worker
+      # answered; `meridian serve` refuses to start without it (D-109).
+      API_WORKERS: ${API_WORKERS:-2}
+      PROMETHEUS_MULTIPROC_DIR: /run/meridian/metrics
       TOKEN_HASH_PEPPER: ${TOKEN_HASH_PEPPER:-change-me}
       REGISTRATION_INVITE_TOKEN: ${REGISTRATION_INVITE_TOKEN:-change-me}
       REGISTRATION_RECOVERY_WINDOW_S: ${REGISTRATION_RECOVERY_WINDOW_S:-3600}
@@ -93,11 +124,53 @@ services:
       MERIDIAN_PUBLIC: ${CLOUDFLARE_TUNNEL_TOKEN:+1}
     ports:
       - "${API_PORT:-8000}:8000"
+    # In memory, and emptied by `meridian serve` at start: counter files from a
+    # previous run must not be summed into this one. World-writable because a
+    # tmpfs mount is created root-owned and the platform does not run as root.
+    tmpfs:
+      - /run/meridian/metrics:mode=1777
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).status==200 else 1)\""]
       interval: 10s
       timeout: 5s
       retries: 6
+      start_period: 20s
+
+  jobs:
+    # Pass generation, then scheduling, every SCHEDULE_INTERVAL_S over the next
+    # SCHEDULE_HORIZON_S (D-110). In the default profile because a deployment
+    # with no simulator must still schedule its own station; before Stage 12 only
+    # the sim profile's shell loop did this. Both tasks are idempotent over a
+    # horizon (D-063, D-066), so overlapping rounds write nothing twice.
+    <<: *platform
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+      API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
+      SCHEDULE_INTERVAL_S: ${SCHEDULE_INTERVAL_S:-300}
+      SCHEDULE_HORIZON_S: ${SCHEDULE_HORIZON_S:-21600}
+      # Its metrics listener requires the same token as the API's /metrics,
+      # and the same placeholder refusal applies when the deployment is public.
+      METRICS_TOKEN: ${METRICS_TOKEN:-change-me}
+      MERIDIAN_PUBLIC: ${CLOUDFLARE_TUNNEL_TOKEN:+1}
+    command: ["meridian", "jobs", "run", "--metrics-host", "0.0.0.0"]
+    # Scraped by Prometheus inside this network (D-109); never published.
+    expose:
+      - "9464"
+    # The listener accepting a connection means the process got past its
+    # configuration refusals and is running rounds. Whether those rounds succeed
+    # is the alerts' question (ScheduledTaskStalled), not a healthcheck's: a
+    # restart would not fix a database that is down.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9464), timeout=3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
       start_period: 20s
 
   tunnel:
@@ -108,38 +181,116 @@ services:
     profiles: ["public"]
     image: cloudflare/cloudflared:2026.7.3
     restart: unless-stopped
+    logging: *logging
     depends_on:
       api:
         condition: service_healthy
-    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+    environment:
+      # From the environment, not `--token` on the command line, where `ps`
+      # shows it to every user on the host (D-114).
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      # A fixed address for the readiness endpoint the healthcheck calls.
+      # Loopback: the tunnel's metrics are nobody else's business.
+      TUNNEL_METRICS: 127.0.0.1:20241
+    command: ["tunnel", "--no-autoupdate", "run"]
+    # Ready means at least one connection to the Cloudflare edge is registered.
+    # The image has no shell, so the check is cloudflared asking itself.
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
 
   prometheus:
     profiles: ["metrics"]
     image: prom/prometheus:v3.13.2
     restart: unless-stopped
+    logging: *logging
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       # Prometheus does not expand environment variables in its own config, so
       # the bearer token reaches it as a file rather than as a variable. Copy
       # metrics_token.example to metrics_token and put the same value in it as
-      # METRICS_TOKEN in .env — the file is gitignored, the example is not.
-      - ./prometheus/metrics_token:/etc/prometheus/metrics_token:ro
+      # METRICS_TOKEN in deploy/.env — the file is gitignored, the example is not.
+      #
+      # Long form so a missing file stops `up` with its path. The short form
+      # would create an empty directory in its place, and Prometheus would
+      # start, fail every scrape, and read as the API being down.
+      - type: bind
+        source: ./prometheus/metrics_token
+        target: /etc/prometheus/metrics_token
+        read_only: true
+        bind:
+          create_host_path: false
+      # Alert rules only. Their tests sit in prometheus/tests/, outside the
+      # mount, because every file here is loaded as rules (D-112).
+      - ./prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     expose:
       - "9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  alertmanager:
+    # Routes every alert to a receiver that sends nothing, unless a deployment
+    # names its own untracked configuration (D-112). Not published: alerts are
+    # read in Grafana, and the UI is one `docker compose exec` away.
+    profiles: ["metrics"]
+    image: prom/alertmanager:v0.34.0
+    restart: unless-stopped
+    logging: *logging
+    command:
+      - --config.file=/etc/alertmanager/${ALERTMANAGER_CONFIG_FILE:-alertmanager.yml}
+      - --storage.path=/alertmanager
+    volumes:
+      # The whole directory, so a local configuration finds the secret files it
+      # reads (webhook_url, smtp_password) beside it.
+      - ./alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    expose:
+      - "9093"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9093/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
 
   grafana:
     profiles: ["metrics"]
     image: grafana/grafana:13.1.1
     restart: unless-stopped
+    logging: *logging
     depends_on:
-      - prometheus
+      # Healthy, not merely started: a dashboard opened before Prometheus is
+      # ready shows every panel as an error, which reads as a broken deployment.
+      prometheus:
+        condition: service_healthy
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
     volumes:
       - grafana-data:/var/lib/grafana
+      # The datasource and the platform dashboard, from files (D-112). The
+      # dashboard is read-only in the UI: an edit made there would be lost on
+      # the next restart, so it is refused instead of silently discarded.
+      # Two subdirectories rather than the whole of provisioning/, which would
+      # hide the image's own empty alerting/ and plugins/ and log an error each.
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/meridian-dashboards:ro
     ports:
       - "${GRAFANA_PORT:-3001}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
   # Three services make up `--profile sim`, and the split is the dependency
   # order the chain actually has: something must load a catalogue and mint
@@ -147,9 +298,7 @@ services:
   # stations that already exist. See docs/DECISIONS.md D-079.
   sim-seed:
     profiles: ["sim"]
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    <<: *platform
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -188,9 +337,7 @@ services:
 
   simulator:
     profiles: ["sim"]
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    <<: *platform
     depends_on:
       api:
         condition: service_healthy
@@ -214,43 +361,9 @@ services:
       - meridian_sim.station
     restart: unless-stopped
 
-  sim-scheduler:
-    profiles: ["sim"]
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    depends_on:
-      api:
-        condition: service_healthy
-      # After the catalogue, or the first few runs would propagate nothing and
-      # say so — harmless, since the loop retries, and confusing to read.
-      sim-seed:
-        condition: service_completed_successfully
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
-    # Periodic rather than one-shot, because new passes appear as time advances
-    # and a schedule computed once at start-up runs out. A loop and `sleep` is
-    # not the eventual answer — Stage 12 owns scheduled jobs — and it is written
-    # here rather than left to an operator's cron so that `--profile sim up`
-    # keeps producing work without anybody watching it.
-    #
-    # Both commands are idempotent over a horizon (D-063, D-066), so the overlap
-    # between one run's window and the next writes nothing twice.
-    command:
-      - sh
-      - -c
-      - |
-        while true; do
-          from=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          to=$$(date -u -d '+6 hours' +%Y-%m-%dT%H:%M:%SZ)
-          meridian passes generate --from "$$from" --to "$$to" || true
-          meridian schedule --from "$$from" --to "$$to" --config A || true
-          sleep "${SIMULATOR_SCHEDULE_INTERVAL_S:-300}"
-        done
-    restart: unless-stopped
-
 volumes:
   db-data:
   prometheus-data:
+  alertmanager-data:
   grafana-data:
   sim-state:

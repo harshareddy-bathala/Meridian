@@ -157,6 +157,11 @@ convention = "google"
 # Same shape as the site checker above: a stdlib script whose whole output is
 # printed, run by hand against a deployed hostname (D-088).
 "deploy/tools/verify_public_surface.py" = ["T201", "D", "ANN", "PLR", "C90"]
+# backup.py and restore.py are the same kind of script (D-115). compose_db.py is
+# their shared half, imported by path from beside them, so it takes the same set.
+"deploy/tools/backup.py" = ["T201", "D", "ANN", "PLR", "C90"]
+"deploy/tools/restore.py" = ["T201", "D", "ANN", "PLR", "C90"]
+"deploy/tools/compose_db.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
 # The ban below is global; this is the one module exempt from it, so the boundary
 # is checked by CI rather than remembered by a reviewer.

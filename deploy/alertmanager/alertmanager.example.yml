@@ -1,0 +1,40 @@
+# Alertmanager — an example that delivers alerts (D-112).
+#
+# Copy to alertmanager.local.yml (gitignored), edit, and start the metrics
+# profile with ALERTMANAGER_CONFIG_FILE=alertmanager.local.yml in .env.
+#
+# Secrets are read from files, never written here: the webhook URL (which is a
+# credential for most chat services) and the SMTP password. Put them beside this
+# file with the names below — both are gitignored — and they are mounted with the
+# rest of the directory at /etc/alertmanager/.
+#
+# Everything below with example.org in it is a placeholder.
+
+route:
+  receiver: team
+  group_by: [alertname, simulated]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Simulated stations go quiet on purpose in fault-injection runs; their
+    # station alerts are left in the UI rather than sent.
+    - receiver: nowhere
+      matchers:
+        - simulated="true"
+        - alertname=~"StationStale|StationOffline|ObservationsOverdue"
+
+receivers:
+  - name: nowhere
+
+  - name: team
+    webhook_configs:
+      - url_file: /etc/alertmanager/webhook_url
+        send_resolved: true
+    email_configs:
+      - to: operators@example.org
+        from: meridian@example.org
+        smarthost: smtp.example.org:587
+        auth_username: meridian@example.org
+        auth_password_file: /etc/alertmanager/smtp_password
+        send_resolved: true

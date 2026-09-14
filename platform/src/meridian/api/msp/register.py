@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends
+from prometheus_client import Counter
 
 from meridian.api import platform_clock
 from meridian.api.dependencies import get_connection, get_settings
@@ -27,6 +28,15 @@ __all__ = ["router"]
 _log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+REGISTRATIONS = Counter(
+    "meridian_msp_registrations",
+    "Registration requests decided, by whether they were admitted or refused.",
+    ["result"],
+)
+"""Not labelled ``simulated``: a refused request's claim to be simulated comes
+from the wire and is not evidence (D-048), so only the result is counted.
+"""
 
 INVALID_INVITE_MESSAGE = (
     "Invite token and registration key did not admit a registration."
@@ -71,8 +81,10 @@ def register(
         result = registry.register(body.to_registration_request())
     except InvalidInviteError as exc:
         _log.info("registration rejected: %s", exc)
+        REGISTRATIONS.labels(result="refused").inc()
         raise MspError(INVALID_INVITE, INVALID_INVITE_MESSAGE) from exc
 
+    REGISTRATIONS.labels(result="admitted").inc()
     return RegisterResponseBody(
         station_id=result.station_id,
         token=result.bearer_token,

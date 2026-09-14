@@ -1,0 +1,19 @@
+# The one datasource the platform dashboard reads (D-112).
+#
+# The uid is fixed because the dashboard JSON refers to it; a datasource created
+# by hand in the UI gets a random uid and the dashboard would find nothing.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: meridian-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Matches scrape_interval in deploy/prometheus/prometheus.yml, so rate()
+      # windows chosen by Grafana never fall below two samples.
+      timeInterval: 15s

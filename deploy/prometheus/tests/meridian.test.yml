@@ -1,0 +1,267 @@
+# Unit tests for deploy/prometheus/rules/meridian.yml (D-112).
+#
+#   promtool test rules deploy/prometheus/tests/meridian.test.yml
+#
+# Kept outside rules/ on purpose: Prometheus loads rules/*.yml, and a test file
+# there would be read as a rule file and refused.
+#
+# The first group is a healthy deployment in which nothing may fire. Every
+# later group breaks one thing and proves the alert for it fires — and, where
+# the timing is the point, that it has not fired yet a moment before.
+#
+# Series carry the job and instance labels a real scrape attaches, because
+# several rules match or join on them and a test without them would pass
+# against rules that never match in production.
+
+rule_files:
+  - ../rules/meridian.yml
+
+evaluation_interval: 15s
+
+tests:
+  # --- Nothing is wrong ----------------------------------------------------
+  - name: a healthy deployment fires nothing
+    interval: 15s
+    input_series:
+      - series: 'up{job="meridian", instance="api:8000"}'
+        values: "1x100"
+      - series: 'up{job="meridian-jobs", instance="jobs:9464"}'
+        values: "1x100"
+      - series: 'meridian_database_reachable{job="meridian", instance="api:8000"}'
+        values: "1x100"
+      - series: 'meridian_schema_up_to_date{job="meridian", instance="api:8000"}'
+        values: "1x100"
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="online", simulated="true"}'
+        values: "1x100"
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="stale", simulated="true"}'
+        values: "0x100"
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="offline", simulated="true"}'
+        values: "0x100"
+      - series: 'meridian_msp_heartbeats_total{job="meridian", instance="api:8000", simulated="true"}'
+        values: "0+1x100"
+      - series: 'meridian_assignments_overdue{job="meridian", instance="api:8000", simulated="true"}'
+        values: "0x100"
+      - series: 'process_start_time_seconds{job="meridian-jobs", instance="jobs:9464"}'
+        values: "0x100"
+      # A timestamp that keeps pace with the clock: the task has just succeeded.
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="schedule"}'
+        values: "0+15x100"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
+        values: "0+15x100"
+    alert_rule_test:
+      - {eval_time: 20m, alertname: ApiUnavailable, exp_alerts: []}
+      - {eval_time: 20m, alertname: DatabaseUnavailable, exp_alerts: []}
+      - {eval_time: 20m, alertname: SchemaMigrationMismatch, exp_alerts: []}
+      - {eval_time: 20m, alertname: StationStale, exp_alerts: []}
+      - {eval_time: 20m, alertname: StationOffline, exp_alerts: []}
+      - {eval_time: 20m, alertname: HeartbeatIngestionStopped, exp_alerts: []}
+      - {eval_time: 20m, alertname: ObservationsOverdue, exp_alerts: []}
+      - {eval_time: 20m, alertname: SchedulerUnavailable, exp_alerts: []}
+      - {eval_time: 20m, alertname: ScheduledTaskStalled, exp_alerts: []}
+      - {eval_time: 20m, alertname: ScheduledTaskNeverSucceeded, exp_alerts: []}
+
+  # --- Platform ------------------------------------------------------------
+  - name: the api stops answering
+    interval: 15s
+    input_series:
+      - series: 'up{job="meridian", instance="api:8000"}'
+        values: "1 1 1 1 0x20"
+    alert_rule_test:
+      - eval_time: 90s
+        alertname: ApiUnavailable
+        exp_alerts: []
+      - eval_time: 2m15s
+        alertname: ApiUnavailable
+        exp_alerts:
+          - exp_labels: {severity: critical, job: meridian, instance: "api:8000"}
+            exp_annotations:
+              summary: The platform API is not answering scrapes.
+              runbook: docs/OPERATIONS.md#apiunavailable
+
+  - name: the database is unreachable
+    interval: 15s
+    input_series:
+      - series: 'meridian_database_reachable{job="meridian", instance="api:8000"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: DatabaseUnavailable
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: DatabaseUnavailable
+        exp_alerts:
+          - exp_labels: {severity: critical, job: meridian, instance: "api:8000"}
+            exp_annotations:
+              summary: The API is running but cannot reach the database.
+              runbook: docs/OPERATIONS.md#databaseunavailable
+
+  - name: the schema is not at head
+    interval: 15s
+    input_series:
+      - series: 'meridian_schema_up_to_date{job="meridian", instance="api:8000"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: SchemaMigrationMismatch
+        exp_alerts:
+          - exp_labels: {severity: critical, job: meridian, instance: "api:8000"}
+            exp_annotations:
+              summary: The database is not at the migration this code expects.
+              runbook: docs/OPERATIONS.md#schemamigrationmismatch
+
+  # --- Stations ------------------------------------------------------------
+  - name: a measured station goes stale and a simulated one goes offline
+    interval: 15s
+    input_series:
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="stale", simulated="false"}'
+        values: "1x20"
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="stale", simulated="true"}'
+        values: "0x20"
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="offline", simulated="false"}'
+        values: "0x20"
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="offline", simulated="true"}'
+        values: "2x20"
+    alert_rule_test:
+      # No `for`: SC-5's 90 s budget is spent by liveness and the scrape.
+      - eval_time: 0s
+        alertname: StationStale
+        exp_alerts:
+          - exp_labels: {severity: warning, simulated: "false"}
+            exp_annotations:
+              summary: "1 station(s) have missed two heartbeats (simulated=false)."
+              runbook: docs/OPERATIONS.md#stationstale
+      - eval_time: 0s
+        alertname: StationOffline
+        exp_alerts:
+          - exp_labels: {severity: warning, simulated: "true"}
+            exp_annotations:
+              summary: "2 station(s) have sent no heartbeat for over 90 s (simulated=true)."
+              runbook: docs/OPERATIONS.md#stationoffline
+
+  - name: heartbeats stop arriving after a while
+    interval: 15s
+    input_series:
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="offline", simulated="true"}'
+        values: "1x80"
+      # Counting for five minutes, then flat.
+      - series: 'meridian_msp_heartbeats_total{job="meridian", instance="api:8000", simulated="true"}'
+        values: "0+1x20 20x60"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: HeartbeatIngestionStopped
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: HeartbeatIngestionStopped
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: No station heartbeat has reached the platform in five minutes.
+              runbook: docs/OPERATIONS.md#heartbeatingestionstopped
+
+  - name: no heartbeat has been counted since the api started
+    interval: 15s
+    input_series:
+      # The counter has no series at all; `or vector(0)` must read that as none.
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="offline", simulated="false"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: HeartbeatIngestionStopped
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: No station heartbeat has reached the platform in five minutes.
+              runbook: docs/OPERATIONS.md#heartbeatingestionstopped
+
+  - name: stations that have never heartbeated are not an ingestion outage
+    interval: 15s
+    input_series:
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="never_seen", simulated="true"}'
+        values: "3x40"
+      - series: 'meridian_stations{job="meridian", instance="api:8000", liveness="offline", simulated="true"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: HeartbeatIngestionStopped
+        exp_alerts: []
+
+  - name: a report stays overdue
+    interval: 1m
+    input_series:
+      - series: 'meridian_assignments_overdue{job="meridian", instance="api:8000", simulated="false"}'
+        values: "1x40"
+      - series: 'meridian_assignments_overdue{job="meridian", instance="api:8000", simulated="true"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: ObservationsOverdue
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: ObservationsOverdue
+        exp_alerts:
+          - exp_labels: {severity: warning, simulated: "false"}
+            exp_annotations:
+              summary: "1 assignment(s) have had no report for 45 minutes after their window (simulated=false)."
+              runbook: docs/OPERATIONS.md#observationsoverdue
+
+  # --- Scheduling ----------------------------------------------------------
+  - name: the jobs process stops answering
+    interval: 15s
+    input_series:
+      - series: 'up{job="meridian-jobs", instance="jobs:9464"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: SchedulerUnavailable
+        exp_alerts:
+          - exp_labels: {severity: critical, job: meridian-jobs, instance: "jobs:9464"}
+            exp_annotations:
+              summary: The jobs process is not answering scrapes; nothing is being scheduled.
+              runbook: docs/OPERATIONS.md#schedulerunavailable
+
+  - name: scheduling stops succeeding while pass generation carries on
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="meridian-jobs", instance="jobs:9464"}'
+        values: "0x30"
+      # Succeeded at time zero, never again.
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="schedule"}'
+        values: "0x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
+        values: "0+60x30"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ScheduledTaskStalled
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: ScheduledTaskStalled
+        exp_alerts:
+          - exp_labels: {severity: critical, job: meridian-jobs, instance: "jobs:9464", task: schedule}
+            exp_annotations:
+              summary: "The schedule task has not completed in over 15 minutes."
+              runbook: docs/OPERATIONS.md#scheduledtaskstalled
+      # It succeeded once, so this is a stall, not a task that never ran.
+      - eval_time: 16m
+        alertname: ScheduledTaskNeverSucceeded
+        exp_alerts: []
+
+  - name: scheduling has failed every round since the process started
+    interval: 1m
+    input_series:
+      - series: 'up{job="meridian-jobs", instance="jobs:9464"}'
+        values: "1x30"
+      - series: 'process_start_time_seconds{job="meridian-jobs", instance="jobs:9464"}'
+        values: "0x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
+        values: "0+60x30"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ScheduledTaskNeverSucceeded
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: ScheduledTaskNeverSucceeded
+        exp_alerts:
+          - exp_labels: {severity: critical, job: meridian-jobs, instance: "jobs:9464", task: schedule}
+            exp_annotations:
+              summary: The schedule task has not completed once since the jobs process started.
+              runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded

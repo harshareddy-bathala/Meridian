@@ -1,4 +1,4 @@
-"""Who may scrape ``/metrics``, and what a refusal looks like.
+"""Who may scrape a metrics endpoint, and what a refusal looks like.
 
 The endpoint publishes process internals — resident memory, file descriptors,
 garbage-collection counts — and Stage 11 puts the platform behind a tunnel on a
@@ -16,7 +16,11 @@ It performs no I/O, opens no database and reads no environment — the token is
 handed in by the caller from ``Settings``, so the comparison is testable as a
 pure function.
 
-Reference: docs/DECISIONS.md D-087, D-090.
+It lives under ``meridian.metrics`` rather than ``meridian.api`` because two
+processes serve metrics: the API, and the scheduled jobs (D-109). Both check the
+same token with this one function.
+
+Reference: docs/DECISIONS.md D-087, D-090, D-109.
 """
 
 from __future__ import annotations

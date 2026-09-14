@@ -48,6 +48,28 @@ flowchart TD
 
 *Snapshot taken 2026-09-14. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
+**Stage 12's software is built.** Its decisions are D-109 through D-115, and `docs/OPERATIONS.md` is its runbook.
+- **Scheduling runs by itself.** A `jobs` service in the default profile generates passes and schedules them under configuration A every five minutes, so a deployment schedules with no simulator; the simulator's shell loop is gone. `meridian serve` runs the API with its log level and several workers.
+- **Metrics:**
+  - The API counts requests by route, MSP errors, heartbeats, observations and registrations.
+  - Station liveness, assignments by state, overdue reports, the connection pool and schema revision are read from the database at scrape time.
+  - The jobs process serves its own task timings and failures.
+  - Confirmed misses, indeterminate outcomes and loss budget stay unpublished until Stage 20 (D-111).
+- **Alerts:** ten Prometheus rules, each with promtool tests for firing and staying silent. Alertmanager sends nothing until configured, and Grafana is provisioned with a platform dashboard. On a local stack, `StationStale` fired 59 s after a simulated station was stopped, inside SC-5's 90 s.
+- **Operations:**
+  - `meridian db status`;
+  - host `backup.py` and `restore.py`, where restore refuses a wrong checksum or TimescaleDB version;
+  - `snapshot` and `report` as placeholders that name Stages 15 and 22.
+- **Deployment:**
+  - capped logs and healthchecks on every service, and the tunnel token off the command line;
+  - base images pinned by digest;
+  - amd64 and arm64 images published to GHCR only after CI passes on `main`.
+- **Found on the way:**
+  - The documented root `.env` was never read by compose, which reads `deploy/.env`; every value had been coming from defaults (D-114).
+  - API workers were publishing a jobs-only metric as 0.
+- **CI** now brings up the metrics profile inside the ten-minute bring-up check. It checks both scrape targets and every rule, and backs up, restores and compares row counts.
+- **Not yet shown:** the publish workflow runs for the first time after merge. The tunnel's healthcheck has not been seen passing against a live tunnel.
+
 **Stage 11's software is built.** Its decisions are D-081 through D-093. The public read API under `/api/v1` serves:
 - stations, with their hardware, liveness and heartbeats, located no more precisely than each declared (D-082);
 - the satellite catalogue and its transmitters;

@@ -1,0 +1,28 @@
+# Alertmanager — the tracked default (D-112).
+#
+# Every alert is grouped and routed to `nowhere`, a receiver with no delivery
+# configured. Alerts are still visible, silenceable and grouped in the
+# Alertmanager UI and on the Grafana dashboard; nothing leaves the host.
+#
+# That is the default because no contact address belongs in this repository or
+# in the platform (D-107). To deliver alerts, write your own configuration from
+# alertmanager.example.yml, keep it untracked, and point compose at it:
+#
+#   ALERTMANAGER_CONFIG_FILE=alertmanager.local.yml
+#
+# Check a configuration before using it:
+#
+#   docker run --rm -v "$PWD/deploy/alertmanager:/a:ro" --entrypoint amtool \
+#     prom/alertmanager:v0.34.0 check-config /a/alertmanager.yml
+
+route:
+  receiver: nowhere
+  # One notification per alert and provenance: a simulated station going
+  # offline is never folded into the same message as a measured one.
+  group_by: [alertname, simulated]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: nowhere

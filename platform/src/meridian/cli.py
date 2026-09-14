@@ -6,9 +6,11 @@ will be scheduled against. Each opens its own short-lived connection rather than
 the API's pooled one, because a one-shot process has nothing for a pool to
 amortize.
 
-``serve`` is a **shell**: the parser, the arguments and the exit codes are real;
-the work is not. It reports which stage of
-docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md implements it and exits
+``serve`` runs the API as the image runs it — log level, worker count and the
+metrics directory several workers need (``cli_serve``); ``jobs`` and ``db`` are
+the scheduled work and the migration check beside it. A command whose stage has
+not arrived yet — ``snapshot``, ``report`` — reports which stage of
+docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md builds it and exits
 :data:`EXIT_NOT_IMPLEMENTED`, so a caller gets an answer rather than a
 traceback — see :data:`PENDING`.
 
@@ -32,9 +34,12 @@ import psycopg
 
 from meridian import __version__
 from meridian.cli_catalogue import run_catalogue
+from meridian.cli_db import add_db_parser, run_db
 from meridian.cli_invite import run_invite
+from meridian.cli_jobs import add_jobs_parser, run_jobs
 from meridian.cli_passes import run_passes
 from meridian.cli_schedule import configurations, run_scheduler
+from meridian.cli_serve import add_serve_parser, run_serve
 from meridian.config import load_settings
 from meridian.store import station_tokens, stations
 from meridian.store.pool import CONNECT_TIMEOUT_S
@@ -61,12 +66,16 @@ class _Pending:
 
 
 PENDING: dict[str, _Pending] = {
-    "serve": _Pending(
-        stage="Stage 12 — deployment and monitoring",
+    "snapshot": _Pending(
+        stage="Stage 15 — dataset snapshots and labeling",
         gate=(
-            "a supervised server with logging and signal handling; the API "
-            "itself already runs — use `uvicorn meridian.api.app:app`"
+            "immutable, content-addressed evaluation snapshots that every "
+            "published number is regenerated from"
         ),
+    ),
+    "report": _Pending(
+        stage="Stage 22 — reproducible evaluation and reports",
+        gate="reports regenerated from a snapshot, a configuration and a seed",
     ),
 }
 """Every subcommand, and the stage that replaces its shell with real work.
@@ -285,8 +294,9 @@ def _add_schedule_parser(
 def _add_pending_parsers(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """Wire the subcommands whose parsers are real and whose work is not."""
-    subcommands.add_parser("serve", help="run the API (use uvicorn directly for now)")
+    """Wire the commands Stage 12 documents and later stages build."""
+    subcommands.add_parser("snapshot", help="build a dataset snapshot (Stage 15)")
+    subcommands.add_parser("report", help="generate an evaluation report (Stage 22)")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -310,12 +320,15 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_station_parser(subcommands)
     _add_passes_parser(subcommands)
     _add_schedule_parser(subcommands)
+    add_serve_parser(subcommands)
+    add_jobs_parser(subcommands)
+    add_db_parser(subcommands)
     _add_pending_parsers(subcommands)
 
     return parser
 
 
-NEEDS_ACTION = frozenset({"catalogue", "invite", "passes", "station"})
+NEEDS_ACTION = frozenset({"catalogue", "db", "invite", "jobs", "passes", "station"})
 """Commands that are a noun and mean nothing without a verb after them.
 
 ``meridian schedule`` is a verb already and carries its arguments directly, so
@@ -326,9 +339,12 @@ unrunnable.
 
 IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "catalogue": run_catalogue,
+    "db": run_db,
     "invite": run_invite,
+    "jobs": run_jobs,
     "passes": run_passes,
     "schedule": run_scheduler,
+    "serve": run_serve,
     "station": _run_station,
 }
 """Every subcommand that does real work, and the handler that does it.

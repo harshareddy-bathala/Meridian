@@ -63,22 +63,22 @@ def test_meridian_version_succeeds() -> None:
     assert __version__ in result.stdout
 
 
-@pytest.mark.parametrize("args", [["serve"]])
-def test_unimplemented_subcommands_report_instead_of_raising(args: list[str]) -> None:
-    """Exit 2 with a message naming the stage, never a traceback.
+def test_serve_refuses_several_workers_without_a_metrics_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exit 1 with the reason, never a traceback and never a started server.
 
-    A stub that raises is discovered by whoever needed the command, at the moment
-    they needed it. A stub that answers is discovered by reading its output.
-
-    ``serve`` is the last one. ``passes generate`` was here until Stage 7 built
-    it, and it is now covered by
-    :func:`test_passes_generate_rejects_a_local_time_horizon` and by
-    tests/integration/test_pass_generation.py.
+    ``serve`` was the last placeholder here until Stage 12 built it. What is
+    worth pinning about the real command without starting a server is its
+    refusal: two workers with no multiprocess directory would publish a
+    different count on every scrape (D-109).
     """
-    result = _run("-m", "meridian.cli", *args)
-    assert result.returncode == 2
-    assert "not implemented yet" in result.stderr
-    assert "Stage" in result.stderr
+    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
+
+    result = _run("-m", "meridian.cli", "serve", "--workers", "2")
+
+    assert result.returncode == 1
+    assert "PROMETHEUS_MULTIPROC_DIR" in result.stderr
     assert "Traceback" not in result.stderr
 
 
@@ -134,6 +134,47 @@ def test_invite_create_without_a_database_fails_cleanly() -> None:
         check=False,
     )
     assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("command", "stage"), [("snapshot", "Stage 15"), ("report", "Stage 22")]
+)
+def test_unbuilt_commands_report_their_stage_instead_of_raising(
+    command: str, stage: str
+) -> None:
+    """Exit 2 with the stage that builds the command, never a traceback.
+
+    Stage 12 documents every operator command, and these two belong to later
+    stages. A command that answers "not yet, and here is when" is discovered by
+    reading its output; one that is simply absent reads as a typo.
+    """
+    result = _run("-m", "meridian.cli", command)
+
+    assert result.returncode == 2
+    assert "not implemented yet" in result.stderr
+    assert stage in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_db_status_without_a_database_fails_cleanly() -> None:
+    """Exit 1 and a sentence when the database is unreachable, as `invite` does."""
+    import os
+
+    env = {
+        **os.environ,
+        "DATABASE_URL": "postgresql://meridian:meridian@127.0.0.1:1/meridian",
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "meridian.cli", "db", "status"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "cannot reach the database" in result.stderr
     assert "Traceback" not in result.stderr
 
 

@@ -16,6 +16,7 @@ import logging
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends
+from prometheus_client import Counter, Histogram
 
 from meridian.api import platform_clock
 from meridian.api.dependencies import get_authenticated_station_id, get_connection
@@ -48,6 +49,22 @@ _log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+HEARTBEATS = Counter(
+    "meridian_msp_heartbeats",
+    "Heartbeats accepted, by whether the station is simulated.",
+    ["simulated"],
+)
+
+HEARTBEAT_DELAY = Histogram(
+    "meridian_heartbeat_delay_seconds",
+    "Platform receipt time minus the station's sent_at, for accepted heartbeats.",
+    ["simulated"],
+    # A heartbeat is sent every 30 s (D-054) and a station is stale after 60, so
+    # the buckets resolve network delay under a second and clock skew up to the
+    # stale threshold; anything beyond is already an alert of its own.
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
+)
+
 ASSIGNMENT_HORIZON = timedelta(hours=2)
 """How far ahead of ``now`` an assignment is offered (D-026).
 
@@ -77,7 +94,7 @@ finished.
 
 def _record_heartbeat(
     conn: Connection, body: HeartbeatRequestBody, station_id: str
-) -> None:
+) -> bool:
     """Store one heartbeat and bump the station's last-seen instant.
 
     Both writes together: a heartbeat row without the ``stations`` bump would
@@ -90,6 +107,10 @@ def _record_heartbeat(
         body: The validated §4.2 payload.
         station_id: The identity the bearer token authenticated as — not
             ``body.station_id``, which the caller has already checked matches.
+
+    Returns:
+        Whether the station is simulated, from its registration record, so the
+        caller can label what it counts without reading the record again.
     """
     provenance = find_station_provenance(conn, station_id)
     if provenance is None:  # pragma: no cover — the token just resolved to it
@@ -101,6 +122,7 @@ def _record_heartbeat(
     # keeps that true if a later revision adds one.
     insert_heartbeat(conn, body.to_new_heartbeat(simulated=provenance.simulated))
     touch_last_heartbeat(conn, station_id)
+    return provenance.simulated
 
 
 def _reported_holdings(body: HeartbeatRequestBody) -> HeldReport:
@@ -188,6 +210,20 @@ def _assignments_due_now(
     return due[:MAX_ASSIGNMENTS_PER_RESPONSE]
 
 
+def _count_heartbeat(sent_at: datetime, now: datetime, *, simulated: bool) -> None:
+    """Count one accepted heartbeat and how long it took to arrive.
+
+    A negative delay means the station's clock is ahead of the platform's. It is
+    recorded as zero, because a histogram cannot hold a negative observation
+    without corrupting its sum, and clock offset is already reported separately
+    by MSP's time endpoint.
+    """
+    label = "true" if simulated else "false"
+    HEARTBEATS.labels(simulated=label).inc()
+    delay_s = max(0.0, (now - sent_at).total_seconds())
+    HEARTBEAT_DELAY.labels(simulated=label).observe(delay_s)
+
+
 @router.post("/heartbeat")
 def heartbeat(
     body: HeartbeatRequestBody,
@@ -228,9 +264,11 @@ def heartbeat(
 
     now = platform_clock.utc_now()
     with conn.transaction():
-        _record_heartbeat(conn, body, station_id)
+        simulated = _record_heartbeat(conn, body, station_id)
         _apply_reconciliation(conn, station_id, body)
         due = _assignments_due_now(conn, station_id, now)
+
+    _count_heartbeat(body.sent_at, now, simulated=simulated)
 
     return HeartbeatResponseBody(
         assignments=[AssignmentMessage.from_due_assignment(one) for one in due],

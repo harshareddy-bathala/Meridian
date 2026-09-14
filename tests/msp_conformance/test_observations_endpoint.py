@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client import REGISTRY
 
 from meridian.api.app import create_app
 from meridian.api.dependencies import get_connection
@@ -577,3 +578,33 @@ def test_no_error_response_echoes_the_bearer_token(
     )
 
     assert station["token"] not in response.text
+
+
+def test_an_accepted_observation_is_counted_by_outcome_and_provenance(
+    client: TestClient, station: dict[str, str]
+) -> None:
+    """Counted with the outcome sent and ``simulated`` from the registration.
+
+    The station here registered as measured, so the label must say ``false``
+    whatever the body contains (D-048, D-111).
+    """
+    labels = {"outcome": "decoded", "simulated": "false"}
+    before = REGISTRY.get_sample_value("meridian_msp_observations_total", labels)
+    delay_labels = {"simulated": "false"}
+    delays_before = REGISTRY.get_sample_value(
+        "meridian_observation_submission_delay_seconds_count", delay_labels
+    )
+
+    response = client.post(
+        OBSERVATIONS_PATH,
+        json=observation_body(station["station_id"]),
+        headers=auth(station),
+    )
+
+    assert response.status_code == 200, response.text
+    after = REGISTRY.get_sample_value("meridian_msp_observations_total", labels)
+    assert after == (before or 0.0) + 1
+    delays_after = REGISTRY.get_sample_value(
+        "meridian_observation_submission_delay_seconds_count", delay_labels
+    )
+    assert delays_after == (delays_before or 0.0) + 1

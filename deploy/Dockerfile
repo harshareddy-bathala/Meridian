@@ -1,19 +1,20 @@
 # Meridian platform image.
 #
-# Multi-stage so the runtime layer carries no build toolchain. CI builds this
-# multi-arch and pushes to GHCR so the Pi runs `docker compose pull` rather than
-# `docker build` — compiling psycopg wheels on a Pi is how the ten-minute
-# bring-up requirement becomes forty.
+# Multi-stage so the runtime layer carries no build toolchain.
+# .github/workflows/image-publish.yml builds it for amd64 and arm64 and pushes it
+# to GHCR, so the Pi runs `docker compose pull` rather than `docker build` —
+# compiling wheels on a Pi is how the ten-minute bring-up becomes forty (D-113).
 
-# Every tag here is pinned. A floating `latest` means the image that passed CI
-# and the image that runs on the Pi are different builds with the same name, and
-# the difference surfaces as an unreproducible failure weeks later. Digest
-# pinning arrives with the multi-arch push.
+# Every base image is pinned by tag and by digest. A floating `latest` makes the
+# image that passed CI and the image on the Pi different builds with one name; a
+# tag alone still lets its publisher move it. The digest is the multi-arch index,
+# so one pin covers both architectures. To move a pin, change the tag and take
+# the new digest from `docker buildx imagetools inspect <image>:<tag>`.
 
 # The dashboard (D-081). Pinned to the build platform: the output is HTML, CSS
 # and JavaScript, identical for every target, so a multi-arch build compiles it
 # once natively instead of running npm under arm64 emulation.
-FROM --platform=$BUILDPLATFORM node:24.21.0-bookworm-slim AS dashboard
+FROM --platform=$BUILDPLATFORM node:24.21.0-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS dashboard
 
 WORKDIR /dashboard
 # The lockfile first, for the same reason uv.lock goes first below.
@@ -23,9 +24,9 @@ COPY dashboard/ ./
 RUN npm run build
 
 
-FROM python:3.11.15-slim-bookworm AS build
+FROM python:3.11.15-slim-bookworm@sha256:d29f48a31a8b408ed19272ca1e7b10ebae13b240a27e862d3d4217c528e2e0c3 AS build
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.20 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.20@sha256:eaa5f1a3305307aaf9e67fe2bbba1d85ebbb2d8a63bce23af21797bfafbe0f8b /uv /usr/local/bin/uv
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
@@ -51,7 +52,7 @@ COPY simulator/ simulator/
 RUN uv sync --frozen --no-dev --no-editable --all-packages
 
 
-FROM python:3.11.15-slim-bookworm AS runtime
+FROM python:3.11.15-slim-bookworm@sha256:d29f48a31a8b408ed19272ca1e7b10ebae13b240a27e862d3d4217c528e2e0c3 AS runtime
 
 # Never run as root. The platform is publicly reachable by design.
 RUN useradd --create-home --uid 10001 meridian
@@ -79,4 +80,6 @@ USER meridian
 EXPOSE 8000
 
 # No transmit code paths anywhere, and no shell in the default command.
-CMD ["uvicorn", "meridian.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# `meridian serve` rather than uvicorn directly: it applies API_LOG_LEVEL and
+# API_WORKERS, and refuses several workers without a metrics directory (D-109).
+CMD ["meridian", "serve", "--host", "0.0.0.0", "--port", "8000"]

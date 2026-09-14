@@ -96,6 +96,7 @@ meridian/
 │   ├── EVALUATION.md
 │   ├── DECISIONS.md      decisions taken during implementation
 │   ├── GIT-WORKFLOW.md   branching, commits, migration rules
+│   ├── OPERATIONS.md     the runbook: bring-up, commands, backups, alerts
 │   ├── GLOSSARY.md
 │   ├── PROJECT.md        the full project document
 │   └── SOFTWARE-IMPLEMENTATION-ROADMAP.md   the staged build order
@@ -109,15 +110,17 @@ meridian/
 │       ├── reliability/  SLI computation, budget, chaos
 │       ├── store/        SQL access layer
 │       ├── api/          public + MSP endpoints
+│       ├── jobs/         the `jobs` service: pass generation and scheduling on a timer
+│       ├── metrics/      Prometheus exposition and the scrape token check
 │       ├── pass_generation.py   the job that fills `passes` from local elements
-│       └── cli.py        the `meridian` command; `cli_passes.py` beside it
+│       └── cli.py        the `meridian` command; `cli_*.py` beside it
 ├── client/               distribution: meridian-client
 │   └── src/meridian_client/     reference station client
 ├── simulator/            distribution: meridian-sim
 │   └── src/meridian_sim/        virtual stations speaking MSP
 ├── tests/                unit, integration, msp_conformance, e2e
 ├── site/                 the static public website
-├── deploy/               compose files, migrations, config, dashboards
+├── deploy/               compose, migrations, Prometheus rules, Grafana, backup tools
 ├── firmware/             (planned) Arduino rotator controller
 ├── dashboard/            web front end, served by the platform
 ├── ingest/               (planned) external archive adapters

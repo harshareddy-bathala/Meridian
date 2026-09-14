@@ -22,6 +22,19 @@ htmlcov/
 # a file; the .example beside it is tracked and carries the placeholder.
 deploy/prometheus/metrics_token
 
+# A deployment's own Alertmanager configuration and the secrets it reads
+# (D-112). Only the null-receiver default and the example are tracked.
+deploy/alertmanager/*.local.yml
+deploy/alertmanager/webhook_url
+deploy/alertmanager/smtp_password
+
+# Database backups (D-115). A dump holds every station's token hash and every
+# invite, so it is a secret as much as it is data.
+backups/
+*.dump
+*.dump.manifest.json
+*.dump.partial
+
 # Data. Nothing in the observation lineage belongs in git.
 *.db
 *.sqlite3

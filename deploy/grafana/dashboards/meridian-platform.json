@@ -1,0 +1,1538 @@
+{
+  "uid": "meridian-platform",
+  "title": "Meridian platform",
+  "description": "Stations, reports, API, scheduling and alerts. Provisioned from deploy/grafana/dashboards (D-112).",
+  "tags": [
+    "meridian"
+  ],
+  "timezone": "utc",
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "version": 1,
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Now",
+      "collapsed": false,
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Stations online — measured",
+      "description": "Real stations whose last heartbeat is under 60 s old.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum(meridian_stations{liveness=\"online\", simulated=\"false\"})",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "id": 2,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Stations online — simulated",
+      "description": "Virtual stations from the simulator. Never counted as measured (Hard rule 5).",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum(meridian_stations{liveness=\"online\", simulated=\"true\"})",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "id": 3,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Database",
+      "description": "Whether the API's last scrape could read the database.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "max(meridian_database_reachable)",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "reachable"
+                },
+                "0": {
+                  "text": "unreachable"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "id": 4,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Schema",
+      "description": "meridian db status says whether it is behind or ahead.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "min(meridian_schema_up_to_date)",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "at head"
+                },
+                "0": {
+                  "text": "not at head"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "id": 5,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Since last schedule",
+      "description": "Seconds since the scheduling task last completed. Red past 900 s, where ScheduledTaskStalled fires.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "time() - max(meridian_job_last_success_timestamp_seconds{task=\"schedule\"})",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 900
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "id": 6,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Alerts firing",
+      "description": "From Prometheus's own rule evaluation; the table at the bottom names them.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "id": 7,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Stations",
+      "collapsed": false,
+      "id": 8,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Stations by liveness",
+      "description": "Stale after 60 s without a heartbeat, offline after 90 s (D-054).",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (liveness, simulated) (meridian_stations)",
+          "refId": "A",
+          "legendFormat": "{{liveness}} · simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 20,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 9,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Heartbeats accepted per minute",
+      "description": "Two per minute per online station at the 30 s interval.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (simulated) (rate(meridian_msp_heartbeats_total[5m])) * 60",
+          "refId": "A",
+          "legendFormat": "simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 10,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Heartbeat delay",
+      "description": "Platform receipt time minus the station's sent_at. Includes clock skew.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, simulated) (rate(meridian_heartbeat_delay_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "p50 · simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, simulated) (rate(meridian_heartbeat_delay_seconds_bucket[5m])))",
+          "refId": "B",
+          "legendFormat": "p95 · simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 11,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Assignments by state",
+      "description": "Scheduled assignments only; skipped decisions are not counted.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (state, simulated) (meridian_assignments)",
+          "refId": "A",
+          "legendFormat": "{{state}} · simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 12,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Assignments overdue",
+      "description": "Held or in progress 15 minutes after the window ended, with no report. Not a miss (D-111).",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (simulated) (meridian_assignments_overdue)",
+          "refId": "A",
+          "legendFormat": "simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 13,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Observations accepted per hour",
+      "description": "",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (outcome, simulated) (rate(meridian_msp_observations_total[1h])) * 3600",
+          "refId": "A",
+          "legendFormat": "{{outcome}} · simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 14,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Observation submission delay",
+      "description": "Platform receipt time minus the observation's ended_at.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, simulated) (rate(meridian_observation_submission_delay_seconds_bucket[1h])))",
+          "refId": "A",
+          "legendFormat": "p50 · simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, simulated) (rate(meridian_observation_submission_delay_seconds_bucket[1h])))",
+          "refId": "B",
+          "legendFormat": "p95 · simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 15,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Registrations per hour",
+      "description": "",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (result) (rate(meridian_msp_registrations_total[1h])) * 3600",
+          "refId": "A",
+          "legendFormat": "{{result}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 16,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "MSP errors per minute",
+      "description": "By MSP §6 error code.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (code) (rate(meridian_msp_errors_total[5m])) * 60",
+          "refId": "A",
+          "legendFormat": "{{code}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 17,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "row",
+      "title": "API",
+      "collapsed": false,
+      "id": 18,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests per second by route",
+      "description": "",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (route) (rate(meridian_http_requests_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{route}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 19,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 31
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests per second by status class",
+      "description": "",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (status_class) (rate(meridian_http_requests_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{status_class}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 20,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 20,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 31
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency p95 by route",
+      "description": "",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(meridian_http_request_duration_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "{{route}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 21,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 31
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Database pool (answering worker)",
+      "description": "Read from whichever worker answered the scrape, so this is one worker's pool, not the sum.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "meridian_db_pool_connections",
+          "refId": "A",
+          "legendFormat": "{{kind}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 22,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 39
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Scheduling",
+      "collapsed": false,
+      "id": 23,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Task duration p95",
+      "description": "Past SCHEDULE_INTERVAL_S, rounds overlap.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, task) (rate(meridian_job_duration_seconds_bucket[30m])))",
+          "refId": "A",
+          "legendFormat": "{{task}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 24,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 48
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Task failures per hour",
+      "description": "",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (task) (increase(meridian_job_failures_total[1h]))",
+          "refId": "A",
+          "legendFormat": "{{task}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 25,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 48
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Last round's size",
+      "description": "",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "meridian_passes_computed",
+          "refId": "A",
+          "legendFormat": "passes computed",
+          "range": true,
+          "instant": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "meridian_scheduler_candidates",
+          "refId": "B",
+          "legendFormat": "scheduler candidates",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 26,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 48
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Alerts",
+      "collapsed": false,
+      "id": 27,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Firing alerts",
+      "description": "Each alert's runbook is a section of docs/OPERATIONS.md.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "ALERTS{alertstate=\"firing\"}",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "alertname": 0,
+              "severity": 1,
+              "simulated": 2,
+              "task": 3
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "id": 28,
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    }
+  ]
+}
