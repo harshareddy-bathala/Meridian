@@ -64,18 +64,20 @@ Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](http
 
 ```bash
 git clone <repo> && cd meridian
-cp deploy/.env.example .env
+cp deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.yml up -d --build
 curl http://localhost:8000/healthz
 ```
 
-Platform on `:8000`. The database is deliberately not published — nothing outside the compose network needs it.
+The env file goes in `deploy/`, beside the compose file: compose reads it from there whatever directory the command runs in (D-114). On a Pi, `docker compose -f deploy/docker-compose.yml pull` fetches the prebuilt image instead of building.
 
-Optional profiles: `--profile metrics` for Prometheus and Grafana on `:3001`, `--profile sim` for a simulated station, `--profile public` for the tunnel.
+The default profile runs the database, migrations, the API on `:8000` and the jobs process that generates passes and schedules them every five minutes. The database is deliberately not published — nothing outside the compose network needs it.
+
+Optional profiles: `--profile metrics` for Prometheus, Alertmanager and Grafana on `:3001` (copy `deploy/prometheus/metrics_token.example` to `metrics_token` first), `--profile sim` for a simulated station, `--profile public` for the tunnel.
 
 Bringing the whole platform up on a clean machine in under ten minutes is a hard requirement, not an aspiration. If it takes longer, that is a bug. Measured: about five minutes cold on a laptop including image pulls and the image build, twenty seconds warm. On a Pi, pull a prebuilt image rather than building on the device.
 
-CI measures it on every pull request rather than taking the figure on trust — a cold `docker compose up --build` on a clean runner, timed from before the build to the first healthy `/healthz`, failing over 600 seconds.
+CI measures it on every pull request rather than taking the figure on trust — a cold `docker compose --profile metrics up --build` on a clean runner, timed from before the build until every service with a healthcheck reports healthy, failing over 600 seconds.
 
 ## Development
 
@@ -142,8 +144,8 @@ uv run python -m meridian_sim.station --count 1 --seed 4471 \
 ```
 
 Or let compose do all of it: `docker compose -f deploy/docker-compose.yml
---profile sim up` brings up the seeding, the fleet and a loop that keeps
-generating passes for it.
+--profile sim up` brings up the seeding and the fleet, and the default
+profile's jobs process keeps generating passes for it and scheduling them.
 
 Simulated stations speak real MSP to the real platform, through the same client
 a physical station runs. They are indistinguishable from physical stations at
