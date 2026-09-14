@@ -1960,6 +1960,26 @@ The OSM tile usage policy permits light, attributed use and forbids heavy use. A
 
 ---
 
+## D-093 — Pass windows and angles are published to the minute and the degree
+
+**2026-09-14 · accepted** · *`meridian/api/public/window_privacy.py`, Stage 11*
+
+D-082 lets an operator publish their station's position no more precisely than they choose, and rounds the coordinates on the way out. Stage 11's remaining endpoints publish things **computed from the stored position** — a pass's acquisition and loss times, its peak elevation, its azimuths, and the assignment and observation windows that inherit them. At full precision those undo D-082.
+
+The leak is not hypothetical arithmetic. A kilometre of cross-track displacement moves a low-Earth-orbit pass's peak elevation by roughly a tenth of a degree and its acquisition time by a fraction of a second, and a station publishes dozens of passes a day. Anyone with the public element sets can fit the one position that reproduces them all, and recover the site far more finely than the two decimals its operator declared.
+
+**Every public window is widened to whole minutes — its start floored, its end ceiled — and every angle is published as whole degrees.** That applies to passes, assignments and observations alike, whatever precision the station declared, and it happens in one module, as D-082's rounding does.
+
+Widening rather than rounding is the point of the direction: a published window always *contains* the real one, so a reader is never told a pass ends before it does. A minute is a small fraction of an 8–15 minute pass and loses nothing a person reading a queue needs; the station itself receives exact times over MSP, which is where precision is required. Whole degrees keep "a 72° pass" meaningful while taking away the tenths an inversion would lean on.
+
+This is coarsening, not a proof of privacy. A minute and a degree make the fit far weaker than the declared precision needs; they do not make it impossible for a station publishing thousands of passes over months. An operator for whom that matters should declare coarse coordinates *and* understand that a public schedule is information — which `MSP-SPEC.md` §4.1's description of the field should say when the specification is next revised.
+
+*Rejected: scaling the coarsening to the declared precision.* It sounds more exact and is mostly bookkeeping: the relationship between decimals and seconds depends on orbit altitude and geometry, so a "matched" rule would be a guess wearing a formula. One rule is testable as a table and explainable in a sentence.
+
+*Rejected: not publishing pass geometry at all.* Stage 11 asks for upcoming passes and assignment reasons, and a scheduling reason like "peak elevation below the configured minimum" is unreadable without the elevation it refers to.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
