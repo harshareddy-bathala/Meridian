@@ -2425,6 +2425,12 @@ The Dockerfile's header has promised this since Stage 1: the Pi pulls, it does n
 - The tags are `sha-<short>` and `main`.
 - It never runs on a pull request, so a fork needs no credentials and the existing `image` job stays the per-PR check.
 
+**Only after CI passes, and `main` moves last.** The workflow runs when the CI workflow has succeeded on a push to `main`, not on the push itself.
+- A workflow triggered by the push would run beside CI and could publish a commit whose tests, cold bring-up or restore round trip then failed.
+- It pushes `sha-<short>` first, then runs the image's entry points on both architectures from the registry.
+- Only then does it point `main` at that image, so the tag a Pi pulls never names an image that failed to import on its own architecture.
+- A GHCR package starts private. Making it public, or logging the Pi in, is a one-time step in `docs/OPERATIONS.md`.
+
 **Compose.** Every platform service gets `image: ${MERIDIAN_IMAGE:-ghcr.io/harshareddy-bathala/meridian:main}` beside its `build:`. `docker compose pull && docker compose up` is then the Pi's path, and `up --build` is still a laptop's.
 
 **Base images** are pinned by digest as well as tag, so the build that passed CI and the build on the Pi start from the same bytes.
