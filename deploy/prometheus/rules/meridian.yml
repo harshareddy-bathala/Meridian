@@ -1,0 +1,172 @@
+# Meridian alert rules (docs/DECISIONS.md D-111, D-112).
+#
+# Every alert here has a firing case and a silent case in
+# deploy/prometheus/tests/meridian.test.yml, run in CI with:
+#
+#   promtool test rules deploy/prometheus/tests/meridian.test.yml
+#
+# Change a rule and its test in the same commit. An alert that has never been
+# seen to fire is a claim, not a check.
+#
+# Labels. `severity` is `critical` when the platform itself cannot do its job
+# (nothing is received, scheduled or stored) and `warning` when one station or
+# one report needs looking at. Station alerts keep `simulated`, so a notification
+# about a virtual station can never be read as one about real hardware (Hard
+# rule 5). No alert carries a station identifier: the metrics have none to give
+# (D-111), and the dashboard's station list says which station it is.
+#
+# Annotations. `summary` says what is wrong; `runbook` links the section of
+# docs/OPERATIONS.md that says what to check first. The advice lives there, not
+# here, so it can be read without an alert firing and changed without touching
+# a rule's test.
+#
+# Thresholds that follow a setting say which one. The rules are static files and
+# do not read .env, so changing that setting means changing the number here.
+
+groups:
+  - name: meridian-platform
+    rules:
+      - alert: ApiUnavailable
+        # A wrong metrics_token also lands here: the refused scrape is answered
+        # 404 and reads as a target that is down (D-087).
+        expr: up{job="meridian"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: The platform API is not answering scrapes.
+          runbook: docs/OPERATIONS.md#apiunavailable
+
+      - alert: DatabaseUnavailable
+        expr: meridian_database_reachable == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: The API is running but cannot reach the database.
+          runbook: docs/OPERATIONS.md#databaseunavailable
+
+      - alert: SchemaMigrationMismatch
+        # The roadmap's "migration failure". A migration that fails outright
+        # stops compose from starting the API, which fires ApiUnavailable; this
+        # catches a database that is up but at another revision — restored from
+        # an older backup, or left behind by an image rolled back.
+        expr: meridian_schema_up_to_date == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: The database is not at the migration this code expects.
+          runbook: docs/OPERATIONS.md#schemamigrationmismatch
+
+  - name: meridian-stations
+    rules:
+      - alert: StationStale
+        # SC-5: a disconnected station is detected within 90 s. Liveness turns
+        # stale 60 s after the last heartbeat (two missed at the 30 s interval),
+        # and a scrape plus an evaluation add at most 30 s more. No `for`: any
+        # wait here comes straight out of that budget.
+        expr: sum by (simulated) (meridian_stations{liveness="stale"}) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} station(s) have missed two heartbeats (simulated={{ $labels.simulated }})."
+          runbook: docs/OPERATIONS.md#stationstale
+
+      - alert: StationOffline
+        # Offline is 90 s without a heartbeat, reached only through stale, so
+        # StationStale has already fired by the time this does.
+        expr: sum by (simulated) (meridian_stations{liveness="offline"}) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} station(s) have sent no heartbeat for over 90 s (simulated={{ $labels.simulated }})."
+          runbook: docs/OPERATIONS.md#stationoffline
+
+      - alert: HeartbeatIngestionStopped
+        # No heartbeat from any station in five minutes, while stations that
+        # have heartbeated before exist. One station down is StationOffline;
+        # every station at once points at the path between them and the
+        # platform — the tunnel, DNS, or the MSP endpoint itself.
+        #
+        # `or vector(0)`: the counter has no series until the API has counted a
+        # heartbeat since it started, and an absent series must read as none
+        # arriving, not as nothing to evaluate.
+        expr: >-
+          (sum(increase(meridian_msp_heartbeats_total[5m])) or vector(0)) == 0
+          and on()
+          sum(meridian_stations{liveness=~"online|stale|offline"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: No station heartbeat has reached the platform in five minutes.
+          runbook: docs/OPERATIONS.md#heartbeatingestionstopped
+
+      - alert: ObservationsOverdue
+        # The roadmap's "observation queue growing", measured where the platform
+        # can see it (D-111): assignments still held or in progress 15 minutes
+        # after their window ended, with no report. Not a miss — nothing is
+        # classified from this. Thirty minutes more before firing, because a
+        # station catching up after an outage is normal.
+        expr: sum by (simulated) (meridian_assignments_overdue) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} assignment(s) have had no report for 45 minutes after their window (simulated={{ $labels.simulated }})."
+          runbook: docs/OPERATIONS.md#observationsoverdue
+
+      # Stage 20 adds LossBudgetThresholdReached here, with confirmed misses and
+      # indeterminate outcomes. Until platform/reliability decides what a miss
+      # is, there is no series to alert on, and a stand-in would publish a zero
+      # that means "not measured" (D-086, D-111).
+
+  - name: meridian-scheduling
+    rules:
+      - alert: SchedulerUnavailable
+        expr: up{job="meridian-jobs"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: The jobs process is not answering scrapes; nothing is being scheduled.
+          runbook: docs/OPERATIONS.md#schedulerunavailable
+
+      - alert: ScheduledTaskStalled
+        # 900 s is three rounds at the default SCHEDULE_INTERVAL_S=300: one
+        # failed round is logged and retried, three in a row is a problem.
+        expr: time() - meridian_job_last_success_timestamp_seconds > 900
+        labels:
+          severity: critical
+        annotations:
+          summary: "The {{ $labels.task }} task has not completed in over 15 minutes."
+          runbook: docs/OPERATIONS.md#scheduledtaskstalled
+
+      # The gauge above is absent until a task first succeeds, and a restart
+      # clears it, so a task that has failed every round since the process
+      # started is caught here instead: up for 15 minutes, never succeeded. One
+      # rule per task, because absence has no label to say which task is missing.
+      - alert: ScheduledTaskNeverSucceeded
+        expr: >-
+          time() - process_start_time_seconds{job="meridian-jobs"} > 900
+          unless on(job, instance)
+          meridian_job_last_success_timestamp_seconds{task="schedule"}
+        labels:
+          severity: critical
+          task: schedule
+        annotations:
+          summary: The schedule task has not completed once since the jobs process started.
+          runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+      - alert: ScheduledTaskNeverSucceeded
+        expr: >-
+          time() - process_start_time_seconds{job="meridian-jobs"} > 900
+          unless on(job, instance)
+          meridian_job_last_success_timestamp_seconds{task="pass_generation"}
+        labels:
+          severity: critical
+          task: pass_generation
+        annotations:
+          summary: The pass_generation task has not completed once since the jobs process started.
+          runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
