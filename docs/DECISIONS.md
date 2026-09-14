@@ -2203,7 +2203,7 @@ Placement follows `ARCHITECTURE.md`'s rules: boundaries are firm, only `platform
 
 ## D-103 — Proposed: optional reception evidence fields for MSP 0.3
 
-**2026-09-14 · open** · *a proposal; `MSP-SPEC.md` is not edited by this entry*
+**2026-09-14 · accepted 2026-09-14, amended by D-116 and D-117** · *`MSP-SPEC.md` §4.4, §6 and §7 at 0.3; D-116 moves the implementation from Stage 25 to Stage 13*
 
 **First, whether §4.4 as of 0.2 is already enough.**
 
@@ -2492,6 +2492,330 @@ A backup schedule, retention, and a restore drill on the real deployment are Sta
 
 ---
 
+## D-116 — MSP 0.3 lands with Stage 13, not Stage 25
+
+**2026-09-14 · accepted** · *`docs/MSP-SPEC.md`, `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 25, Stage 13*
+
+**D-103 is accepted, and its fields arrive with the stage that first produces them.** Stage 13 builds the decoder integration, the one step that can measure a noise floor, SNR across a pass, and decoder statistics. Building that pipeline against MSP 0.2 would squeeze all of it into untyped `products[].frames` and `client_notes`, then rewrite the pipeline at Stage 25. D-103's own rejected alternatives explain why that fails.
+
+**The order is D-103's, and only the stage changes.**
+1. A `spec(msp):` pull request carries this entry, D-117 and D-118, and the specification edit. It is **documentation only**, as MSP 0.2's was (#11).
+2. The Stage 13 pull request then implements, in this order: platform storage, platform validation, then the client.
+
+**Why the specification PR carries no conformance tests.** D-103 said the specification change comes "with its conformance tests". But a conformance test asserts the platform's bytes, and the platform cannot produce them until the implementation exists. A test merged ahead of its implementation must be skipped or marked to fail, which is scaffolding. The tests land in the Stage 13 pull request, in the same commit as the behaviour they pin.
+
+**The platform deploys before any 0.3 client.** Today's request model ignores unknown fields, so a 0.2 platform would accept a 0.3 body and silently drop its evidence.
+
+**What Stage 25 keeps:**
+- observation-sourced `noise_measurements` rows;
+- the transmitter's nominal frame interval, and frames expected;
+- the simulator's production of the new fields;
+- the four ground-truth faults.
+
+Its "Specification first" subsection and the first platform and station-client bullets are now Stage 13's. The roadmap is edited to say so.
+
+*Rejected: staying on MSP 0.2 for Stage 13 and upgrading at Stage 25.* The client pipeline would be built twice. The digest rule (D-118), which has to be decided before the first 0.3 row exists, would wait for a stage that does not need it.
+
+---
+
+## D-117 — What MSP 0.3 refuses
+
+**2026-09-14 · accepted** · *`docs/MSP-SPEC.md` §4.4, §6; `meridian/api/models/observation.py`, Stage 13*
+
+D-072's principle carries over: refuse a body that contradicts itself, store anything merely unusual. Every field D-103 adds is optional, and every rule below constrains only the new fields, so **no valid 0.2 body is refused by 0.3**.
+
+**`signal` gains three optional fields:**
+- `noise_floor_dbfs`: a finite number.
+- `receiver_gain_db`: a finite number.
+- `snr_samples`: an array of `{ "t": <UTC instant>, "snr_db": <finite number> }`.
+  - **At most 512 entries**; more is `malformed`, like `doppler_samples` (D-032).
+  - Order is significant: they are a time series, stored and hashed as sent.
+  - `null` (not measured) and `[]` (measured, nothing worth reporting) remain different claims.
+
+**A noise floor requires a gain.** D-103 makes the floor comparable only at a stated gain, so a floor without one cannot be compared with anything, and is `malformed`. A gain without a floor is accepted; it describes the receiver.
+
+**`decode` is an optional top-level object.**
+- `decoder`: a non-empty string. **Required whenever the block is present**, because a statistic from an unnamed decoder cannot be segmented by decoder (EVALUATION.md §11.1).
+- `decoder_version`: optional string.
+- `frames_decoded`, `frames_failed`: optional integers, each ≥ 0. Optional because a decoder with no frame structure has no frames to count, and zero would be a false claim.
+
+**Outcome consistency, applied only when `frames_decoded` is present:**
+
+| `outcome` | `frames_decoded` must be |
+|---|---|
+| `decoded` | ≥ 1 |
+| `signal_no_decode` | 0 |
+| `no_signal` | 0 |
+| `aborted` | anything |
+
+**`not_attempted` carries no `decode` block and none of the three new `signal` fields.** A station that never began measured nothing. Its body already carries no detection (D-072).
+
+**D-072 is unchanged.**
+- `decoded` and `signal_no_decode` still require `signal.detected` with `first_detection_at`.
+- A station whose decoder produced frames but no timing reports `aborted`, with its `decode` block and no `signal` block (D-122).
+- The alternative — `detected` without an instant — would admit a guess into the timing measurement SC-3 is built on.
+
+---
+
+## D-118 — Fields added after 0.2 are hashed only when present
+
+**2026-09-14 · accepted** · *`meridian/observations/canonical_body.py`, D-070, Stage 13*
+
+**The problem.** D-070's canonical body renders every field of the stored record, writing an absent one as `null`. Adding MSP 0.3's fields under that rule would change the canonical bytes of **every observation already stored**, whose new columns are all `null`. Two things would break:
+- **Every stored `content_sha256` would stop matching its own row.** A dataset snapshot could no longer verify its hashes, which is hard rule 8.
+- **A 0.2 observation still queued on a station** would retry as a "change" and write a spurious new revision, defeating D-015.
+
+**The rule.** The keys `noise_floor_dbfs`, `receiver_gain_db`, `snr_samples` and `decode` are rendered only when their value is not `null`. Every later additive field follows the same rule. It is a stated exception to D-070's "absent fields are written as `null`", and it applies only to keys introduced after 0.2.
+
+**What is preserved:**
+- **Absent and `null` still hash identically**, so a station omitting a field and one sending `null` agree, as before.
+- **`snr_samples: []` still differs from absent.** An empty array is not `null` and is rendered.
+- Inside `decode`, the optional members are rendered as `null` when missing. The block's own shape is new in 0.3, so there are no stored digests to protect there.
+
+A golden digest of a 0.2 observation is pinned before the change and must survive it.
+
+*Rejected: a `canonical_version` column and re-hashing old rows.* It changes stored history to accommodate a schema change, and a snapshot taken before the migration would then disagree with one taken after, over identical facts.
+
+---
+
+## D-119 — MSP 0.3's evidence is stored as columns on `observations`
+
+**2026-09-14 · accepted** · *`deploy/migrations/sql/0015_reception_evidence.sql`, `docs/DATA-MODEL.md`, Stage 13*
+
+**Seven nullable columns on the `observations` hypertable**, mirroring how `doppler_samples` is already held:
+
+| Column | Type | From |
+|---|---|---|
+| `noise_floor_dbfs` | `double precision` | `signal.noise_floor_dbfs` |
+| `receiver_gain_db` | `double precision` | `signal.receiver_gain_db` |
+| `snr_samples` | `jsonb` | `signal.snr_samples`, as sent |
+| `decoder` | `text` | `decode.decoder` |
+| `decoder_version` | `text` | `decode.decoder_version` |
+| `frames_decoded` | `integer` | `decode.frames_decoded` |
+| `frames_failed` | `integer` | `decode.frames_failed` |
+
+`observations_current` is recreated in the same migration, because a view's `*` is expanded when the view is created.
+
+*Rejected: a side table keyed on the observation.* Every row read by the verdict would need a join, and immutability (D-015) would have to be enforced in two places for one record.
+
+**The compressed-chunk question is tested, not assumed.** `observations` has compression enabled with a 7-day policy, and no migration has altered it since. A nullable `ADD COLUMN` is supported on compressed hypertables. A `CHECK` added across compressed chunks is not established for TimescaleDB 2.29.
+
+The migration is therefore tested by compressing a chunk holding an existing row and then upgrading. **Database `CHECK`s are added only where that test proves they apply.** Wherever they cannot be, D-117's rules are enforced by the request model alone, and the migration's header says so. The model already restates every database rule (D-072), so no body the model accepts could be refused later.
+
+**Not exposed on `/api/v1` yet.** The public observation history keeps its current fields. Decoder statistics are published when Stages 25 and 26 give them a reader. D-083 makes `/api/v1` no compatibility promise, and adding fields breaks nothing that reads it today.
+
+---
+
+## D-120 — The reception layer sits below `PassExecutor`
+
+**2026-09-14 · accepted** · *`meridian_client/reception/`, `meridian_client/execution.py`, Stage 13*
+
+**`PassExecutor` stays the loop's only view of reception** (D-069, D-073). Stage 13 adds `ReceptionExecutor`, one implementation composed of three narrower protocols in a new `meridian_client/reception/` subpackage:
+- **`Receiver`** owns an SDR, or stands in for one. It starts a capture, reports whether it is still alive, and stops it.
+- **`Decoder`** turns a finished recording into a decode report.
+- **`RotatorController`** points an antenna, or does nothing (D-126).
+
+The names are D-069's: an executor drives a receiver, a decoder and possibly a rotator.
+
+**No threads.** The loop is single-threaded, and none of `begin`, `end` or `take_completed` may block for a pass.
+- A real receiver is a subprocess writing a file: `rtl_sdr` is the shape the protocol is checked against, though no physical adapter ships at this stage.
+- A decoder is a subprocess.
+- Both are polled on each tick. The only waits allowed are bounded ones of seconds, when stopping or killing a process.
+
+A thread would make the executor's state concurrent for no gain, because every long-running part is already another process.
+
+**What ships:**
+- the three protocols;
+- a simulated receiver and a file-replay receiver (D-125);
+- the null rotator (D-126);
+- the subprocess decoder adapter (D-124);
+- `ReceptionExecutor`.
+
+**The simulator is unchanged.** `SimulatedExecutor` keeps implementing `PassExecutor` directly. Its outcome model, determinism (D-077) and golden digest stay exactly as they are; Stage 25 extends it with the new fields.
+
+---
+
+## D-121 — The executor states its capture window, and the loop reports what it says
+
+**2026-09-14 · accepted** · *`meridian_client/execution.py`, `meridian_client/station_loop.py`, `meridian_client/held_assignments.py`, Stage 13*
+
+Four faults in the loop become real once reception takes real time.
+
+**1. Capture starts late, and is never widened.**
+- The loop begins an assignment on the first tick at or after `start_at`, so up to one heartbeat interval late.
+- MSP §4.3 asks a station to widen by `timing_uncertainty_s` if it can afford the recording, and nothing does.
+
+`PassExecutor` gains **`capture_window(assignment) -> CaptureWindow`**, and `ReceptionExecutor` answers with the assignment's window widened by `timing_uncertainty_s` at each end.
+- The platform has already widened by one σ (D-021), so a capture covers two σ in total. D-060 prices the trade: overstating costs disk; understating loses the start of the pass.
+- The loop clips a capture's end to the next held assignment's window, so one pass's tail never delays the next pass's head.
+- `run()` sleeps until the earlier of the next heartbeat and the next capture edge. Capture then starts on time, at the cost of one extra heartbeat at each edge. That extra heartbeat is also the one that reports `listening` promptly.
+
+**2. Work is dropped from the heartbeat while it is still being done.**
+- The loop drops an assignment at `end_at`, so the heartbeat stops naming it during the widened tail, and while its decoder runs.
+
+An assignment now **stays in `held_assignments` until its result has been handed to the queue**. D-067 already made the platform keep an assignment the station still names out of expiry, however overdue, so nothing changes there.
+
+**3. The heartbeat copies `listening` from the assignment, not from the receiver.**
+- A dead receiver would keep claiming it was listening, which is exactly the claim hard rule 7 must be able to trust.
+
+`PassExecutor` gains **`status(running) -> ExecutionStatus`**: a `state`, a `listening` block, and the ids still unfinished. `ReceptionExecutor` reports:
+- `listening`, with the frequency and mode the receiver actually tuned, only while the receiver is alive;
+- `processing` while a decode runs;
+- `degraded`, with no listening block, when a receiver has died inside its window.
+
+`NullExecutor` and `SimulatedExecutor` report what the loop reports today, so their behaviour is byte-identical.
+
+**4. A held pass that never began disappears.**
+- An assignment the station held but never started is dropped at its window end, and the platform later expires it as a decline.
+- A decline is absence from `held_assignments` (D-003), and that is not what happened: the station took the work and failed to start it.
+
+The loop now calls `end()` for a held assignment whose window closed without `begin`, and the executor yields `not_attempted` for it (MSP §4.4).
+
+`StationLoop`'s constructor is unchanged, since everything new arrives through the protocol it already holds.
+
+---
+
+## D-122 — How a reception's outcome is derived
+
+**2026-09-14 · accepted** · *`meridian_client/reception/outcome_rules.py`, Stage 13*
+
+The rules are a pure function from the facts of one reception to an `ObservationResult`, and the first matching row wins.
+
+| Facts | `outcome` | `signal` | `decode` |
+|---|---|---|---|
+| Never started — receiver refused, disk guard, no decoder for the mode, or window closed before `begin` | `not_attempted` | — | — |
+| Started; the decoder failed, timed out, or wrote an invalid report | `aborted` | — | — |
+| Capture interrupted, or covering less than the policy's minimum of the window, with a valid report | `aborted` | evidence if any | yes |
+| Complete; frames ≥ 1 and a detection offset | `decoded` | detected, at the instant below | yes |
+| Complete; frames ≥ 1 and no timing | `aborted` | — | yes |
+| Complete; frames 0 or not counted; an SNR sample at or above the threshold | `signal_no_decode` | detected, at the first such sample | yes |
+| Complete; frames 0; no SNR sample at or above the threshold | `no_signal` | not detected, with SNR, floor and gain | yes |
+| A report with neither frames nor SNR | `aborted` | — | — |
+
+**`no_signal` is reached only by a complete capture and a successful decode that found nothing.** That is what "verifiably listening, nothing detected" means (MSP §4.4). Every failure of the station's own chain is `aborted` or `not_attempted`, so absence of signal is never confused with a broken station (hard rule 7).
+
+**The detection instant.**
+- It is the recording's first-sample time plus the earliest evidence offset in the report: the first decoded frame, or the first SNR sample at or above the threshold.
+- The first-sample time is derived when capture stops, as `stopped_at − sample_count / sample_rate`, not from when the receiver process was launched. Start-up latency would otherwise bias every timing-error measurement by an amount `clock_uncertainty_s` does not cover.
+- The method and threshold are named in `client_notes`, because first detection depends on the detector (D-100).
+- An offset outside the recording invalidates the report. It is never clamped into range.
+
+**Unknown is absent, never zero.** A floor, gain, version or count the decoder does not report is omitted from the body.
+
+**SNR samples beyond 512** are reduced by taking the sample nearest the centre of each of 512 equal time buckets. They stay raw values, not averages (D-032), and `peak_snr_db` is taken over the full series before the reduction.
+
+---
+
+## D-123 — Each reception keeps a capture folder, and a restart resumes from it
+
+**2026-09-14 · accepted** · *`meridian_client/reception/capture_folder.py`, `capture_recovery.py`, Stage 13*
+
+**One folder per assignment**: `<state>/captures/<assignment_id>/`, beside `held.json` and `outbox/`. It holds a `manifest.json`, the recording (or a reference to it), the decoder's output directory, its report, and its stdout and stderr logs.
+
+**The manifest records the phase**, and is rewritten temp-then-rename on each transition (D-068):
+- `refused`
+- `capturing`
+- `captured`
+- `decoding`
+- `reported`
+- `handed_over`
+
+**Recovery at start-up reads every manifest:**
+
+| Phase found | Action |
+|---|---|
+| `capturing` | the capture was interrupted: decode what was recorded, and report `aborted` |
+| `captured`, `decoding` | clear the decoder's output and decode again |
+| `reported` | rebuild the result and hand it over again |
+| `handed_over` | nothing |
+
+The rebuilt body is deterministic, so a result handed over twice produces an identical digest, and the platform writes nothing the second time (D-015). The window D-073 names — between the queue write and `handed_over` — is unchanged, and now reconstructible, as D-073 anticipated.
+
+**A disk guard runs before every capture.** The estimated recording size times a margin, plus a fixed reserve, must be free, or the pass is `not_attempted`, with the reason in `client_notes`. A full disk mid-capture is a worse outcome than a pass never started.
+
+**A recording is referenced where it is, never copied or hashed on the loop.** An LRPT pass is about a gigabyte, and copying or hashing that on a Pi takes seconds the loop may not spend (D-069). The manifest records path, size and modification time, and a recording that changed before its decode is refused.
+
+**Retention.**
+- The recording is deleted once its manifest reaches `handed_over`, unless the station is configured to keep recordings.
+- Manifests, reports and logs are pruned after thirty days, the acceptance window D-074 already mirrors.
+- Recordings are never committed to the repository (`GIT-WORKFLOW.md` Rule 4); the file patterns are gitignored.
+
+---
+
+## D-124 — A decoder is a supervised subprocess that writes Meridian's report
+
+**2026-09-14 · accepted** · *`meridian_client/reception/subprocess_decoder.py`, `decode_report.py`, D-001, Stage 13*
+
+**Invocation.**
+- Each mode, such as `lrpt`, maps to an argv template in the station's configuration.
+- Templates are validated when the configuration is loaded, against a closed set of placeholders: `{recording}`, `{output_dir}`, `{report_path}`, `{sample_rate_hz}`, `{sample_format}`, `{centre_freq_hz}` and `{mode}`. An unknown placeholder is a configuration error, not a runtime surprise.
+- The process is started with no shell, so a file name can never become a command, in its own session so its whole process group can be stopped.
+- Its stdout and stderr go to files in the capture folder, never to pipes, which deadlock a child that writes more than a pipe buffer while nobody reads.
+
+**Supervision.**
+- The timeout is measured on an injected monotonic clock.
+- When it expires: terminate the process group, wait a bounded time, then kill it.
+- At most one decode runs at a time, oldest first, at a lower CPU priority. A capture always takes precedence over a decode.
+- A mode with no configured decoder is refused at `begin`, and the pass is `not_attempted`.
+
+**The output contract is Meridian's own JSON report**, written to `{report_path}`:
+- `decoder`, `decoder_version`;
+- `frames_decoded`, `frames_failed`, and the offset of the first decoded frame;
+- SNR points as offsets into the recording;
+- noise floor.
+
+Parsing is strict: integers exclude booleans, and numbers must be finite. A missing or unparseable report is a failed decode. A station wraps whichever decoder it runs in a script that writes this file.
+
+**The GPL boundary holds by construction** (D-001). SatDump and GNU Radio are only ever run as separate programs named in configuration, and nothing in the client links, imports or copies them.
+
+**No SatDump output reader ships yet.** Reading SatDump's own files — its frame file's naming, its sync-marker handling, where it logs SNR — is unverified without a real recording through a real SatDump. A reader built from documentation alone could count frames wrongly with nothing to show it, and a physical adapter may stay unvalidated at this stage, but it may not be wrong.
+
+The reader, and its `ATTRIBUTION.md` entry, land when a recorded pass validates them. Until then, a SatDump wrapper script writes the report above.
+
+---
+
+## D-125 — A synthetic receiver can only report for a simulated station
+
+**2026-09-14 · accepted** · *`meridian_client/reception/synthetic_receivers.py`, `reception_executor.py`, hard rule 5, Stage 13*
+
+**The hazard.** A simulated receiver or a file-replay receiver attached to a station registered `simulated: false` would report `listening` and submit a measured-looking observation of a pass nobody heard. That is a simulated result presented as measured, which hard rule 5 exists to prevent, delivered through the one path the platform trusts.
+
+**The guard is structural.**
+- Every `Receiver` declares `hears_the_sky`: true for a physical receiver, false for the simulated and replay receivers.
+- `ReceptionExecutor` is constructed with the station's `simulated` flag, and **refuses a receiver that does not hear the sky for a station that is not simulated**, at construction, before any pass.
+
+**Replay says it is replay.** A file-replay result names the recording it replayed in `client_notes`. An offline replay run (Stage 13's optional runner) writes a body to a file or stdout and never submits it.
+
+*Rejected: trusting configuration discipline.* The mistake this prevents is exactly the one a tired operator makes, and it leaves no trace in the data.
+
+---
+
+## D-126 — Receive-only is structural, and antenna tracking is deferred
+
+**2026-09-14 · accepted** · *`meridian_client/reception/`, `docs/ARCHITECTURE.md` rules 2 and 6, D-066, D-094, Stage 13*
+
+**The station never transmits (hard rule 4), and the reception layer has nowhere a transmission could come from.**
+- No protocol has a transmit-shaped method.
+- No adapter opens a device for writing.
+- The decoder adapter runs programs that read a recording.
+
+A test asserts the protocol and adapter surface. A denylist of transmit-capable programs is not claimed as a safeguard, because a list cannot be complete, and a partial list would be presented as a guarantee it is not.
+
+**Only the null rotator ships.**
+- `RotatorController` is defined, so a tracking station later changes an implementation, not the executor.
+- `NullRotator` is what the funded station has: a fixed QFH antenna for 137 MHz (D-094). Phase 1 schedules every station as fixed (D-066).
+- `slewing` is never reported.
+
+**Why tracking waits.** Pointing an antenna needs azimuth and elevation over the pass, which means propagation in the client. ARCHITECTURE rule 2 allows only `platform/orbit` to import a propagator, and the ruff ban enforces it. The two ways forward are recorded for the stage that funds the tracking hardware:
+- **(a)** the assignment carries a pointing table computed by the platform — an MSP change;
+- **(b)** rule 2 is relaxed for the client's use of `sgp4`, with the element set it already receives (§4.3).
+
+Neither is decided here, and neither is needed by a fixed antenna.
+
+*Rejected: a Hamlib `rotctld` adapter now.* It would be an adapter with nothing to point it, tested against a fake server, for hardware that is optional and unfunded.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -2505,12 +2829,11 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 
 **Nothing is now unrecorded.** `GIT-WORKFLOW.md` Rule 10's question — whether AI-assisted commits are marked — was carried as outstanding through every previous pass and is settled by **D-043**: a `Co-Authored-By` trailer from that entry forward, with existing history left alone. That was the last Stage 0 item.
 
-**Opened 2026-09-14 by the post-reception layer**, each waiting on the team rather than on evidence the documents already hold:
+**Opened 2026-09-14 by the post-reception layer**, each waiting on the team rather than on evidence the documents already hold. D-103, opened with them, was accepted the same day for Stage 13 (D-116):
 
 | | Question | Blocks |
 |---|---|---|
 | **D-100** | Which method SC-3 is measured by, after `first_detection_at` is tested on archive data | SC-3's analysis in Stage 22 |
-| **D-103** | Whether MSP 0.3 adds optional noise floor, SNR samples and decoder statistics | Stage 25 |
 | **D-106** | What label "usable" is, independent of the verdict's inputs | Stage 26 and SC-7 |
 | **D-107** | Whether an owner's contact is held, and how §16 of `PROJECT.md` changes | Stage 29 beyond team-operated stations |
 | **D-108** | Archive rows as runtime evidence; D-053 against §17; phase naming; calendar placement | — |
@@ -2622,6 +2945,14 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — `GET /msp/v0/time` (Stage 4.1) | `meridian/api/msp.py`, `tests/msp_conformance/` |
 | — client transport and clock estimator (Stage 4.1) | `meridian_client/{transport.py,clock.py}` |
 | D-045 clock uncertainty floored at clock resolution | `meridian_client/clock.py`, `tests/unit/test_clock_offset_convention.py` |
+
+**Landed 2026-09-14**, opening Stage 13 with MSP 0.3.
+
+| Decision | Applied to |
+|---|---|
+| D-103 accepted, D-116 moved to Stage 13 | `MSP-SPEC.md` header, §4.4, §6, §7; `SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 25 |
+| D-117 0.3 validation rules | `MSP-SPEC.md` §4.4, §6 |
+| D-118 to D-126 | — (implemented by the Stage 13 pull request) |
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
 

@@ -236,7 +236,7 @@ How modules 13–17 are proven (D-095). Everything above applies to them — tem
 - **Data.** Measured receptions only: our station's, and archive receptions where the inputs exist. **Never simulated** — D-078 applies without exception (D-105).
 - **Split.** Temporal: train on earlier receptions, calibrate on a later interval, test on the latest untouched interval. Report the boundary dates.
 - **Base rate.** The fraction of usable receptions in the training period, predicted for every test reception.
-- **Report.** Brier score against the base rate; a reliability diagram; and calibration **by segment** — per station, per band, per data type (image or telemetry), per decoder version, and with and without the decoder statistics D-103 proposes, because a verdict computed from less evidence must still be calibrated.
+- **Report.** Brier score against the base rate; a reliability diagram; and calibration **by segment** — per station, per band, per data type (image or telemetry), per decoder version, and with and without the decoder statistics MSP 0.3 carries (D-103), because a verdict computed from less evidence must still be calibrated.
 
 **Selection bias, and why §4's form of it is limited here.** The verdict is only ever applied to receptions that were scheduled, so training on scheduled receptions matches the population it serves. Archive receptions were scheduled by other policies at other stations, though, so archive and own-station results are separate segments and are not pooled.
 
