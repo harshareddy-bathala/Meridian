@@ -110,6 +110,35 @@ services:
       retries: 6
       start_period: 20s
 
+  jobs:
+    # Pass generation, then scheduling, every SCHEDULE_INTERVAL_S over the next
+    # SCHEDULE_HORIZON_S (D-110). In the default profile because a deployment
+    # with no simulator must still schedule its own station; before Stage 12 only
+    # the sim profile's shell loop did this. Both tasks are idempotent over a
+    # horizon (D-063, D-066), so overlapping rounds write nothing twice.
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+      API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
+      SCHEDULE_INTERVAL_S: ${SCHEDULE_INTERVAL_S:-300}
+      SCHEDULE_HORIZON_S: ${SCHEDULE_HORIZON_S:-21600}
+      # Its metrics listener requires the same token as the API's /metrics,
+      # and the same placeholder refusal applies when the deployment is public.
+      METRICS_TOKEN: ${METRICS_TOKEN:-change-me}
+      MERIDIAN_PUBLIC: ${CLOUDFLARE_TUNNEL_TOKEN:+1}
+    command: ["meridian", "jobs", "run", "--metrics-host", "0.0.0.0"]
+    # Scraped by Prometheus inside this network (D-109); never published.
+    expose:
+      - "9464"
+
   tunnel:
     # Outbound-only over 443: no static IP, no inbound port, and no firewall
     # exception to request from college IT — which is the actual constraint SC-6
@@ -222,41 +251,6 @@ services:
       - python
       - -m
       - meridian_sim.station
-    restart: unless-stopped
-
-  sim-scheduler:
-    profiles: ["sim"]
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    depends_on:
-      api:
-        condition: service_healthy
-      # After the catalogue, or the first few runs would propagate nothing and
-      # say so — harmless, since the loop retries, and confusing to read.
-      sim-seed:
-        condition: service_completed_successfully
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
-    # Periodic rather than one-shot, because new passes appear as time advances
-    # and a schedule computed once at start-up runs out. A loop and `sleep` is
-    # not the eventual answer — Stage 12 owns scheduled jobs — and it is written
-    # here rather than left to an operator's cron so that `--profile sim up`
-    # keeps producing work without anybody watching it.
-    #
-    # Both commands are idempotent over a horizon (D-063, D-066), so the overlap
-    # between one run's window and the next writes nothing twice.
-    command:
-      - sh
-      - -c
-      - |
-        while true; do
-          from=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          to=$$(date -u -d '+6 hours' +%Y-%m-%dT%H:%M:%SZ)
-          meridian passes generate --from "$$from" --to "$$to" || true
-          meridian schedule --from "$$from" --to "$$to" --config A || true
-          sleep "${SIMULATOR_SCHEDULE_INTERVAL_S:-300}"
-        done
     restart: unless-stopped
 
 volumes:

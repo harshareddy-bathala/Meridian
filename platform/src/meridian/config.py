@@ -46,6 +46,13 @@ class Settings:
     api_workers: int
     """How many processes ``meridian serve`` runs the API in (D-109)."""
 
+    schedule_interval_s: int
+    """Seconds between the scheduled jobs' rounds (D-110)."""
+    schedule_horizon_s: int
+    """How far ahead of now each round generates and schedules (D-110)."""
+    jobs_metrics_port: int
+    """Where the scheduled jobs serve their metrics, inside the network (D-109)."""
+
     token_hash_pepper: str
     registration_invite_token: str
     registration_recovery_window_s: int
@@ -262,6 +269,15 @@ def load_settings() -> Settings:
         api_port=_int_env("API_PORT", 8000),
         api_log_level=os.environ.get("API_LOG_LEVEL", "info"),
         api_workers=_int_env("API_WORKERS", 1),
+        # Five minutes and six hours, the values the sim profile's scheduling
+        # loop ran on since Stage 10: a pass is at least eight minutes long, so
+        # a round every five cannot let one rise unscheduled, and six hours keeps
+        # D-026's two-hour delivery horizon filled with room to spare.
+        schedule_interval_s=_int_env("SCHEDULE_INTERVAL_S", 300),
+        schedule_horizon_s=_int_env("SCHEDULE_HORIZON_S", 6 * 3600),
+        # Never published outside the compose network, so nothing depends on
+        # the number itself beyond Prometheus's scrape configuration agreeing.
+        jobs_metrics_port=_int_env("JOBS_METRICS_PORT", 9464),
         token_hash_pepper=_secret_env("TOKEN_HASH_PEPPER", PLACEHOLDER),
         registration_invite_token=_secret_env("REGISTRATION_INVITE_TOKEN", PLACEHOLDER),
         # D-023: how long after registering a station may still recover a lost

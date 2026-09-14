@@ -33,6 +33,7 @@ import psycopg
 from meridian import __version__
 from meridian.cli_catalogue import run_catalogue
 from meridian.cli_invite import run_invite
+from meridian.cli_jobs import add_jobs_parser, run_jobs
 from meridian.cli_passes import run_passes
 from meridian.cli_schedule import configurations, run_scheduler
 from meridian.cli_serve import add_serve_parser, run_serve
@@ -297,11 +298,12 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_passes_parser(subcommands)
     _add_schedule_parser(subcommands)
     add_serve_parser(subcommands)
+    add_jobs_parser(subcommands)
 
     return parser
 
 
-NEEDS_ACTION = frozenset({"catalogue", "invite", "passes", "station"})
+NEEDS_ACTION = frozenset({"catalogue", "invite", "jobs", "passes", "station"})
 """Commands that are a noun and mean nothing without a verb after them.
 
 ``meridian schedule`` is a verb already and carries its arguments directly, so
@@ -313,6 +315,7 @@ unrunnable.
 IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "catalogue": run_catalogue,
     "invite": run_invite,
+    "jobs": run_jobs,
     "passes": run_passes,
     "schedule": run_scheduler,
     "serve": run_serve,
