@@ -39,6 +39,7 @@ __all__ = [
     "decode_cursor",
     "encode_cursor",
     "page_request",
+    "single_cursor_value",
     "trim_overfetch",
 ]
 
@@ -209,3 +210,21 @@ def trim_overfetch(fetched: list[RowT], limit: int) -> TrimmedPage[RowT]:
         total is an exact multiple of the limit.
     """
     return TrimmedPage(rows=fetched[:limit], has_more_rows=len(fetched) > limit)
+
+
+def single_cursor_value(cursor_key: tuple[str, ...] | None) -> str | None:
+    """The one value a single-column cursor carries, or ``None`` on page one.
+
+    Endpoints that page by a row id rather than by the sort key itself (D-093)
+    issue one-part cursors. A cursor with any other shape was issued by a
+    different endpoint and is refused here, rather than being half-read.
+
+    Raises:
+        PublicError: ``invalid_query`` when the key does not have exactly one
+            part.
+    """
+    if cursor_key is None:
+        return None
+    if len(cursor_key) != 1 or not cursor_key[0]:
+        raise PublicError(INVALID_QUERY, "cursor is not a valid cursor.")
+    return cursor_key[0]

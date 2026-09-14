@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from meridian.api.public.models.capabilities import HorizonMaskPoint, PublicCapability
 from meridian.api.public.models.heartbeats import ListeningBlock, PublicHeartbeat
+from meridian.api.public.models.passes import PublicPass
 from meridian.api.public.models.satellites import PublicSatellite, PublicTransmitter
 from meridian.api.public.models.stations import (
     Page,
@@ -33,6 +34,7 @@ __all__ = [
     "Page",
     "PublicCapability",
     "PublicHeartbeat",
+    "PublicPass",
     "PublicSatellite",
     "PublicStation",
     "PublicTransmitter",
