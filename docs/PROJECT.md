@@ -148,6 +148,8 @@ Both speak MSP. That is the point. A protocol that only works on the machine it 
 
 If the microcontroller carries a LoRa transceiver it also receives satellite telemetry. If it does not, it still joins as a non-receiving station reporting environmental and power telemetry — and still proves the point.
 
+The microcontroller station is a **LoRa satellite receiver**, proving MSP on small hardware. It is not a field sensor product, and the telemetry in the fallback above is the station reporting on itself (D-096). Its LoRa telemetry passes are also the second data type the post-reception layer in §5.6 must handle.
+
 ### 5.4 External networks — separate and optional
 
 Registering our station on an existing public network is a **separate, optional requirement.** If done, it demonstrates that the station is good enough for an independent network to accept. The demonstration does not depend on it and the platform does not require it.
@@ -160,6 +162,28 @@ The dashboard is reachable from anywhere: a map of registered stations and their
 
 Anyone with the link can watch. That is the demo, and it works from a phone.
 
+### 5.6 After reception
+
+Receiving a pass is not the end of the work. Before this layer, an observation that arrived was stored and nothing further was concluded from it: a station's owner could not tell whether last night's pass was usable, why the one before failed, or that their cable was going. Five capabilities answer that — numbered **13 to 17** in the submission module list (D-095):
+
+| # | Capability | What it gives | How it is proven |
+|---|---|---|---|
+| 13 | **reception verdict** | A calibrated probability, for every reception, that it is usable — from decoder statistics, frames decoded against frames expected, signal strength, outcome and listening evidence | Reliability diagram and Brier score against a base rate, per segment |
+| 14 | **loss diagnosis** | For every failed or partial reception, the most likely cause — satellite silent, station not listening, obstruction, interference, or a timing or clock fault — or *undetermined* | Per-cause confusion matrix on simulator faults with known causes, plus any real cases the team can label |
+| 15 | **station health watch** | A warning that the receive chain — antenna, cable, LNA — is degrading, from signal strength at each elevation against the station's own history, before reception fails | Detection delay and false-alarm rate on injected gradual degradation |
+| 16 | **owner reports** | A plain-language message after each pass, and a weekly station summary, from templates | Delivered end to end in the demonstration |
+| 17 | **evidence dataset** | Receptions with verdict, cause and full provenance, as a hash-verified package | Regenerating from the same snapshot, configuration and seed gives the identical hash |
+
+**It works on whatever was received** — an LRPT image, a LoRa telemetry frame, or nothing at all. None of the five reads image content; a pass that received nothing still has an outcome, heartbeat evidence and a noise floor, which is what loss diagnosis reads. **It adds no hardware and no cost** (D-094): everything above runs on the funded station and the simulator.
+
+**Who benefits, and how.**
+
+- **Station owners** learn after every pass whether it worked, and if not, why — in terms they can act on: a direction that is blocked, an hour when the noise floor rises, a receive chain losing signal week by week. The weekly report catches a failing cable before it has cost a month of passes that will not come back.
+- **Schools and colleges running a station.** A student-run station changes hands with every cohort, and the people inheriting it are rarely radio specialists. A verdict on every pass, a named cause for every loss and a weekly summary are how a new team can tell whether the station they inherited works, without an expert on hand — and the evidence dataset gives a class its own receptions to analyse, with provenance attached.
+- **Researchers who need a labelled reception dataset.** Receptions carrying a calibrated confidence, a diagnosed cause and full provenance — station, element set, simulated flag, content hash — packaged so anyone can regenerate it and check the hash. Measured and simulated receptions are kept in separate files, and simulated ones are included only when asked for.
+
+Where each capability lives in the platform is D-102, what it stores D-104, and the build order roadmap Stages 25–30.
+
 ---
 
 ## 6. What makes this different
@@ -171,6 +195,17 @@ Anyone with the link can watch. That is the demo, and it works from a phone.
 **We treat reception as a service with reliability targets** — including an *irrecoverable loss budget*. We present this as an operational framing rather than a technical novelty: the mechanism resembles a standard error budget, but the accounting differs because the work cannot be retried, and no existing ground station software applies either.
 
 **We built the network, not just a station.** A published protocol, a reference client, a registry and a public platform.
+
+**We say what happened to each reception, with a calibrated confidence and a named cause.** Other networks already rate receptions — SatNOGS does, manually and by automatic rules. What Meridian adds is narrower: an automatic confidence whose stated probabilities are tested against what happened, and an automatic attribution of cause for every loss, scored against known causes (D-099).
+
+### What we do not claim
+
+- **That nobody else assesses receptions**, or that any part of this is a first. Receptions are rated elsewhere; our claim is calibration and automatic cause attribution, and nothing more (D-099).
+- **That loss diagnosis is accurate in the field.** Its confusion matrix is measured on simulated faults whose causes are known, and shows that evidence of a fault's shape is attributed to that fault. Real labelled cases are reported separately, however few (D-105).
+- **That the station health watch locates the failing part.** It warns that the receive chain is losing signal; it does not say whether the antenna, the cable or the LNA is at fault.
+- **That owner reports are useful by any measure.** They are shown to be delivered and to regenerate exactly; whether owners act on them is not measured.
+- **That a low verdict makes data worthless.** The verdict is a probability of being usable under a stated label, not a judgement of scientific value.
+- **That Doppler orbit determination works.** It remains a stretch result (§8.5), and no claim depends on it.
 
 ---
 
@@ -281,13 +316,24 @@ All evaluation uses temporal splits — train on earlier data, test on later. Ne
 
 > **Stated contingency on SC-1.** If the data does not support a 20% margin, the project is not invalidated. A *calibrated* prediction model — one whose stated probabilities match observed frequencies — is a result in its own right, and a smaller measured gain reported honestly is a better outcome than a large one claimed loosely. We report what we measure.
 
+**Proposed — to agree with the team.** Four criteria for the post-reception layer in §5.6. SC-1 to SC-6 above are unchanged, and none of these is a commitment until the team agrees it. Method and reasoning are in `docs/EVALUATION.md` §1 and §11; the two lists are kept in step (D-011).
+
+| ID | Criterion | Target |
+|---|---|---|
+| SC-7 | Reception verdict calibration, Brier score vs base-rate predictor, on measured receptions | ≥ 40% reduction — *proposed* |
+| SC-8 | Loss diagnosis on simulated faults with known causes | ≥ 80% recall per cause, ≤ 5% wrong cause — *proposed* |
+| SC-9 | Station health watch on injected gradual degradation | Warning before first failure in ≥ 90% of runs; ≤ 1 false alarm per station per 30 days — *proposed* |
+| SC-10 | Evidence dataset regenerated from the same snapshot, configuration and seed | Identical hash — Achieved / not — *proposed* |
+
+SC-7 cannot be measured until the team settles what "usable" means (D-106), and SC-8 and SC-9 are simulated results, labelled as such wherever they are reported.
+
 ---
 
 ## 10. What we build, and what we use
 
 We write the parts that are the project. We use libraries for the parts that are solved, well tested, and would only get worse if we rewrote them.
 
-**We build:** MSP and its specification · station registry · observation store and data model · orbit uncertainty model · timing-error and Doppler analysis · obstruction profile inference · reception outcome prediction · scheduler and optimiser · station client · rotator controller firmware · reliability layer, service targets and failure injection · station simulator · public API and dashboard
+**We build:** MSP and its specification · station registry · observation store and data model · orbit uncertainty model · timing-error and Doppler analysis · obstruction profile inference · reception outcome prediction · scheduler and optimiser · station client · rotator controller firmware · reliability layer, service targets and failure injection · station simulator · public API and dashboard · reception verdict · loss diagnosis · station health watch · owner reports · evidence dataset
 
 **We use as libraries:**
 
@@ -344,9 +390,10 @@ What an examiner sees, end to end, in about twelve minutes.
 6. **Reception begins.** The waterfall fills; the characteristic Doppler curve appears.
 7. **Data arrives.** A decoded image or telemetry frame appears as the pass proceeds.
 8. **The pass ends.** Reliability figures update live; the loss budget ticks.
-9. **The measurement.** Actual acquisition time is compared against prediction, plotted against element-set age and our confidence band.
-10. **Break it.** A station is disconnected mid-operation. Within ninety seconds an alert fires and the scheduler re-plans around the loss.
-11. **Show the scale.** Switch to fifty simulated stations, clearly labelled, scheduled by the same optimiser, with the ablation comparison plotted across them.
+9. **The owner hears about it.** A plain-language report arrives with the pass's reception verdict — or, for a pass that failed, its diagnosed cause — and the dashboard shows the same result with the evidence behind it.
+10. **The measurement.** Actual acquisition time is compared against prediction, plotted against element-set age and our confidence band.
+11. **Break it.** A station is disconnected mid-operation. Within ninety seconds an alert fires and the scheduler re-plans around the loss.
+12. **Show the scale.** Switch to fifty simulated stations, clearly labelled, scheduled by the same optimiser, with the ablation comparison plotted across them.
 
 Every step runs on our own infrastructure.
 
@@ -365,6 +412,9 @@ Every step runs on our own infrastructure.
 | Software phase overruns | Medium | Medium | Week 15 hardware gate; project ships without hardware if breached |
 | Hardware failure late in project | Medium | Medium | Contingency budget; spare amplifier and receiver held from Phase 3 |
 | Scope expansion | High | Medium | Exclusions frozen; reversal requires written agreement from all three and the guide |
+| First detection varies with horizon, obstruction and link margin far more than the sub-second orbital effect SC-3 measures | High | Medium | Measurement tested on archive data before SC-3 relies on it; timing from the Doppler curve noted as an alternative (D-100) |
+| No label for a "usable" reception independent of the verdict's own inputs | Medium | Medium | Settled before the verdict is built; SC-7 is not measured until it is (D-106) |
+| Simulator faults and the loss diagnosis, written by one team, agree by construction | Medium | Medium | Fault effects specified first and reviewed by another member; real labelled cases reported separately (D-105) |
 
 ---
 
@@ -400,6 +450,8 @@ The rotator is built in the college workshop: printed structure with the worm ge
 
 The system receives only open, unencrypted transmissions intended for public reception — weather satellite imagery and amateur satellite telemetry. No attempt is made to receive or decode protected communications. No personal data is collected, stored or processed. Observation records and derived datasets are published openly.
 
+Owner reports (§5.6) need a way to reach a station's owner, and a contact address is personal data. How — or whether — one is held is open (D-107). Until the team decides, reports go only to stations the team itself operates, and the statement above holds as written.
+
 ---
 
 ## 17. Budget
@@ -418,6 +470,8 @@ The system receives only open, unencrypted transmissions intended for public rec
 **With tracking: ₹43,500.**
 
 Tier 3 is genuinely optional: every claim the project makes is provable with a fixed antenna. Tracking adds a second band, an antenna that moves under software control during the demonstration, and substantive use of the institute's machining facilities.
+
+The post-reception layer in §5.6 changes nothing here: it needs no hardware beyond Tiers 1 and 2, and the request stays at ₹27,600 (D-094).
 
 Nothing is purchased before the software that consumes it exists — with one exception, the receiver, bought early so that reception from our site is confirmed before any installation spend.
 
@@ -450,6 +504,7 @@ MSP is designed jointly and reviewed by all three, as the interface every module
 9. Fifty-station simulator with reproducible runs
 10. One operational ground station
 11. Technical report and demonstration
+12. Post-reception layer — reception verdict, loss diagnosis, station health watch, owner reports and evidence dataset (modules 13–17, §5.6)
 
 ---
 
@@ -458,3 +513,36 @@ MSP is designed jointly and reviewed by all three, as the interface every module
 Satellite reception happens under a deadline that cannot be missed twice, using orbital data whose accuracy is never stated, scheduled by a rule that ignores most of what matters, with no way of telling whether it is working.
 
 We are building the layer that fixes that — the protocol and the network for other stations to join, and one station on our roof to prove it is true.
+
+---
+
+## 21. Phase 2 candidates — not committed
+
+**Nothing in this section is planned work.** It has no roadmap stage, no success criterion and no line in the budget (D-101). Here "Phase 1" means everything this project commits to, and "Phase 2" what might follow it — **not** §12's Phase 1 (Foundations) and Phase 2 (Intelligence), which are committed build phases.
+
+**Phase 2 starts only when both hold:** the Phase 1 post-reception stages (roadmap Stages 25–30) have passed their completion gates, and the tracking tier is approved.
+
+### 21.1 HRPT reception from the same Meteor-M satellites
+
+- **Not a new target.** HRPT is a second transmitter row on satellites already in the catalogue, alongside their LRPT downlink.
+- **The same single SDR**, switched between antennas by the scheduler. A station declaring an L-band capability beside its VHF one is already a case the scheduler's per-station non-overlap rule covers (D-053).
+- **Hardware:** a DTH dish with a helix feed, a 1.7 GHz LNA, and the tracking tier — the dish's beam is too narrow to leave fixed. The tracking tier's 435 MHz Yagi and amplifier may be swapped for the L-band parts to stay within ₹43,500; **confirm with a bill of materials**, including that the receiver tunes 1.7 GHz at the sample rate HRPT needs.
+- **Still about 1 km per pixel.** HRPT's value is not sharper images: it is uncompressed data on all six channels, with calibrated temperature from onboard telemetry, which is what enables night-time thermal products.
+- **§17's statement would no longer hold for this path.** "Every claim the project makes is provable with a fixed antenna" is true of everything the project commits to and false of L-band reception, which needs a tracking dish.
+
+### 21.2 Area alerts for people who do not run a station
+
+Every alert is **gated by the reception verdict**, so a bad pass never triggers one.
+
+- **Fire near a registered village**, from a night pass. Validated against NASA FIRMS detections.
+- **Greenness change within a few kilometres of a village**, over weeks. Validated against MODIS or Sentinel-2 vegetation indices.
+- **Fog alert** — only if pass times align with fog hours, which must be verified before it is committed to.
+
+**Limits, stated plainly:**
+
+- area or village scale, **never an individual plot** — one pixel covers about 100 hectares;
+- clouds block both the optical and the thermal view;
+- only a few looks per day;
+- **descriptive alerts only** — no crop, irrigation or safety advice.
+
+**Every alert type needs an external validation source before it is built.** That source scores alerts offline and never sits on the path that raises one, so the independence test still holds. A way of reaching people who receive alerts would be personal data, and inherits D-107's question.

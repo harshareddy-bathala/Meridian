@@ -19,6 +19,21 @@ How every claim in this project is tested, and the threats to validity, stated b
 
 SC-6 is the only criterion that is pass/fail rather than measured, and it is effectively the Phase 1 exit criterion. It is listed here because a methodology document that omits the easiest criterion to verify — and the most visible to an examiner — has the omission the wrong way round.
 
+### Proposed — to agree with the team
+
+Four criteria for the post-reception layer (modules 13–17, D-095). **Every target below is proposed — to agree with the team**, and none is a commitment until that agreement is recorded. SC-1 to SC-6 are unchanged. The method is §11.
+
+| ID | Claim | Target |
+|---|---|---|
+| SC-7 | The reception verdict is calibrated | ≥ 40% Brier score reduction vs base rate, on held-out measured receptions — *proposed, to agree with the team* |
+| SC-8 | Loss diagnosis names the injected cause | ≥ 80% recall for each of the five causes, and ≤ 5% of diagnoses naming a wrong cause, on simulated faults — *proposed, to agree with the team* |
+| SC-9 | The health watch warns before reception fails | a warning before the first failed reception in ≥ 90% of injected degradation runs, and ≤ 1 false alarm per station per 30 days on fault-free runs — *proposed, to agree with the team* |
+| SC-10 | The evidence dataset is regenerable | identical content hash from the same snapshot, configuration and seed — Achieved / not — *proposed, to agree with the team* |
+
+Owner reports (module 16) have no numeric criterion; they are proven by working end to end in the demonstration (§11.4).
+
+**SC-7's target is higher than SC-2's on purpose.** SC-2 forecasts a pass that has not happened; the verdict reads the evidence of one that has, so a verdict that only matched SC-2's margin would be using that evidence badly. **SC-7 also cannot be measured until D-106 settles what "usable" means** — a label built from the verdict's own inputs would make any target meaningless. **SC-8 and SC-9 are simulated results** and are labelled so wherever they appear (§11.2, §11.3, D-105).
+
 ---
 
 ## 2. The prediction model is hybrid by design
@@ -145,6 +160,20 @@ Recovering orbital state from the observed frequency curve.
 
 This is a **stretch result**. No project claim depends on it. If it works, it is a stronger and more interesting validation of the uncertainty model. If it does not, SC-3 is satisfied by timing error alone.
 
+### 6.3 Risk to the primary method
+
+**SC-3 is unchanged. The method in §6.1 carries a risk, and is tested before SC-3 relies on it** (`docs/DECISIONS.md` D-100).
+
+The effect being measured is small. Public element sets are roughly 1 km accurate at epoch and drift about 1–2 km per day, which at 7.5 km/s along track is about 0.13–0.27 s of timing per day of age.
+
+`first_detection_at` can vary by far more than that for reasons unrelated to the orbit: the horizon and obstructions in the acquisition direction, link margin, and the detector's threshold. Near the horizon an overhead pass at 850 km rises about one degree every 14 seconds, so a detection elevation that varies by two degrees between passes moves first detection by roughly half a minute. If that spread dominates, timing error regressed against element-set age measures the station's horizon rather than the element set.
+
+**Open question, tested before it is answered.**
+
+1. On archive data, take receptions whose element set was under a day old — where the orbital contribution is known to be sub-second — and measure the spread of first-detection offset.
+2. If that spread exceeds the effect SC-3 exists to detect, §6.1 is not fit as written, and that finding is reported rather than worked around.
+3. A possible alternative is **timing from the Doppler curve.** Range rate crosses zero at closest approach, mid-pass and high in the sky, away from the horizon and the acquisition link margin. A constant receiver frequency offset moves the literal zero crossing but not the curve's steepest point, so that is the form to test. §6.2's oscillator-drift objection still applies.
+
 ---
 
 ## 7. Calibration over accuracy
@@ -188,3 +217,72 @@ Analysis scripts write these three things into their output alongside the result
 - **State sample size and confidence intervals** on every number.
 - **State the completeness ratio** on every archive-derived result.
 - If SC-1 is not met, §9 of the project document applies: a calibrated model is a result in its own right, and an honestly reported small gain beats a loosely claimed large one.
+
+---
+
+## 11. After reception — the four proofs
+
+How modules 13–17 are proven (D-095). Everything above applies to them — temporal splits (§8), regenerability (§9) and the reporting rules (§10). In particular, **simulated and measured results are never pooled**, and every number carries its sample size and a confidence interval.
+
+**The novelty these proofs support is narrow** (D-099). Other networks already rate receptions, manually and by rule. What is tested here is that Meridian's confidence is *calibrated* and that its cause of loss is *attributed automatically and scored*. No result is written up as something nobody else does.
+
+### 11.1 Reception verdict — calibration (SC-7)
+
+**What it is.** For every reception, a probability that it is usable, computed from decoder statistics, frames decoded against frames expected, `peak_snr_db`, `outcome`, and listening evidence from heartbeats. A calibrated probability, not a hand-weighted score. A reception that received nothing still gets one.
+
+**Method — the discipline of §7.**
+
+- **Label.** Settled by D-106 before any training, and independent of the verdict's inputs. Until then SC-7 is not measured.
+- **Data.** Measured receptions only: our station's, and archive receptions where the inputs exist. **Never simulated** — D-078 applies without exception (D-105).
+- **Split.** Temporal: train on earlier receptions, calibrate on a later interval, test on the latest untouched interval. Report the boundary dates.
+- **Base rate.** The fraction of usable receptions in the training period, predicted for every test reception.
+- **Report.** Brier score against the base rate; a reliability diagram; and calibration **by segment** — per station, per band, per data type (image or telemetry), per decoder version, and with and without the decoder statistics D-103 proposes, because a verdict computed from less evidence must still be calibrated.
+
+**Selection bias, and why §4's form of it is limited here.** The verdict is only ever applied to receptions that were scheduled, so training on scheduled receptions matches the population it serves. Archive receptions were scheduled by other policies at other stations, though, so archive and own-station results are separate segments and are not pooled.
+
+**It does not claim** that a low verdict means the data is useless to everyone, or that it predicts anything before a pass — that is SC-2's model.
+
+### 11.2 Loss diagnosis — per-cause confusion matrix (SC-8)
+
+**What it is.** For every failed or partial reception, the most likely cause — satellite silent, station not listening, obstruction, interference, or a timing or clock fault — or *undetermined* when the evidence is insufficient.
+
+**Method.**
+
+- **Ground truth comes from injected faults** with known causes (roadmap Stage 25): gradual signal degradation, a new obstruction, interference and a silent satellite, alongside the existing receiver-down fault for a station not listening and clock drift for timing. The cause is written to the simulator's run record, **never sent over MSP and never stored by the platform**, and is joined to diagnoses only here (D-105).
+- **Negative control.** Stage 21's degraded decoder is a failure with no category in the list. The correct diagnosis is *undetermined*, and how often it is reported as something else is reported.
+- **Report.** A confusion matrix with injected causes as rows and diagnosed causes, *undetermined* included, as columns; per-cause recall; the fraction naming a wrong cause; and the *undetermined* fraction, which is never folded into either. Several seeds per cause, with the spread between seeds.
+- **Real cases** the team can label are reported in their own table, however few, and never added to the simulated matrix.
+
+**It does not claim** real-world diagnostic accuracy. SC-8 shows that evidence of the shape a fault produces is attributed to that fault. Whether real faults produce that shape is what the real cases begin to answer, and the report says so beside the number.
+
+### 11.3 Station health watch — detection delay and false alarms (SC-9)
+
+**What it is.** A comparison of a station's signal strength at each elevation against its own history, warning when the receive chain — antenna, cable, LNA — is degrading, before reception fails.
+
+**Method.**
+
+- **Injected gradual degradation** (Stage 25): a receive-chain loss growing over days, at several rates, after a fault-free history long enough to build a baseline.
+- **Detection delay** — time from degradation onset to the warning, and the loss in dB at that moment.
+- **Lead** — time from the warning to the first reception the degradation turns into a failure. SC-9 asks that the warning come first.
+- **False-alarm rate** — warnings per station per 30 days on fault-free runs.
+- **Simulated results**, labelled as such and reported apart from anything measured.
+
+**To verify — a controlled real-station test.** If station 001's LNA is powered through the SDR's bias-tee, switching the bias-tee off removes the LNA's gain on command: a real, known receive-chain fault. It is a step rather than a gradual loss, so it tests that the watch responds to a real shortfall on real data, and it is reported as one measured case, not a rate. Whether the LNA is powered that way is confirmed when the station is built.
+
+**It does not claim** to locate which part of the chain degraded, or to detect a fault that leaves signal strength against elevation unchanged.
+
+### 11.4 Owner reports — end to end in the demonstration
+
+**What it is.** A plain-language message to a station's owner after each pass, and a weekly station summary, rendered from versioned templates with no language model (D-098).
+
+**Proof.** In the demonstration, a decoded pass and a diagnosed loss each produce a delivered report, and the delivered text regenerates to its recorded content hash from the stored results and template version. There is no numeric success criterion, and none is invented.
+
+**It does not claim** that owners act on reports, or any measure of their usefulness.
+
+### 11.5 Evidence dataset — identical hash on regeneration (SC-10)
+
+**What it is.** A package of receptions with verdict, diagnosed cause and full provenance — station, element set, `simulated` flag, content hash — with measured and simulated receptions in separate files (D-104).
+
+**Proof.** Export once. Regenerate from the same snapshot, configuration and seed, **on a machine other than the one that produced it**. The content hashes are identical. This is `CLAUDE.md` rule 8 turned into a test.
+
+**It does not claim** that the labels inside it are correct — only that anyone can reproduce exactly what Meridian concluded, and check it.
