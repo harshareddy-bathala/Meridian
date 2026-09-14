@@ -137,6 +137,47 @@ def test_invite_create_without_a_database_fails_cleanly() -> None:
     assert "Traceback" not in result.stderr
 
 
+@pytest.mark.parametrize(
+    ("command", "stage"), [("snapshot", "Stage 15"), ("report", "Stage 22")]
+)
+def test_unbuilt_commands_report_their_stage_instead_of_raising(
+    command: str, stage: str
+) -> None:
+    """Exit 2 with the stage that builds the command, never a traceback.
+
+    Stage 12 documents every operator command, and these two belong to later
+    stages. A command that answers "not yet, and here is when" is discovered by
+    reading its output; one that is simply absent reads as a typo.
+    """
+    result = _run("-m", "meridian.cli", command)
+
+    assert result.returncode == 2
+    assert "not implemented yet" in result.stderr
+    assert stage in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_db_status_without_a_database_fails_cleanly() -> None:
+    """Exit 1 and a sentence when the database is unreachable, as `invite` does."""
+    import os
+
+    env = {
+        **os.environ,
+        "DATABASE_URL": "postgresql://meridian:meridian@127.0.0.1:1/meridian",
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "meridian.cli", "db", "status"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "cannot reach the database" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_simulator_station_runs_as_a_module() -> None:
     """`python -m meridian_sim.station` is what compose runs under `--profile sim`.
 

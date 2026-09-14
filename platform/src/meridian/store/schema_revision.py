@@ -23,7 +23,12 @@ from alembic.script import ScriptDirectory
 
 from meridian.store.stations import Connection
 
-__all__ = ["ALEMBIC_CONFIG_PATH", "find_current_revision", "find_head_revision"]
+__all__ = [
+    "ALEMBIC_CONFIG_PATH",
+    "find_current_revision",
+    "find_head_revision",
+    "find_known_revisions",
+]
 
 ALEMBIC_CONFIG_PATH = Path("deploy/alembic.ini")
 """Relative to the working directory, as the ``migrate`` service invokes it.
@@ -52,6 +57,24 @@ def find_head_revision(config_path: Path = ALEMBIC_CONFIG_PATH) -> str | None:
     if not config_path.is_file():
         return None
     return ScriptDirectory.from_config(Config(str(config_path))).get_current_head()
+
+
+def find_known_revisions(config_path: Path = ALEMBIC_CONFIG_PATH) -> frozenset[str]:
+    """Every revision the scripts define, head and ancestors alike.
+
+    A database at a revision outside this set was migrated by newer code, which
+    is a different problem from one that is merely behind (``meridian db status``).
+
+    Args:
+        config_path: The alembic configuration naming the script directory.
+
+    Returns:
+        The revisions, or an empty set when the configuration is not there.
+    """
+    if not config_path.is_file():
+        return frozenset()
+    scripts = ScriptDirectory.from_config(Config(str(config_path)))
+    return frozenset(script.revision for script in scripts.walk_revisions())
 
 
 def find_current_revision(conn: Connection) -> str | None:
