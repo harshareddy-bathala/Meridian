@@ -15,6 +15,7 @@ import {
   asString,
   DecodeError,
 } from "./decode";
+import { getJson, type Fetcher } from "./api";
 
 export const LIVENESS = ["online", "stale", "offline", "never_seen"] as const;
 export type Liveness = (typeof LIVENESS)[number];
@@ -75,7 +76,7 @@ export function decodeStationPage(body: unknown): StationPage {
   };
 }
 
-export type Fetcher = (url: string, init: { signal: AbortSignal }) => Promise<Response>;
+export type { Fetcher } from "./api";
 
 async function fetchPage(
   fetcher: Fetcher,
@@ -86,16 +87,8 @@ async function fetchPage(
   if (cursor !== null) {
     query.set("cursor", cursor);
   }
-  const response = await fetcher(`/api/v1/stations?${query.toString()}`, { signal });
-  const body: unknown = await response.json();
-  if (!response.ok) {
-    // D-084's envelope; fall back to the status if even that is missing.
-    const message = typeof body === "object" && body !== null && "message" in body
-      ? String(body.message)
-      : `HTTP ${String(response.status)}`;
-    throw new Error(`the station directory refused the request: ${message}`);
-  }
-  return decodeStationPage(body);
+  const url = `/api/v1/stations?${query.toString()}`;
+  return decodeStationPage(await getJson(fetcher, url, "the station directory", signal));
 }
 
 /** Every station, walking the keyset cursor until the API says there is no more. */
