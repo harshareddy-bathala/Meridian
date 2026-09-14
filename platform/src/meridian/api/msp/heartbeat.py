@@ -192,7 +192,7 @@ def _assignments_due_now(
 def heartbeat(
     body: HeartbeatRequestBody,
     station_id: str = Depends(get_authenticated_station_id),
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
 ) -> HeartbeatResponseBody:
     """Record a station's liveness and hand back the work it is due (MSP §4.2).
 

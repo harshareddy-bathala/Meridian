@@ -29,11 +29,11 @@ Built so far:
 - **Public read API** under `/api/v1`: stations, satellites, upcoming passes, scheduling decisions with their reasons, observations and simulator runs.
 - **Dashboard**, served from the platform: a station map, liveness, simulated badges, and each station's listening state and next assignments.
 
-The exit criterion passes when rehearsed locally. What remains is putting it on the public hostname: the tunnel, the edge rate limit, and a run of `deploy/tools/verify_public_surface.py` from outside (D-088). The roadmap's status note lists the steps.
+**The exit criterion was met on 2026-09-14.** A virtual station was served on `dash.meridian.org.in` through the Cloudflare tunnel, and `deploy/tools/verify_public_surface.py` passed every check from a mobile network outside the college, the edge rate limit included (D-088). The host was a laptop, because there is no Pi yet, so the dashboard is online only while a host runs the `public` profile.
 
 Not yet started: prediction models, the constrained scheduler that beats the baselines, the reliability layer, hardware. `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` says which stage each belongs to.
 
-[**meridian.org.in**](https://meridian.org.in) — the static public site, in `site/`: the front page plus the architecture, protocol, documentation and about pages. It is deliberately not the dashboard: the exit criterion above will be met by the live dashboard on `dash.meridian.org.in`, tunnelled from the station, which is a separate surface with a separate uptime story. See D-036, D-037 and D-038 for the two-theme system and the move to five pages, and D-039 and D-040 for the contrast pass and the document rail.
+[**meridian.org.in**](https://meridian.org.in) — the static public site, in `site/`: the front page plus the architecture, protocol, documentation and about pages. It is deliberately not the dashboard: the exit criterion above is met by the live dashboard on `dash.meridian.org.in`, tunnelled from the station, which is a separate surface with a separate uptime story. See D-036, D-037 and D-038 for the two-theme system and the move to five pages, and D-039 and D-040 for the contrast pass and the document rail.
 
 Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](https://github.com/harshareddy-bathala/Meridian/issues) and [discussions](https://github.com/harshareddy-bathala/Meridian/discussions) for anything technical.
 

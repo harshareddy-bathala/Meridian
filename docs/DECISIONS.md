@@ -1876,6 +1876,35 @@ rate limited       SKIP  not attempted; rerun with --burst N once the edge rule 
 every check that can run passed
 ```
 
+**Public run, 2026-09-14 — the transcript this entry asks for.** Run against `https://dash.meridian.org.in`, from a mobile network outside the college, with the stack on a laptop behind the tunnel.
+
+The edge rule, as applied. The free plan allows one rule, matched on path only, counted per IP, over 10 seconds:
+
+| Setting | Value |
+|---|---|
+| Match | URI Path starts with `/api/` |
+| Count by | IP |
+| Limit | 50 requests per 10 seconds |
+| Action | Block for 10 seconds, which answers 429 |
+
+The site at the apex has no `/api/` paths, so in effect the rule covers only the dashboard.
+
+```
+verifying https://dash.meridian.org.in
+
+metrics refused    PASS  refused, and indistinguishable from a path that is not there
+dashboard served   PASS  the dashboard page is served at /
+virtual station    PASS  st_cd2a4e is listed, simulated and online
+lists labelled     PASS  stations 1; passes 2; assignments 2; observations 0; simulator-runs 1; satellites 2
+rate limited       PASS  96 of 150 request(s) refused with 429
+
+every check that can run passed
+```
+
+Two things this run found:
+- **The burst had to be concurrent.** Sent one at a time, it never exceeded the free plan's window, and a working rule read as missing. The verifier now sends it from 25 workers.
+- **The platform had a commit-ordering bug.** A newly registered station's first heartbeat was refused with 401: FastAPI returned the request's connection, which is what commits, only after the response had been sent. Every route now declares its connection with `scope="function"`, and `tests/msp_conformance/test_commit_before_response.py` pins it.
+
 ---
 
 ## D-089 — The README banner is a generated SVG pair, and the type is outlines

@@ -66,14 +66,11 @@ The dashboard is served from the platform's own origin (D-081, D-091). It shows:
 
 **Rehearsed locally on 2026-09-14.** `docker compose --profile sim up --build` on a laptop registered a virtual station through the reference client, generated and scheduled its passes, and served it on the dashboard. The verifier passed every check that can run against `localhost`; its transcript is in D-088, labelled as the rehearsal it is.
 
-**What remains for the Phase 1 exit criterion is operational, not code:**
-1. Create the Cloudflare tunnel for `dash.meridian.org.in`, which has no DNS record yet.
-2. On the host, set real secrets and `CLOUDFLARE_TUNNEL_TOKEN`, then run `docker compose --profile public --profile sim up -d`.
-3. Apply the edge rate-limit rule (D-088).
-4. From a network outside the college, run `python deploy/tools/verify_public_surface.py https://dash.meridian.org.in --burst 300`.
-5. Paste that transcript into D-088.
-
-The criterion is met when step 4 passes. This note says so only once it has.
+**The Phase 1 exit criterion was met on 2026-09-14.**
+- **Deployment:** `dash.meridian.org.in` is routed through a Cloudflare tunnel to `api:8000`, with the edge rate-limit rule on.
+- **Check:** `deploy/tools/verify_public_surface.py --burst 150` passed all five checks from a mobile network outside the college. Its transcript is in D-088.
+- **Host:** a laptop running `docker compose --profile public --profile sim`, because there is no Pi yet. The dashboard is online only while a host runs that profile; moving it to the station is hardware work.
+- **Bug found:** the public run exposed a platform bug. A request's writes were committed only after its response was sent, so a newly registered station's first heartbeat was refused. It is fixed and tested, and the re-run shows that heartbeat accepted.
 
 The rest of this section is the 2026-08-12 snapshot, left as written.
 

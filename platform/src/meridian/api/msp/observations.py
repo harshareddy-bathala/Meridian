@@ -108,7 +108,7 @@ def _ingest_or_translate(
 def submit_observation(
     body: ObservationRequestBody,
     station_id: str = Depends(get_authenticated_station_id),
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
 ) -> ObservationAckBody:
     """Record what a station heard, or did not hear, on one assignment (MSP §4.4).
 

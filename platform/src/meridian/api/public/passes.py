@@ -46,7 +46,7 @@ def _after_pass_id(page: PageRequest) -> int | None:
 
 @router.get("/passes")
 def list_upcoming_passes(
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
     page: PageRequest = Depends(page_request),
     station_id: Annotated[str | None, Query()] = None,
 ) -> Page[PublicPass]:

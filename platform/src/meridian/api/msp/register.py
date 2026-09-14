@@ -45,7 +45,7 @@ The specific reason is logged server-side instead, matching how
 @router.post("/register")
 def register(
     body: RegisterRequestBody,
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
     settings: Settings = Depends(get_settings),
 ) -> RegisterResponseBody:
     """Admit a station, or recover/rotate its credentials, per MSP §4.1.

@@ -78,7 +78,7 @@ def _heartbeat_cursor(key: tuple[str, ...] | None) -> tuple[datetime, int] | Non
 
 @router.get("/stations")
 def list_stations(
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
     page: PageRequest = Depends(page_request),
 ) -> Page[PublicStation]:
     """Every registered station, oldest id first.
@@ -113,7 +113,7 @@ def list_stations(
 
 @router.get("/stations/{station_id}")
 def get_station(
-    station_id: str, conn: Connection = Depends(get_connection)
+    station_id: str, conn: Connection = Depends(get_connection, scope="function")
 ) -> PublicStation:
     """One station, in the same shape the list serves.
 
@@ -135,7 +135,7 @@ def get_station(
 
 @router.get("/stations/{station_id}/capabilities")
 def get_station_capabilities(
-    station_id: str, conn: Connection = Depends(get_connection)
+    station_id: str, conn: Connection = Depends(get_connection, scope="function")
 ) -> list[PublicCapability]:
     """The antennas and receivers one station declared.
 
@@ -161,7 +161,7 @@ def get_station_capabilities(
 
 @router.get("/stations/{station_id}/liveness")
 def get_station_liveness(
-    station_id: str, conn: Connection = Depends(get_connection)
+    station_id: str, conn: Connection = Depends(get_connection, scope="function")
 ) -> StationLiveness:
     """Whether one station is reporting, without the rest of its record.
 
@@ -187,7 +187,7 @@ def get_station_liveness(
 @router.get("/stations/{station_id}/heartbeats")
 def list_station_heartbeats(
     station_id: str,
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
     page: PageRequest = Depends(page_request),
 ) -> Page[PublicHeartbeat]:
     """One station's recent heartbeats, newest first.
