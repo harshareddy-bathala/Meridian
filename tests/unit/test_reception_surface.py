@@ -3,7 +3,8 @@
 Hard rule 4: the station never transmits. A denylist of transmit-capable
 programs is not claimed as a safeguard — a list cannot be complete — so these
 check the shape instead: every public method on the protocols and adapters is
-one this test names, and nothing in the package opens a device path.
+one this test names, and nothing in the package opens a device path. The decoder
+adapter runs programs that read a recording; which program is configuration.
 
 A new method on a receiver or a rotator therefore fails here until someone adds
 it to the allowlist below, which is the moment to ask what it does.
@@ -21,7 +22,12 @@ from pathlib import Path
 
 import pytest
 
-from meridian_client.reception import null_rotator, protocols, synthetic_receivers
+from meridian_client.reception import (
+    null_rotator,
+    protocols,
+    subprocess_decoder,
+    synthetic_receivers,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RECEPTION_SOURCES = sorted(
@@ -30,6 +36,8 @@ RECEPTION_SOURCES = sorted(
 
 RECEIVER_SURFACE = {"hears_the_sky", "start", "alive", "stop"}
 ROTATOR_SURFACE = {"prepare", "release"}
+DECODER_SURFACE = {"supports", "start"}
+DECODE_RUN_SURFACE = {"poll", "cancel"}
 
 
 def public_members(cls: type) -> set[str]:
@@ -44,10 +52,15 @@ def public_members(cls: type) -> set[str]:
         (synthetic_receivers.FileReplayReceiver, RECEIVER_SURFACE),
         (protocols.RotatorController, ROTATOR_SURFACE),
         (null_rotator.NullRotator, ROTATOR_SURFACE),
+        (protocols.Decoder, DECODER_SURFACE),
+        (subprocess_decoder.SubprocessDecoder, DECODER_SURFACE),
+        (protocols.DecodeRun, DECODE_RUN_SURFACE),
+        # `failed` builds a run that never started; it launches nothing.
+        (subprocess_decoder.SubprocessDecodeRun, DECODE_RUN_SURFACE | {"failed"}),
     ],
     ids=lambda value: getattr(value, "__name__", "surface"),
 )
-def test_receivers_and_rotators_expose_only_receive_shaped_calls(
+def test_receivers_decoders_and_rotators_expose_only_receive_shaped_calls(
     cls: type, surface: set[str]
 ) -> None:
     assert public_members(cls) == surface
@@ -72,4 +85,5 @@ def test_the_scan_covers_the_package() -> None:
         "synthetic_receivers.py",
         "null_rotator.py",
         "capture_folder.py",
+        "subprocess_decoder.py",
     }

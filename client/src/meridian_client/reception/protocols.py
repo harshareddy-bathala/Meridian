@@ -1,4 +1,4 @@
-"""What a receiver and a rotator must do, and the values that pass between them.
+"""What a receiver, a decoder and a rotator must do, and the values between them.
 
 Narrower than :class:`~meridian_client.execution.PassExecutor`, and deliberately
 so: an executor drives a receiver, a decoder and possibly a rotator, and each of
@@ -11,9 +11,9 @@ file: :meth:`Receiver.start` launches it, :meth:`Receiver.alive` polls it, and
 :meth:`Receiver.stop` interrupts it and waits a bounded few seconds.
 
 **Nothing here transmits** (D-126). The receiver's methods start, poll and stop a
-recording; the rotator's point and release an antenna.
+recording; the decoder's read one; the rotator's point and release an antenna.
 
-Reference: docs/DECISIONS.md D-069, D-120, D-122, D-125, D-126.
+Reference: docs/DECISIONS.md D-069, D-120, D-122, D-124, D-125, D-126.
 """
 
 from __future__ import annotations
@@ -25,10 +25,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
+from meridian_client.reception.decode_report import DecodeFailure, DecodeReport
+
 __all__ = [
     "BYTES_PER_SAMPLE",
     "CapturePlan",
     "CaptureRefusedError",
+    "DecodeJob",
+    "DecodeRun",
+    "Decoder",
     "Receiver",
     "Recording",
     "RotatorController",
@@ -192,4 +197,49 @@ class RotatorController(Protocol):
 
     def release(self) -> None:
         """Let the antenna go once capture has stopped."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class DecodeJob:
+    """One recording to decode, and where its output belongs."""
+
+    recording: Recording
+    mode: str
+    """The assignment's mode, which chooses the decoder (D-124)."""
+
+    folder: Path
+    """The capture folder. The decoder's output, report and logs go inside it."""
+
+
+class DecodeRun(Protocol):
+    """One decode in progress, polled rather than waited on."""
+
+    def poll(self) -> DecodeReport | DecodeFailure | None:
+        """``None`` while running; the outcome, the same on every call, after."""
+        ...
+
+    def cancel(self) -> None:
+        """Stop the decode. Waits seconds at most."""
+        ...
+
+
+class Decoder(Protocol):
+    """Turns a finished recording into a decode report (D-124)."""
+
+    def supports(self, mode: str) -> bool:
+        """Whether a decoder is configured for ``mode``.
+
+        Asked before capture, so a pass nothing could decode is refused at
+        ``begin`` and reported ``not_attempted`` rather than recorded for
+        nothing (D-124).
+        """
+        ...
+
+    def start(self, job: DecodeJob) -> DecodeRun:
+        """Begin decoding, returning at once.
+
+        A decoder that cannot even start returns a run whose first poll is the
+        failure, so the executor has one path for every way a decode goes wrong.
+        """
         ...
