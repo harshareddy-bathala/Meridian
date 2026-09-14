@@ -177,9 +177,9 @@ Measured noise floor per station, azimuth bin and time.
 
 `source` distinguishes a measurement taken during an observation from one taken by a dedicated survey sweep — the two have different duty cycles and the model should be able to weight them differently.
 
-**Observation-sourced rows are how loss diagnosis sees interference.** Each reception's noise floor lands here with `source` marking it as taken during that observation, and a floor raised against the station's `interference_profiles` cell is the evidence for the interference cause. That needs a noise floor in the observation body, which MSP 0.2 does not carry; D-103 proposes it.
+**Observation-sourced rows are how loss diagnosis sees interference.** Each reception's noise floor lands here with `source` marking it as taken during that observation, and a floor raised against the station's `interference_profiles` cell is the evidence for the interference cause. That needs a noise floor in the observation body, which MSP 0.3 carries (D-103, D-117).
 
-*A unit gap, recorded before the migration is written.* `noise_floor_dbm` presumes absolute calibration, and RF calibration is outside the software roadmap. A station can honestly report dBFS at a stated receiver gain, and interference is judged against the same station's own history, where a relative figure suffices. If D-103 is accepted, the stored value is dBFS with its gain and the column is named for what it holds; Stage 19 settles it (D-104).
+*A unit gap, recorded before the migration is written.* `noise_floor_dbm` presumes absolute calibration, and RF calibration is outside the software roadmap. A station can honestly report dBFS at a stated receiver gain, and interference is judged against the same station's own history, where a relative figure suffices. D-103 is accepted, so the stored value is dBFS with its gain and the column is named for what it holds; Stage 19 writes that migration (D-104).
 
 ### `interference_profiles`
 Derived per station: noise floor by azimuth bin **and hour of day**, with the sample count behind each cell.
@@ -230,7 +230,7 @@ Written for every **failed or partial reception** — an observation whose outco
 ### `signal_baselines`
 `(id, station_id, capability_id, elevation_bin_deg, snr_db_median, snr_db_p10, sample_count, trained_from, trained_to, method, computed_at, simulated)`
 
-A station's own signal strength by elevation, per receive chain — two antennas on one station degrade separately. Versioned exactly as `horizon_profiles` is, so a warning can be traced to the baseline it was raised against. Built from `peak_snr_db` against maximum elevation under MSP 0.2, and from per-sample SNR if D-103's `snr_samples` is accepted.
+A station's own signal strength by elevation, per receive chain — two antennas on one station degrade separately. Versioned exactly as `horizon_profiles` is, so a warning can be traced to the baseline it was raised against. Built from `peak_snr_db` against maximum elevation under MSP 0.2, and from per-sample SNR once stations send MSP 0.3's `snr_samples` (D-103).
 
 ### `receive_chain_warnings`
 `(id, station_id, capability_id, baseline_id, raised_at, cleared_at, shortfall_db, affected_bins_json, method, simulated)`

@@ -2289,7 +2289,7 @@ flowchart TD
     S22[Stage 22 reproducible reports] --> S30
 ```
 
-This stage gives the later ones their evidence and their ground truth. Depends on Stages 9, 13, 19 and 21, and on the team's answer to D-103.
+This stage gives the later ones their evidence and their ground truth. Depends on Stages 9, 13, 19 and 21. D-103 was accepted, and its MSP 0.3 fields are specified, validated, stored and reported by Stage 13 (D-116).
 
 ## Learn
 
@@ -2302,21 +2302,19 @@ This stage gives the later ones their evidence and their ground truth. Depends o
 
 ## Implement
 
-### Specification first
+### Specification
 
-If D-103 is accepted, a `spec(msp):` change adds the optional `noise_floor_dbfs`, `receiver_gain_db`, `snr_samples` and `decode` fields as MSP 0.3, with conformance tests, and **merges before anything below** (`GIT-WORKFLOW.md` Rule 9). If it is not, skip this subsection: Stages 26–28 run on MSP 0.2's evidence in the reduced forms D-103 lists, and the interference cause is always undetermined.
+Already done. MSP 0.3's optional `noise_floor_dbfs`, `receiver_gain_db`, `snr_samples` and `decode` fields merged ahead of Stage 13 (D-116, D-117), and Stage 13 validates and stores them (D-119). Nothing in this stage re-specifies them.
 
 ### Platform
 
-- validate and store the new fields, with `snr_samples` capped at 512;
 - write each reception's noise floor to `noise_measurements` as an observation-sourced row;
 - add the nominal frame interval to `satellite_transmitters`, loaded by `meridian catalogue load`;
 - compute frames expected from the pass and that interval, leaving it absent where the interval is unknown.
 
 ### Station client
 
-- extract noise floor, SNR samples and decoder statistics in Stage 13's "extract result metrics" step;
-- omit any value the receiver or decoder cannot produce — never send zero for unknown.
+Nothing further. Stage 13's pipeline already extracts the noise floor, SNR samples and decoder statistics, and omits any value it cannot produce (D-122).
 
 ### Simulator
 
@@ -2331,9 +2329,6 @@ If D-103 is accepted, a `spec(msp):` change adds the optional `noise_floor_dbfs`
 
 ## Tests
 
-- an MSP 0.2 observation without the new fields is accepted and stored unchanged;
-- more than 512 `snr_samples` is `malformed`;
-- an unknown value is absent, never zero;
 - every fault is reproducible from its seed;
 - no fault label appears in any MSP body or platform table;
 - every derived row keeps `simulated`.

@@ -1,6 +1,6 @@
 # Meridian Station Protocol (MSP)
 
-**Version 0.2**
+**Version 0.3**
 
 An open protocol for satellite ground stations to join a scheduling network.
 
@@ -300,7 +300,19 @@ Station → platform, after every attempt — **including failures**.
     "doppler_samples": [
       { "t": "2026-08-14T09:41:53Z", "offset_hz": 3140 },
       { "t": "2026-08-14T09:46:44Z", "offset_hz": 12 }
+    ],
+    "noise_floor_dbfs": -52.3,
+    "receiver_gain_db": 32.8,
+    "snr_samples": [
+      { "t": "2026-08-14T09:41:53Z", "snr_db": 3.1 },
+      { "t": "2026-08-14T09:46:44Z", "snr_db": 11.4 }
     ]
+  },
+  "decode": {
+    "decoder": "satdump",
+    "decoder_version": "1.2.2",
+    "frames_decoded": 412,
+    "frames_failed": 37
   },
   "products": [
     { "kind": "waterfall", "uri": "…", "sha256": "…" },
@@ -327,6 +339,33 @@ Station → platform, after every attempt — **including failures**.
 `first_detection_at` is what makes pass-timing-error measurement possible: the difference between it and the predicted acquisition time, against element-set age, is the project's primary measurement of orbital data quality.
 
 `doppler_samples` are optional and only expected from stations with adequate frequency stability. **At most 512 samples**; more is `malformed`. That is one sample every 1.75 seconds across a fifteen-minute pass, beyond both what any receiver here produces and what is useful on a curve this smooth. They are transmitted as samples rather than as a fitted curve because they are the raw measurement, and the residual against a model is what the orbit-uncertainty analysis needs to see (`docs/DECISIONS.md` D-032).
+
+**Reception evidence, added in 0.3.** Every field below is optional, and a station that cannot measure one omits it. **An unknown value is absent, never zero**: a zero is a measurement.
+
+| Field | Meaning |
+|---|---|
+| `signal.noise_floor_dbfs` | Noise floor during the pass, relative to the receiver's full scale |
+| `signal.receiver_gain_db` | The receiver gain that floor was measured at |
+| `signal.snr_samples` | SNR across the pass: `{ "t", "snr_db" }`, in time order, **at most 512** |
+| `decode.decoder` | The decoder that ran, by name |
+| `decode.decoder_version` | Its version |
+| `decode.frames_decoded` | Frames the decoder recovered |
+| `decode.frames_failed` | Frames it found and could not recover |
+
+- **dBFS at a stated gain, not dBm.** RF calibration is outside what a station can honestly claim, and a relative floor is compared only against the same station's own history, at the same gain. So **a `noise_floor_dbfs` without a `receiver_gain_db` is `malformed`**; a gain alone is accepted.
+- **`snr_samples` follow `doppler_samples`.** They are raw samples, not a fit. Order is significant, more than 512 is `malformed`, and `[]` (measured, nothing to report) is a different claim from an absent array.
+- **`decode` describes the decode, not an artefact of it.** One decode can produce several products, so per-product counts would double-count. `decoder` is required whenever the block is present, because statistics from an unnamed decoder cannot be compared across decoders or versions. The frame counts are integers, zero or more, and a decoder with no frame structure omits them. **Frames expected is not sent**: the platform computes it from the pass and the transmitter, so every station's ratio has one definition.
+
+**The evidence must agree with the outcome**, or the body is `malformed`:
+
+| `outcome` | If `decode.frames_decoded` is present, it must be |
+|---|---|
+| `decoded` | 1 or more |
+| `signal_no_decode` | 0 |
+| `no_signal` | 0 |
+| `aborted` | anything |
+
+`not_attempted` carries no `decode` block and none of the three fields above: a station that never began measured nothing. The rules on `signal.detected` are unchanged: `decoded` and `signal_no_decode` still require a detection with its `first_detection_at`. **A station that decoded frames but cannot say when its first detection happened reports `aborted`**, with its `decode` block and no `signal` block. The timing measurement admits no guessed instant (`docs/DECISIONS.md` D-103, D-117).
 
 `products` carries **metadata only** — `kind`, `uri`, `sha256`, and whatever else the product type warrants. The platform stores the array as submitted. **MSP 0.x defines no transfer mechanism**; a station with nowhere to put an artefact omits the array entirely, which is valid. When transfer is defined it will be a pre-signed PUT to object storage, off the MSP path, rather than an inline upload — a waterfall is megabytes and this protocol's request bodies are sized for a microcontroller (`docs/DECISIONS.md` D-029).
 
@@ -402,20 +441,25 @@ A request over its limit is rejected as `malformed` before the body is parsed.
 | `observations` body | 256 KiB |
 | `health` object, serialised | 4 KiB |
 | `doppler_samples` | 512 entries |
+| `snr_samples` | 512 entries |
 
 **A request carrying a body must declare its length.** A `POST` without a `Content-Length` header — a chunked body — is `malformed`, because a body of undeclared size cannot be checked against the limit before it is parsed, which is what the paragraph above requires. Every HTTP client that sends a JSON body sends `Content-Length` for it, so this constrains no ordinary station; it is stated because a station implementer streaming a body would otherwise discover it as a rejection. `GET /msp/v0/time` carries no body and is unaffected.
 
-These are stated in the protocol rather than left to the deployment because a station needs to know what it may send before it sends it, and because `health` is opaque JSON written every thirty seconds by every station — unbounded, that is storage exhaustion with no attacker required. See `docs/DECISIONS.md` D-028, D-032 and D-050.
+These are stated in the protocol rather than left to the deployment because a station needs to know what it may send before it sends it, and because `health` is opaque JSON written every thirty seconds by every station — unbounded, that is storage exhaustion with no attacker required. See `docs/DECISIONS.md` D-028, D-032, D-050 and D-117.
 
 ---
 
 ## 7. Versioning
 
-`MSP-Version: 0.2` header on every request. The platform supports the current major version and one previous. Breaking changes increment the major version.
+`MSP-Version: 0.3` header on every request. The platform supports the current major version and one previous. Breaking changes increment the major version.
 
-**The current minor is 0.2, and 0.1 is still accepted.** 0.2 added one optional field to `register` (§4.1). That is additive, which this section says is a minor bump, so a 0.1 station omits the field, receives the default, and needs no change — see `docs/DECISIONS.md` D-082. This is the rule's first real exercise rather than a hypothetical, and the document version moved with the text so that "0.1" continues to name exactly one document.
+**The current minor is 0.3, and 0.1 and 0.2 are still accepted.**
+- **0.2** added one optional field to `register` (§4.1). That is additive, which this section says is a minor bump, so a 0.1 station omits the field, receives the default, and needs no change — see `docs/DECISIONS.md` D-082. This was the rule's first real exercise rather than a hypothetical.
+- **0.3** added optional reception evidence to `observation` (§4.4). Every new field is optional, and its rules constrain only the new fields, so every valid 0.2 observation is still valid — see D-103 and D-117.
 
-The header carries `major.minor`; the path carries the major only, so `MSP-Version: 0.1` is served at `/msp/v0/`. "Current major and one previous" is a statement about the major component. A request whose major falls outside the supported range gets `unsupported_version`; an unrecognised **minor** within a supported major is accepted, because minor versions are additive by definition and a station built against 0.1 must keep working when the platform speaks 0.2. A missing header is `unsupported_version` — sending it is one line of client code, and requiring it is what makes deprecation possible later.
+The document version moves with the text, so that each version number names exactly one document.
+
+The header carries `major.minor`; the path carries the major only, so `MSP-Version: 0.1` is served at `/msp/v0/`. "Current major and one previous" is a statement about the major component. A request whose major falls outside the supported range gets `unsupported_version`; an unrecognised **minor** within a supported major is accepted, because minor versions are additive by definition and a station built against 0.1 must keep working when the platform speaks 0.3. A missing header is `unsupported_version` — sending it is one line of client code, and requiring it is what makes deprecation possible later.
 
 ---
 
@@ -480,3 +524,5 @@ Four endpoints is deliberate. A protocol a student can implement on a microcontr
 *Version 0.1 was frozen 2026-08-01 by the decision log rather than by a review meeting, and completed on 2026-08-02 when D-023 through D-032 closed the last undefined recovery paths and the four open questions. Every module depends on this document; changes go through a `spec(msp):` pull request with a `D-` entry behind them.*
 
 *Version 0.2, 2026-08-12: `location_precision_decimals` added to `register` (§4.1, D-082). The first change since the freeze to add a field rather than clarify one, and therefore the first to move the version — additively, under §7's own rule, so every 0.1 station keeps working untouched.*
+
+*Version 0.3, 2026-09-14: optional reception evidence added to `observation` — `noise_floor_dbfs`, `receiver_gain_db` and `snr_samples` in `signal`, and a `decode` block (§4.4, §6, D-103, D-117). Proposed as the evidence the reception verdict and loss diagnosis need, and accepted for Stage 13, where the decoder integration first produces it (D-116). Additive again: no field a 0.2 station sends means anything different.*
