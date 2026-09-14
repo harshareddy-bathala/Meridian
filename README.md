@@ -23,9 +23,13 @@ Meridian predicts which reception opportunities are worth taking, schedules them
 
 Done when a virtual station is visible on the public site from outside the college network.
 
-Built so far: the store and its migrations, the orbit service and element-set archive, all four MSP endpoints, the station registry, pass generation, the two baseline schedulers, append-only observations, a deterministic fleet of virtual stations that speaks MSP through the reference client, and the first half of the public read API under `/api/v1`: stations, their hardware, liveness and heartbeats, and the satellite catalogue.
+Built so far:
+- **Platform core:** the store and its migrations, the orbit service and element-set archive, all four MSP endpoints, the station registry, pass generation and the two baseline schedulers.
+- **Observations and simulation:** append-only observations, and a deterministic fleet of virtual stations that speaks MSP through the reference client.
+- **Public read API** under `/api/v1`: stations, satellites, upcoming passes, scheduling decisions with their reasons, observations and simulator runs.
+- **Dashboard**, served from the platform: a station map, liveness, simulated badges, and each station's listening state and next assignments.
 
-What remains for the exit criterion: the dashboard, and running `deploy/tools/verify_public_surface.py` against the public hostname once the edge rate limit is on (D-088).
+The exit criterion passes when rehearsed locally. What remains is putting it on the public hostname: the tunnel, the edge rate limit, and a run of `deploy/tools/verify_public_surface.py` from outside (D-088). The roadmap's status note lists the steps.
 
 Not yet started: prediction models, the constrained scheduler that beats the baselines, the reliability layer, hardware. `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` says which stage each belongs to.
 

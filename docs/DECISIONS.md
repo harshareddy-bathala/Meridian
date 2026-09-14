@@ -1862,6 +1862,20 @@ D-051 deferred rate limiting and named its own revisit trigger: "the first time 
 
 It cannot run in CI — a fork PR has no public hostname — so it is an operator tool, run against a deployment, and re-running it is one command.
 
+**Rehearsal, 2026-09-14 — against `localhost`, not the public hostname.** A cold `docker compose --profile sim up --build` from the Stage 11 branch, then the verifier. It proves the checks and the platform agree; it is **not** the transcript this entry asks for, which must come from outside the college network with the edge rule on and `--burst` given.
+
+```
+verifying http://localhost:8000
+
+metrics refused    PASS  refused, and indistinguishable from a path that is not there
+dashboard served   PASS  the dashboard page is served at /
+virtual station    PASS  st_b10dee is listed, simulated and online
+lists labelled     PASS  stations 1; passes 2; assignments 2; observations 0; simulator-runs 1; satellites 2
+rate limited       SKIP  not attempted; rerun with --burst N once the edge rule is on
+
+every check that can run passed
+```
+
 ---
 
 ## D-089 — The README banner is a generated SVG pair, and the type is outlines
