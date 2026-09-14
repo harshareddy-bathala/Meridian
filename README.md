@@ -28,6 +28,14 @@ Built so far:
 - **Observations and simulation:** append-only observations, and a deterministic fleet of virtual stations that speaks MSP through the reference client.
 - **Public read API** under `/api/v1`: stations, satellites, upcoming passes, scheduling decisions with their reasons, observations and simulator runs.
 - **Dashboard**, served from the platform: a station map, liveness, simulated badges, and each station's listening state and next assignments.
+- **Deployment and monitoring:**
+  - scheduling that runs by itself every five minutes;
+  - Prometheus metrics and ten tested alert rules, Alertmanager and a provisioned Grafana dashboard;
+  - capped logs and healthchecks on every service;
+  - host backup and restore tools;
+  - amd64 and arm64 images on GHCR.
+
+  `docs/OPERATIONS.md` is the runbook.
 
 **The exit criterion was met on 2026-09-14.** A virtual station was served on `dash.meridian.org.in` through the Cloudflare tunnel, and `deploy/tools/verify_public_surface.py` passed every check from a mobile network outside the college, the edge rate limit included (D-088). The host was a laptop, because there is no Pi yet, so the dashboard is online only while a host runs the `public` profile.
 
@@ -48,6 +56,7 @@ Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](http
 | `docs/DATA-MODEL.md` | Schema |
 | `docs/EVALUATION.md` | Methodology. Read before writing any model code. |
 | `docs/DECISIONS.md` | Decisions taken during implementation, and why |
+| `docs/OPERATIONS.md` | Running a deployment: bring-up, operator commands, backup and restore, and what to do when each alert fires |
 | `docs/GLOSSARY.md` | Domain terms |
 | `docs/PROJECT.md` | The full project document — problem, method, phases, budget |
 | `docs/GIT-WORKFLOW.md` | Commit, branch and review rules |

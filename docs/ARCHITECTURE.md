@@ -149,4 +149,35 @@ External archive adapters. **Optional path.** Failure here degrades model qualit
 
 Everything in Docker Compose. Postgres + TimescaleDB on the Pi's NVMe. Public access via a secure tunnel — no static IP, works from behind the college network.
 
-`docker compose up` on a clean machine must produce a working platform in under ten minutes.
+`docker compose up` on a clean machine must produce a working platform in under ten minutes. CI measures it on every pull request. `docs/OPERATIONS.md` is the runbook.
+
+```mermaid
+flowchart LR
+    DB[(TimescaleDB)] --> M[migrate]
+    M --> API[api: MSP, public API, dashboard]
+    M --> J[jobs: pass generation + scheduling]
+    API --> T[tunnel]
+    P[Prometheus] -- scrape --> API
+    P -- scrape --> J
+    P --> AM[Alertmanager]
+    P --> G[Grafana]
+```
+
+**Processes.** One image runs as four services with different commands.
+- **`migrate`** applies the schema once and exits.
+- **`api`** is `meridian serve`: MSP, the public read API and the dashboard, in several worker processes (D-109).
+- **`jobs`** is `meridian jobs run`: it generates passes and schedules them every five minutes, so a deployment schedules with no simulator and no operator (D-110).
+- **The `sim` profile** adds the simulated fleet on the same image.
+
+**Metrics** (D-109, D-111).
+- **API events:** requests, MSP errors, heartbeats, observations and registrations are counted in the API. Its workers share them through Prometheus's multiprocess directory.
+- **State:** station liveness, assignments by state, overdue reports, the connection pool and schema revision are computed from the database at scrape time. Nothing is stored for them.
+- **Jobs process:** it serves its own series on a listener inside the compose network.
+- **Access:** both endpoints need the same bearer token.
+- **Labels:** every station series carries `simulated`, and none carries an identifier.
+
+**Alerts** are Prometheus rules with promtool tests, routed by Alertmanager to nothing until a deployment supplies its own receiver. Grafana is provisioned from files (D-112).
+
+**Images** are built for amd64 and arm64 and published to GHCR once CI passes on `main`, so the Pi pulls rather than builds (D-113).
+
+**Logs and backups.** Every container's logs are capped (D-114). Backup and restore are host tools, with a manifest that restore checks before touching anything (D-115).
