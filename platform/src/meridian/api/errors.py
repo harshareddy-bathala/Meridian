@@ -34,6 +34,7 @@ from http import HTTPStatus
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from prometheus_client import Counter
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from meridian.api.public.envelope import (
@@ -49,6 +50,7 @@ from meridian.api.public.envelope import SERVER_ERROR as PUBLIC_SERVER_ERROR
 __all__ = [
     "INVALID_INVITE",
     "MALFORMED",
+    "MSP_ERRORS",
     "NOT_OWNER",
     "RATE_LIMITED",
     "SERVER_ERROR",
@@ -136,6 +138,19 @@ platform's log, where the operator can see it and a station cannot.
 """
 
 
+MSP_ERRORS = Counter(
+    "meridian_msp_errors",
+    "MSP error responses sent, by MSP §6's stable code.",
+    ["code"],
+)
+"""Counted where the body is built, so every path to an MSP error is counted once.
+
+The label is one of the eight codes in ``STATUS_FOR_CODE``, so it is bounded by
+the specification (D-111). Public API errors are not counted here; the request
+metrics already count them by route and status class.
+"""
+
+
 class MspError(Exception):
     """A failure that maps onto one of MSP §6's stable codes.
 
@@ -183,6 +198,7 @@ def error_body(code: str, message: str) -> dict[str, str]:
 
 def error_response(code: str, message: str) -> JSONResponse:
     """An MSP error as a response, at the status §6 pairs with ``code``."""
+    MSP_ERRORS.labels(code=code).inc()
     return JSONResponse(error_body(code, message), status_code=STATUS_FOR_CODE[code])
 
 

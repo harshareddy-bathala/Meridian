@@ -16,6 +16,7 @@ import logging
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends
+from prometheus_client import Counter, Histogram
 
 from meridian.api import platform_clock
 from meridian.api.dependencies import get_authenticated_station_id, get_connection
@@ -34,6 +35,26 @@ __all__ = ["router"]
 _log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+OBSERVATIONS = Counter(
+    "meridian_msp_observations",
+    "Observation submissions accepted, by outcome and whether simulated.",
+    ["outcome", "simulated"],
+)
+"""Every accepted submission, including an unchanged retry.
+
+The outcome label is MSP §4.4's fixed set, so it is bounded by the specification.
+"""
+
+OBSERVATION_SUBMISSION_DELAY = Histogram(
+    "meridian_observation_submission_delay_seconds",
+    "Platform receipt time minus the observation's ended_at.",
+    ["simulated"],
+    # From a station online at the end of the pass, seconds, to one that queued
+    # its reports through an outage: MSP §6 accepts submissions up to thirty
+    # days late, and the upper buckets are hour, six hours and a day.
+    buckets=(1.0, 5.0, 15.0, 60.0, 300.0, 900.0, 3600.0, 21600.0, 86400.0),
+)
 
 OLDEST_ACCEPTED_START = timedelta(days=30)
 """How far back a ``started_at`` may be (D-013).
@@ -104,6 +125,20 @@ def _ingest_or_translate(
         raise MspError(NOT_OWNER, NOT_OWNER_MESSAGE) from exc
 
 
+def _count_observation(
+    body: ObservationRequestBody, now: datetime, *, simulated: bool
+) -> None:
+    """Count one accepted submission and how long after the pass it arrived.
+
+    A negative delay is a station clock running ahead, and is recorded as zero
+    for the same reason the heartbeat's is.
+    """
+    label = "true" if simulated else "false"
+    OBSERVATIONS.labels(outcome=body.outcome, simulated=label).inc()
+    delay_s = max(0.0, (now - body.ended_at).total_seconds())
+    OBSERVATION_SUBMISSION_DELAY.labels(simulated=label).observe(delay_s)
+
+
 @router.post("/observations")
 def submit_observation(
     body: ObservationRequestBody,
@@ -143,10 +178,13 @@ def submit_observation(
         )
         raise MspError(NOT_OWNER, STATION_MISMATCH_MESSAGE)
 
-    _require_a_plausible_start(body.started_at, platform_clock.utc_now())
+    now = platform_clock.utc_now()
+    _require_a_plausible_start(body.started_at, now)
 
     with conn.transaction():
         acknowledgement = _ingest_or_translate(conn, body, station_id)
+
+    _count_observation(body, now, simulated=acknowledgement.simulated)
 
     return ObservationAckBody(
         observation_id=acknowledgement.observation_id,

@@ -22,6 +22,7 @@ import pytest
 psycopg = pytest.importorskip("psycopg")
 
 from fastapi.testclient import TestClient  # noqa: E402
+from prometheus_client import REGISTRY  # noqa: E402
 
 from meridian.api.app import create_app  # noqa: E402
 from meridian.api.dependencies import get_connection  # noqa: E402
@@ -433,3 +434,38 @@ def test_the_station_s_own_list_is_what_exempts_a_row_from_expiry(
 
     assert state_of(rollback, "as_finishing") == "held"
     assert state_of(rollback, "as_abandoned") == "expired"
+
+
+def counted(name: str, labels: dict[str, str]) -> float:
+    """A counter's current value in this process, zero when never incremented."""
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+@pytest.mark.parametrize("simulated", [True, False])
+def test_a_heartbeat_is_counted_under_its_registration_record(
+    client: TestClient, rollback: Any, simulated: bool
+) -> None:
+    """The ``simulated`` label comes from the station's record, as the row does.
+
+    Counted in both directions, because a label hard-coded to either value would
+    pass a test of the other one (D-111, CLAUDE.md rule 5).
+    """
+    label = {"simulated": "true" if simulated else "false"}
+    station = register(client, rollback, simulated=simulated)
+    before = counted("meridian_msp_heartbeats_total", label)
+    delays_before = counted("meridian_heartbeat_delay_seconds_count", label)
+
+    send_heartbeat(client, station)
+
+    assert counted("meridian_msp_heartbeats_total", label) == before + 1
+    assert counted("meridian_heartbeat_delay_seconds_count", label) == delays_before + 1
+
+
+def test_an_admitted_registration_is_counted(client: TestClient, rollback: Any) -> None:
+    """Registration results are counted by outcome alone, never by claim."""
+    before = counted("meridian_msp_registrations_total", {"result": "admitted"})
+
+    register(client, rollback, simulated=True)
+
+    after = counted("meridian_msp_registrations_total", {"result": "admitted"})
+    assert after == before + 1

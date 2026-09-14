@@ -18,7 +18,7 @@ from fastapi import FastAPI, Header, Response
 from fastapi.testclient import TestClient
 
 from meridian.api.errors import install_error_handlers, no_such_endpoint_response
-from meridian.api.metrics_access import is_metrics_scrape_authorised
+from meridian.metrics.access import is_metrics_scrape_authorised
 
 TOKEN = "a-real-metrics-token"
 

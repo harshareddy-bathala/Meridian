@@ -111,11 +111,17 @@ class RevisionDecision:
 
 @dataclass(frozen=True, slots=True)
 class Acknowledgement:
-    """MSP §4.4's three-field response."""
+    """MSP §4.4's three-field response, and the provenance the route counts by.
+
+    ``simulated`` is not part of the response on the wire. It is carried back so
+    the route can label its counter from the registration record that
+    :func:`ingest` already read, rather than reading it a second time (D-111).
+    """
 
     observation_id: str
     assignment_id: str
     superseded: bool
+    simulated: bool
 
 
 def decide_revision(
@@ -196,6 +202,7 @@ def ingest(
         observation_id=observation_id,
         assignment_id=submission.assignment_id,
         superseded=decision.superseded,
+        simulated=record.simulated,
     )
 
 
