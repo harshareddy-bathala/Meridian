@@ -27,6 +27,7 @@ RULES = DEPLOY / "prometheus/rules/meridian.yml"
 RULE_TESTS = DEPLOY / "prometheus/tests/meridian.test.yml"
 DASHBOARDS = DEPLOY / "grafana/dashboards"
 DATASOURCES = DEPLOY / "grafana/provisioning/datasources/prometheus.yml"
+OPERATIONS = DEPLOY.parent / "docs/OPERATIONS.md"
 
 
 def _alerting_rules() -> list[dict[str, object]]:
@@ -59,6 +60,22 @@ def test_every_alert_links_its_own_runbook_section_and_has_a_severity() -> None:
         assert annotations["runbook"] == f"docs/OPERATIONS.md#{name.lower()}"
         assert annotations["summary"]
         assert labels["severity"] in {"critical", "warning"}
+
+
+def test_every_runbook_link_lands_on_a_section() -> None:
+    """A ``runbook`` annotation naming a missing heading is a link to nothing.
+
+    GitHub derives ``#apiunavailable`` from a ``### ApiUnavailable`` heading, so
+    the heading must be the alert's name exactly.
+    """
+    headings = {
+        line.removeprefix("### ").strip()
+        for line in OPERATIONS.read_text(encoding="utf-8").splitlines()
+        if line.startswith("### ")
+    }
+
+    for rule in _alerting_rules():
+        assert rule["alert"] in headings, f"no runbook section for {rule['alert']}"
 
 
 def test_no_alert_is_labelled_with_an_identifier() -> None:
