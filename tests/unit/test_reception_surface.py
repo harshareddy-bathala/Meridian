@@ -25,6 +25,7 @@ import pytest
 from meridian_client.reception import (
     null_rotator,
     protocols,
+    reception_executor,
     subprocess_decoder,
     synthetic_receivers,
 )
@@ -38,6 +39,8 @@ RECEIVER_SURFACE = {"hears_the_sky", "start", "alive", "stop"}
 ROTATOR_SURFACE = {"prepare", "release"}
 DECODER_SURFACE = {"supports", "start"}
 DECODE_RUN_SURFACE = {"poll", "cancel"}
+EXECUTOR_SURFACE = {"capture_window", "begin", "end", "status", "take_completed"}
+""":class:`meridian_client.execution.PassExecutor`'s calls, and nothing more."""
 
 
 def public_members(cls: type) -> set[str]:
@@ -57,6 +60,7 @@ def public_members(cls: type) -> set[str]:
         (protocols.DecodeRun, DECODE_RUN_SURFACE),
         # `failed` builds a run that never started; it launches nothing.
         (subprocess_decoder.SubprocessDecodeRun, DECODE_RUN_SURFACE | {"failed"}),
+        (reception_executor.ReceptionExecutor, EXECUTOR_SURFACE),
     ],
     ids=lambda value: getattr(value, "__name__", "surface"),
 )
@@ -86,4 +90,5 @@ def test_the_scan_covers_the_package() -> None:
         "null_rotator.py",
         "capture_folder.py",
         "subprocess_decoder.py",
+        "reception_executor.py",
     }
