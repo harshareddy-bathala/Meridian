@@ -163,6 +163,40 @@ def test_the_digest_is_thirty_two_raw_bytes() -> None:
     assert len(digest) == 32
 
 
+MSP_02_EXAMPLE_DIGEST = (
+    "0ff3ad44f9db3299a1be48e6fc508d8155e6d05c1e07ea5a4c9661f5d84d5c78"
+)
+MSP_02_NOT_ATTEMPTED_DIGEST = (
+    "eb6f5ba0e4ce63264b7b0fde1ad73fb86c1a86d9b4d39b87c678ed5bc14bc2eb"
+)
+
+
+def test_a_02_observation_keeps_the_digest_it_was_stored_with() -> None:
+    """Every stored `content_sha256` must keep matching its own row (D-118).
+
+    Pinned from the rendering as it was before MSP 0.3's fields existed. A field
+    added later that changed these bytes would make every stored hash disagree
+    with the record it was taken over, and turn every queued 0.2 retry into a
+    spurious new revision. The second observation has every optional field
+    absent — the case a naive `null` rendering of the new fields would change.
+    """
+    assert content_sha256(observation()).hex() == MSP_02_EXAMPLE_DIGEST
+    assert (
+        content_sha256(
+            observation(
+                outcome="not_attempted",
+                signal_detected=False,
+                first_detection_at=None,
+                peak_snr_db=None,
+                doppler_samples=None,
+                products=(),
+                client_notes=None,
+            )
+        ).hex()
+        == MSP_02_NOT_ATTEMPTED_DIGEST
+    )
+
+
 def test_two_stations_reporting_identically_do_not_collide() -> None:
     """`station_id` is in the rendering, so one station's row is not another's.
 
