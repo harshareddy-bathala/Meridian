@@ -22,6 +22,13 @@ htmlcov/
 # a file; the .example beside it is tracked and carries the placeholder.
 deploy/prometheus/metrics_token
 
+# Database backups (D-115). A dump holds every station's token hash and every
+# invite, so it is a secret as much as it is data.
+backups/
+*.dump
+*.dump.manifest.json
+*.dump.partial
+
 # Data. Nothing in the observation lineage belongs in git.
 *.db
 *.sqlite3
