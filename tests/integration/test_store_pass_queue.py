@@ -21,7 +21,14 @@ from meridian.store.pass_queue import find_upcoming_passes  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
-NOW = datetime(2026, 9, 14, 6, 0, tzinfo=UTC)
+NOW = datetime.now(UTC).replace(microsecond=0)
+"""The wall clock, not a fixed instant.
+
+``schedule_rows.satellite()`` stamps its element set with the database's
+``now() - interval '6 hours'``, so an instant pinned to one morning made the
+epoch assertion below true until noon that day and false for ever after. Every
+pass here is placed relative to this value, so nothing else depends on the date.
+"""
 
 
 @pytest.fixture
