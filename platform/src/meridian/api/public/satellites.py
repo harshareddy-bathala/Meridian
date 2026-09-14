@@ -54,7 +54,7 @@ def _satellite_or_404(conn: Connection, satellite_id: str) -> CataloguedSatellit
 
 @router.get("/satellites")
 def list_satellites(
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
     page: PageRequest = Depends(page_request),
 ) -> Page[PublicSatellite]:
     """Every tracked object, in catalogue order.
@@ -90,7 +90,7 @@ def list_satellites(
 
 @router.get("/satellites/{satellite_id}")
 def get_satellite(
-    satellite_id: str, conn: Connection = Depends(get_connection)
+    satellite_id: str, conn: Connection = Depends(get_connection, scope="function")
 ) -> PublicSatellite:
     """One satellite, in the same shape the list serves.
 
@@ -111,7 +111,7 @@ def get_satellite(
 
 @router.get("/satellites/{satellite_id}/transmitters")
 def get_satellite_transmitters(
-    satellite_id: str, conn: Connection = Depends(get_connection)
+    satellite_id: str, conn: Connection = Depends(get_connection, scope="function")
 ) -> list[PublicTransmitter]:
     """The downlinks recorded for one satellite.
 

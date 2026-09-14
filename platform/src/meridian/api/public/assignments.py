@@ -38,7 +38,7 @@ router = APIRouter()
 
 @router.get("/assignments")
 def list_assignments(
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
     page: PageRequest = Depends(page_request),
     station_id: Annotated[str | None, Query()] = None,
     decision: Annotated[AssignmentDecision | None, Query()] = None,
@@ -77,7 +77,7 @@ def list_assignments(
 
 @router.get("/assignments/{assignment_id}")
 def get_assignment(
-    assignment_id: str, conn: Connection = Depends(get_connection)
+    assignment_id: str, conn: Connection = Depends(get_connection, scope="function")
 ) -> PublicAssignment:
     """One decision, including one whose window is long past.
 

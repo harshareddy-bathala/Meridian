@@ -44,6 +44,14 @@ def get_connection(request: Request) -> Iterator[Connection]:
     The same ``pool.connection()`` call ``meridian.store.pool.is_database_reachable``
     already uses — the connection is returned to the pool when the request
     finishes, whether it succeeded or raised.
+
+    **Every route declares it with** ``scope="function"``. Returning the
+    connection is what commits the request's transaction, and FastAPI's default
+    request scope runs that step *after* the response is sent. A station that
+    registered and heartbeated straight away was refused with 401, because its
+    row was not committed yet, and it stopped for good (D-024). A write that
+    failed to commit would also have been acknowledged to a client that then
+    discards its copy. Function scope commits before the response leaves.
     """
     with request.app.state.pool.connection() as conn:
         yield conn
@@ -81,7 +89,7 @@ def parse_bearer_token(header: str | None) -> str:
 
 def get_authenticated_station_id(
     authorization: str | None = Header(default=None),
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
     settings: Settings = Depends(get_settings),
 ) -> str:
     """The ``station_id`` a bearer token authenticates as.

@@ -37,7 +37,7 @@ router = APIRouter()
 
 @router.get("/observations")
 def list_observations(
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
     page: PageRequest = Depends(page_request),
     station_id: Annotated[str | None, Query()] = None,
 ) -> Page[PublicObservation]:
@@ -71,7 +71,7 @@ def list_observations(
 
 @router.get("/simulator-runs")
 def list_simulator_runs(
-    conn: Connection = Depends(get_connection),
+    conn: Connection = Depends(get_connection, scope="function"),
     page: PageRequest = Depends(page_request),
 ) -> Page[PublicSimulatorRun]:
     """Simulator runs with registered virtual stations, by run id.
