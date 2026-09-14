@@ -33,8 +33,10 @@ import json
 import sys
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 TIMEOUT_S = 10
+BURST_WORKERS = 25
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -178,15 +180,35 @@ def check_dashboard_is_served(base_url: str) -> tuple[str, str]:
     return PASS, "the dashboard page is served at /"
 
 
+def judge_burst(statuses: list[int]) -> tuple[str, str]:
+    """PASS when the edge refused any request of a burst with 429."""
+    refused = statuses.count(429)
+    if refused:
+        return PASS, f"{refused} of {len(statuses)} request(s) refused with 429"
+    return FAIL, f"{len(statuses)} requests, none refused (D-088)"
+
+
 def check_rate_limit_is_applied(base_url: str, burst: int) -> tuple[str, str]:
-    """A burst against the public API is eventually refused with 429 (D-088)."""
+    """A burst against the public API is refused with 429 (D-088).
+
+    The requests go out concurrently. Cloudflare's free-plan rule counts over a
+    ten-second window, and one request at a time through a tunnel managed about
+    thirty per window, under the limit, so a sequential burst reported a working
+    rule as missing. A request that fails outright counts as status 0, which is
+    not a refusal.
+    """
     if burst <= 0:
         return SKIP, "not attempted; rerun with --burst N once the edge rule is on"
-    for sent in range(1, burst + 1):
-        status, _ = fetch(f"{base_url}/api/v1/stations?limit=1")
-        if status == 429:
-            return PASS, f"refused with 429 after {sent} request(s)"
-    return FAIL, f"{burst} requests in a row, none refused (D-088)"
+    url = f"{base_url}/api/v1/stations?limit=1"
+
+    def status_of(_: int) -> int:
+        try:
+            return fetch(url)[0]
+        except OSError:
+            return 0
+
+    with ThreadPoolExecutor(max_workers=BURST_WORKERS) as pool:
+        return judge_burst(list(pool.map(status_of, range(burst))))
 
 
 def main(argv: list[str]) -> int:

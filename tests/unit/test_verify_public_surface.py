@@ -80,3 +80,11 @@ def test_the_burst_is_not_fired_unless_asked(verifier: ModuleType) -> None:
     outcome, _ = verifier.check_rate_limit_is_applied("https://unused.invalid", 0)
 
     assert outcome == verifier.SKIP
+
+
+def test_any_429_in_a_burst_passes(verifier: ModuleType) -> None:
+    assert verifier.judge_burst([530, 429, 0])[0] == verifier.PASS
+
+
+def test_a_burst_with_no_429_fails(verifier: ModuleType) -> None:
+    assert verifier.judge_burst([200, 200, 0])[0] == verifier.FAIL
