@@ -123,6 +123,8 @@ Must survive: network loss mid-pass (continue, queue results), power loss (rejoi
 - a **`Decoder`**: `SubprocessDecoder` runs whichever program a station configures for each mode and reads the JSON report it writes;
 - a **`RotatorController`**: only `NullRotator`, for a fixed antenna (D-126).
 
+**One TOML file configures a station** — platform, state directory, receiver, a decoder command per mode, thresholds and the disk guard — and `meridian-station` runs it; `meridian-replay` puts a recording through the same pipeline offline and cannot submit (D-127, D-128). Whether a station is simulated comes from the credentials registration wrote, never from that file.
+
 Each reception keeps a capture folder, whose manifest records how far it got, so a restart resumes it (D-123). Its observation is derived from what was recorded and decoded by D-122's table, which never turns a failure of the station's own chain into `no_signal`. A receiver that does not hear the sky is refused for a station that did not register as simulated (D-125). There are no threads: the receiver and decoder are other processes or files, polled on each tick.
 
 ### `simulator`

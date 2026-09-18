@@ -8,7 +8,7 @@ Every command runs from the repository root. `compose` below is shorthand for:
 docker compose -f deploy/docker-compose.yml
 ```
 
-Decisions this page puts into practice: D-109 to D-115, and D-120 to D-126 for station reception. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+Decisions this page puts into practice: D-109 to D-115, and D-120 to D-128 for station reception. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
 
 ---
 
@@ -89,7 +89,102 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 
 ## Station reception
 
-What the station client does with an assignment, and what it leaves on the station's disk (D-120 to D-126). This is the software half: **no physical receiver adapter ships yet**, and nothing here has run against a real SDR or a real decoder. It runs today with the simulated and file-replay receivers.
+How a station is configured and run, what it does with an assignment, and what it leaves on its disk (D-120 to D-128). This is the software half: **no physical receiver adapter ships yet**, and nothing here has run against a real SDR or a real decoder. It runs today with the simulated and file-replay receivers.
+
+### Configuring a station
+
+One TOML file says what a station is (D-127). Every table is optional, and what
+is left out takes the default below. **An unknown table or key is refused by
+name** rather than ignored, so a typo stops the station at start-up instead of
+at the end of a pass.
+
+```toml
+[station]
+base_url = "https://dash.meridian.org.in"   # default http://localhost:8000
+state_dir = "/var/lib/meridian-station"     # default: "state" beside this file
+
+[receiver]
+kind = "simulated"        # or "replay"; no physical adapter ships yet (D-124)
+sample_rate_hz = 1000     # the simulated receiver's rate
+
+[decoders.lrpt]           # one table per mode; a mode with none is not attempted
+argv = ["/usr/local/bin/meridian-satdump", "{recording}", "{report_path}"]
+timeout_s = 900.0
+
+[policy]
+snr_threshold_db = 3.0    # what counts as a detection
+minimum_coverage = 0.8    # how much of the window a capture must span
+
+[disk]
+bytes_per_second = 2048000   # the receiver's write rate, for the disk guard
+margin = 1.25
+reserve_bytes = 1073741824
+
+[retention]
+keep_recordings = false   # true keeps each recording after its result is sent
+```
+
+To replay recordings instead of receiving, name one per assignment:
+
+```toml
+[receiver]
+kind = "replay"
+
+[receiver.recordings.as_44b2]
+path = "recordings/pass.cf32"     # relative to this file
+sample_rate_hz = 1000
+sample_format = "cf32"            # u8, s8, s16 or cf32
+centre_freq_hz = 137900000        # must be within Doppler of the assignment's
+gain_db = 32.8
+```
+
+**Whether the station is simulated is not in this file.** It is written into the
+credentials when the station registers, and read back from there, so no edit here
+can make a simulated receiver report for a station the platform records as
+measuring the real sky (D-125, D-127). A station whose credentials predate that
+field counts as measured, which refuses a synthetic receiver rather than
+admitting one.
+
+The state directory holds everything the station owns: `credentials.json`,
+`registration_key`, `held.json`, `outbox/` and `captures/`.
+
+### Running a station
+
+```bash
+meridian-station --config /etc/meridian/station.toml
+```
+
+Also `python -m meridian_client.station --config …`, which is what a systemd unit
+or a container runs. `--ticks N` stops after N ticks, for a commissioning run.
+
+**It does not register.** Registration consumes an invite and mints the only copy
+of a bearer token (D-023), so a station with no credentials says so and stops
+rather than quietly burning an invite. Admit it with `meridian invite create`
+first, and register it with the invite that prints.
+
+A revoked token stops the station with the sentence that says what to do, and
+exit code 1 (D-024).
+
+### Replaying a recording offline
+
+```bash
+meridian-replay --config station.toml \
+    --assignment as_44b2.json --recording pass.cf32 --sample-rate-hz 1000
+```
+
+Puts one recording through the real pipeline — the same executor, capture folder,
+decoder program and outcome rules — and writes the MSP 0.3 body a station would
+have queued to stdout, or to `--out`. This is how a decoder wrapper and a
+threshold are checked against a pass you already have.
+
+**It cannot submit.** The runner has no transport at all, so nothing it produces
+reaches the platform (D-128); the body names the recording it replayed. It leaves
+the station's own state directory alone, and a pass it has to refuse — a
+recording tuned to another satellite, say — still prints the `not_attempted`
+observation the station would have sent.
+
+`--assignment` takes one MSP §4.3 assignment as JSON, as a heartbeat response
+delivered it.
 
 ### The capture folder
 
