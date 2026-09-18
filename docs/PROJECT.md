@@ -164,7 +164,7 @@ Anyone with the link can watch. That is the demo, and it works from a phone.
 
 ### 5.6 After reception
 
-Receiving a pass is not the end of the work. Before this layer, an observation that arrived was stored and nothing further was concluded from it: a station's owner could not tell whether last night's pass was usable, why the one before failed, or that their cable was going. Five capabilities answer that — numbered **13 to 17** in the submission module list (D-095):
+Receiving a pass is not the end of the work. Before this layer, an observation that arrived was stored and nothing further was concluded from it: a station's owner could not tell whether last night's pass was usable, why the one before failed, or that their cable was going. Five capabilities answer that — numbered **13 to 17** in the submission module list (D-095) — and three more supply what they read and carry where they run, numbered **18 to 20**:
 
 | # | Capability | What it gives | How it is proven |
 |---|---|---|---|
@@ -173,8 +173,11 @@ Receiving a pass is not the end of the work. Before this layer, an observation t
 | 15 | **station health watch** | A warning that the receive chain — antenna, cable, LNA — is degrading, from signal strength at each elevation against the station's own history, before reception fails | Detection delay and false-alarm rate on injected gradual degradation |
 | 16 | **owner reports** | A plain-language message after each pass, and a weekly station summary, from templates | Delivered end to end in the demonstration |
 | 17 | **evidence dataset** | Receptions with verdict, cause and full provenance, as a hash-verified package | Regenerating from the same snapshot, configuration and seed gives the identical hash |
+| 18 | **public data ingest** | Published geomagnetic and solar activity indices, local atmospheric conditions, and imagery-derived products — taken once, with source, licence, retrieval time and checksum recorded, and served to the rest of the system from immutable snapshots (D-132) | A snapshot re-normalises and re-evaluates with the network unplugged |
+| 19 | **regional monitoring** | For a registered area of interest, what the ingested products say about it over time, and which of the network's own receptions cover it | An area registered in the demonstration, its record built from snapshots alone |
+| 20 | **deployment and data custody** | Who holds which record and what survives a disconnection: the station authoritative for its own receptions, reconciliation on reconnect, and backup, restore and retention across both tiers (D-129) | Both independence drills pass, and a restore is proven on a machine other than the one backed up |
 
-**It works on whatever was received** — an LRPT image, a LoRa telemetry frame, or nothing at all. None of the five reads image content; a pass that received nothing still has an outcome, heartbeat evidence and a noise floor, which is what loss diagnosis reads. **It adds no hardware and no cost** (D-094): everything above runs on the funded station and the simulator.
+**It works on whatever was received** — an LRPT image, a LoRa telemetry frame, or nothing at all. None of the first five reads image content; a pass that received nothing still has an outcome, heartbeat evidence and a noise floor, which is what loss diagnosis reads. **It adds no hardware and no cost** (D-094): modules 13 to 17 run on the funded station and the simulator. **Modules 18 to 20 add no hardware either, and no committed cost** — the data they read is published, and the cloud tier module 20 permits is funded by student credit that **nothing assessed may depend on** (D-130). A tile from any of these sources is shown, never sampled for a number (D-133).
 
 **Who benefits, and how.**
 
@@ -182,7 +185,7 @@ Receiving a pass is not the end of the work. Before this layer, an observation t
 - **Schools and colleges running a station.** A student-run station changes hands with every cohort, and the people inheriting it are rarely radio specialists. A verdict on every pass, a named cause for every loss and a weekly summary are how a new team can tell whether the station they inherited works, without an expert on hand — and the evidence dataset gives a class its own receptions to analyse, with provenance attached.
 - **Researchers who need a labelled reception dataset.** Receptions carrying a calibrated confidence, a diagnosed cause and full provenance — station, element set, simulated flag, content hash — packaged so anyone can regenerate it and check the hash. Measured and simulated receptions are kept in separate files, and simulated ones are included only when asked for.
 
-Where each capability lives in the platform is D-102, what it stores D-104, and the build order roadmap Stages 25–30.
+Where each capability lives in the platform is D-102, what it stores D-104, and the build order roadmap Stages 25–30 — with Stages 31 to 33 for modules 18 to 20.
 
 ---
 
@@ -254,6 +257,7 @@ Elevation and operator priority are not competitors to our model — they are in
 - **Elevation** is the strongest single predictor and remains the first feature.
 - **Operator priority** is a weight in the objective function, not something to predict away.
 - **Our contribution** is the additional signal: learned horizon profile, element-set age, station health, interference profile by azimuth and hour, and per-satellite history.
+- **Published conditions** — geomagnetic and solar activity indices, and local atmospheric conditions — are candidate features, not committed ones (D-131). A disturbed ionosphere moves the noise floor for reasons that are not the station's fault, and cloud cover is why a clean decode can still produce an unusable image. They enter the ablation as one named group and earn their place or do not; SC-1 is still measured as D − B.
 
 This is also a functional requirement, not just a design preference. A newly joined station has no history, so the model has nothing to learn from and **must** fall back to geometry until data accumulates.
 
@@ -326,6 +330,8 @@ All evaluation uses temporal splits — train on earlier data, test on later. Ne
 | SC-10 | Evidence dataset regenerated from the same snapshot, configuration and seed | Identical hash — Achieved / not — *proposed* |
 
 SC-7 cannot be measured until the team settles what "usable" means (D-106), and SC-8 and SC-9 are simulated results, labelled as such wherever they are reported.
+
+**No criterion above depends on a cloud host** (D-130). Every one of SC-1 to SC-10 is measurable on the single machine §17 already funds, and the same holds for the demonstration in §13 and for every completion gate in the roadmap. A cloud tier may make the work faster; it may not make any of it possible.
 
 ---
 
@@ -452,6 +458,8 @@ The system receives only open, unencrypted transmissions intended for public rec
 
 Owner reports (§5.6) need a way to reach a station's owner, and a contact address is personal data. How — or whether — one is held is open (D-107). Until the team decides, reports go only to stations the team itself operates, and the statement above holds as written.
 
+**Ingested public data** (modules 18 and 19) is published environmental and space-weather data about the atmosphere and the ionosphere, not about people. Each source is recorded with its licence and its terms of use in `ATTRIBUTION.md` before anything is retrieved from it (D-134), and terms are recorded separately from licence because they decide what may be republished in the evidence dataset (D-136). An **area of interest** is a place and a label; it holds no personal data, and who may register one is open (D-137).
+
 ---
 
 ## 17. Budget
@@ -472,6 +480,8 @@ Owner reports (§5.6) need a way to reach a station's owner, and a contact addre
 Tier 3 is genuinely optional: every claim the project makes is provable with a fixed antenna. Tracking adds a second band, an antenna that moves under software control during the demonstration, and substantive use of the institute's machining facilities.
 
 The post-reception layer in §5.6 changes nothing here: it needs no hardware beyond Tiers 1 and 2, and the request stays at ₹27,600 (D-094).
+
+**Cloud hosting is not in this request and is not depended on.** Where a cloud tier is used it is funded by student credit, which may lapse before submission and cannot be renewed by the team. Nothing assessed may require it (D-130): the single-machine deployment stays supported and tested, and a lapse costs throughput rather than any claim, deliverable or criterion. No recurring cost is committed to.
 
 Nothing is purchased before the software that consumes it exists — with one exception, the receiver, bought early so that reception from our site is confirmed before any installation spend.
 
@@ -505,6 +515,7 @@ MSP is designed jointly and reviewed by all three, as the interface every module
 10. One operational ground station
 11. Technical report and demonstration
 12. Post-reception layer — reception verdict, loss diagnosis, station health watch, owner reports and evidence dataset (modules 13–17, §5.6)
+13. Public data ingest, regional monitoring, and the deployment and custody record (modules 18–20, §5.6)
 
 ---
 
