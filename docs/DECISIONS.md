@@ -3079,7 +3079,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 |---|---|
 | D-129 two tiers, the station authoritative for its receptions | `ARCHITECTURE.md` Deployment and Rules; `EVALUATION.md` §12 |
 | D-130 no criterion depends on a cloud host | `PROJECT.md` §9, §17; `EVALUATION.md` §12 |
-| D-131 environmental and space-weather features | `PROJECT.md` §8.1; `EVALUATION.md` §2, §3, §4.4 |
+| D-131 environmental and space-weather features | `PROJECT.md` §8.1; `EVALUATION.md` §2, §3 |
 | D-132 widened ingest, provenance unchanged | `SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 14, Stage 31; `DATA-MODEL.md` |
 | D-133 a tile is not a measurement | `ARCHITECTURE.md` Rules; `DATA-MODEL.md`; Stages 31 and 32 |
 | D-134 every ingested source is credited | `ATTRIBUTION.md` |
