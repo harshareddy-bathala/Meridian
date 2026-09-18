@@ -116,6 +116,7 @@ meridian/
 │       └── cli.py        the `meridian` command; `cli_*.py` beside it
 ├── client/               distribution: meridian-client
 │   └── src/meridian_client/     reference station client
+│       └── reception/    receiver, decoder and rotator behind the executor seam
 ├── simulator/            distribution: meridian-sim
 │   └── src/meridian_sim/        virtual stations speaking MSP
 ├── tests/                unit, integration, msp_conformance, e2e

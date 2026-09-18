@@ -8,7 +8,7 @@ Every command runs from the repository root. `compose` below is shorthand for:
 docker compose -f deploy/docker-compose.yml
 ```
 
-Decisions this page puts into practice: D-109 to D-115. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+Decisions this page puts into practice: D-109 to D-115, and D-120 to D-126 for station reception. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
 
 ---
 
@@ -84,6 +84,92 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
 **Scheduling needs no command.** The `jobs` service generates passes and schedules them under configuration A every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
+
+---
+
+## Station reception
+
+What the station client does with an assignment, and what it leaves on the station's disk (D-120 to D-126). This is the software half: **no physical receiver adapter ships yet**, and nothing here has run against a real SDR or a real decoder. It runs today with the simulated and file-replay receivers.
+
+### The capture folder
+
+Each assignment the station works gets `<state>/captures/<assignment_id>/`, beside `held.json` and `outbox/`:
+
+| File | What it is |
+|---|---|
+| `manifest.json` | The assignment, what was tuned and recorded, and the phase reached |
+| `recording.u8` | The recording, when the station made it; a replayed file stays where the operator put it |
+| `decoder_output/` | Whatever the decoder writes; emptied before every decode |
+| `decode_report.json` | The decoder's report, read by the client |
+| `decoder.stdout.log`, `decoder.stderr.log` | The decoder's own output |
+
+The phases are `refused`, `capturing`, `captured`, `decoding`, `reported` and `handed_over`. **A restart resumes every folder from its phase**: an interrupted capture is decoded and reported `aborted`, a decode is run again, and a result not yet marked handed over is handed over again. Rebuilt from the same files, it is byte-identical, so the platform stores it once (D-123).
+
+- **Recordings** are deleted once their result is handed over, unless the station keeps them. A replayed file is never deleted.
+- **Folders** are pruned thirty days after hand-over.
+- **An unreadable manifest** is logged and left alone for an operator. Nothing overwrites it.
+- **Recordings never belong in git.** `*.u8`, `*.cf32`, `*.iq` and `captures/` are ignored.
+
+### Decoders
+
+Each mode maps to one command. The command is an argv, never a shell line, and may use only these placeholders:
+
+`{recording}` `{output_dir}` `{report_path}` `{sample_rate_hz}` `{sample_format}` `{centre_freq_hz}` `{mode}`
+
+An unknown placeholder, a format spec, or a placeholder in the program name is refused when the command is built. The decoder runs in its own session at a lower CPU priority, one decode at a time, oldest first. When its timeout expires, its whole process group is sent SIGTERM, then SIGKILL five seconds later (D-124).
+
+**A mode with no decoder is refused before capture**, and the pass is reported `not_attempted`.
+
+**The decoder must write Meridian's report** to `{report_path}`. A station wraps SatDump, or anything else, in a script that writes it:
+
+```json
+{
+  "format": 1,
+  "decoder": "satdump",
+  "decoder_version": "1.2.2",
+  "frames_decoded": 412,
+  "frames_failed": 37,
+  "first_frame_offset_s": 35.2,
+  "snr": [{"offset_s": 35.0, "snr_db": 3.1}, {"offset_s": 326.0, "snr_db": 11.4}],
+  "noise_floor_dbfs": -52.3
+}
+```
+
+Only `format` and `decoder` are required. Offsets are seconds into the recording. Leave out anything the decoder did not measure: zero is a measurement.
+
+The reader is strict. A report is refused, and the pass is `aborted`, if it:
+- has an unknown key;
+- gives a boolean or negative number as a count;
+- has a number that is not finite;
+- has an offset outside the recording;
+- lists SNR points out of time order;
+- gives a first-frame offset without at least one decoded frame.
+
+The decoder's stderr log says why.
+
+### What each pass is reported as
+
+The first matching row wins (D-122):
+
+| What happened | Reported as |
+|---|---|
+| The pass never started: no decoder, not enough disk, the receiver refused, or the window closed before capture | `not_attempted`, with the reason |
+| The decoder failed, timed out, or wrote a report that was refused | `aborted`, with the reason |
+| Capture was interrupted, or covered less than 80% of the window | `aborted`, with whatever evidence there is |
+| Frames were decoded, with a detection time | `decoded` |
+| Frames were decoded, with no detection time | `aborted` — no time is ever guessed |
+| No frames, but SNR reached the threshold (3 dB) | `signal_no_decode` |
+| Zero frames counted and nothing reached the threshold | `no_signal` |
+| Anything else | `aborted` |
+
+**The detection time** is the first decoded frame or the first SNR sample at or above the threshold, whichever came first. It is counted from the recording's first sample, and `client_notes` says which method found it. A noise floor is sent only with the receiver gain it was measured at.
+
+### Before each capture
+
+- **A disk check:** the estimated recording times 1.25, plus a reserve of 1 GiB, must be free, or the pass is `not_attempted`.
+- **An honesty check:** the simulated and file-replay receivers do not hear the sky, and the client refuses to start with one for a station that did not register as simulated (D-125). A replay names the file it replayed in `client_notes`.
+
+While a pass is open, the heartbeat says `listening` only while the receiver is alive. It says `degraded` if the receiver died or the pass could not be captured, and `processing` while a decode waits or runs (D-121).
 
 ---
 
