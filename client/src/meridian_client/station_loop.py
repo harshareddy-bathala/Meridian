@@ -231,6 +231,10 @@ class StationLoop:
             on time rather than up to one interval late. The wake is an extra
             tick with its own heartbeat — the one that reports ``listening``
             promptly — and leaves the heartbeat grid where it was (D-121).
+
+            **A run with a tick budget stops at its last tick rather than after
+            it.** A one-shot commissioning run that slept out a whole interval
+            with nothing left to do would look like a station that had hung.
         """
         interval_s = float(self._credentials.heartbeat_interval_s)
         due_at = _monotonic()
@@ -245,6 +249,8 @@ class StationLoop:
             # An edge wake before the grid's tick is not that tick.
             if _monotonic() >= due_at:
                 due_at = _next_due_at(due_at, interval_s)
+            if stop_after_ticks is not None and ticks >= stop_after_ticks:
+                break
             _sleep(self._seconds_until_next_tick(due_at))
 
         return None

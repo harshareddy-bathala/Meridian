@@ -404,7 +404,8 @@ def test_a_refusal_that_is_not_a_401_does_not_stop_the_loop(
     assert len(transport.sent) == 2
     # And it waited between them rather than retrying immediately: a refusal the
     # platform is sure about does not get better by being asked again sooner.
-    assert len(clock.waits) == 2
+    # One wait, not two: the run stops at its last tick rather than after it.
+    assert len(clock.waits) == 1
 
 
 def test_the_loop_waits_the_platforms_interval_between_ticks(
@@ -415,7 +416,7 @@ def test_the_loop_waits_the_platforms_interval_between_ticks(
 
     loop.run(stop_after_ticks=3)
 
-    assert clock.waits == [30.0, 30.0, 30.0]
+    assert clock.waits == [30.0, 30.0]
 
 
 def test_an_instant_tick_does_not_make_the_cadence_drift(
@@ -431,7 +432,7 @@ def test_an_instant_tick_does_not_make_the_cadence_drift(
 
     loop.run(stop_after_ticks=3)
 
-    assert clock.elapsed_s == pytest.approx(90.0)
+    assert clock.elapsed_s == pytest.approx(60.0)
 
 
 def test_an_overrun_tick_is_skipped_rather_than_queued(
