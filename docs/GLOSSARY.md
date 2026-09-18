@@ -140,6 +140,34 @@ What the platform concludes once a pass is over — modules 13 to 17 in the subm
 
 ---
 
+## Public data, tiers and custody
+
+What the platform reads from outside, and where each record lives — modules 18 to 20.
+
+**Space weather** — the state of the Sun and of the near-Earth environment it drives. Here it means published **geomagnetic and solar activity indices**: numbers describing how disturbed the ionosphere is. A disturbed ionosphere raises absorption and scintillation, which moves a station's noise floor for reasons that are not the station's fault — which is why it is a candidate feature and not decoration.
+
+**Cloud cover** — how much of the sky over a scene was overcast. The reason a reception can decode perfectly and still produce an unusable image, and therefore a candidate input to the reception verdict.
+
+**Candidate feature** — a signal offered to the model, which earns its place in the ablation or does not. Never a gate: nothing is ever skipped or refused because of one.
+
+**Data product** — the published values themselves, with units and provenance. What every number in this system is computed from.
+
+**Map tile** — a pre-rendered image of a data product, styled for legibility. Shown, never measured: a pixel read back from a tile is a fact about the colour map, not the scene, so **no derived number is ever computed by sampling one**.
+
+**Area of interest** — a registered place a regional series is kept for. A geometry and a label. It describes ground, never a person, and holds no contact details.
+
+**Ingest record** — one retrieved artefact with its full provenance: source, original identifier, source version, retrieval time, licence, checksum and transformation version. Append-only — a re-fetch that differs is a new record, never an overwrite.
+
+**Station tier / platform tier** — the two halves of a deployment. The station client, its receiver and its decoder on one side; the platform on the other. They may share one machine, as they do today, or the platform may run on a cloud host. The split is a deployment choice, not an architectural one.
+
+**Authoritative record** — the copy that decides. A **station is authoritative for its own receptions**; the **platform is authoritative for what it assigned**. Neither overwrites the other, which is what makes reconciliation possible without a merge rule.
+
+**Reconciliation** — what a station does after a disconnection: re-send whatever was never acknowledged. Not a merge, because only one side ever authors a reception, and safe to repeat because the platform's ingest is idempotent.
+
+**Independence drill** — a run, not an assertion, of the claim that Meridian works with the outside world removed. Two of them: the station receives and decodes with the platform unreachable, and the dashboard serves its last snapshot — labelled with its age — with the network down.
+
+---
+
 ## Conventional short names in code
 
 Not domain terms, but recorded so the "no abbreviations outside this glossary" rule in `CLAUDE.local.md` §4 is honest in both directions. These are permitted as local variable names only, never as part of a public name.
