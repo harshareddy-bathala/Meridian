@@ -12,9 +12,9 @@
       ┌────────────────────────▼──────────────────────────┐
       │                  PLATFORM                         │      ┌──────────────┐
       │                                                   │      │  External    │
-      │  orbit ──▶ prediction ──▶ scheduler               │◀╌╌╌╌╌┤  archives    │
-      │    │            │              │                  │      │  (optional,  │
-      │    └────────────┴──────────────┘                  │      │  data only)  │
+      │  orbit ──▶ prediction ──▶ scheduler               │◀╌╌╌╌╌┤  archives &  │
+      │    │            │              │                  │      │  public data │
+      │    └────────────┴──────────────┘                  │      │  (optional)  │
       │              observation store                    │      └──────────────┘
       │         registry        reliability               │
       │         notifications   datasets                  │╌╌╌╌╌▶ email, Telegram
@@ -32,6 +32,10 @@
 
 **The independence test:** remove every dashed element and the system still schedules, receives, decodes, monitors and reports.
 
+**Two tiers, one architecture** (D-129). The boxes above are modules, not machines. The **station tier** — the station client, its receiver and its decoder — and the **platform tier** may share one Pi, as they do today, or the platform tier may run on a cloud host for archive processing, model training and public service. The split changes where processes run and nothing about what they are: the same image, the same compose file, the same schema.
+
+**A station is authoritative for its own receptions.** A reception exists first on the station and the platform's row is a copy; after a disconnection the station re-sends what was not acknowledged, and ingest is idempotent (D-027, D-015), so reconciliation is resend rather than merge. The platform stays authoritative for what it assigned. **Nothing assessed depends on a cloud host being reachable** (D-130), and the drills that prove it are `EVALUATION.md` §12.
+
 ---
 
 ## Modules
@@ -46,7 +50,8 @@ The sections below describe each module's responsibility in the finished system.
 | `platform/observations` | Ingest and the canonical body a revision is compared against (Stage 9). |
 | `platform/reliability` | Its interface and nothing else — Stage 20. |
 | `client`, `simulator` | A station that registers, holds work, executes it and delivers observations from a durable queue, and a deterministic fleet of virtual ones that drives it over real MSP (Stage 10). The receiver and decoder behind the client's execution seam are Stage 13. |
-| `dashboard`, `ingest` | No directory yet — Stages 11 and 14. |
+| `dashboard`, `ingest` | No directory yet — Stages 11 and 14. Ingest widens to environmental and space-weather sources at Stage 31 (D-132). |
+| `platform/regions` | No directory yet — Stage 32, regional monitoring (module 19). |
 | `platform/notifications`, `platform/datasets` | No directory yet — Stages 29 and 30, which add the post-reception layer (D-102). |
 | `firmware` | No directory yet, and excluded from the software roadmap: it is built alongside the antenna and rotator rather than in a software stage. |
 
@@ -123,13 +128,26 @@ Not a mock. It is a client implementation — the same transport, held-work reco
 
 Outcomes are elevation-driven, which is what makes simulated traffic worth generating and is also why **simulated observations are excluded from every model training and evaluation set**, not merely from reported aggregates (D-078). Distributions fitted to real archive data are Stage 14's, once there is an archive to fit them to.
 
+### `platform/regions`
+Regional monitoring (module 19): registered areas of interest, and what the ingested environmental products say about them over time.
+
+**Not the platform's own monitoring.** Prometheus, Grafana and the alert rules watch Meridian; this module watches places on the ground, and the two never share a name in code (the same separation D-013 made for "health").
+
+Reads ingested records through `ingest`'s normalised tables and **never at runtime from a source**. Holds no personal data: an area of interest is a place and a label, and who may register one is open (D-137).
+
 ### `firmware`
 Arduino rotator controller. Stepper control, homing, limit switches, network command interface.
 
 Target is an Arduino Uno R4 WiFi — **Renesas RA4M1, not AVR.** AVR-targeted stepper libraries will not port unchanged.
 
 ### `ingest`
-External archive adapters. **Optional path.** Failure here degrades model quality; it never blocks scheduling or reception.
+External archive adapters, and — from Stage 31 — adapters for published environmental and space-weather products (D-132). **Optional path.** Failure here degrades model quality; it never blocks scheduling or reception.
+
+One subsystem, whatever the payload. Every source records the same provenance — source, original identifier, retrieval time, source version, licence, checksum, transformation version — and every adapter downloads into immutable raw storage, validates, hashes and normalises separately. Access constraints differ per source and are recorded per source: some need a free key and count requests, some need registration before a download, at least one needs neither. Keys are secrets and are never committed.
+
+**Published indices and conditions reach the model as features, never as gates** (D-131). A missing index degrades a prediction; it never skips a pass, which would both make an external service a runtime dependency and poison the archive by never observing the passes the model most needs. Feature values are the ones published *before* the pass, never a later revision.
+
+**A styled map tile is a visualisation, never a measurement** (D-133). Derived numbers come from the data product; a tile may be displayed and referenced, and never sampled for a value.
 
 ---
 
@@ -142,12 +160,16 @@ External archive adapters. **Optional path.** Failure here degrades model qualit
 5. The station client never assumes connectivity. Reception is never blocked on the platform being reachable.
 6. No transmit code paths anywhere.
 7. Owner reports and dataset exports read stored results; they never recompute a verdict or a diagnosis, and no delivery failure reaches scheduling or reception.
+8. A rendered map tile is never sampled for a number. Derived values come from the data product the tile depicts.
+9. A station is authoritative for its own receptions; the platform is authoritative for what it assigned. Neither overwrites the other, and no tier is required to be reachable for the other to work.
 
 ---
 
 ## Deployment
 
 Everything in Docker Compose. Postgres + TimescaleDB on the Pi's NVMe. Public access via a secure tunnel — no static IP, works from behind the college network.
+
+**The single machine is the deployment of record** (D-130). A cloud tier may be added for archive processing, model training and public service, funded by student credit that may lapse before submission — so no success criterion, demonstration step or roadmap completion gate may depend on it, and the one-machine path stays supported and measured by CI. What a lapse costs is throughput, never a claim. Which host, on whose account, is open (D-135).
 
 `docker compose up` on a clean machine must produce a working platform in under ten minutes. CI measures it on every pull request. `docs/OPERATIONS.md` is the runbook.
 
