@@ -74,6 +74,21 @@ class StationCredentials:
     a restart knowing its identity and not knowing how often to use it.
     """
 
+    simulated: bool = False
+    """Whether this station registered as simulated (MSP §5).
+
+    Kept here rather than in the station's configuration file, because it
+    decides whether a receiver that does not hear the sky may report at all
+    (D-125). A flag an operator could edit between runs would let a simulated
+    receiver report for a station the platform records as measuring the real
+    sky — the one thing that guard exists to prevent — so it is written once,
+    from the registration this station actually sent, and read back after.
+
+    **A credential file written before this field existed reads as ``False``**,
+    which refuses a synthetic receiver rather than admitting one: the safe
+    direction for a station whose provenance is not on file (D-127).
+    """
+
 
 def _write_secret_file(path: Path, text: str) -> None:
     """Replace ``path`` with ``text``, atomically, and restrict its mode.
@@ -136,6 +151,7 @@ def save_credentials(path: Path, credentials: StationCredentials) -> None:
                 "bearer_token": credentials.bearer_token,
                 "registration_key": credentials.registration_key,
                 "heartbeat_interval_s": credentials.heartbeat_interval_s,
+                "simulated": credentials.simulated,
             },
             indent=2,
         )
@@ -173,6 +189,7 @@ def load_credentials(path: Path) -> StationCredentials | None:
             bearer_token=str(stored["bearer_token"]),
             registration_key=str(stored["registration_key"]),
             heartbeat_interval_s=int(stored["heartbeat_interval_s"]),
+            simulated=bool(stored.get("simulated", False)),
         )
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"{path} is not a readable credential file: {exc}") from exc
