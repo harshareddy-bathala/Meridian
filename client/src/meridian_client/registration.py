@@ -218,4 +218,7 @@ def register(
         bearer_token=str(admitted["token"]),
         registration_key=registration_key,
         heartbeat_interval_s=int(admitted["heartbeat_interval_s"]),
+        # From the profile this station actually registered with, so what the
+        # platform recorded and what the station believes cannot drift (D-127).
+        simulated=profile.simulated,
     )

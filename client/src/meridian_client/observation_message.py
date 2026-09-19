@@ -11,27 +11,44 @@ would send is checkable without a receiver, a clock, a file or a network.
 The body this builds is also the format the upload queue stores, so a queued
 observation and a sent one are the same bytes and the same code path (D-068).
 
-Reference: docs/MSP-SPEC.md §4.4, §6; docs/DECISIONS.md D-027, D-032, D-068.
+What the platform would refuse is refused first, in
+:mod:`meridian_client.observation_checks`, so a pipeline bug surfaces when the
+body is built rather than as an observation the platform turns away for good.
+
+MSP 0.3 added optional reception evidence — the noise floor with its gain, SNR
+samples, and the decoder's own statistics. Like every optional field here, what
+was not measured is omitted from the body, never sent as zero (D-117).
+
+Reference: docs/MSP-SPEC.md §4.4, §6; docs/DECISIONS.md D-027, D-032, D-068,
+D-103, D-117.
 """
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
 from meridian_client.clock import require_utc
+from meridian_client.observation_checks import (
+    MAX_DOPPLER_SAMPLES,
+    MAX_SNR_SAMPLES,
+    OUTCOMES,
+    check_the_result_is_sendable,
+)
 
 __all__ = [
     "MAX_DOPPLER_SAMPLES",
+    "MAX_SNR_SAMPLES",
     "OUTCOMES",
+    "Decode",
     "DopplerSample",
     "MalformedAcknowledgementError",
     "ObservationAck",
     "ObservationResult",
     "Signal",
+    "SnrSample",
     "build_observation_body",
     "parse_observation_ack",
 ]
@@ -44,28 +61,6 @@ opaque, so a station that read the assignment or the revision out of it would be
 depending on a format the platform is free to change.
 """
 
-OUTCOMES = (
-    "decoded",
-    "signal_no_decode",
-    "no_signal",
-    "aborted",
-    "not_attempted",
-)
-"""MSP §4.4's five values for ``outcome``, in the specification's order.
-
-Written out rather than passed through, so a value the platform would reject
-cannot leave this client — and cannot sit in the upload queue being retried
-against an endpoint that will refuse it every time.
-"""
-
-MAX_DOPPLER_SAMPLES = 512
-"""MSP §6's cap (D-032).
-
-Checked here as well as at the platform because a body over the cap is refused
-permanently: queueing one would mean a station holding a payload it can never
-deliver, and discovering that only after the pass is long gone.
-"""
-
 
 @dataclass(frozen=True, slots=True)
 class DopplerSample:
@@ -74,6 +69,28 @@ class DopplerSample:
     sampled_at: datetime
     offset_hz: int
     """Observed minus nominal, in whole hertz. Frequencies are never floats."""
+
+
+@dataclass(frozen=True, slots=True)
+class SnrSample:
+    """One signal-to-noise measurement, at the instant it was measured (MSP 0.3)."""
+
+    sampled_at: datetime
+    snr_db: float
+
+
+@dataclass(frozen=True, slots=True)
+class Decode:
+    """MSP 0.3's ``decode`` block — the decoder's own account of its run.
+
+    Only ``decoder`` is required. A decoder with no frame structure has no frames
+    to count, and a zero would claim it counted and found nothing.
+    """
+
+    decoder: str
+    decoder_version: str | None = None
+    frames_decoded: int | None = None
+    frames_failed: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +112,14 @@ class Signal:
     """``None`` is a station with no frequency reference; ``()`` is one that
     measured and found nothing worth reporting. Different claims, sent
     differently."""
+
+    noise_floor_dbfs: float | None = None
+    """MSP 0.3: relative to the receiver's full scale, and meaningful only with
+    ``receiver_gain_db``, which the checks require whenever this is present."""
+
+    receiver_gain_db: float | None = None
+    snr_samples: tuple[SnrSample, ...] | None = None
+    """MSP 0.3: raw samples in time order; ``None`` and ``()`` differ as for Doppler."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +146,9 @@ class ObservationResult:
     nowhere to put an artefact sends nothing here, which stays valid."""
 
     client_notes: str | None = None
+
+    decode: Decode | None = None
+    """MSP 0.3: absent when no decoder ran — and always absent for ``not_attempted``."""
 
 
 def _wire_time(instant: datetime, field_name: str) -> str:
@@ -153,47 +181,28 @@ def _signal_block(signal: Signal) -> dict[str, object]:
             }
             for one in signal.doppler_samples
         ]
+    if signal.noise_floor_dbfs is not None:
+        block["noise_floor_dbfs"] = signal.noise_floor_dbfs
+    if signal.receiver_gain_db is not None:
+        block["receiver_gain_db"] = signal.receiver_gain_db
+    if signal.snr_samples is not None:
+        block["snr_samples"] = [
+            {"t": _wire_time(one.sampled_at, "snr sample t"), "snr_db": one.snr_db}
+            for one in signal.snr_samples
+        ]
     return block
 
 
-def _check_the_result_is_sendable(result: ObservationResult) -> None:
-    """Refuse a result the platform would refuse, before it reaches the queue.
-
-    The window is checked *after* both instants are known to be aware, because
-    comparing a naive datetime with an aware one raises ``TypeError`` — which
-    would reach a caller as "this program has a bug" rather than as "that
-    timestamp cannot be sent", and those are answered differently.
-    """
-    if result.outcome not in OUTCOMES:
-        raise ValueError(f"outcome must be one of {OUTCOMES}, not {result.outcome!r}")
-
-    require_utc(result.started_at, "started_at")
-    require_utc(result.ended_at, "ended_at")
-    if result.started_at > result.ended_at:
-        raise ValueError("started_at is after ended_at")
-
-    samples = None if result.signal is None else result.signal.doppler_samples
-    if samples is not None and len(samples) > MAX_DOPPLER_SAMPLES:
-        raise ValueError(f"more than {MAX_DOPPLER_SAMPLES} doppler samples")
-
-    _check_the_products_are_strict_json(result.products)
-
-
-def _check_the_products_are_strict_json(
-    products: tuple[Mapping[str, object], ...],
-) -> None:
-    """Refuse a ``products`` array the platform could not store.
-
-    ``products`` is deliberately unvalidated in shape, but a non-finite float
-    inside it has no JSON literal — and one arrives without anyone writing it,
-    since a decoder metric of ``inf`` renders as the token ``Infinity``. The
-    platform refuses it, so queueing it would mean a station holding a payload
-    it can never deliver and retrying it against every tick.
-    """
-    try:
-        json.dumps([dict(one) for one in products], allow_nan=False)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"products is not strict JSON: {exc}") from exc
+def _decode_block(decode: Decode) -> dict[str, object]:
+    """MSP 0.3's ``decode`` block, omitting what the decoder did not report."""
+    block: dict[str, object] = {"decoder": decode.decoder}
+    if decode.decoder_version is not None:
+        block["decoder_version"] = decode.decoder_version
+    if decode.frames_decoded is not None:
+        block["frames_decoded"] = decode.frames_decoded
+    if decode.frames_failed is not None:
+        block["frames_failed"] = decode.frames_failed
+    return block
 
 
 def build_observation_body(
@@ -211,10 +220,9 @@ def build_observation_body(
         the upload queue can store it unchanged.
 
     Raises:
-        ValueError: The outcome is not one of MSP §4.4's five, the window runs
-            backwards, an instant is naive or not UTC, or the Doppler array is
-            over its cap. All four are refusals the platform would make anyway,
-            made here so a station never queues work it can never deliver.
+        ValueError: The body breaks a rule the platform would refuse it for —
+            see :func:`meridian_client.observation_checks.check_the_result_is_sendable`.
+            Made here so a station never queues work it can never deliver.
 
     Note:
         Optional fields are **omitted rather than sent as ``null``**, matching
@@ -222,7 +230,7 @@ def build_observation_body(
         identically, so this is a choice about bytes on a link a microcontroller
         may be sharing rather than about meaning.
     """
-    _check_the_result_is_sendable(result)
+    check_the_result_is_sendable(result)
 
     body: dict[str, object] = {
         "assignment_id": result.assignment_id,
@@ -237,6 +245,8 @@ def build_observation_body(
         body["products"] = [dict(one) for one in result.products]
     if result.client_notes is not None:
         body["client_notes"] = result.client_notes
+    if result.decode is not None:
+        body["decode"] = _decode_block(result.decode)
     return body
 
 

@@ -3,9 +3,12 @@
 Implements the seam the reference client already has
 (:class:`meridian_client.execution.PassExecutor`): the loop calls ``begin`` when
 a window opens and ``end`` when it closes, and drains finished work with
-``take_completed``. Everything above this — heartbeats, the held record, the
-upload queue, the transport — is the real client, unchanged. This is the only
-piece of a virtual station that a real station replaces with a radio.
+``take_completed``. Its capture window and its status are the assignment's own,
+as they were before D-121 gave the seam a way to say otherwise: there is no
+recording to widen and no receiver to die. Everything above this — heartbeats,
+the held record, the upload queue, the transport — is the real client,
+unchanged. This is the only piece of a virtual station that a real station
+replaces with a radio.
 
 It is also the first thing in this project that ever produced an observation.
 ``NullExecutor`` returns nothing on purpose, because a station with no receiver
@@ -30,6 +33,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from meridian_client.assignment_message import Assignment
+from meridian_client.execution import (
+    CaptureWindow,
+    ExecutionStatus,
+    assignment_capture_window,
+    assignment_status,
+)
 from meridian_client.observation_message import (
     DopplerSample,
     ObservationResult,
@@ -82,6 +91,19 @@ class SimulatedExecutor:
         self._begun: set[str] = set()
         self._held_but_not_begun: set[str] = set()
         self._ready: list[ObservationResult] = []
+
+    def capture_window(self, assignment: Assignment) -> CaptureWindow:
+        """The assignment's own window, which is what keeps D-077's bodies fixed."""
+        return assignment_capture_window(assignment)
+
+    def status(self, running: Assignment | None) -> ExecutionStatus:
+        """``listening`` whenever the loop is running a pass, even a faulted one.
+
+        A virtual station with a downed receiver reports what the reference
+        client reported before D-121. Stage 25 gives the simulator faults that
+        show up in the heartbeat; this stage keeps its behaviour unchanged.
+        """
+        return assignment_status(running)
 
     def begin(self, assignment: Assignment) -> None:
         """Start receiving ``assignment``, unless the receiver is down.

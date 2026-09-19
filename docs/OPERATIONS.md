@@ -8,7 +8,7 @@ Every command runs from the repository root. `compose` below is shorthand for:
 docker compose -f deploy/docker-compose.yml
 ```
 
-Decisions this page puts into practice: D-109 to D-115. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+Decisions this page puts into practice: D-109 to D-115, and D-120 to D-128 for station reception. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
 
 ---
 
@@ -84,6 +84,187 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
 **Scheduling needs no command.** The `jobs` service generates passes and schedules them under configuration A every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
+
+---
+
+## Station reception
+
+How a station is configured and run, what it does with an assignment, and what it leaves on its disk (D-120 to D-128). This is the software half: **no physical receiver adapter ships yet**, and nothing here has run against a real SDR or a real decoder. It runs today with the simulated and file-replay receivers.
+
+### Configuring a station
+
+One TOML file says what a station is (D-127). Every table is optional, and what
+is left out takes the default below. **An unknown table or key is refused by
+name** rather than ignored, so a typo stops the station at start-up instead of
+at the end of a pass.
+
+```toml
+[station]
+base_url = "https://dash.meridian.org.in"   # default http://localhost:8000
+state_dir = "/var/lib/meridian-station"     # default: "state" beside this file
+
+[receiver]
+kind = "simulated"        # or "replay"; no physical adapter ships yet (D-124)
+sample_rate_hz = 1000     # the simulated receiver's rate
+
+[decoders.lrpt]           # one table per mode; a mode with none is not attempted
+argv = ["/usr/local/bin/meridian-satdump", "{recording}", "{report_path}"]
+timeout_s = 900.0
+
+[policy]
+snr_threshold_db = 3.0    # what counts as a detection
+minimum_coverage = 0.8    # how much of the window a capture must span
+
+[disk]
+bytes_per_second = 2048000   # the receiver's write rate, for the disk guard
+margin = 1.25
+reserve_bytes = 1073741824
+
+[retention]
+keep_recordings = false   # true keeps each recording after its result is sent
+```
+
+To replay recordings instead of receiving, name one per assignment:
+
+```toml
+[receiver]
+kind = "replay"
+
+[receiver.recordings.as_44b2]
+path = "recordings/pass.cf32"     # relative to this file
+sample_rate_hz = 1000
+sample_format = "cf32"            # u8, s8, s16 or cf32
+centre_freq_hz = 137900000        # must be within Doppler of the assignment's
+gain_db = 32.8
+```
+
+**Whether the station is simulated is not in this file.** It is written into the
+credentials when the station registers, and read back from there, so no edit here
+can make a simulated receiver report for a station the platform records as
+measuring the real sky (D-125, D-127). A station whose credentials predate that
+field counts as measured, which refuses a synthetic receiver rather than
+admitting one.
+
+The state directory holds everything the station owns: `credentials.json`,
+`registration_key`, `held.json`, `outbox/` and `captures/`.
+
+### Running a station
+
+```bash
+meridian-station --config /etc/meridian/station.toml
+```
+
+Also `python -m meridian_client.station --config …`, which is what a systemd unit
+or a container runs. `--ticks N` stops after N ticks, for a commissioning run.
+
+**It does not register.** Registration consumes an invite and mints the only copy
+of a bearer token (D-023), so a station with no credentials says so and stops
+rather than quietly burning an invite. Admit it with `meridian invite create`
+first, and register it with the invite that prints.
+
+A revoked token stops the station with the sentence that says what to do, and
+exit code 1 (D-024).
+
+### Replaying a recording offline
+
+```bash
+meridian-replay --config station.toml \
+    --assignment as_44b2.json --recording pass.cf32 --sample-rate-hz 1000
+```
+
+Puts one recording through the real pipeline — the same executor, capture folder,
+decoder program and outcome rules — and writes the MSP 0.3 body a station would
+have queued to stdout, or to `--out`. This is how a decoder wrapper and a
+threshold are checked against a pass you already have.
+
+**It cannot submit.** The runner has no transport at all, so nothing it produces
+reaches the platform (D-128); the body names the recording it replayed. It leaves
+the station's own state directory alone, and a pass it has to refuse — a
+recording tuned to another satellite, say — still prints the `not_attempted`
+observation the station would have sent.
+
+`--assignment` takes one MSP §4.3 assignment as JSON, as a heartbeat response
+delivered it.
+
+### The capture folder
+
+Each assignment the station works gets `<state>/captures/<assignment_id>/`, beside `held.json` and `outbox/`:
+
+| File | What it is |
+|---|---|
+| `manifest.json` | The assignment, what was tuned and recorded, and the phase reached |
+| `recording.u8` | The recording, when the station made it; a replayed file stays where the operator put it |
+| `decoder_output/` | Whatever the decoder writes; emptied before every decode |
+| `decode_report.json` | The decoder's report, read by the client |
+| `decoder.stdout.log`, `decoder.stderr.log` | The decoder's own output |
+
+The phases are `refused`, `capturing`, `captured`, `decoding`, `reported` and `handed_over`. **A restart resumes every folder from its phase**: an interrupted capture is decoded and reported `aborted`, a decode is run again, and a result not yet marked handed over is handed over again. Rebuilt from the same files, it is byte-identical, so the platform stores it once (D-123).
+
+- **Recordings** are deleted once their result is handed over, unless the station keeps them. A replayed file is never deleted.
+- **Folders** are pruned thirty days after hand-over.
+- **An unreadable manifest** is logged and left alone for an operator. Nothing overwrites it.
+- **Recordings never belong in git.** `*.u8`, `*.cf32`, `*.iq` and `captures/` are ignored.
+
+### Decoders
+
+Each mode maps to one command. The command is an argv, never a shell line, and may use only these placeholders:
+
+`{recording}` `{output_dir}` `{report_path}` `{sample_rate_hz}` `{sample_format}` `{centre_freq_hz}` `{mode}`
+
+An unknown placeholder, a format spec, or a placeholder in the program name is refused when the command is built. The decoder runs in its own session at a lower CPU priority, one decode at a time, oldest first. When its timeout expires, its whole process group is sent SIGTERM, then SIGKILL five seconds later (D-124).
+
+**A mode with no decoder is refused before capture**, and the pass is reported `not_attempted`.
+
+**The decoder must write Meridian's report** to `{report_path}`. A station wraps SatDump, or anything else, in a script that writes it:
+
+```json
+{
+  "format": 1,
+  "decoder": "satdump",
+  "decoder_version": "1.2.2",
+  "frames_decoded": 412,
+  "frames_failed": 37,
+  "first_frame_offset_s": 35.2,
+  "snr": [{"offset_s": 35.0, "snr_db": 3.1}, {"offset_s": 326.0, "snr_db": 11.4}],
+  "noise_floor_dbfs": -52.3
+}
+```
+
+Only `format` and `decoder` are required. Offsets are seconds into the recording. Leave out anything the decoder did not measure: zero is a measurement.
+
+The reader is strict. A report is refused, and the pass is `aborted`, if it:
+- has an unknown key;
+- gives a boolean or negative number as a count;
+- has a number that is not finite;
+- has an offset outside the recording;
+- lists SNR points out of time order;
+- gives a first-frame offset without at least one decoded frame.
+
+The decoder's stderr log says why.
+
+### What each pass is reported as
+
+The first matching row wins (D-122):
+
+| What happened | Reported as |
+|---|---|
+| The pass never started: no decoder, not enough disk, the receiver refused, or the window closed before capture | `not_attempted`, with the reason |
+| The decoder failed, timed out, or wrote a report that was refused | `aborted`, with the reason |
+| Capture was interrupted, or covered less than 80% of the window | `aborted`, with whatever evidence there is |
+| Frames were decoded, with a detection time | `decoded` |
+| Frames were decoded, with no detection time | `aborted` — no time is ever guessed |
+| No frames, but SNR reached the threshold (3 dB) | `signal_no_decode` |
+| Zero frames counted and nothing reached the threshold | `no_signal` |
+| Anything else | `aborted` |
+
+**The detection time** is the first decoded frame or the first SNR sample at or above the threshold, whichever came first. It is counted from the recording's first sample, and `client_notes` says which method found it. A noise floor is sent only with the receiver gain it was measured at.
+
+### Before each capture
+
+- **A disk check:** the estimated recording times 1.25, plus a reserve of 1 GiB, must be free, or the pass is `not_attempted`.
+- **An honesty check:** the simulated and file-replay receivers do not hear the sky, and the client refuses to start with one for a station that did not register as simulated (D-125). A replay names the file it replayed in `client_notes`.
+
+While a pass is open, the heartbeat says `listening` only while the receiver is alive. It says `degraded` if the receiver died or the pass could not be captured, and `processing` while a decode waits or runs (D-121).
 
 ---
 

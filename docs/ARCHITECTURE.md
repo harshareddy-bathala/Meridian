@@ -121,6 +121,17 @@ Reference station client. Polls heartbeat, receives assignments, drives the rece
 
 Must survive: network loss mid-pass (continue, queue results), power loss (rejoin cleanly), and clock skew (report offset). Knows nothing about the database.
 
+**The loop sees reception through one protocol**, `execution.PassExecutor`. It asks the executor for each assignment's capture window, begins and ends captures by it, drains finished results into the upload queue, and reports whatever state the executor gives it (D-121). `NullExecutor` has no radio; the simulator's executor decides outcomes from a seed.
+
+**`meridian_client/reception/` is the executor that receives** (D-120). `ReceptionExecutor` is built from three narrower protocols:
+- a **`Receiver`**: the simulated and file-replay receivers ship; a physical SDR adapter does not yet;
+- a **`Decoder`**: `SubprocessDecoder` runs whichever program a station configures for each mode and reads the JSON report it writes;
+- a **`RotatorController`**: only `NullRotator`, for a fixed antenna (D-126).
+
+**One TOML file configures a station** — platform, state directory, receiver, a decoder command per mode, thresholds and the disk guard — and `meridian-station` runs it; `meridian-replay` puts a recording through the same pipeline offline and cannot submit (D-127, D-128). Whether a station is simulated comes from the credentials registration wrote, never from that file.
+
+Each reception keeps a capture folder, whose manifest records how far it got, so a restart resumes it (D-123). Its observation is derived from what was recorded and decoded by D-122's table, which never turns a failure of the station's own chain into `no_signal`. A receiver that does not hear the sky is refused for a station that did not register as simulated (D-125). There are no threads: the receiver and decoder are other processes or files, polled on each tick.
+
 ### `simulator`
 Virtual stations speaking real MSP over the real network stack to the real platform. Deterministic from a seed, and from each station's own index — raising the station count leaves station 1 unchanged (D-075). Geometry is real: it propagates real catalogue element sets, so only its *outcomes* are synthetic.
 

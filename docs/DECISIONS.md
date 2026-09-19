@@ -2816,6 +2816,44 @@ Neither is decided here, and neither is needed by a fixed antenna.
 
 ---
 
+## D-127 — A station is configured by one file, and it cannot declare itself simulated
+
+**2026-09-18 · accepted** · *`meridian_client/station_config.py`, `station_wiring.py`, `credentials.py`, Stage 13*
+
+Stage 13 built a reception layer that nothing outside the tests could construct. A station needs to say what it receives with, what decodes each mode, and where its state lives, or the layer is a library with no operator.
+
+**One TOML file, read with `tomllib`.** Standard library, so the client still installs on a Pi with `httpx` as its only dependency. Tables: `[station]`, `[receiver]`, `[decoders.<mode>]`, `[policy]`, `[disk]`, `[retention]`. Every table is optional and every default is the one the documentation names.
+
+**Unknown tables and keys are refused, not ignored.** A misspelled key that silently left a setting at its default would be discovered at the end of a pass, and a pass never repeats. This is D-124's rule for decoder placeholders, applied to the whole file — and each decoder command is validated as it is read, so a bad argv template fails at start-up.
+
+**Relative paths resolve against the file's own directory**, so a configuration and the recordings it names can be moved together.
+
+**`simulated` is not in this file.** It decides whether a receiver that does not hear the sky may report at all (D-125), and a flag an operator could edit between runs would let a simulated receiver report for a station the platform records as measuring the real sky. So it is written into the credentials at registration, from the profile the station actually sent, and read back from there.
+- `StationCredentials` gains `simulated`; `register()` sets it.
+- **A credential file written before the field existed reads as `false`** — the direction that refuses a synthetic receiver rather than admitting one.
+
+**No physical receiver is configurable**, because none ships (D-124). `kind = "sdr"` is refused by name rather than ignored.
+
+*Rejected: environment variables, as the simulator uses.* The simulator's fleet is one process with three settings; a station has a decoder argv per mode and a recording table, which is a file, not an environment.
+
+---
+
+## D-128 — The offline replay runner writes a body and cannot submit one
+
+**2026-09-18 · accepted** · *`meridian_client/replay.py`, D-125, Stage 13*
+
+`python -m meridian_client.replay` puts one recording through the real executor, the real capture folder, the real decoder program and the real outcome rules, and writes the MSP 0.3 body a station would have queued. It is how a decoder wrapper and an SNR threshold are validated against a pass someone already has, before a station is trusted to report from them.
+
+**It has no path to the platform.** No transport and no upload queue are imported, so "it never submits" is a property of the module rather than a promise about a run, and a test asserts it against the source.
+
+**It may run on a real station's configuration**, since nothing can reach the platform from it, and the body names the recording it replayed (D-125). The station's own state directory is untouched: the capture folder is a temporary one unless `--work-dir` says otherwise.
+
+**A refused pass is still a body.** A recording tuned to another satellite prints a `not_attempted` observation and exits 0 — that is what the station would have sent, and seeing it is the point of the tool.
+
+**`python -m meridian_client.station` runs a registered station** from the same configuration, and **never registers**: registration consumes an invite and mints the only copy of a bearer token (D-023), so a station that registered itself whenever its state directory looked empty would burn an invite on every wiped disk. A station with no credentials says so and stops.
+
+---
+
 ## D-129 — Two tiers: the platform may run in a cloud, the station keeps its own record
 
 **2026-09-18 · accepted** · *`ARCHITECTURE.md` Deployment, `EVALUATION.md` §12, Stage 33*

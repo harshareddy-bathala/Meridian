@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -29,11 +29,11 @@ from meridian_client.assignment_message import (
     Assignment,
     MalformedAssignmentError,
     parse_assignment,
+    render_assignment,
 )
 
 __all__ = [
     "AssignmentRecord",
-    "due_now",
     "merge_by_id",
     "still_current",
 ]
@@ -90,31 +90,6 @@ def still_current(held: Sequence[Assignment], now: datetime) -> tuple[Assignment
     return tuple(one for one in held if one.end_at >= now)
 
 
-def due_now(held: Sequence[Assignment], now: datetime) -> Assignment | None:
-    """The held assignment a station should be receiving at ``now``, if any.
-
-    Args:
-        held: What the station has.
-        now: Timezone-aware UTC.
-
-    Returns:
-        The earliest assignment whose window is open, or ``None`` when the
-        station has nothing to do.
-
-    Note:
-        **Earliest first, and only one.** A station has one antenna chain in
-        Phase 1, and the scheduler already guarantees the windows it issues do
-        not overlap for one station (D-065). If two are open anyway — because two
-        configurations were scheduled, or a clock stepped — taking the earliest
-        is the choice that finishes work rather than abandoning a pass already
-        under way for one that just began.
-    """
-    open_now = [one for one in held if one.start_at <= now <= one.end_at]
-    if not open_now:
-        return None
-    return min(open_now, key=lambda one: (one.start_at, one.assignment_id))
-
-
 class AssignmentRecord:
     """The station's held assignments, kept in one JSON file.
 
@@ -161,17 +136,26 @@ class AssignmentRecord:
         self._held = merged
         return merged
 
-    def drop_closed(self, now: datetime) -> tuple[Assignment, ...]:
+    def drop_closed(
+        self, now: datetime, *, keep: Collection[str] = ()
+    ) -> tuple[Assignment, ...]:
         """Forget assignments whose windows have passed, and say which went.
 
         Args:
             now: Timezone-aware UTC.
+            keep: Ids to go on holding although their windows have passed —
+                work still being captured in a widened tail, or decoded, whose
+                result has not reached the queue. Naming it keeps the platform
+                from expiring it (D-067, D-121).
 
         Returns:
             The assignments dropped, so a caller can log what the station stopped
             holding rather than noticing the list got shorter.
         """
-        remaining = still_current(self._held, now)
+        current = still_current(self._held, now)
+        remaining = tuple(
+            one for one in self._held if one in current or one.assignment_id in keep
+        )
         if len(remaining) == len(self._held):
             return ()
 
@@ -191,7 +175,8 @@ def _write(path: Path, held: Sequence[Assignment]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(path.name + ".partial")
     partial.write_text(
-        json.dumps([_to_stored(one) for one in held], indent=2) + "\n", encoding="utf-8"
+        json.dumps([render_assignment(one) for one in held], indent=2) + "\n",
+        encoding="utf-8",
     )
     os.replace(partial, path)  # noqa: PTH105 — Path.replace is the same call
 
@@ -214,29 +199,3 @@ def _read(path: Path) -> tuple[Assignment, ...]:
         raise MalformedAssignmentError(
             f"{path} is not a readable record: {exc}"
         ) from exc
-
-
-def _to_stored(one: Assignment) -> dict[str, object]:
-    """One assignment in the same shape MSP §4.3 delivered it.
-
-    The wire format is reused as the file format so that reading a record and
-    reading a response are the same code path — a second representation would be
-    a second parser, and the two would drift.
-    """
-    return {
-        "assignment_id": one.assignment_id,
-        "satellite_id": one.satellite_id,
-        "start_at": one.start_at.isoformat(),
-        "end_at": one.end_at.isoformat(),
-        "centre_freq_hz": one.centre_freq_hz,
-        "mode": one.mode,
-        "expected_max_elevation_deg": one.expected_max_elevation_deg,
-        "predicted_yield": one.predicted_yield,
-        "element_set": {
-            "epoch": one.element_set.epoch.isoformat(),
-            "line1": one.element_set.line1,
-            "line2": one.element_set.line2,
-        },
-        "timing_uncertainty_s": one.timing_uncertainty_s,
-        "priority": one.priority,
-    }
