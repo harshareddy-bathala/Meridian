@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -174,3 +175,43 @@ def test_secret_files_are_not_readable_by_other_users(tmp_path: Path) -> None:
     for path in (credentials_path, key_path):
         mode = stat.S_IMODE(path.stat().st_mode)
         assert mode & (stat.S_IRGRP | stat.S_IROTH | stat.S_IWGRP | stat.S_IWOTH) == 0
+
+
+def test_whether_a_station_is_simulated_survives_a_restart(tmp_path: Path) -> None:
+    """D-127: the flag that decides what may report comes from registration.
+
+    A station that forgot it between reboots would be free to pair a simulated
+    receiver with a measured station's identity, which is the case D-125 refuses.
+    """
+    path = tmp_path / "credentials.json"
+    save_credentials(path, replace(REGISTERED, simulated=True))
+
+    reloaded = load_credentials(path)
+
+    assert reloaded is not None
+    assert reloaded.simulated is True
+    assert json.loads(path.read_text(encoding="utf-8"))["simulated"] is True
+
+
+def test_a_credential_file_written_before_the_flag_existed_reads_as_measured(
+    tmp_path: Path,
+) -> None:
+    """Fail closed: a station whose provenance is not on file gets no synthetic
+    receiver, rather than one nobody recorded a reason for."""
+    path = tmp_path / "credentials.json"
+    path.write_text(
+        json.dumps(
+            {
+                "station_id": "st_7fa3c1",
+                "bearer_token": "a-token",
+                "registration_key": "a-key",
+                "heartbeat_interval_s": 30,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    reloaded = load_credentials(path)
+
+    assert reloaded is not None
+    assert reloaded.simulated is False

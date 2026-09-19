@@ -22,7 +22,12 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
-from meridian.store.observations import DopplerSample, NewObservation
+from meridian.store.observations import (
+    DecodeStatistics,
+    DopplerSample,
+    NewObservation,
+    SnrSample,
+)
 
 __all__ = ["canonical_bytes", "content_sha256"]
 
@@ -67,6 +72,12 @@ def canonical_bytes(record: NewObservation) -> bytes:
         ``None`` either way, because this renders the record rather than the
         request.
 
+        **Fields added after MSP 0.2 are the exception: they are rendered only
+        when present** (D-118). Rendering them as ``null`` would change the bytes
+        of every observation stored before they existed, so every stored
+        ``content_sha256`` would stop matching its own row, and a 0.2 report
+        still queued on a station would retry as a spurious correction.
+
         One rule exists to make different facts hash differently: **array order
         is preserved**. ``doppler_samples`` is a time series, so two orderings
         are two different measurements, and sorting them would make a scrambled
@@ -101,6 +112,52 @@ def _canonical_mapping(record: NewObservation) -> dict[str, object]:
         "products": [dict(one) for one in record.products],
         "client_notes": record.client_notes,
         "simulated": record.simulated,
+    } | _evidence_added_in_03(record)
+
+
+def _evidence_added_in_03(record: NewObservation) -> dict[str, object]:
+    """MSP 0.3's reception evidence, holding only what was measured (D-118).
+
+    A key whose value is ``None`` is left out rather than rendered as ``null``,
+    so an observation with no evidence renders exactly as it did under 0.2. An
+    empty SNR array is not ``None`` and is kept: measured with nothing to report
+    is a different claim from not measured.
+
+    Every key added to the protocol after 0.2 belongs here, not in
+    :func:`_canonical_mapping`'s literal.
+    """
+    evidence: dict[str, object | None] = {
+        "noise_floor_dbfs": record.noise_floor_dbfs,
+        "receiver_gain_db": record.receiver_gain_db,
+        "snr_samples": _snr_samples(record.snr_samples),
+        "decode": _decode(record.decode),
+    }
+    return {key: value for key, value in evidence.items() if value is not None}
+
+
+def _snr_samples(
+    samples: Sequence[SnrSample] | None,
+) -> list[Mapping[str, object]] | None:
+    """The SNR array in submitted order, as :func:`_samples` renders Doppler."""
+    if samples is None:
+        return None
+    return [{"t": _instant(one.sampled_at), "snr_db": one.snr_db} for one in samples]
+
+
+def _decode(decode: DecodeStatistics | None) -> Mapping[str, object] | None:
+    """The decode block with all four members, or ``None`` when no decoder ran.
+
+    Inside the block a missing member *is* rendered as ``null``: the block is new
+    in 0.3, so there is no stored digest its shape could disturb, and a fixed
+    shape keeps "no frame count" distinct from a block with fewer keys.
+    """
+    if decode is None:
+        return None
+    return {
+        "decoder": decode.decoder,
+        "decoder_version": decode.decoder_version,
+        "frames_decoded": decode.frames_decoded,
+        "frames_failed": decode.frames_failed,
     }
 
 

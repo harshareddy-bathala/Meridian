@@ -42,6 +42,13 @@ data/
 products/
 snapshots/
 
+# Recordings and capture folders (D-123, GIT-WORKFLOW.md Rule 4). A pass is about
+# a gigabyte, and a recording of the sky is data, not source.
+captures/
+*.u8
+*.cf32
+*.iq
+
 # Notebooks
 .ipynb_checkpoints/
 

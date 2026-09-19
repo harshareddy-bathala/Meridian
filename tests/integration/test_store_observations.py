@@ -22,8 +22,10 @@ from meridian.store.assignments import (  # noqa: E402 — after importorskip
     mark_assignment_reported,
 )
 from meridian.store.observations import (  # noqa: E402 — after importorskip
+    DecodeStatistics,
     DopplerSample,
     NewObservation,
+    SnrSample,
     find_latest_observation,
     insert_observation,
     lock_assignment_for_report,
@@ -278,6 +280,66 @@ def test_doppler_samples_are_stored_in_the_shape_the_wire_used(
         (samples,) = cur.fetchone()
     assert [set(one) for one in samples] == [{"t", "offset_hz"}]
     assert samples[0]["offset_hz"] == 3140
+
+
+def test_reception_evidence_is_stored_in_the_columns_0015_added(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """MSP 0.3's evidence reaches its seven columns, and the view shows them.
+
+    The SNR array keeps the wire's `t` and `snr_db` and the submitted order, as
+    `doppler_samples` does, and the decode block is flattened without loss.
+    """
+    insert_assignment(assignment_id="as_evidence")
+    first, peak = (
+        SnrSample(datetime(2026, 8, 14, 9, 41, 53, tzinfo=UTC), 3.1),
+        SnrSample(datetime(2026, 8, 14, 9, 46, 44, tzinfo=UTC), 11.4),
+    )
+    record = observation(
+        "as_evidence",
+        noise_floor_dbfs=-52.3,
+        receiver_gain_db=32.8,
+        snr_samples=(first, peak),
+        decode=DecodeStatistics("satdump", "1.2.2", 412, 37),
+    )
+
+    insert_observation(rollback, record, revision=1, content_sha256=b"\x05" * 32)
+
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select noise_floor_dbfs, receiver_gain_db, snr_samples, decoder,"
+            " decoder_version, frames_decoded, frames_failed"
+            " from observations_current where assignment_id = %s",
+            ("as_evidence",),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    floor, gain, samples, decoder, version, decoded, failed = row
+    assert (floor, gain) == (-52.3, 32.8)
+    assert [one["snr_db"] for one in samples] == [3.1, 11.4]
+    assert [set(one) for one in samples] == [{"t", "snr_db"}] * 2
+    assert (decoder, version, decoded, failed) == ("satdump", "1.2.2", 412, 37)
+
+
+def test_an_observation_without_evidence_stores_nulls_not_zeros(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """A 0.2 observation measured none of it, and the row must not say otherwise."""
+    insert_assignment(assignment_id="as_no_evidence")
+
+    insert_observation(
+        rollback, observation("as_no_evidence"), revision=1, content_sha256=b"\x06" * 32
+    )
+
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select noise_floor_dbfs, receiver_gain_db, snr_samples, decoder,"
+            " decoder_version, frames_decoded, frames_failed"
+            " from observations where assignment_id = %s",
+            ("as_no_evidence",),
+        )
+        row = cur.fetchone()
+    assert row == (None, None, None, None, None, None, None)
 
 
 def test_locking_returns_the_owner_and_the_satellite_behind_the_pass(

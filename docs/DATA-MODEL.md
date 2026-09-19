@@ -107,7 +107,7 @@ State is derived by reconciling `held_assignments` against what was issued — s
 ### `observations` *(hypertable)*
 One row per attempt, including attempts that produced nothing.
 
-`(assignment_id, revision, observation_id, station_id, satellite_id, started_at, ended_at, outcome, signal_detected, first_detection_at, peak_snr_db, doppler_samples, products_json, client_notes, simulated, provenance, submitted_at, content_sha256)`
+`(assignment_id, revision, observation_id, station_id, satellite_id, started_at, ended_at, outcome, signal_detected, first_detection_at, peak_snr_db, doppler_samples, products_json, client_notes, simulated, provenance, submitted_at, content_sha256, noise_floor_dbfs, receiver_gain_db, snr_samples, decoder, decoder_version, frames_decoded, frames_failed)`
 
 `observation_id` is the public identifier MSP §4.4's acknowledgement returns, and it is a **stored generated column** derived from `(assignment_id, revision)` rather than an allocated value:
 
@@ -144,6 +144,8 @@ Derived, because an idempotent retry must return the *same* id as the original s
 A `supersedes_id` pointer would have been the obvious shape and is rejected on modelling grounds: `revision` orders the lineage explicitly instead of requiring a chain walk, and `(assignment_id, revision)` must exist as the key regardless. `content_sha256` over the canonical body makes a byte-identical resubmission — the queued-retry case of MSP §6 — a no-op rather than a new revision. See D-015. **What "canonical" means is D-070**: a rendering of the stored record with sorted keys, no whitespace, timestamps normalised to UTC milliseconds and arrays in submitted order — not the received bytes, which could not be regenerated from a dataset snapshot. Only the platform ever computes it; the hash appears in no MSP message.
 
 This table also carries `products_json`, holding the MSP §4.4 `products` array verbatim until O-1 is resolved and the `products` table exists (D-018).
+
+**MSP 0.3's reception evidence** (migration `0015`, D-119) is seven nullable columns: the noise floor in dBFS with the receiver gain it was measured at, `snr_samples` as sent, and the flattened `decode` block — `decoder`, `decoder_version`, `frames_decoded`, `frames_failed`. **Null is "not measured"**, which is every observation stored before 0.3, and no column has a default that would put a measurement into a row that never had one. `CHECK`s restate D-117: counts are non-negative, a floor carries its gain, statistics name their decoder, frames agree with the outcome, and `not_attempted` measured nothing. The 512-sample cap is enforced by the request model, as for `doppler_samples`. The new keys enter `content_sha256`'s canonical body only when present, so every digest stored before them still matches its row (D-118).
 
 Partitioned on `started_at`, but ingest rejects a `started_at` outside `[now − 30 days, now + 1 hour]` as `malformed` — a client-supplied timestamp must never be trusted to place a chunk (D-013).
 

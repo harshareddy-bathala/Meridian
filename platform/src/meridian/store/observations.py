@@ -32,9 +32,11 @@ from meridian.store.stations import Connection
 
 __all__ = [
     "AssignmentForReport",
+    "DecodeStatistics",
     "DopplerSample",
     "LatestObservation",
     "NewObservation",
+    "SnrSample",
     "find_latest_observation",
     "insert_observation",
     "lock_assignment_for_report",
@@ -53,6 +55,34 @@ class DopplerSample:
     sampled_at: datetime
     offset_hz: int
     """Observed minus nominal. Positive while the satellite is approaching."""
+
+
+@dataclass(frozen=True, slots=True)
+class SnrSample:
+    """One signal-to-noise measurement, at the instant it was measured (MSP 0.3).
+
+    Capped at 512 per observation like :class:`DopplerSample`, and for the same
+    reason held as raw samples: the health watch maps each instant to an
+    elevation, which a fitted curve would have smoothed away (D-103).
+    """
+
+    sampled_at: datetime
+    snr_db: float
+
+
+@dataclass(frozen=True, slots=True)
+class DecodeStatistics:
+    """MSP 0.3's ``decode`` block — what the decoder says of its own run.
+
+    ``decoder`` is required whenever the block exists; everything else is
+    optional, because a decoder with no frame structure has no frames to count
+    and a zero would be a false claim (D-117).
+    """
+
+    decoder: str
+    decoder_version: str | None = None
+    frames_decoded: int | None = None
+    frames_failed: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +129,18 @@ class NewObservation:
 
     client_notes: str | None
     simulated: bool
+
+    # MSP 0.3's reception evidence (D-103, D-119). Defaulted, and last, so every
+    # observation built before 0.3 existed is still built the same way — and
+    # ``None`` is "not measured", which is what each of those observations is.
+    noise_floor_dbfs: float | None = None
+    """Relative to the receiver's full scale; meaningful only with its gain."""
+
+    receiver_gain_db: float | None = None
+    snr_samples: tuple[SnrSample, ...] | None = None
+    """``None`` is not measured; ``()`` is measured with nothing to report."""
+
+    decode: DecodeStatistics | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,9 +287,12 @@ def insert_observation(
                  station_id, satellite_id, outcome,
                  signal_detected, first_detection_at, peak_snr_db,
                  doppler_samples, products_json, client_notes,
-                 simulated, content_sha256)
+                 simulated, content_sha256,
+                 noise_floor_dbfs, receiver_gain_db, snr_samples,
+                 decoder, decoder_version, frames_decoded, frames_failed)
             values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s::jsonb, %s::jsonb, %s, %s, %s)
+                    %s::jsonb, %s::jsonb, %s, %s, %s,
+                    %s, %s, %s::jsonb, %s, %s, %s, %s)
             returning observation_id
             """,
             (
@@ -266,6 +311,10 @@ def insert_observation(
                 record.client_notes,
                 record.simulated,
                 content_sha256,
+                record.noise_floor_dbfs,
+                record.receiver_gain_db,
+                _snr_json(record.snr_samples),
+                *_decode_columns(record.decode),
             ),
         )
         row = cur.fetchone()
@@ -290,4 +339,31 @@ def _doppler_json(samples: Sequence[DopplerSample] | None) -> str | None:
             {"t": one.sampled_at.isoformat(), "offset_hz": one.offset_hz}
             for one in samples
         ]
+    )
+
+
+def _snr_json(samples: Sequence[SnrSample] | None) -> str | None:
+    """The SNR array in MSP §4.4's shape, or null when none was measured.
+
+    The same rendering as :func:`_doppler_json`, for the same reason: the column
+    and the specification describe one thing and should look like it.
+    """
+    if samples is None:
+        return None
+    return json.dumps(
+        [{"t": one.sampled_at.isoformat(), "snr_db": one.snr_db} for one in samples]
+    )
+
+
+def _decode_columns(
+    decode: DecodeStatistics | None,
+) -> tuple[str | None, str | None, int | None, int | None]:
+    """The flattened ``decode`` block, all four null when no decoder ran."""
+    if decode is None:
+        return (None, None, None, None)
+    return (
+        decode.decoder,
+        decode.decoder_version,
+        decode.frames_decoded,
+        decode.frames_failed,
     )
