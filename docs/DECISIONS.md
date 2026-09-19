@@ -2854,6 +2854,117 @@ Stage 13 built a reception layer that nothing outside the tests could construct.
 
 ---
 
+## D-129 — Two tiers: the platform may run in a cloud, the station keeps its own record
+
+**2026-09-18 · accepted** · *`ARCHITECTURE.md` Deployment, `EVALUATION.md` §12, Stage 33*
+
+Everything runs on one machine today: Postgres, the API, the jobs process and the tunnel, on the Pi's NVMe (D-033, Stage 12). Archive processing, model training and public service have appetites a Pi does not, and the machine that must never stop receiving is a poor place to run a training job.
+
+**The deployment may have two tiers.** A **station tier** — the Pi, the station client, the receiver and the decoder — and a **platform tier**, which may run on the same Pi or on a cloud host. Which tier the platform sits in is a deployment choice, not an architectural one: the same image, the same compose file, the same schema.
+
+**The station keeps the authoritative local record of its own receptions.** A reception exists first on the station — its capture folder, its manifest, its upload queue — and the platform's row is a copy of something the station already holds. This is not a new mechanism; it is the durable queue the client already has, named as the authority it already is.
+
+**Reconciliation after a disconnection is resend, not merge.** The station re-sends what the platform has not acknowledged, and the platform's ingest is idempotent by construction: the observation identifier is derived (D-027), revisions are append-only (D-015), and a replayed report is a no-op rather than a duplicate. Nothing has to decide which of two copies is newer, because only one side ever authors a reception.
+
+**Authority is split, and neither side overwrites the other.** The station is authoritative for what it received; the platform is authoritative for what it assigned. A station that holds a reception for an assignment the platform never issued keeps it and reports it — that is evidence of a scheduling fault, not something to discard.
+
+**The independence test is unchanged** and now has two drills that are run rather than asserted (`EVALUATION.md` §12): the station keeps receiving, recording and decoding with the cloud unreachable, and the dashboard serves its last snapshot with the network down.
+
+*Rejected: making the cloud tier the system of record.* It would put an unfunded host that may expire (D-130) on the path between a pass and the record of it, which is precisely the runtime dependency `CLAUDE.md`'s independence test forbids. *Rejected: a station-side database replica.* The queue already survives a disconnection; a replica adds a merge problem the split above is designed not to have.
+
+Which host, on whose account, and how long a station retains an unacknowledged reception are open (D-135).
+
+---
+
+## D-130 — No success criterion may depend on a cloud host
+
+**2026-09-18 · accepted** · *`PROJECT.md` §9, §17; `EVALUATION.md` §12; every roadmap completion gate*
+
+Cloud hosting here is funded by student credit. It may expire before submission, and it is not something the project can renew.
+
+**Nothing assessed depends on it.** No success criterion, no demonstration step and no roadmap completion gate may require a cloud host to be reachable. SC-1 to SC-10 are unchanged by D-129 and every one of them is measurable on a single machine. A stage whose gate can only be met in a cloud is a stage written wrongly, and is rewritten rather than excused.
+
+**The single-machine path stays supported and tested.** `docker compose up` on a clean machine producing a working platform in under ten minutes remains the deployment of record, and CI keeps measuring it on every pull request. The cloud tier is an addition that must never become the only path that works.
+
+**If the credit expires, what is lost is throughput** — larger backfills, faster training, a public dashboard that does not share the Pi — and no claim, no measurement and no deliverable. That is the whole point of writing it down before the credit is spent rather than after it lapses.
+
+*Rejected: budgeting for paid hosting.* §17 requests hardware and nothing recurring; a recurring cost that outlives the credit is a liability three students carry personally. *Rejected: quietly relying on it and hoping.* The failure mode is discovering in week 26 that the demonstration needs a host nobody can pay for.
+
+---
+
+## D-131 — Published environmental and space-weather data are prediction features, not only presentation
+
+**2026-09-18 · accepted** · *`platform/prediction`, `EVALUATION.md` §2, §3; Stage 31*
+
+Two physical effects the system currently cannot see, both of which it already has the measurements to be confused by:
+
+- **Geomagnetic disturbance affects signals propagating through the ionosphere.** At 137 MHz the ionosphere is largely transparent, but a disturbed ionosphere raises absorption and scintillation, which moves the noise floor and the decode rate for reasons that have nothing to do with the station, the geometry or the element set. Without a disturbance index those passes look like station degradation — exactly the conclusion the receive-chain watch (module 15) exists to draw, and exactly the false alarm it must not raise.
+- **Cloud cover explains an unusable image after a clean decode.** The frames arrived, the checksum passed, and the scene underneath was overcast. The reception verdict (module 13) is a probability that a reception is *usable*, so it has to be able to separate "the link failed" from "the link worked and the sky was white".
+
+**Decision.** Published geomagnetic and solar activity indices, and local atmospheric conditions, become candidate features of the prediction module and candidate inputs to the reception verdict.
+
+**Candidate, not committed.** They enter the ablation as one named feature group and either earn their place or do not. The group's contribution is isolated by a leave-one-group-out run against configuration D, reported beside the four configurations (`EVALUATION.md` §3). SC-1 is still measured as D − B and does not move.
+
+**They are features, never gates.** A missing index never blocks scheduling or reception, and no pass is ever skipped because a forecast said cloudy. Skipping on a forecast would make an external service a runtime dependency, and it would poison the archive by never observing the passes the model most needs to learn from (`EVALUATION.md` §4).
+
+**A feature value is the one published before the pass**, never a later revision or a reanalysis — the same temporal rule element-set age already obeys, for the same reason: a model that reads the corrected value has read the future.
+
+*Rejected: using them only to decorate the dashboard.* The information is about whether reception worked, which is what this project measures; leaving it in the presentation layer would be discarding a signal we had already paid the ingest cost for.
+
+---
+
+## D-132 — Ingest widens beyond imagery, with its provenance rules unchanged
+
+**2026-09-18 · accepted** · *`ingest/`, Stage 14, Stage 31*
+
+Stage 14 was written for external *observation archives* — other people's receptions of the same satellites. D-131 needs environmental and space-weather products too, which are a different kind of data arriving through the same pipe.
+
+**One ingest subsystem, wider scope.** The adapter contract is unchanged: download into immutable raw storage, validate and hash, normalise separately, load, never overwrite the original, and never become required by the operational scheduler.
+
+**Every provenance field stays required** for every source, whatever it carries: source name, original identifier, retrieval timestamp, source version, licence, checksum and transformation version. Widening what we ingest does not relax what we record about it — a widened scope is exactly when provenance discipline usually slips.
+
+**The snapshot requirement stays.** Prediction and evaluation read immutable snapshots (Stage 15), never a live feed, so that every published number is regenerable from a snapshot, a configuration and a seed (`CLAUDE.md` rule 8). A feature computed from whatever an endpoint returned that afternoon is not a measurement anyone can check.
+
+**Access constraints are per source and recorded per source.** Some sources need a free key and count requests against it; some need registration before a download is permitted; at least one needs no key at all. Each adapter records which it is, and keys are secrets — never committed, per `GIT-WORKFLOW.md` Rule 4.
+
+**Classes of source are named here; vendors are not.** A class is what the decision rests on, and naming a company in this file would bind an architectural decision to a commercial relationship that may not outlast the project. The candidate sources are named where they can change without a decision changing: `ATTRIBUTION.md` and Stage 31.
+
+*Rejected: a second ingest subsystem for environmental data.* Same obligations, same failure modes, same rate limits; two of them would mean two provenance implementations and one of them rotting.
+
+---
+
+## D-133 — A styled map tile is a visualisation, never a measurement
+
+**2026-09-18 · accepted** · *`ingest/`, `dashboard`, Stages 31 and 32*
+
+Near-real-time imagery and derived products are published both as data and as pre-rendered map tiles. The tiles are far easier to obtain, and sampling a pixel from one is a tempting way to get a number.
+
+**No derived number may be computed by sampling a rendered tile.** Numbers come from the corresponding data product. Tiles are for display.
+
+A tile has been through a colour map, a projection, resampling and lossy compression, all chosen for legibility rather than fidelity. A pixel read back is a fact about the rendering, not about the scene — several physical values map to one colour, and the styling can change upstream without notice or version. Such a number is also not regenerable (`CLAUDE.md` rule 8): re-fetching the tile a month later can give a different answer with nothing in our record to explain it.
+
+**Consequence.** A tile may appear on the dashboard, in a report and in the demonstration. It may not appear in a prediction feature, in a verdict input, or in an evidence dataset record as anything other than a reference to the tile.
+
+*Rejected: calibrating against the published palette.* It can be made to work and it produces a number whose error budget nobody can state — the worst of both, because it looks like a measurement.
+
+---
+
+## D-134 — Every ingested source is credited, with its licence and its terms
+
+**2026-09-18 · accepted** · *`ATTRIBUTION.md`, Stage 14, Stage 31*
+
+`ATTRIBUTION.md` covers code and approaches we read. Ingested data is neither, and it arrives with obligations of its own.
+
+**Each source class gets an entry** naming the source, its licence and its terms of use, and **the entry lands before the first retrieval**, not after. This is Rule 5 of `GIT-WORKFLOW.md` — attribution in the same commit as the work — extended from code we read to data we take.
+
+**Terms are recorded as well as licence**, because data terms routinely constrain redistribution independently of any licence label, and that constraint decides what the evidence dataset (module 17, D-104) may contain and republish. A source we may compute from is not automatically a source we may republish.
+
+**Consequence for exports.** A source whose terms forbid redistribution can still be used as a feature input; its records are then referenced in an export by identifier and checksum rather than bundled — the same treatment products already get (D-104).
+
+*Rejected: a licences section in the ingest code.* It would be read by nobody outside the module, and the file that answers "did you take this fairly?" in a viva is this one.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -2875,6 +2986,14 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | **D-106** | What label "usable" is, independent of the verdict's inputs | Stage 26 and SC-7 |
 | **D-107** | Whether an owner's contact is held, and how §16 of `PROJECT.md` changes | Stage 29 beyond team-operated stations |
 | **D-108** | Archive rows as runtime evidence; D-053 against §17; phase naming; calendar placement | — |
+
+**Opened 2026-09-18 with the two-tier deployment and public data**, each needing the team rather than another document:
+
+| | Question | Blocks |
+|---|---|---|
+| **D-135** | Which cloud host and tier, on whose account, what happens when the credit lapses, and how long a station retains an unacknowledged reception | Stage 33 |
+| **D-136** | Whether any ingested source's terms permit its records to be republished inside the evidence dataset, which decides that dataset's own licence | Stage 30's licence entry |
+| **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Stage 32 |
 
 ---
 
@@ -2991,6 +3110,18 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-103 accepted, D-116 moved to Stage 13 | `MSP-SPEC.md` header, §4.4, §6, §7; `SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 25 |
 | D-117 0.3 validation rules | `MSP-SPEC.md` §4.4, §6 |
 | D-118 to D-126 | — (implemented by the Stage 13 pull request) |
+
+**Landed 2026-09-18**, widening the deployment and the data the platform may read.
+
+| Decision | Applied to |
+|---|---|
+| D-129 two tiers, the station authoritative for its receptions | `ARCHITECTURE.md` Deployment and Rules; `EVALUATION.md` §12 |
+| D-130 no criterion depends on a cloud host | `PROJECT.md` §9, §17; `EVALUATION.md` §12 |
+| D-131 environmental and space-weather features | `PROJECT.md` §8.1; `EVALUATION.md` §2, §3, §4.4 |
+| D-132 widened ingest, provenance unchanged | `SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 14, Stage 31; `DATA-MODEL.md` |
+| D-133 a tile is not a measurement | `ARCHITECTURE.md` Rules; `DATA-MODEL.md`; Stages 31 and 32 |
+| D-134 every ingested source is credited | `ATTRIBUTION.md` |
+| Modules 18 to 20, and Stages 31 to 33 | `PROJECT.md` §5.6, §19; `SOFTWARE-IMPLEMENTATION-ROADMAP.md`; `GLOSSARY.md` |
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
 
