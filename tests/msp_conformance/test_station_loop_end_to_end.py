@@ -30,6 +30,12 @@ from meridian.api.dependencies import get_connection
 from meridian.store.invites import hash_invite_token
 from meridian_client.assignment_message import Assignment
 from meridian_client.credentials import StationCredentials, save_credentials
+from meridian_client.execution import (
+    CaptureWindow,
+    ExecutionStatus,
+    assignment_capture_window,
+    assignment_status,
+)
 from meridian_client.held_assignments import AssignmentRecord
 from meridian_client.observation_message import (
     ObservationResult,
@@ -73,6 +79,14 @@ class RecordingExecutor:
         self.begun: list[str] = []
         self.ended: list[str] = []
         self.ready: list[ObservationResult] = []
+
+    def capture_window(self, assignment: Assignment) -> CaptureWindow:
+        """The assignment's own window."""
+        return assignment_capture_window(assignment)
+
+    def status(self, running: Assignment | None) -> ExecutionStatus:
+        """What the assignment says, as ``NullExecutor`` reports it."""
+        return assignment_status(running)
 
     def begin(self, assignment: Assignment) -> None:
         """Note a start."""

@@ -608,3 +608,309 @@ def test_an_accepted_observation_is_counted_by_outcome_and_provenance(
         "meridian_observation_submission_delay_seconds_count", delay_labels
     )
     assert delays_after == (delays_before or 0.0) + 1
+
+
+# --- MSP 0.3: reception evidence (D-103, D-117) -------------------------------
+
+VERSION_03 = {"MSP-Version": "0.3"}
+
+
+def evidence_auth(station: dict[str, str]) -> dict[str, str]:
+    """Headers for a 0.3 station: the new minor, and its bearer token."""
+    return {**VERSION_03, "Authorization": f"Bearer {station['token']}"}
+
+
+def wire_time(**offset: float) -> str:
+    return recent(**offset).isoformat().replace("+00:00", "Z")
+
+
+def evidence_body(station_id: str, **overrides: Any) -> dict[str, Any]:
+    """MSP §4.4's 0.3 example: a decoded pass with every evidence field."""
+    body = observation_body(station_id)
+    body["signal"] = {
+        **body["signal"],
+        "noise_floor_dbfs": -52.3,
+        "receiver_gain_db": 32.8,
+        "snr_samples": [
+            {"t": wire_time(seconds=35), "snr_db": 3.1},
+            {"t": wire_time(minutes=5), "snr_db": 11.4},
+        ],
+    }
+    body["decode"] = {
+        "decoder": "satdump",
+        "decoder_version": "1.2.2",
+        "frames_decoded": 412,
+        "frames_failed": 37,
+    }
+    body.update(overrides)
+    return body
+
+
+def stored_evidence(rollback: Any, assignment_id: str = "as_44b2") -> tuple[Any, ...]:
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select noise_floor_dbfs, receiver_gain_db, snr_samples, decoder,"
+            " decoder_version, frames_decoded, frames_failed"
+            " from observations_current where assignment_id = %s",
+            (assignment_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    return tuple(row)
+
+
+def assert_malformed(response: Any) -> None:
+    assert response.status_code == 400, response.text
+    assert response.json()["error"] == "malformed"
+
+
+def test_a_03_observation_stores_its_reception_evidence(
+    client: TestClient, station: dict[str, str], rollback: Any
+) -> None:
+    """Every 0.3 field reaches its column, in the submitted order and shape."""
+    response = client.post(
+        OBSERVATIONS_PATH,
+        json=evidence_body(station["station_id"]),
+        headers=evidence_auth(station),
+    )
+
+    assert response.status_code == 200, response.text
+    floor, gain, samples, decoder, version, decoded, failed = stored_evidence(rollback)
+    assert (floor, gain) == (-52.3, 32.8)
+    assert [one["snr_db"] for one in samples] == [3.1, 11.4]
+    assert (decoder, version, decoded, failed) == ("satdump", "1.2.2", 412, 37)
+
+
+def test_a_02_observation_is_stored_with_no_evidence_at_all(
+    client: TestClient, station: dict[str, str], rollback: Any
+) -> None:
+    """D-117: 0.3 refuses nothing a 0.2 station sends, and invents nothing for it."""
+    response = client.post(
+        OBSERVATIONS_PATH,
+        json=observation_body(station["station_id"]),
+        headers=auth(station),
+    )
+
+    assert response.status_code == 200, response.text
+    assert stored_evidence(rollback) == (None,) * 7
+
+
+def test_evidence_added_to_an_earlier_02_report_supersedes_it(
+    client: TestClient, station: dict[str, str]
+) -> None:
+    """A station that upgrades and re-reports has corrected, not repeated, itself.
+
+    The two bodies agree on every 0.2 field, so this also proves the evidence is
+    part of the content digest (D-118): without it the second submission would
+    be taken as an unchanged retry and silently dropped.
+    """
+    plain = observation_body(station["station_id"])
+    first = client.post(OBSERVATIONS_PATH, json=plain, headers=auth(station))
+
+    enriched = evidence_body(station["station_id"])
+    enriched["started_at"] = plain["started_at"]
+    enriched["ended_at"] = plain["ended_at"]
+    enriched["signal"]["first_detection_at"] = plain["signal"]["first_detection_at"]
+    enriched["signal"]["doppler_samples"] = plain["signal"]["doppler_samples"]
+    second = client.post(
+        OBSERVATIONS_PATH, json=enriched, headers=evidence_auth(station)
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json()["superseded"] is True
+
+
+def test_an_identical_03_resubmission_returns_the_identical_acknowledgement(
+    client: TestClient, station: dict[str, str]
+) -> None:
+    """The queued-retry case of §6, carrying evidence: still idempotent."""
+    body = evidence_body(station["station_id"])
+
+    first = client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+    second = client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+
+    assert first.json() == second.json()
+    assert second.json()["superseded"] is False
+
+
+def test_more_than_512_snr_samples_is_malformed(
+    client: TestClient, station: dict[str, str]
+) -> None:
+    """MSP §6's table: the same cap as `doppler_samples` (D-117)."""
+    body = evidence_body(station["station_id"])
+    sample = {"t": wire_time(seconds=35), "snr_db": 3.1}
+    body["signal"]["snr_samples"] = [sample] * 513
+
+    assert_malformed(
+        client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+    )
+
+
+def test_exactly_512_snr_samples_is_accepted(
+    client: TestClient, station: dict[str, str]
+) -> None:
+    body = evidence_body(station["station_id"])
+    sample = {"t": wire_time(seconds=35), "snr_db": 3.1}
+    body["signal"]["snr_samples"] = [sample] * 512
+
+    response = client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+
+    assert response.status_code == 200, response.text
+
+
+def test_a_noise_floor_without_its_gain_is_malformed(
+    client: TestClient, station: dict[str, str]
+) -> None:
+    """D-117: a floor comparable with nothing is not a measurement."""
+    body = evidence_body(station["station_id"])
+    del body["signal"]["receiver_gain_db"]
+
+    assert_malformed(
+        client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+    )
+
+
+def test_a_gain_without_a_noise_floor_is_accepted(
+    client: TestClient, station: dict[str, str]
+) -> None:
+    """The gain describes the receiver on its own; only the reverse is refused."""
+    body = evidence_body(station["station_id"])
+    del body["signal"]["noise_floor_dbfs"]
+
+    response = client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize(
+    "decode",
+    [
+        {"frames_decoded": 412},
+        {"decoder": "", "frames_decoded": 412},
+        {"decoder": "satdump", "frames_decoded": -1},
+        {"decoder": "satdump", "frames_decoded": True},
+        {"decoder": "satdump", "frames_decoded": 412.5},
+        {"decoder": "satdump", "frames_failed": -3},
+    ],
+    ids=[
+        "unnamed",
+        "empty-name",
+        "negative",
+        "boolean",
+        "fractional",
+        "failed-negative",
+    ],
+)
+def test_a_decode_block_that_is_not_a_count_by_a_named_decoder_is_malformed(
+    client: TestClient, station: dict[str, str], decode: dict[str, Any]
+) -> None:
+    """D-117: statistics name their decoder, and counts are whole and non-negative."""
+    body = evidence_body(station["station_id"], decode=decode)
+
+    assert_malformed(
+        client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+    )
+
+
+def test_a_decode_block_with_only_a_decoder_name_is_accepted(
+    client: TestClient, station: dict[str, str], rollback: Any
+) -> None:
+    """A decoder with no frame structure sends no counts, and none are invented."""
+    body = evidence_body(station["station_id"], decode={"decoder": "gr-satellites"})
+
+    response = client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+
+    assert response.status_code == 200, response.text
+    assert stored_evidence(rollback)[3:] == ("gr-satellites", None, None, None)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "frames", "detected"),
+    [("decoded", 0, True), ("signal_no_decode", 5, True), ("no_signal", 1, False)],
+)
+def test_frames_that_contradict_the_outcome_are_malformed(
+    client: TestClient,
+    station: dict[str, str],
+    outcome: str,
+    frames: int,
+    detected: bool,
+) -> None:
+    """D-117: decoded needs a frame; signal_no_decode and no_signal need none."""
+    signal: dict[str, Any] = {"detected": detected}
+    if detected:
+        signal["first_detection_at"] = wire_time(seconds=35)
+    body = observation_body(
+        station["station_id"],
+        outcome=outcome,
+        signal=signal,
+        decode={"decoder": "satdump", "frames_decoded": frames},
+    )
+
+    assert_malformed(
+        client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+    )
+
+
+def test_an_aborted_decode_may_report_any_frame_count(
+    client: TestClient, station: dict[str, str]
+) -> None:
+    """A decode can stop part-way, and what it recovered before stopping is data.
+
+    This is also D-122's report for a decoder that produced frames but no timing:
+    `aborted`, with the decode block and no signal block.
+    """
+    body = observation_body(
+        station["station_id"],
+        outcome="aborted",
+        decode={"decoder": "satdump", "frames_decoded": 120, "frames_failed": 8},
+    )
+    del body["signal"]
+
+    response = client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize(
+    ("signal", "decode"),
+    [
+        ({"detected": False, "receiver_gain_db": 30.0}, None),
+        ({"detected": False, "snr_samples": []}, None),
+        (None, {"decoder": "satdump"}),
+    ],
+    ids=["gain", "snr-samples", "decode-block"],
+)
+def test_a_not_attempted_report_carrying_evidence_is_malformed(
+    client: TestClient,
+    station: dict[str, str],
+    signal: dict[str, Any] | None,
+    decode: dict[str, Any] | None,
+) -> None:
+    """A station that never began measured nothing, and cannot claim otherwise."""
+    body = observation_body(station["station_id"], outcome="not_attempted", products=[])
+    del body["signal"]
+    if signal is not None:
+        body["signal"] = signal
+    if decode is not None:
+        body["decode"] = decode
+
+    assert_malformed(
+        client.post(OBSERVATIONS_PATH, json=body, headers=evidence_auth(station))
+    )
+
+
+def test_a_non_finite_snr_sample_is_malformed(
+    client: TestClient, station: dict[str, str]
+) -> None:
+    """Sent as raw bytes, as `1e400` arrives, for the reason the products test gives."""
+    body = evidence_body(station["station_id"])
+    raw = json.dumps(body).replace('"snr_db": 11.4', '"snr_db": 1e400')
+
+    assert_malformed(
+        client.post(
+            OBSERVATIONS_PATH,
+            content=raw,
+            headers={**evidence_auth(station), "Content-Type": "application/json"},
+        )
+    )

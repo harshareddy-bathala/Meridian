@@ -29,9 +29,11 @@ from meridian.observations.canonical_body import content_sha256
 from meridian.store.assignments import mark_assignment_reported
 from meridian.store.observations import (
     AssignmentForReport,
+    DecodeStatistics,
     DopplerSample,
     LatestObservation,
     NewObservation,
+    SnrSample,
     find_latest_observation,
     insert_observation,
     lock_assignment_for_report,
@@ -88,6 +90,13 @@ class Submission:
     doppler_samples: tuple[DopplerSample, ...] | None
     products: tuple[Mapping[str, object], ...]
     client_notes: str | None
+
+    # MSP 0.3's reception evidence (D-117), defaulted so a 0.2 submission is
+    # built exactly as before and records "not measured" for all four.
+    noise_floor_dbfs: float | None = None
+    receiver_gain_db: float | None = None
+    snr_samples: tuple[SnrSample, ...] | None = None
+    decode: DecodeStatistics | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +258,10 @@ def _derive_record(
         products=submission.products,
         client_notes=submission.client_notes,
         simulated=provenance.simulated,
+        noise_floor_dbfs=submission.noise_floor_dbfs,
+        receiver_gain_db=submission.receiver_gain_db,
+        snr_samples=submission.snr_samples,
+        decode=submission.decode,
     )
 
 

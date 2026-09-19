@@ -1,12 +1,14 @@
 """The loop that runs a station unattended.
 
-One thread, one heartbeat at a time. Each tick the station drops work whose
-window has closed, starts work whose window has opened, queues whatever finished,
-states what it holds, takes delivery of what the platform sends back, and
-delivers what it owes. Nothing here decides what to receive — the platform
-scheduled that — nothing here receives anything, which is
-:mod:`meridian_client.execution`'s job, and nothing here decides what a refused
-submission means, which is :mod:`meridian_client.observation_submission`'s.
+One thread, one heartbeat at a time. Each tick the station stops a capture whose
+window has closed, starts one whose window has opened, queues whatever finished,
+forgets work it has handed over, states what it holds, takes delivery of what the
+platform sends back, and delivers what it owes. Nothing here decides what to
+receive — the platform scheduled that — nothing here receives anything, which is
+:mod:`meridian_client.execution`'s job, and nothing here decides which capture
+comes next or what a refused submission means, which are
+:mod:`meridian_client.capture_sequence`'s and
+:mod:`meridian_client.observation_submission`'s.
 
 Three properties are worth stating because they are what the loop is *for*:
 
@@ -22,29 +24,29 @@ Three properties are worth stating because they are what the loop is *for*:
   to the platform exactly like the incident that caused it.
 
 Reference: docs/MSP-SPEC.md §4.2, §4.4, §6; docs/DECISIONS.md D-003, D-024,
-D-030, D-068, D-069, D-073.
+D-030, D-068, D-069, D-073, D-121.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 import httpx
 
 from meridian_client.assignment_message import Assignment
+from meridian_client.capture_sequence import CaptureSequence
 from meridian_client.credentials import StationCredentials
 from meridian_client.execution import PassExecutor
 from meridian_client.heartbeat import (
     HeartbeatResponse,
-    Listening,
     StationState,
     build_heartbeat_body,
     parse_heartbeat_response,
 )
-from meridian_client.held_assignments import AssignmentRecord, due_now
+from meridian_client.held_assignments import AssignmentRecord
 from meridian_client.observation_message import build_observation_body
 from meridian_client.observation_queue import ObservationQueue
 from meridian_client.observation_submission import submit_pending
@@ -62,6 +64,13 @@ __all__ = [
 ]
 
 _log = logging.getLogger(__name__)
+
+EDGE_MARGIN_S = 0.5
+"""How far past a capture edge the loop wakes, so the tick lands on its far side.
+
+A sleep can return a hair early against the wall clock it is aimed at, and a tick
+just before an opening starts nothing and sleeps for the same edge again.
+"""
 
 
 def retry_policy_attempts_for(interval_s: float) -> int:
@@ -112,6 +121,10 @@ class TickOutcome:
     stop_reason: str | None = None
     """Set only when the loop must not continue — today, only a revoked token."""
 
+    not_begun: tuple[str, ...] = ()
+    """Held assignments whose capture closed without being begun, handed to the
+    executor's ``end`` so it can report them ``not_attempted`` (D-121)."""
+
 
 class StationLoop:
     """Drives one station: heartbeat, hold, execute, repeat.
@@ -142,11 +155,11 @@ class StationLoop:
         self._record = record
         self._executor = executor
         self._queue = queue
-        self._executing: Assignment | None = None
+        self._captures = CaptureSequence(record, executor)
 
     def executing(self) -> Assignment | None:
         """What the station is receiving right now, or ``None``."""
-        return self._executing
+        return self._captures.executing()
 
     def tick(self, now: datetime) -> TickOutcome:
         """One heartbeat, and the work it implies.
@@ -171,28 +184,29 @@ class StationLoop:
             means the tick has already told the platform the station is alive,
             which is the message that matters most when a backlog is draining.
         """
-        ended = self._stop_finished_work(now)
-        began = self._start_due_work(now)
+        ended, not_begun = self._captures.stop_finished(now)
+        began = self._captures.start_due(now)
         self._queue_completed_work()
+        self._captures.forget_handed_over(now)
+        work = TickOutcome(False, (), began, ended, not_begun=not_begun)
 
         try:
             response = self._send_heartbeat(now)
         except ProtocolError as exc:
-            return self._outcome_for_protocol_error(exc, began, ended)
+            return self._outcome_for_protocol_error(exc, work)
         except httpx.HTTPError as exc:
             # Unreachable, not refused. The station keeps executing and keeps
             # what it holds; the next tick carries the same statement. Nothing is
             # submitted either — the queue is on disk and loses nothing by waiting.
             _log.warning("heartbeat could not reach the platform: %s", exc)
-            return TickOutcome(False, (), began, ended)
+            return work
 
         accepted = self._record.accept(response.assignments)
         run = submit_pending(self._transport, self._queue, now)
-        return TickOutcome(
-            True,
-            tuple(one.assignment_id for one in accepted),
-            began,
-            ended,
+        return replace(
+            work,
+            heartbeat_sent=True,
+            accepted=tuple(one.assignment_id for one in accepted),
             submitted=run.submitted,
             stop_reason=run.stop_reason,
         )
@@ -212,42 +226,43 @@ class StationLoop:
             Scheduled on :func:`time.monotonic`, not on the wall clock, so an
             NTP step cannot make the loop spin or stall — the one clock a station
             is expected to correct is the one it must not schedule against.
+
+            **It also wakes at every capture edge**, so a capture starts and stops
+            on time rather than up to one interval late. The wake is an extra
+            tick with its own heartbeat — the one that reports ``listening``
+            promptly — and leaves the heartbeat grid where it was (D-121).
+
+            **A run with a tick budget stops at its last tick rather than after
+            it.** A one-shot commissioning run that slept out a whole interval
+            with nothing left to do would look like a station that had hung.
         """
         interval_s = float(self._credentials.heartbeat_interval_s)
         due_at = _monotonic()
         ticks = 0
 
         while stop_after_ticks is None or ticks < stop_after_ticks:
-            outcome = self.tick(datetime.now(UTC))
+            outcome = self.tick(_wall_clock())
             ticks += 1
             if outcome.stop_reason is not None:
                 return outcome.stop_reason
 
-            due_at = _next_due_at(due_at, interval_s)
-            _sleep(max(0.0, due_at - _monotonic()))
+            # An edge wake before the grid's tick is not that tick.
+            if _monotonic() >= due_at:
+                due_at = _next_due_at(due_at, interval_s)
+            if stop_after_ticks is not None and ticks >= stop_after_ticks:
+                break
+            _sleep(self._seconds_until_next_tick(due_at))
 
         return None
 
-    def _stop_finished_work(self, now: datetime) -> str | None:
-        """End execution and forget assignments whose windows have closed."""
-        self._record.drop_closed(now)
-        running = self._executing
-        if running is None or running.end_at >= now:
-            return None
-        self._executor.end(running)
-        self._executing = None
-        return running.assignment_id
-
-    def _start_due_work(self, now: datetime) -> str | None:
-        """Begin the assignment whose window is open, if one is and none is running."""
-        if self._executing is not None:
-            return None
-        candidate = due_now(self._record.held(), now)
-        if candidate is None:
-            return None
-        self._executor.begin(candidate)
-        self._executing = candidate
-        return candidate.assignment_id
+    def _seconds_until_next_tick(self, due_at: float) -> float:
+        """The wait until the next heartbeat or the next capture edge, if sooner."""
+        until_heartbeat = max(0.0, due_at - _monotonic())
+        now = _wall_clock()
+        edge = self._captures.next_edge(now)
+        if edge is None:
+            return until_heartbeat
+        return min(until_heartbeat, (edge - now).total_seconds() + EDGE_MARGIN_S)
 
     def _queue_completed_work(self) -> None:
         """Take whatever the executor has finished and write it down.
@@ -271,24 +286,19 @@ class StationLoop:
                 )
 
     def _send_heartbeat(self, now: datetime) -> HeartbeatResponse:
-        """Build and send one §4.2 heartbeat, returning the parsed response."""
-        running = self._executing
-        listening = (
-            None
-            if running is None
-            else Listening(
-                assignment_id=running.assignment_id,
-                satellite_id=running.satellite_id,
-                centre_freq_hz=running.centre_freq_hz,
-                mode=running.mode,
-            )
-        )
+        """Build and send one §4.2 heartbeat, returning the parsed response.
+
+        The state and ``listening`` block are the executor's, not the
+        assignment's: a receiver that died mid-pass must be able to stop
+        claiming it is listening (D-121, CLAUDE.md rule 7).
+        """
+        status = self._captures.status()
         body = build_heartbeat_body(
             StationState(
                 station_id=self._credentials.station_id,
                 sent_at=now,
-                state="listening" if running else "idle",
-                listening=listening,
+                state=status.state,
+                listening=status.listening,
             ),
             # From the record, never from the last response: the field states
             # what survived, and a list built from what was just delivered would
@@ -298,7 +308,7 @@ class StationLoop:
         return parse_heartbeat_response(self._transport.heartbeat(body))
 
     def _outcome_for_protocol_error(
-        self, exc: ProtocolError, began: str | None, ended: str | None
+        self, exc: ProtocolError, work: TickOutcome
     ) -> TickOutcome:
         """Decide whether an MSP error ends the loop or is merely this tick's."""
         if exc.code == UNAUTHORIZED:
@@ -307,9 +317,9 @@ class StationLoop:
                 "must issue a replacement invite bound to %s (D-024, D-034)",
                 self._credentials.station_id,
             )
-            return TickOutcome(False, (), began, ended, stop_reason=UNAUTHORIZED)
+            return replace(work, stop_reason=UNAUTHORIZED)
         _log.warning("heartbeat refused: %s", exc)
-        return TickOutcome(False, (), began, ended)
+        return work
 
 
 def _next_due_at(due_at: float, interval_s: float) -> float:
@@ -333,6 +343,11 @@ def _monotonic() -> float:
     backwards makes the loop stall, while one that steps forwards makes it spin.
     """
     return time.monotonic()
+
+
+def _wall_clock() -> datetime:
+    """The instant a tick is stamped with, named so a test can substitute it."""
+    return datetime.now(UTC)
 
 
 def _sleep(seconds: float) -> None:

@@ -30,6 +30,7 @@ __all__ = [
     "ElementSet",
     "MalformedAssignmentError",
     "parse_assignment",
+    "render_assignment",
 ]
 
 
@@ -151,3 +152,31 @@ def parse_assignment(message: Mapping[str, object]) -> Assignment:
         timing_uncertainty_s=float(str(_required(message, "timing_uncertainty_s"))),
         priority=float(str(_required(message, "priority"))),
     )
+
+
+def render_assignment(one: Assignment) -> dict[str, object]:
+    """One assignment in the shape MSP §4.3 delivered it.
+
+    The inverse of :func:`parse_assignment`, used wherever a station writes an
+    assignment down: the held record, and each capture folder's manifest. The
+    wire format is reused as the file format so
+    that reading a file and reading a response are the same code path — a second
+    representation would be a second parser, and the two would drift.
+    """
+    return {
+        "assignment_id": one.assignment_id,
+        "satellite_id": one.satellite_id,
+        "start_at": one.start_at.isoformat(),
+        "end_at": one.end_at.isoformat(),
+        "centre_freq_hz": one.centre_freq_hz,
+        "mode": one.mode,
+        "expected_max_elevation_deg": one.expected_max_elevation_deg,
+        "predicted_yield": one.predicted_yield,
+        "element_set": {
+            "epoch": one.element_set.epoch.isoformat(),
+            "line1": one.element_set.line1,
+            "line2": one.element_set.line2,
+        },
+        "timing_uncertainty_s": one.timing_uncertainty_s,
+        "priority": one.priority,
+    }

@@ -48,6 +48,33 @@ flowchart TD
 
 *Snapshot taken 2026-09-14. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
+**Stage 13's software is built.** Its decisions are D-116 through D-128, and `docs/OPERATIONS.md` § Station reception describes it.
+- **MSP 0.3 is live end to end.** The platform validates, hashes and stores the optional reception evidence: noise floor, gain, SNR samples and the `decode` block. The client sends it and refuses, before queueing, anything the platform would refuse. Digests of 0.2 bodies are unchanged (D-118).
+- **The loop takes its cues from the executor:**
+  - capture opens early by the timing uncertainty, and its tail yields to the next pass;
+  - the loop wakes at each capture's start and end;
+  - work stays in `held_assignments` until its result is queued;
+  - a held pass that never began is reported `not_attempted`, not left to expire as a decline (D-121).
+- **`meridian_client/reception/`** holds:
+  - simulated and file-replay receivers, and a null rotator;
+  - a subprocess decoder that reads Meridian's JSON report;
+  - D-122's outcome rules;
+  - capture folders that a restart resumes from;
+  - `ReceptionExecutor`, which composes them.
+- **The gate passes both ways:**
+  - `tests/unit/test_reception_gate.py` turns an assignment into a valid observation with no database;
+  - `tests/msp_conformance/test_reception_end_to_end.py` stores a simulated station's `decoded` 0.3 observation, with its frame counts, through the real platform.
+- **A station is configured and run from one file** (D-127, D-128):
+  - `station.toml` names the platform, the state directory, the receiver, a decoder command per mode, the detection threshold, the coverage floor and the disk guard — every table optional, every unknown key refused by name;
+  - `meridian-station --config …` runs a registered station, and never registers one itself: an invite is an operator's to spend (D-023);
+  - `meridian-replay --config … --recording …` puts one recording through the real pipeline offline and prints the body a station would have queued. It imports no transport, so it cannot submit;
+  - **whether a station is simulated comes from its credentials**, written at registration, not from the file — no edit can make a synthetic receiver report as a measured station.
+- **Not built:**
+  - a physical receiver adapter;
+  - a SatDump output reader (D-124);
+  - antenna tracking (D-126);
+  - registration for the reference client, which is still an operator step through the simulator's path or the tests.
+
 **Stage 12's software is built.** Its decisions are D-109 through D-115, and `docs/OPERATIONS.md` is its runbook.
 - **Scheduling runs by itself.** A `jobs` service in the default profile generates passes and schedules them under configuration A every five minutes, so a deployment schedules with no simulator; the simulator's shell loop is gone. `meridian serve` runs the API with its log level and several workers.
 - **Metrics:**

@@ -14,8 +14,11 @@ The one validation rule that lives at the route instead is D-013's window on
 ``started_at``: it needs the platform clock, and a model that read one could not
 be tested at a fixed instant (D-072).
 
+MSP 0.3's reception evidence — the noise floor, SNR samples and ``decode`` block
+— is modelled in :mod:`meridian.api.models.observation_evidence` and joined here.
+
 Reference: docs/MSP-SPEC.md §4.4, §6; docs/DECISIONS.md D-010, D-018, D-029,
-D-032, D-072.
+D-032, D-072, D-117.
 """
 
 from __future__ import annotations
@@ -25,8 +28,14 @@ from typing import Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
+from meridian.api.models.observation_evidence import (
+    MAX_SNR_SAMPLES,
+    DecodeBlock,
+    SnrSampleBlock,
+    check_evidence_agrees_with_the_outcome,
+)
 from meridian.observations.ingest import Submission
-from meridian.store.observations import DopplerSample
+from meridian.store.observations import DopplerSample, SnrSample
 
 __all__ = [
     "MAX_DOPPLER_SAMPLES",
@@ -95,6 +104,32 @@ class SignalBlock(BaseModel):
     claims and are stored as different values.
     """
 
+    noise_floor_dbfs: float | None = Field(default=None, allow_inf_nan=False)
+    """MSP 0.3: relative to full scale, comparable only at ``receiver_gain_db``."""
+
+    receiver_gain_db: float | None = Field(default=None, allow_inf_nan=False)
+
+    snr_samples: list[SnrSampleBlock] | None = Field(
+        default=None, max_length=MAX_SNR_SAMPLES
+    )
+    """MSP 0.3: raw samples in time order; ``null`` and ``[]`` differ as for Doppler."""
+
+    @property
+    def carries_reception_evidence(self) -> bool:
+        """Whether any of MSP 0.3's three signal fields is present."""
+        return (
+            self.noise_floor_dbfs is not None
+            or self.receiver_gain_db is not None
+            or self.snr_samples is not None
+        )
+
+    @model_validator(mode="after")
+    def _a_noise_floor_states_its_gain(self) -> Self:
+        """D-117: a floor with no gain cannot be compared with anything."""
+        if self.noise_floor_dbfs is not None and self.receiver_gain_db is None:
+            raise ValueError("signal.noise_floor_dbfs requires signal.receiver_gain_db")
+        return self
+
     @model_validator(mode="after")
     def _detection_and_its_timestamp_agree(self) -> Self:
         """The pair the ``observation_detection_consistent`` CHECK enforces.
@@ -141,6 +176,21 @@ class ObservationRequestBody(BaseModel):
     """
 
     client_notes: str | None = None
+
+    decode: DecodeBlock | None = None
+    """MSP 0.3: the decoder's own statistics, absent when no decoder ran."""
+
+    @model_validator(mode="after")
+    def _the_evidence_agrees_with_the_outcome(self) -> Self:
+        """D-117: frame counts against the outcome, and nothing on ``not_attempted``."""
+        check_evidence_agrees_with_the_outcome(
+            self.outcome,
+            self.decode,
+            signal_evidence_present=(
+                self.signal is not None and self.signal.carries_reception_evidence
+            ),
+        )
+        return self
 
     @model_validator(mode="after")
     def _the_products_are_strict_json(self) -> Self:
@@ -207,7 +257,18 @@ class ObservationRequestBody(BaseModel):
             ),
             products=tuple(self.products),
             client_notes=self.client_notes,
+            noise_floor_dbfs=None if signal is None else signal.noise_floor_dbfs,
+            receiver_gain_db=None if signal is None else signal.receiver_gain_db,
+            snr_samples=_snr_samples(signal),
+            decode=None if self.decode is None else self.decode.to_statistics(),
         )
+
+
+def _snr_samples(signal: SignalBlock | None) -> tuple[SnrSample, ...] | None:
+    """The SNR series in the store's shape, with ``None`` kept apart from ``()``."""
+    if signal is None or signal.snr_samples is None:
+        return None
+    return tuple(one.to_snr_sample() for one in signal.snr_samples)
 
 
 class ObservationAckBody(BaseModel):

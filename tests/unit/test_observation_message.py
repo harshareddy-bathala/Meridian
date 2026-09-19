@@ -13,10 +13,13 @@ import pytest
 
 from meridian_client.observation_message import (
     MAX_DOPPLER_SAMPLES,
+    MAX_SNR_SAMPLES,
+    Decode,
     DopplerSample,
     MalformedAcknowledgementError,
     ObservationResult,
     Signal,
+    SnrSample,
     build_observation_body,
     parse_observation_ack,
 )
@@ -282,3 +285,217 @@ def test_a_non_boolean_superseded_is_refused() -> None:
             },
             "as_44b2",
         )
+
+
+# --- MSP 0.3: reception evidence (D-103, D-117) -------------------------------
+
+LATER = datetime(2026, 8, 14, 9, 46, 44, tzinfo=UTC)
+
+
+def evidence_result(**overrides: object) -> ObservationResult:
+    """MSP §4.4's 0.3 example: a decoded pass carrying every evidence field."""
+    fields: dict[str, object] = {
+        "assignment_id": "as_44b2",
+        "started_at": STARTED_AT,
+        "ended_at": ENDED_AT,
+        "outcome": "decoded",
+        "signal": Signal(
+            detected=True,
+            first_detection_at=DETECTED_AT,
+            peak_snr_db=11.4,
+            noise_floor_dbfs=-52.3,
+            receiver_gain_db=32.8,
+            snr_samples=(SnrSample(DETECTED_AT, 3.1), SnrSample(LATER, 11.4)),
+        ),
+        "decode": Decode("satdump", "1.2.2", 412, 37),
+    }
+    fields.update(overrides)
+    return ObservationResult(**fields)  # type: ignore[arg-type]
+
+
+def test_the_03_body_is_the_one_the_specification_shows() -> None:
+    """MSP §4.4's 0.3 evidence, written out rather than computed."""
+    body = build_observation_body(evidence_result(), STATION_ID)
+
+    assert body["signal"] == {
+        "detected": True,
+        "first_detection_at": "2026-08-14T09:41:53Z",
+        "peak_snr_db": 11.4,
+        "noise_floor_dbfs": -52.3,
+        "receiver_gain_db": 32.8,
+        "snr_samples": [
+            {"t": "2026-08-14T09:41:53Z", "snr_db": 3.1},
+            {"t": "2026-08-14T09:46:44Z", "snr_db": 11.4},
+        ],
+    }
+    assert body["decode"] == {
+        "decoder": "satdump",
+        "decoder_version": "1.2.2",
+        "frames_decoded": 412,
+        "frames_failed": 37,
+    }
+
+
+def test_evidence_that_was_not_measured_is_omitted_not_zeroed() -> None:
+    """D-117: an unknown value is absent, never zero — a zero is a measurement."""
+    result = evidence_result(
+        signal=Signal(detected=True, first_detection_at=DETECTED_AT),
+        decode=Decode("gr-satellites"),
+    )
+
+    body = build_observation_body(result, STATION_ID)
+
+    assert body["signal"] == {
+        "detected": True,
+        "first_detection_at": "2026-08-14T09:41:53Z",
+    }
+    assert body["decode"] == {"decoder": "gr-satellites"}
+
+
+def test_a_02_result_builds_the_02_body() -> None:
+    """A result with no evidence carries no `decode` key and no new signal keys."""
+    body = build_observation_body(decoded_result(), STATION_ID)
+
+    assert "decode" not in body
+    assert set(body["signal"]) == {  # type: ignore[arg-type]
+        "detected",
+        "first_detection_at",
+        "peak_snr_db",
+        "doppler_samples",
+    }
+
+
+def test_no_snr_samples_and_an_empty_array_are_sent_differently() -> None:
+    measured_nothing = evidence_result(
+        outcome="no_signal",
+        signal=Signal(detected=False, snr_samples=()),
+        decode=Decode("satdump", frames_decoded=0),
+    )
+
+    body = build_observation_body(measured_nothing, STATION_ID)
+
+    assert body["signal"] == {"detected": False, "snr_samples": []}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"signal": Signal(detected=True)},
+            "detected and signal.first_detection_at must agree",
+        ),
+        ({"outcome": "decoded", "signal": None}, "requires signal.detected"),
+        (
+            {
+                "outcome": "no_signal",
+                "decode": None,
+                "signal": Signal(detected=True, first_detection_at=DETECTED_AT),
+            },
+            "cannot carry a detection",
+        ),
+        (
+            {
+                "signal": Signal(
+                    detected=True,
+                    first_detection_at=DETECTED_AT,
+                    noise_floor_dbfs=-50.0,
+                )
+            },
+            "requires signal.receiver_gain_db",
+        ),
+        (
+            {
+                "signal": Signal(
+                    detected=True,
+                    first_detection_at=DETECTED_AT,
+                    snr_samples=(SnrSample(DETECTED_AT, 3.1),) * (MAX_SNR_SAMPLES + 1),
+                )
+            },
+            "snr samples",
+        ),
+        (
+            {
+                "signal": Signal(
+                    detected=True,
+                    first_detection_at=DETECTED_AT,
+                    snr_samples=(SnrSample(DETECTED_AT, float("nan")),),
+                )
+            },
+            "not a finite number",
+        ),
+        (
+            {
+                "signal": Signal(
+                    detected=True,
+                    first_detection_at=DETECTED_AT,
+                    peak_snr_db=float("inf"),
+                )
+            },
+            "not a finite number",
+        ),
+        ({"decode": Decode("")}, "must name the decoder"),
+        ({"decode": Decode("satdump", frames_decoded=-1)}, "whole number of frames"),
+        ({"decode": Decode("satdump", frames_decoded=True)}, "whole number of frames"),
+        (
+            {"decode": Decode("satdump", frames_decoded=0)},
+            "requires decode.frames_decoded >= 1",
+        ),
+        (
+            {
+                "outcome": "no_signal",
+                "signal": Signal(detected=False),
+                "decode": Decode("satdump", frames_decoded=3),
+            },
+            "requires decode.frames_decoded == 0",
+        ),
+        (
+            {"outcome": "not_attempted", "signal": None, "decode": Decode("satdump")},
+            "carries no reception evidence",
+        ),
+        (
+            {
+                "outcome": "not_attempted",
+                "signal": Signal(detected=False, receiver_gain_db=30.0),
+                "decode": None,
+            },
+            "carries no reception evidence",
+        ),
+    ],
+    ids=[
+        "detected-without-instant",
+        "decoded-without-signal",
+        "no-signal-with-detection",
+        "floor-without-gain",
+        "over-snr-cap",
+        "nan-snr-sample",
+        "infinite-peak",
+        "unnamed-decoder",
+        "negative-frames",
+        "boolean-frames",
+        "decoded-with-no-frames",
+        "no-signal-with-frames",
+        "not-attempted-with-decode",
+        "not-attempted-with-gain",
+    ],
+)
+def test_a_body_the_platform_would_refuse_never_leaves_the_client(
+    overrides: dict[str, object], message: str
+) -> None:
+    """Every refusal the platform makes on a body alone is made here first.
+
+    A body refused as `malformed` is refused for good, so a pipeline bug that
+    built one would lose the pass. Raising at build time puts the bug where the
+    station's own logs show it.
+    """
+    with pytest.raises(ValueError, match=message):
+        build_observation_body(evidence_result(**overrides), STATION_ID)
+
+
+def test_frames_but_no_timing_is_sendable_as_aborted() -> None:
+    """D-122's report for a decoder that gave frames and no detection instant."""
+    result = evidence_result(outcome="aborted", signal=None)
+
+    body = build_observation_body(result, STATION_ID)
+
+    assert "signal" not in body
+    assert body["decode"]["frames_decoded"] == 412  # type: ignore[index]
