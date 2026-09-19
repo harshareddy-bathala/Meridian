@@ -47,6 +47,28 @@ Libraries used as dependencies rather than reimplemented. Not attribution in the
 
 **Licence decision, 2026-07-31.** Apache-2.0, recorded in `docs/DECISIONS.md`. Chosen deliberately, not inherited: permissive terms plus an explicit patent grant suit a published protocol and a reference client intended for third-party implementation. The process boundary above is what makes this available to us, and it must be maintained — linking a GPL decoder into our code would change the answer.
 
+## Ingested data sources
+
+Data we take rather than code we read, recorded here for the same reasons (D-134). An entry lands **before the first retrieval** from a source, not after it — the same rule the log below follows, applied to data.
+
+**Licence and terms are recorded separately.** A licence says what the data is; terms of use often constrain redistribution independently of it, and that constraint is what decides whether the evidence dataset may republish a record or must reference it by identifier and checksum (D-104, D-136).
+
+**Nothing has been retrieved yet.** The classes below are the candidates Stage 31 will implement, named as classes rather than as a commitment to any vendor (D-132). Each row's licence and terms are filled in from the source's own published statement, by the commit that adds its adapter and before it fetches anything — deliberately left unfilled here rather than guessed, because an unverified licence in this file is worse than an empty one.
+
+| Source class | Used for | Access constraint | Licence and terms |
+|---|---|---|---|
+| Published **geomagnetic and solar activity indices** | Ionospheric disturbance as a candidate feature (D-131) | Typically no key | *to record before first retrieval* |
+| A **local atmospheric conditions** service | Cloud cover, for the reception verdict | Free key, requests counted | *to record before first retrieval* |
+| **Near-real-time global imagery tiles** | Display only — never sampled for a value (D-133) | Typically no key | *to record before first retrieval* |
+| **Active fire detections** | Regional monitoring | Free key, requests counted | *to record before first retrieval* |
+| **Vegetation index composites** | Regional monitoring | Registration for downloads | *to record before first retrieval* |
+| **Precipitation** products | Regional monitoring | Registration for downloads | *to record before first retrieval* |
+| **Aerosol** products | Regional monitoring, candidate context | Registration for downloads | *to record before first retrieval* |
+| **Night-time lights** composites | Regional monitoring | Registration for downloads | *to record before first retrieval* |
+| A **national geoportal for India** | Regional products for our own region | Registration for downloads | *to record before first retrieval* |
+
+**Keys and registration credentials are secrets** and appear nowhere in this repository, per `GIT-WORKFLOW.md` Rule 4. Which of these sources is actually adopted is Stage 31's to settle; a class listed here and never used is removed rather than left implying a relationship we do not have.
+
 ## Log
 
 **2026-08-08 — a note on how this log starts.** The four entries below were added

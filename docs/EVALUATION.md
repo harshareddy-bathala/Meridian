@@ -50,6 +50,10 @@ Elevation and operator priority are **inputs to our model, not competing baselin
 | **Interference profile** | **Ours** | Noise floor by azimuth and hour |
 | **Station health history** | **Ours** | Recent failure rate at this station |
 | **Per-satellite history** | **Ours** | This satellite's observed decode rate |
+| **Geomagnetic and solar activity** | **Public** | Ionospheric disturbance — absorption and scintillation that move the noise floor for reasons that are not the station's |
+| **Local atmospheric conditions** | **Public** | Cloud cover — why a clean decode can still produce an unusable image |
+
+The two public rows are **candidate** features (D-131). They are ingested once with provenance and read from immutable snapshots, never from a live service, and the value used is the one published *before* the pass — a model that reads a later revision has read the future. They are never gates: no pass is skipped because an index was high or a forecast was cloudy, which would make an external service a runtime dependency and would leave exactly the passes the model needs unobserved (§4).
 
 **Cold start is a functional requirement.** A newly registered station has no history. The model must degrade gracefully to geometry-only prediction and recover as data accumulates. Implement this as an explicit fallback path, tested, not as an accident of missing features.
 
@@ -69,6 +73,14 @@ A combined model cannot show what our contribution added. The model layer **must
 **SC-1 is measured as D − B.** Not D − A, which would flatter us by taking credit for priority weighting that already exists.
 
 C matters independently: if our features carry no signal on their own, that is a finding worth reporting, and it changes what we claim.
+
+### Isolating the public conditions
+
+The public features of §2 join configurations **C** and **D** as one named group, and their own contribution is isolated by **leaving that group out of the shipped model**: a fifth run, D without the group, reported beside the four configurations as **D − D∖conditions**. A fifth *configuration* is not added, because the four answer questions about what we contribute and this asks a question about one feature group inside it.
+
+**SC-1 does not move.** It stays D − B: the shipped system against what existing practice achieves. If the public group ships, it is part of D and part of the headline honestly; if it does not earn its place, D is the model without it. Either way the headline is not recomputed to flatter the group, and the group's own effect is the leave-one-out number, stated with its confidence interval.
+
+**Risk: a quiet Sun.** The geomagnetic feature can only be measured on disturbed passes, and disturbance is not ours to arrange — a quiet stretch of the solar cycle over our observation window may leave too few disturbed passes to measure anything at all. Two commitments follow. The minimum count of disturbed passes per index band is **stated in advance**, and below it the group is reported as **untested**, never as unhelpful: "we could not measure this, and here is the sample we had" is a different claim from "this does not help", and the second is the one that would be wrong. Cloud cover carries no such risk — it varies daily — so the two public features are reported separately rather than as one verdict.
 
 A hybrid is not automatically better. Adding a weak or noisy feature can degrade a model. The ablation is how we find out rather than assume.
 
@@ -286,3 +298,31 @@ How modules 13–17 are proven (D-095). Everything above applies to them — tem
 **Proof.** Export once. Regenerate from the same snapshot, configuration and seed, **on a machine other than the one that produced it**. The content hashes are identical. This is `CLAUDE.md` rule 8 turned into a test.
 
 **It does not claim** that the labels inside it are correct — only that anyone can reproduce exactly what Meridian concluded, and check it.
+
+---
+
+## 12. Independence drills
+
+`CLAUDE.md`'s independence test says that if every external service went offline permanently tomorrow, Meridian would still schedule, receive, decode, monitor and report. A two-tier deployment (D-129) makes that a claim someone can check, so it is checked: two drills, each a procedure with a pass condition, run before the demonstration and after any change to how the tiers are deployed. Both are gates of Stage 33.
+
+**Neither drill may be run against a cloud tier only.** The point is what survives without one.
+
+### 12.1 The station receives with the platform unreachable
+
+**Method.** Break the station's route to the platform tier — drop the tunnel, or block the route — before a scheduled pass, and leave it broken until after the pass ends. Restore it afterwards.
+
+**The station must**, with nothing reachable: begin its capture on the schedule it already held, write the recording and its manifest, run the decoder, derive the observation and hold it in its durable upload queue. On restoration it re-sends what was never acknowledged.
+
+**Pass condition.** The pass is received and decoded with no gap attributable to the outage, and after reconciliation the platform holds exactly one observation for that assignment — a replayed report is a no-op, because the identifier is derived and revisions are append-only (D-027, D-015).
+
+**Fails if** the client blocks on the network at any point during the pass, if any part of the reception is lost rather than queued, or if reconciliation produces a second revision whose content is identical to the first.
+
+### 12.2 The dashboard serves its last snapshot with the network down
+
+**Method.** With the platform tier unreachable from the dashboard's own host, load the dashboard as a visitor would.
+
+**Pass condition.** It renders its last snapshot, and it **says how old that snapshot is** on the page. Nothing stale is presented as current.
+
+**Fails if** the page errors, hangs waiting on an upstream, or shows figures that look live when they are not — the last of these is the serious one, because a stale number presented as current is worse than a page that admits it is offline.
+
+**This drill is owed work, not only a run.** Serving a last snapshot and labelling its age is a capability the dashboard does not have today; Stage 33 is where it is built, and recording the drill here is what makes it a requirement rather than an aspiration.

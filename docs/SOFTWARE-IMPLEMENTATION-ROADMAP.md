@@ -1444,6 +1444,8 @@ The station client can execute an assignment through a simulated or recorded-dat
 
 Only begin after Meridian works independently.
 
+**Scope, from D-132.** This stage builds *the* ingest subsystem, and it is not only for other people's observation archives. Published environmental and space-weather products arrive through the same adapters, under the same provenance rules, for the features D-131 makes candidates. Stage 31 adds those sources; it does not add a second subsystem. Nothing here becomes a runtime dependency of scheduling or reception, whatever the payload.
+
 ## Learn
 
 - ETL design;
@@ -1486,6 +1488,24 @@ The adapter must:
 4. load normalized records;
 5. never overwrite original data;
 6. never become required by the operational scheduler.
+
+### Access constraints, recorded per source
+
+Sources differ in what they demand before they will answer, and the adapter records which case it is (D-132):
+
+- a **free key**, with requests counted against it — the adapter rate-limits itself and surfaces its remaining budget rather than discovering the limit by being refused;
+- **registration** before a download is permitted, with credentials held as secrets;
+- **no key at all**.
+
+Keys and credentials are secrets: never committed, per `GIT-WORKFLOW.md` Rule 4, and supplied the way every other secret is.
+
+### Tiles are not measurements
+
+Several sources publish both a data product and pre-rendered map tiles. **No derived number is ever computed by sampling a tile** (D-133): tiles may be stored and displayed, and values come from the data product. An adapter that can only obtain tiles for a quantity has not obtained that quantity.
+
+### Attribution before retrieval
+
+Each source class has an `ATTRIBUTION.md` entry — source, licence, terms of use — **before the first retrieval from it**, not after (D-134). Terms are recorded separately from licence because they decide what the evidence dataset may republish (D-136).
 
 If implementation is informed by another project’s source, update `ATTRIBUTION.md` in the same change. Never copy GPL/AGPL source.
 
@@ -2636,6 +2656,138 @@ Which licence the published dataset carries is owed by this stage as a `D-` entr
 ## Completion gate
 
 SC-10: regenerating the package from the same snapshot, configuration and seed, on a machine other than the one that produced it, gives the identical content hash.
+
+---
+
+# Stage 31 — Public environmental and space-weather ingest
+
+Module 18. Depends on Stages 14 and 15. Nothing depends on this stage for scheduling or reception, by construction (D-132).
+
+## Learn
+
+- what each index physically measures, and over what cadence;
+- ionospheric absorption and scintillation at VHF, well enough to say what a feature can and cannot explain;
+- publication latency, revision and reanalysis — which value existed *before* a pass;
+- gridded products, projections and resampling;
+- rate limits, keys and terms of use.
+
+## Implement
+
+Adapters under Stage 14's `ingest/`, one per source class, each with that stage's provenance record and access constraint. No new subsystem (D-132).
+
+### Source classes, and what each is for
+
+| Class | Used for | Access |
+|---|---|---|
+| Published **geomagnetic and solar activity indices** | The disturbance feature (D-131); context for a raised noise floor | Typically no key |
+| A **local atmospheric conditions** service | Cloud cover, for the verdict's "decoded but unusable" case | Free key, requests counted |
+| **Near-real-time global imagery tiles** | Display only — never sampled for a value (D-133) | Typically no key |
+| **Active fire detections** | Regional monitoring (Stage 32) | Free key, requests counted |
+| **Vegetation index composites**, **precipitation**, **aerosol**, **night-time lights** | Regional monitoring, and candidate context | Registration for downloads |
+| A **national geoportal for India** | Regional products for our own region | Registration for downloads |
+
+Named as classes with a candidate provider each, not as a commitment to a vendor. Licence and terms go in `ATTRIBUTION.md` before the first retrieval (D-134).
+
+### Feature discipline
+
+- Values are read from Stage 15 snapshots, never from a live service.
+- The value used for a pass is the one **published before that pass**; a later revision or reanalysis is a different column, and never the feature.
+- A missing value is missing, not zero, and the model's cold-start path already handles absent features.
+- No pass is skipped because of any of these values (D-131).
+
+## Tests
+
+- an adapter's snapshot re-normalises and re-evaluates with the network unplugged;
+- provenance is complete for every ingested record, and a record with a missing field is refused;
+- a re-fetch of the same identifier produces the same checksum, or a new record — never a silent overwrite;
+- the pre-pass value is selected when a later revision exists;
+- a rate-limited adapter stops before the limit rather than being refused;
+- no code path samples a tile for a number.
+
+## Completion gate
+
+Every feature the prediction module can read from a public source is reproducible from a snapshot on a machine with no network access, with its provenance, and the value for any pass is the one published before that pass.
+
+---
+
+# Stage 32 — Regional monitoring
+
+Module 19. Depends on Stages 11 and 31.
+
+## Learn
+
+- areas of interest: geometry, extent, and how to store one without storing a person;
+- time series over an area from gridded products;
+- what a composite does and does not say about a single day;
+- how to present an area's record without implying a measurement we did not make.
+
+## Implement
+
+Create `platform/regions`, with its own scope in the commit conventions as earlier module stages did.
+
+- **Registration.** An area of interest is a place and a label. What it stores is in `DATA-MODEL.md`; who may register one is open (D-137).
+- **Series.** For each registered area, what the ingested products say about it over time, computed from normalised records — never from a rendered tile (D-133) and never at runtime from a source.
+- **Coverage.** Which of the network's own receptions cover the area, from passes and station geometry. This is the part that is Meridian's rather than anyone's ingest.
+- **Presentation.** Tiles may be shown behind an area for context, labelled as imagery; every number beside them comes from the data product.
+
+**Not the platform's own monitoring.** Prometheus and Grafana watch Meridian; this watches places. The two never share a name in code.
+
+## Tests
+
+- an area's series is reproducible from a snapshot alone;
+- a series states its source, product version and retrieval time for every point;
+- coverage counts only receptions whose pass geometry actually crosses the area;
+- simulated receptions are excluded from coverage unless asked for by name;
+- no tile is read for a value.
+
+## Completion gate
+
+An area registered in the demonstration shows its record and its coverage, built entirely from snapshots, with every number traceable to an ingested record and every image labelled as imagery.
+
+---
+
+# Stage 33 — Deployment and data custody
+
+Module 20. Depends on Stages 12, 13 and 30.
+
+## Learn
+
+- what "authoritative" means when two machines hold a copy of the same fact;
+- idempotent resend against append-only storage;
+- backup, restore and retention across two tiers;
+- serving a last known snapshot, and labelling its age honestly.
+
+## Implement
+
+No new package. This stage is deployment, `deploy/` tooling and the record of who holds what (D-129).
+
+### The two tiers
+
+- The **station tier** and the **platform tier** run the same image and the same schema; which machine each sits on is a deployment choice.
+- The **single-machine path stays the deployment of record** and stays measured by CI (D-130). A cloud tier is optional, and which host is open (D-135).
+
+### Custody
+
+- The **station is authoritative for its own receptions**; the platform is authoritative for what it assigned. Neither overwrites the other.
+- **Reconciliation is resend, not merge.** The station re-sends what was never acknowledged; ingest is idempotent because the identifier is derived (D-027) and revisions are append-only (D-015).
+- **Retention** says how long a station keeps an unacknowledged reception, and how long each tier keeps recordings, snapshots and backups. The station figure is open (D-135).
+- **Backup and restore** extend Stage 12's host tools to whichever tiers exist, with the manifest restore already checks (D-115).
+
+### The dashboard's last snapshot
+
+Serving the last snapshot with an upstream unreachable, and stating its age on the page, is built here — §12.2 of `EVALUATION.md` requires it and today's dashboard cannot do it.
+
+## Tests
+
+- the two drills of `EVALUATION.md` §12, run as tests and not only as procedures;
+- a reception queued during an outage is stored exactly once after reconnection;
+- a replayed report writes no second revision;
+- a restore from a manifest succeeds on a machine other than the one backed up;
+- the compose stack still comes up on a clean single machine inside ten minutes.
+
+## Completion gate
+
+Both independence drills pass, a station's reception survives a full outage and reconciles to exactly one stored observation, and a restore is proven on another machine — all of it without a cloud host being reachable (D-130).
 
 ---
 

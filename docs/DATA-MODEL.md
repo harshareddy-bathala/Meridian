@@ -251,6 +251,51 @@ One row per evidence-dataset package; the package itself is files, as `products`
 
 ---
 
+## Ingest and regional tables *(planned)*
+
+Five tables for modules 18 and 19. None exists; the column tuples are the intent, settled when Stages 31 and 32 write their migrations. What they share is decided in D-132, D-133 and D-134:
+
+- **Raw arrivals are append-only.** A re-fetch that differs is a new row, never an overwrite — the discipline D-015 applies to observations, applied to data we did not author either.
+- **Provenance is complete or the record is refused.** Source, original identifier, source version, retrieval time, licence, checksum and transformation version, for every record, whatever it carries.
+- **A tile is marked as a tile**, and a tile row may never be read for a number (D-133).
+- **None of these tables carries `simulated`.** They describe the world, not a station's reception; where such a value becomes a feature of a simulated station's pass, the flag stays on the observation, where it has always been.
+- **No secret is stored in any of them.** Keys and registration credentials are supplied as secrets, per `GIT-WORKFLOW.md` Rule 4.
+
+### `ingest_sources`
+`(source_id, source_class, name, licence, terms_url, access_constraint, attribution_entry, added_at, active)`
+
+One row per source we take data from. `licence` and `terms_url` are recorded here and in `ATTRIBUTION.md` before the first retrieval (D-134); `attribution_entry` names the entry, so a record can be traced to the terms it arrived under — which is what decides whether the evidence dataset may republish it (D-136). `access_constraint` is `none`, `key_counted` or `registration`.
+
+### `ingest_records`
+`(record_id, source_id, original_identifier, source_version, payload_kind, retrieved_at, sha256, transformation_version, raw_path, valid_from, valid_to, spatial_extent, superseded_by)`
+
+One row per retrieved artefact — Stage 14's provenance list, as columns. `sha256` is of the raw bytes as downloaded, before any normalisation, so the hash proves what arrived rather than what we made of it. `superseded_by` links a re-fetch that differs to the row it replaces, and nothing is deleted.
+
+`valid_from`/`valid_to` is the interval the artefact *describes*, which is not `retrieved_at` and is not interchangeable with it: a feature lookup selects on what the artefact describes and on when it was published, never on when we happened to fetch it (D-131).
+
+`payload_kind` is `data` or `tile`. A `tile` row exists to be displayed and referenced; **no query may derive a value from one** (D-133).
+
+### `environment_samples`
+`(sample_id, record_id, quantity, observed_at, published_at, value, value_unit, area_id, method)`
+
+The normalised scalar values features are read from — an index, a condition, a composite's value over an area. `area_id` is null for a global or point value.
+
+**`published_at` is the load-bearing column.** It is when the value became available, and the pre-pass rule reads it: the value used for a pass is the latest one whose `published_at` precedes the pass (D-131). A later revision of the same `observed_at` is a new row with a later `published_at`, and a model that selects on `observed_at` alone has read the future.
+
+### `areas_of_interest`
+`(area_id, label, geometry, centroid_lat_deg, centroid_lon_deg, area_km2, created_at, active, notes)`
+
+A place and a label — nothing else. **No owner, no contact, no address**: an area of interest describes ground, and the moment it describes a person it becomes personal data the project does not hold (`PROJECT.md` §16). Who may register one, and whether a registration is public, is open (D-137).
+
+`geometry` is the registered extent; the centroid and area are derived and stored so a listing does not need the geometry. `active` retires an area without deleting its series, because a series that vanishes cannot be checked against what was published from it.
+
+### `area_series`
+`(area_id, quantity, observed_at, value, value_unit, record_id, method, computed_at)`
+
+What the ingested products say about a registered area over time. **Every point names the `record_id` it was computed from** and the `method` version that computed it, so a chart on the dashboard can be traced to an artefact with a checksum and a licence. Recomputing with a new method appends; it never rewrites an earlier series.
+
+---
+
 ## Conventions
 
 - **All timestamps UTC**, stored as `timestamptz`. No exceptions, no local time anywhere.
@@ -298,6 +343,9 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `loss_diagnoses.cause` *(planned)* | `satellite_silent`, `station_not_listening`, `obstruction`, `interference`, `timing_fault`, `undetermined` — D-104 |
 | `report_deliveries.kind` *(planned)* | `pass`, `weekly` — D-098 |
 | `report_deliveries.channel` *(planned)* | `email`, `telegram` — D-098 |
+| `ingest_sources.access_constraint` *(planned)* | `none`, `key_counted`, `registration` — D-132 |
+| `ingest_records.payload_kind` *(planned)* | `data`, `tile` — a `tile` is never read for a value, D-133 |
+| `environment_samples.quantity` *(planned)* | free-text lowercase at first, as `station_capabilities.modes` is — index and product naming varies too much between sources to freeze |
 
 ---
 
