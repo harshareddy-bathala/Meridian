@@ -253,10 +253,10 @@ One row per evidence-dataset package; the package itself is files, as `products`
 
 ## Ingest and regional tables *(planned)*
 
-Five tables for modules 18 and 19. None exists; the column tuples are the intent, settled when Stages 31 and 32 write their migrations. What they share is decided in D-132, D-133 and D-134:
+Five tables for modules 18 and 19. **`ingest_sources` and `ingest_records` are created by Stage 14's migration and reused unchanged by Stage 31** (D-140), because one ingest subsystem means one provenance record; the other three do not exist yet, and their column tuples are the intent, settled when Stages 31 and 32 write their migrations. Stage 14's own archive tables are documented with that migration (D-139). What all of them share is decided in D-132, D-133, D-134 and D-140:
 
 - **Raw arrivals are append-only.** A re-fetch that differs is a new row, never an overwrite — the discipline D-015 applies to observations, applied to data we did not author either.
-- **Provenance is complete or the record is refused.** Source, original identifier, source version, retrieval time, licence, checksum and transformation version, for every record, whatever it carries.
+- **Provenance is complete or the record is refused.** Source, original identifier, source version, retrieval time, licence and checksum, for every record, whatever it carries. The version of the transformation that produced a value sits on the normalised row rather than on the arrival (D-140): an artefact is retrieved once and may be normalised many times.
 - **A tile is marked as a tile**, and a tile row may never be read for a number (D-133).
 - **None of these tables carries `simulated`.** They describe the world, not a station's reception; where such a value becomes a feature of a simulated station's pass, the flag stays on the observation, where it has always been.
 - **No secret is stored in any of them.** Keys and registration credentials are supplied as secrets, per `GIT-WORKFLOW.md` Rule 4.
@@ -264,12 +264,12 @@ Five tables for modules 18 and 19. None exists; the column tuples are the intent
 ### `ingest_sources`
 `(source_id, source_class, name, licence, terms_url, access_constraint, attribution_entry, added_at, active)`
 
-One row per source we take data from. `licence` and `terms_url` are recorded here and in `ATTRIBUTION.md` before the first retrieval (D-134); `attribution_entry` names the entry, so a record can be traced to the terms it arrived under — which is what decides whether the evidence dataset may republish it (D-136). `access_constraint` is `none`, `key_counted` or `registration`.
+One row per source we take data from, created by Stage 14's migration and **insert-only**: a change of terms is a new `source_id`, so stored records keep pointing at the terms they arrived under (D-140). `licence` and `terms_url` are recorded here and in `ATTRIBUTION.md` before the first retrieval (D-134); `attribution_entry` names the entry, so a record can be traced to the terms it arrived under — which is what decides whether the evidence dataset may republish it (D-136). `access_constraint` is `none`, `key_counted` or `registration`.
 
 ### `ingest_records`
-`(record_id, source_id, original_identifier, source_version, payload_kind, retrieved_at, sha256, transformation_version, raw_path, valid_from, valid_to, spatial_extent, superseded_by)`
+`(record_id, source_id, original_identifier, source_version, payload_kind, retrieved_at, sha256, raw_path, media_type, byte_count, valid_from, valid_to, spatial_extent, superseded_by)`
 
-One row per retrieved artefact — Stage 14's provenance list, as columns. `sha256` is of the raw bytes as downloaded, before any normalisation, so the hash proves what arrived rather than what we made of it. `superseded_by` links a re-fetch that differs to the row it replaces, and nothing is deleted.
+One row per retrieved artefact — Stage 14's provenance list, as columns. `raw_path` locates the artefact inside the raw store, relative to its root, and no part of it comes from the source (D-141). `sha256` is of the raw bytes as downloaded, before any normalisation, so the hash proves what arrived rather than what we made of it. `superseded_by` links a re-fetch that differs to the row it replaces, and nothing is deleted.
 
 `valid_from`/`valid_to` is the interval the artefact *describes*, which is not `retrieved_at` and is not interchangeable with it: a feature lookup selects on what the artefact describes and on when it was published, never on when we happened to fetch it (D-131).
 
