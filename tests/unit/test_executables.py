@@ -41,7 +41,7 @@ def test_every_declared_console_script_imports() -> None:
     """
     import importlib
 
-    for distribution in ("platform", "client", "simulator"):
+    for distribution in ("platform", "client", "simulator", "ingest"):
         pyproject = REPO_ROOT / distribution / "pyproject.toml"
         scripts = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"].get(
             "scripts", {}

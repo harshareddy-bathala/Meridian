@@ -42,6 +42,13 @@ data/
 products/
 snapshots/
 
+# The raw store (D-141). Retrieved artefacts are somebody else's bytes held
+# unchanged, and the store is the one thing here that cannot be regenerated — it
+# belongs in a backup, not in a repository. `data/` above already covers the
+# default root; `ingest/raw/` is named as well because the roadmap sketch put it
+# there and somebody will create it from the sketch.
+ingest/raw/
+
 # Recordings and capture folders (D-123, GIT-WORKFLOW.md Rule 4). A pass is about
 # a gigabyte, and a recording of the sky is data, not source.
 captures/

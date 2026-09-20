@@ -38,7 +38,7 @@ jobs:
         # rule for it — so without this the one size limit that most reliably
         # predicts an unreviewable file was the one nothing checked.
         #
-        # Scoped to the three distributions, which is the scope section 9's own
+        # Scoped to the four distributions, which is the scope section 9's own
         # version of this check names. Tests are excluded because a table-driven
         # test file grows honestly with the number of cases it covers, and
         # site/tools are build scripts (D-044).
@@ -50,7 +50,7 @@ jobs:
         # config.py, which is how we know it can.
         run: |
           set -euo pipefail
-          over=$(git ls-files 'platform/*.py' 'client/*.py' 'simulator/*.py' \
+          over=$(git ls-files 'platform/*.py' 'client/*.py' 'simulator/*.py' 'ingest/*.py' \
             | while read -r f; do
                 n=$(wc -l < "$f")
                 if [ "$n" -gt 400 ]; then echo "$f: $n lines"; fi
@@ -74,12 +74,12 @@ jobs:
         # `meridian.api` would therefore also stop the `skyfield` ban applying to
         # tests, trading an enforced boundary away to add one.
         #
-        # Scoped to the three distributions. `platform/src/meridian/api/**` is
+        # Scoped to the four distributions. `platform/src/meridian/api/**` is
         # excluded because its own modules import each other; tests are out of
         # scope by the same argument the 400-line check uses.
         run: |
           set -euo pipefail
-          crossings=$(git ls-files 'platform/*.py' 'client/*.py' 'simulator/*.py' \
+          crossings=$(git ls-files 'platform/*.py' 'client/*.py' 'simulator/*.py' 'ingest/*.py' \
             | grep -v '^platform/src/meridian/api/' \
             | xargs grep -n -E '^\s*(from|import)\s+meridian\.api' || true)
           if [ -n "$crossings" ]; then
@@ -151,7 +151,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --dev
-      - run: uv run mypy platform/src client/src simulator/src
+      - run: uv run mypy platform/src client/src simulator/src ingest/src
 
   test:
     runs-on: ubuntu-latest

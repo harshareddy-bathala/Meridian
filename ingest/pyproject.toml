@@ -1,0 +1,28 @@
+[project]
+name = "meridian-ingest"
+version = "0.1.0"
+description = "External archive ingest. Depends on the platform; the platform never depends on it."
+requires-python = ">=3.11,<3.12"
+license = { text = "Apache-2.0" }
+
+# `meridian` and nothing else. The arrow points one way and this list is what
+# makes that true at install time rather than at review time (D-138): the
+# platform's own dependency list does not name this distribution, so a
+# deployment can install Meridian complete and never bring the archive layer
+# with it. The independence test is the reason — an external archive must not
+# be reachable from the scheduling or reception path even by an import.
+#
+# The SQL these adapters eventually write lives in `meridian.store`, not here,
+# because `store/__init__.py` states that only that package talks to the
+# database. So there is no psycopg here, and the import-boundary test enforces
+# its absence (tests/unit/test_import_boundaries.py).
+dependencies = [
+    "meridian",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meridian_ingest"]

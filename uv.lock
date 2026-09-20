@@ -6,6 +6,7 @@ requires-python = "==3.11.*"
 members = [
     "meridian",
     "meridian-client",
+    "meridian-ingest",
     "meridian-sim",
     "meridian-workspace",
 ]
@@ -317,6 +318,17 @@ dependencies = [
 requires-dist = [{ name = "httpx", specifier = ">=0.27" }]
 
 [[package]]
+name = "meridian-ingest"
+version = "0.1.0"
+source = { editable = "ingest" }
+dependencies = [
+    { name = "meridian" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "meridian", editable = "platform" }]
+
+[[package]]
 name = "meridian-sim"
 version = "0.1.0"
 source = { editable = "simulator" }
@@ -337,6 +349,7 @@ dev = [
     { name = "httpx" },
     { name = "meridian" },
     { name = "meridian-client" },
+    { name = "meridian-ingest" },
     { name = "meridian-sim" },
     { name = "mypy" },
     { name = "pytest" },
@@ -350,6 +363,7 @@ dev = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "meridian", editable = "platform" },
     { name = "meridian-client", editable = "client" },
+    { name = "meridian-ingest", editable = "ingest" },
     { name = "meridian-sim", editable = "simulator" },
     { name = "mypy", specifier = ">=1.11" },
     { name = "pytest", specifier = ">=8.0" },
