@@ -122,3 +122,72 @@ def test_the_scan_would_notice_a_crossing(tmp_path: Path) -> None:
     assert found == ["os", "meridian", "psycopg"]
     assert "meridian" in FORBIDDEN["client"]
     assert "psycopg" in FORBIDDEN["ingest"]
+
+
+ARCHIVE_STORE_MODULES = (
+    "meridian.store.ingest_sources",
+    "meridian.store.ingest_records",
+    "meridian.store.archive_stations",
+    "meridian.store.archive_observations",
+)
+"""The four modules that read and write somebody else's data.
+
+Reachable from ``meridian.store``, which the whole platform imports — so
+"external data is training input only" is, without a check, a sentence in a
+document that nothing enforces.
+"""
+
+
+def imported_modules(path: Path) -> Iterator[tuple[int, str]]:
+    """Each absolute import in ``path``, as its line and full dotted module.
+
+    The twin of :func:`imported_top_levels`, kept separate rather than folded
+    into it: that one answers "which distribution is this", and truncating to
+    the top level is what makes the answer right. This one answers "which
+    module", where truncating would lose the whole question.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node.lineno, alias.name
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            yield node.lineno, node.module
+
+
+def test_no_platform_module_outside_the_store_reads_archive_data() -> None:
+    """D-102 and D-138: archive data is training input, never a runtime input.
+
+    The scheduler, the prediction module, the reliability layer and the API must
+    not be able to read what an archive published — not because someone would do
+    it deliberately, but because a completeness figure or a loss diagnosis drawn
+    from another network's rows imports that network's selection bias along with
+    them (D-053), and nothing downstream would show it happened.
+
+    ``store/`` itself is excluded because these modules import each other, the
+    same exemption ``meridian.api`` already has in the CI boundary check.
+    """
+    store = REPO_ROOT / "platform" / "src" / "meridian" / "store"
+    crossings = [
+        f"{path.relative_to(REPO_ROOT)}:{line} imports {module}"
+        for path in sources("platform")
+        if store not in path.parents
+        for line, module in imported_modules(path)
+        if module in ARCHIVE_STORE_MODULES
+    ]
+
+    assert crossings == []
+
+
+def test_the_archive_scan_would_notice_a_crossing(tmp_path: Path) -> None:
+    """The positive control, without which the test above can pass while inert."""
+    offender = tmp_path / "offender.py"
+    offender.write_text(
+        "from meridian.store.archive_observations import count_satellite_coverage\n",
+        encoding="utf-8",
+    )
+
+    found = [module for _, module in imported_modules(offender)]
+
+    assert found == ["meridian.store.archive_observations"]
+    assert found[0] in ARCHIVE_STORE_MODULES
