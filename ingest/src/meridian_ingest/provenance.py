@@ -31,6 +31,7 @@ __all__ = [
     "SOURCE_ID",
     "IncompleteProvenanceError",
     "Provenance",
+    "check_interval",
 ]
 
 SOURCE_ID = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
@@ -135,15 +136,27 @@ class Provenance:
         if self.retrieved_at.tzinfo is None:
             message = "retrieved_at is naive; it is read back as UTC and must say so"
             raise IncompleteProvenanceError(message)
-        _check_interval(self.valid_from, self.valid_to)
+        check_interval(self.valid_from, self.valid_to)
 
 
-def _check_interval(valid_from: datetime | None, valid_to: datetime | None) -> None:
+def check_interval(valid_from: datetime | None, valid_to: datetime | None) -> None:
     """The two coverage instants, held to what 0016's CHECKs also hold them to.
 
-    Checked here as well as in the database because the raw store writes a
-    manifest before any row exists, and a manifest the loader will later refuse
-    is a directory nobody can do anything with.
+    Args:
+        valid_from: The start of what an artefact describes, or None.
+        valid_to: The end, or None.
+
+    Raises:
+        IncompleteProvenanceError: The interval has an end and no start, either
+            instant is naive, or it runs backwards.
+
+    Note:
+        Public because an adapter plans coverage before it fetches, so
+        :class:`~meridian_ingest.retrieval.RemoteArtefact` holds the same two
+        instants and must hold them to the same rules. Checked here as well as
+        in the database because the raw store writes a manifest before any row
+        exists, and a manifest the loader will later refuse is a directory
+        nobody can do anything with.
     """
     if valid_to is not None and valid_from is None:
         message = "valid_to without valid_from is an interval with no start"

@@ -1,0 +1,102 @@
+{
+  "schema": "reference-archive/1",
+  "covers": "2026-08",
+  "stations": [
+    {
+      "key": "gs-dublin",
+      "name": "Rooftop, Dublin",
+      "lat": 53.3498,
+      "lon": -6.2603,
+      "alt_m": 20.0,
+      "capability": {
+        "band": "vhf",
+        "modes": [
+          "lrpt"
+        ]
+      }
+    },
+    {
+      "key": "gs-galway",
+      "name": "Galway west",
+      "lat": 53.28,
+      "lon": -9.06,
+      "alt_m": 12.0,
+      "capability": null
+    },
+    {
+      "key": "gs-cork",
+      "name": "Cork harbour",
+      "lat": null,
+      "lon": null,
+      "alt_m": null,
+      "capability": {
+        "band": "vhf",
+        "modes": [
+          "lrpt"
+        ]
+      }
+    }
+  ],
+  "receptions": [
+    {
+      "id": "obs-2608-001",
+      "station": "gs-dublin",
+      "object": {
+        "norad": 57166
+      },
+      "start": "2026-08-02T09:38:51Z",
+      "end": "2026-08-02T09:49:30Z",
+      "max_elevation": 71.8,
+      "frequency_hz": 137100000,
+      "mode": "lrpt",
+      "result": "decoded",
+      "frames": 903,
+      "snr_db": 12.9
+    },
+    {
+      "id": "obs-2608-002",
+      "station": "gs-galway",
+      "object": {
+        "intl": "2023-091A"
+      },
+      "start": "2026-08-09T20:14:02Z",
+      "end": "2026-08-09T20:23:31Z",
+      "max_elevation": 33.4,
+      "frequency_hz": 137912500,
+      "mode": "lrpt",
+      "result": "decoded",
+      "frames": 410,
+      "snr_db": 8.2
+    },
+    {
+      "id": "obs-2608-003",
+      "station": "gs-cork",
+      "object": {
+        "norad": 57166
+      },
+      "start": "2026-08-15T10:05:12Z",
+      "end": null,
+      "max_elevation": null,
+      "frequency_hz": null,
+      "mode": null,
+      "result": "receiver offline",
+      "frames": null,
+      "snr_db": null
+    },
+    {
+      "id": "obs-2608-004",
+      "station": null,
+      "object": {
+        "norad": 25338
+      },
+      "start": "2026-08-27T17:44:19Z",
+      "end": "2026-08-27T17:53:02Z",
+      "max_elevation": 22.1,
+      "frequency_hz": 137620000,
+      "mode": "lrpt",
+      "result": "nothing",
+      "frames": 0,
+      "snr_db": null
+    }
+  ]
+}

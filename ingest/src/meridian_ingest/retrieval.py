@@ -16,18 +16,37 @@ Reference: docs/DECISIONS.md D-133, D-141, D-142.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from meridian_ingest.provenance import PAYLOAD_KINDS
+from meridian_ingest.provenance import PAYLOAD_KINDS, check_interval
+from meridian_ingest.raw_layout import digest_on_disk
 
 __all__ = [
+    "FIXTURE_MEDIA_TYPES",
+    "FixtureRetriever",
     "RemoteArtefact",
     "RetrievalError",
     "RetrievedArtefact",
     "Retriever",
 ]
+
+FIXTURE_MEDIA_TYPES = {
+    ".json": "application/json",
+    ".csv": "text/csv",
+    ".png": "image/png",
+}
+"""What a fixture file's suffix says it is.
+
+Small and closed on purpose: a fixture whose type nobody declared is one whose
+``media_type`` would be guessed, and that value is stored as though a source
+had said it.
+"""
+
+_READ_BLOCK = 1 << 16
 
 
 class RetrievalError(Exception):
@@ -68,6 +87,21 @@ class RemoteArtefact:
     ``access_constraint = 'key_counted'`` and the key comes from configuration,
     not from an adapter's literal."""
 
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    """The interval this artefact is expected to *describe*.
+
+    Planning information, and the reason the adapter asked for it: a listing
+    that says "August" is what made August's file worth fetching. It travels
+    with the name rather than being read from the bytes because it reaches
+    ``ingest_records.valid_from``, where it is what a feature lookup selects on
+    (D-131) — and a value read out of a normaliser would arrive too late, after
+    the row already exists.
+    """
+
+    spatial_extent: dict[str, float] | None = None
+    """The ground it covers, as a bounding box, or None where it covers none."""
+
     def __post_init__(self) -> None:
         """Refuse an artefact that should not be asked for."""
         if not self.url.startswith("https://"):
@@ -84,6 +118,7 @@ class RemoteArtefact:
             kinds = ", ".join(PAYLOAD_KINDS)
             message = f"payload_kind {self.payload_kind!r} is not one of {kinds}"
             raise RetrievalError(message)
+        check_interval(self.valid_from, self.valid_to)
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,3 +167,87 @@ class Retriever(Protocol):
             RetrievalError: The artefact could not be fetched.
         """
         ...
+
+
+class FixtureRetriever:
+    """Serves artefacts from a flat directory of files instead of a network.
+
+    Args:
+        root: The directory holding the fixture files.
+
+    Note:
+        **The adapter above it cannot tell.** It plans the same https URLs it
+        would plan against the real source, and only the last path segment is
+        used to find a file — so what is exercised is the adapter that would be
+        deployed, not a test-shaped variant of it (D-142).
+
+        The URLs the reference adapter plans are under ``.invalid``, which is
+        reserved and never resolves, so even wiring a real retriever underneath
+        it cannot reach anything.
+    """
+
+    def __init__(self, root: Path) -> None:
+        """Point at ``root``. Nothing is read yet."""
+        self._root = root
+
+    def retrieve(self, remote: RemoteArtefact) -> RetrievedArtefact:
+        """Read one fixture as though it had been fetched.
+
+        Args:
+            remote: What the adapter asked for. Its URL's final segment names
+                the file.
+
+        Returns:
+            The bytes as a stream, with a media type from the suffix and an
+            ``ETag`` over the content.
+
+        Raises:
+            RetrievalError: The URL does not name a plain file, the file is
+                absent, or its suffix is not in :data:`FIXTURE_MEDIA_TYPES`.
+
+        Note:
+            The ``ETag`` is the file's own digest, which is what a real server
+            computes and means an unchanged fixture re-fetches to the same
+            ``source_version``. It costs a second read of the file; a fixture
+            is small, and inventing a version instead would make the one value
+            that detects a changed artefact depend on when the test ran.
+        """
+        path = self._path_for(remote.url)
+        suffix = path.suffix.lower()
+        if suffix not in FIXTURE_MEDIA_TYPES:
+            known = ", ".join(sorted(FIXTURE_MEDIA_TYPES))
+            message = f"{path.name} has no declared media type; known suffixes: {known}"
+            raise RetrievalError(message)
+        if not path.is_file():
+            message = f"{remote.url} has no fixture at {path}"
+            raise RetrievalError(message)
+
+        digest, _ = digest_on_disk(path)
+        media_type = FIXTURE_MEDIA_TYPES[suffix]
+        return RetrievedArtefact(
+            remote=remote,
+            chunks=_blocks(path),
+            media_type=media_type,
+            headers={"ETag": f'"{digest.hex()[:16]}"', "Content-Type": media_type},
+        )
+
+    def _path_for(self, url: str) -> Path:
+        """The fixture file one URL names, refusing anything that is not one.
+
+        The same rule the raw store applies to a stored path: a name, never a
+        route through the filesystem. A fixture directory is flat, so a
+        separator or a dot-segment in the final element is not a fixture that
+        is missing — it is a URL trying to be a path.
+        """
+        name = url.rstrip("/").rsplit("/", 1)[-1]
+        if not name or name.startswith(".") or "\\" in name:
+            message = f"{url!r} does not name a fixture file"
+            raise RetrievalError(message)
+        return self._root / name
+
+
+def _blocks(path: Path) -> Iterator[bytes]:
+    """The file's bytes, a block at a time, as a response body would arrive."""
+    with path.open("rb") as handle:
+        while block := handle.read(_READ_BLOCK):
+            yield block
