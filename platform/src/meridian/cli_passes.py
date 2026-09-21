@@ -20,8 +20,6 @@ import argparse
 import sys
 from datetime import datetime
 
-import psycopg
-
 from meridian.config import load_settings
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.orbit.types import require_utc
@@ -30,7 +28,7 @@ from meridian.pass_generation import (
     GenerationReport,
     generate_passes,
 )
-from meridian.store.pool import CONNECT_TIMEOUT_S
+from meridian.store.pool import DatabaseUnreachableError, connect_once
 
 __all__ = ["parse_horizon_bound", "run_passes"]
 
@@ -117,10 +115,10 @@ def run_passes(args: argparse.Namespace) -> int:
 
     settings = load_settings()
     try:
-        conn = psycopg.connect(settings.psycopg_url, connect_timeout=CONNECT_TIMEOUT_S)
-    except (psycopg.Error, OSError) as exc:
+        conn = connect_once(settings)
+    except DatabaseUnreachableError as exc:
         print(  # noqa: T201 — this is a CLI; stderr is the interface
-            f"meridian passes: cannot reach the database: {exc}", file=sys.stderr
+            f"meridian passes: {exc}", file=sys.stderr
         )
         return EXIT_FAILED
 

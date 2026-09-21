@@ -24,8 +24,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-import psycopg
-
 from meridian.catalogue_file import (
     CatalogueDocument,
     MalformedCatalogueError,
@@ -33,7 +31,7 @@ from meridian.catalogue_file import (
 )
 from meridian.config import load_settings
 from meridian.store.element_sets import insert_element_set
-from meridian.store.pool import CONNECT_TIMEOUT_S
+from meridian.store.pool import DatabaseUnreachableError, connect_once
 from meridian.store.satellites import insert_satellite, insert_transmitter
 from meridian.store.stations import Connection
 
@@ -142,10 +140,10 @@ def run_catalogue(args: argparse.Namespace) -> int:
 
     settings = load_settings()
     try:
-        conn = psycopg.connect(settings.psycopg_url, connect_timeout=CONNECT_TIMEOUT_S)
-    except (psycopg.Error, OSError) as exc:
+        conn = connect_once(settings)
+    except DatabaseUnreachableError as exc:
         print(  # noqa: T201 — this is a CLI; stderr is the interface
-            f"meridian catalogue: cannot reach the database: {exc}", file=sys.stderr
+            f"meridian catalogue: {exc}", file=sys.stderr
         )
         return EXIT_FAILED
 
