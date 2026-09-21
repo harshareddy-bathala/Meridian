@@ -16,8 +16,14 @@ license = { text = "Apache-2.0" }
 # because `store/__init__.py` states that only that package talks to the
 # database. So there is no psycopg here, and the import-boundary test enforces
 # its absence (tests/unit/test_import_boundaries.py).
+# `httpx` joins `meridian` for one module: `http_retriever.py`, the only place
+# in this distribution that opens a socket. The station client already depends
+# on it, and importing *that* client's transport instead would invert the
+# boundary D-138 exists to hold — a station installs without any of this, so
+# the arrow must not point back.
 dependencies = [
     "meridian",
+    "httpx>=0.27",
 ]
 
 [build-system]

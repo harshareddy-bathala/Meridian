@@ -322,11 +322,15 @@ name = "meridian-ingest"
 version = "0.1.0"
 source = { editable = "ingest" }
 dependencies = [
+    { name = "httpx" },
     { name = "meridian" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "meridian", editable = "platform" }]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "meridian", editable = "platform" },
+]
 
 [[package]]
 name = "meridian-sim"
