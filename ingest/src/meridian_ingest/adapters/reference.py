@@ -165,6 +165,8 @@ class ReferenceAdapter:
             request, not when it is contained by it. A request for one day in
             August wants August's file; requiring containment would silently
             return nothing and look like an archive with no data.
+
+            Both intervals are half-open — see :func:`_overlaps`.
         """
         wanted = [
             self._remote(published)
@@ -245,10 +247,18 @@ class ReferenceNormaliser:
 
 
 def _overlaps(published: _Published, request: FetchRequest) -> bool:
-    """Whether one published artefact's coverage meets the requested interval."""
-    if request.until is not None and published.valid_from > request.until:
+    """Whether one published artefact's coverage meets the requested interval.
+
+    Both intervals are **half-open**, ``[from, to)``. July's file is published
+    as 2026-07-01 to 2026-08-01, which means "July" and not "July and the first
+    instant of August" — so a request beginning exactly at 2026-08-01 wants
+    August's file and not July's. Writing the closed form instead
+    (``2026-07-31T23:59:59.999Z``) would make the boundary depend on how many
+    decimal places somebody chose.
+    """
+    if request.until is not None and published.valid_from >= request.until:
         return False
-    return not (request.since is not None and published.valid_to < request.since)
+    return not (request.since is not None and published.valid_to <= request.since)
 
 
 def _parse(artefact: StoredArtefact) -> dict[str, object]:

@@ -167,6 +167,24 @@ def test_an_artefact_is_planned_when_its_month_overlaps_the_request() -> None:
     assert [one.original_identifier for one in planned] == [AUGUST, TILE]
 
 
+def test_the_coverage_bounds_are_half_open() -> None:
+    """July is published as 2026-07-01 to 2026-08-01, which means July.
+
+    A request beginning at exactly 2026-08-01 wants August's file and not
+    July's. The closed form would have to be written 23:59:59.999 and the
+    boundary would then depend on how many decimal places somebody chose.
+    """
+    from_august = ReferenceAdapter().plan(
+        FetchRequest(since=datetime(2026, 8, 1, tzinfo=UTC))
+    )
+    until_august = ReferenceAdapter().plan(
+        FetchRequest(until=datetime(2026, 8, 1, tzinfo=UTC))
+    )
+
+    assert [one.original_identifier for one in from_august] == [AUGUST, TILE]
+    assert [one.original_identifier for one in until_august] == [JULY]
+
+
 def test_a_request_outside_the_catalogue_plans_nothing() -> None:
     assert (
         ReferenceAdapter().plan(FetchRequest(since=datetime(2027, 1, 1, tzinfo=UTC)))

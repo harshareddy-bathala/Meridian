@@ -29,7 +29,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from meridian_ingest.adapters.protocol import Adapter, Normaliser, SourceDescriptor
-from meridian_ingest.adapters.reference import ReferenceAdapter, ReferenceNormaliser
+from meridian_ingest.adapters.reference import (
+    FIXTURE_ROOT,
+    ReferenceAdapter,
+    ReferenceNormaliser,
+)
+from meridian_ingest.retrieval import FixtureRetriever, Retriever
 
 __all__ = [
     "REGISTRY",
@@ -41,12 +46,14 @@ __all__ = [
 ]
 
 
-class UnknownSourceError(KeyError):
+class UnknownSourceError(LookupError):
     """A source id nothing is registered under.
 
-    A ``KeyError`` so that a caller which already handles a missing mapping
-    behaves, and a named one so that a command can print the ids that do exist
-    instead of a bare traceback.
+    A ``LookupError`` rather than the ``KeyError`` beneath it, because this is
+    printed to an operator and ``KeyError.__str__`` renders its argument with
+    ``repr`` — a sentence about a missing source would arrive wrapped in
+    quotation marks. Still a lookup failure, still caught by
+    ``except LookupError``.
     """
 
 
@@ -56,6 +63,14 @@ class Registration:
 
     adapter: Adapter
     normaliser: Normaliser
+    retriever: Retriever | None = None
+    """How its artefacts are obtained, when it is not plain HTTP.
+
+    The reference archive serves the synthetic files shipped beside it, so it
+    declares that here rather than leaving ``fetch`` to recognise an id and
+    special-case it. A source that says nothing is fetched over HTTP, under the
+    budget and backoff in :mod:`meridian_ingest.politeness`.
+    """
 
 
 def _registry() -> dict[str, Registration]:
@@ -66,7 +81,13 @@ def _registry() -> dict[str, Registration]:
     disagree — and a disagreement there would mean artefacts published into one
     source's directory in the raw store and recorded against another's row.
     """
-    pairs = [Registration(ReferenceAdapter(), ReferenceNormaliser())]
+    pairs = [
+        Registration(
+            ReferenceAdapter(),
+            ReferenceNormaliser(),
+            FixtureRetriever(FIXTURE_ROOT),
+        )
+    ]
     return {pair.adapter.descriptor.source_id: pair for pair in pairs}
 
 
