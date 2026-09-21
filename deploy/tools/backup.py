@@ -8,6 +8,12 @@ restore.py checks the first two before it touches anything (D-115).
 The API keeps running. `pg_dump` reads one consistent snapshot, so a heartbeat
 arriving mid-dump is simply in the next backup.
 
+**It does not take the ingest raw store**, and it says so on every run. That tree
+holds external artefacts exactly as they were retrieved, it is not in Postgres,
+and it is the one thing here that cannot be recreated without going back to a
+source that may have withdrawn it (D-141). A backup that quietly omitted it
+would be discovered at the worst possible moment.
+
 The dump is written to `<out>.partial` and renamed only once `pg_dump` has exited
 cleanly, so a file at `--out` is always a complete dump — an interrupted backup
 leaves a `.partial` behind, never a truncated file that looks finished.
@@ -43,6 +49,28 @@ from compose_db import (
 )
 
 DUMP_SCRIPT = 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom'
+
+RAW_STORE = Path("data/ingest/raw")
+"""The ingest raw store's default root, which this tool never touches.
+
+The documented default rather than a value read from `ingest.toml`: this is a
+stdlib-only host tool (D-115) and cannot import `meridian_ingest` to ask. An
+operator who moved the root still reads a true sentence, because the point of
+the line is that *no* raw store is in the dump.
+"""
+
+
+def raw_store_note(root: Path = RAW_STORE) -> str:
+    """One line naming what this backup did not take.
+
+    Args:
+        root: Where the raw store is expected to be.
+
+    Returns:
+        A sentence for the operator, saying whether that tree is there at all.
+    """
+    state = "" if root.is_dir() else " (nothing there)"
+    return f"not in this dump   {root}{state} — the ingest raw store (D-141)"
 
 
 def dump_command(compose: Compose) -> list[str]:
@@ -124,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  alembic revision     {manifest.alembic_revision}")
     print(f"  timescaledb version  {manifest.timescaledb_version}")
     print(f"  manifest             {manifest_path(args.out)}")
+    print(f"  {raw_store_note()}")
+    print("  copy that tree yourself — docs/OPERATIONS.md § External archive ingest")
     return 0
 
 

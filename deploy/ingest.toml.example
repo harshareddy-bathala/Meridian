@@ -24,6 +24,12 @@
 # somebody else, and committing them is the redistribution question D-136 leaves
 # open.
 #
+# **The `../` below assumes this file stays in `deploy/`.** Copied to the
+# repository root and left as it is, it puts the raw store *beside* the
+# repository rather than inside it — change it to `data/ingest/raw` there. The
+# tree still works; it is just somewhere nobody looks, which is the worst place
+# for the one thing that cannot be re-downloaded.
+#
 # **This tree is not in the database backup.** `deploy/tools/backup.py` dumps
 # Postgres and takes none of this. It is also the one thing that cannot be
 # recreated without going back to the source, which is what the stage's
