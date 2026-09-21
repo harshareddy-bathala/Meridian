@@ -46,7 +46,31 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-09-14. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-09-21. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stage 14's software is built.** Its decisions are D-138 through D-142, and `docs/OPERATIONS.md` § External archive ingest is its runbook.
+- **The completion gate passes, and is demonstrable at a prompt.** An archive snapshot is downloaded once and then normalised repeatedly with nothing reachable — `uv run meridian-ingest normalise` twice and `diff`, or `unshare -rn` to take the network away rather than trust that it went unused.
+- **`ingest` is a fourth distribution**, `meridian-ingest`, which imports `meridian` and is imported by nothing (D-138). `deploy/Dockerfile` excludes it by name — its metadata has to be present for uv to resolve the workspace, while the package itself must not be installed — so the machine that has to keep receiving when every archive is unreachable does not carry the code that talks to one. Its absence is checked by `tests/unit/test_layout.py`, which makes a fifth distribution in that image a decision rather than a default. `meridian-ingest` is its own binary for the same reason: `meridian/cli.py` imports every `cli_*` module eagerly.
+- **Archive receptions are kept apart from our own** (D-139). Migration 0016 adds `ingest_sources`, `ingest_records`, `archive_stations` and `archive_observations`, plus the `ingest_provenance` view that answers "is the provenance complete" in one query. They are plain tables: append-only, read in bulk by Stage 15, and un-hypertabling later is not supported while adding one is.
+  - the archive's outcome vocabulary is its own — `no_data`, never `no_signal`, because we hold no heartbeat evidence for somebody else's station (rule 7, D-010);
+  - there is no foreign key to `satellites`, so an external archive cannot decide what pass generation propagates, and coverage is reported as a number rather than applied as a filter;
+  - `licence`, `terms_url` and `attribution_entry` are `not null` and non-empty, which puts D-134 in the database: no record can exist that arrived under terms nobody recorded.
+- **The raw store is immutable, and no remote string becomes a filename** (D-141). Bytes stream into a scratch directory, are hashed on the wire and re-hashed from disk, and the directory is renamed into place — so "written once" is the filesystem's promise, not a check of ours. The directory name is our timestamp and our digest; a source's own identifier lives in the manifest and the database and nowhere else.
+- **The separation is enforced by a signature.** A normaliser takes bytes and a manifest — no client, no adapter, no URL, no clock — so there is no argument through which it could reach a network (D-142). That is what makes the gate provable rather than asserted.
+- **`meridian_ingest/` holds** the provenance record and its manifest, the raw store and its layout, the adapter and normaliser contract, a fixture-backed reference adapter of our own, full-jitter backoff under a request budget, one strict TOML settings file that refuses a pasted credential, the loader, and the command.
+- **The gate is asserted both ways:**
+  - `tests/unit/test_ingest_gate.py` publishes a snapshot, **deletes the fixtures it came from**, and normalises three times under a socket guard — the third pass through `cli.main`;
+  - `tests/integration/test_ingest_gate.py` loads that snapshot into the archive tables with the same guard installed;
+  - both guards have positive controls, because a gate passing with an inert guard is the one failure that looks done.
+- **Found on the way:**
+  - all six one-shot database connections in the platform's CLI were missing the pool's session parameters, so `meridian passes generate` read timestamps in the server's default zone while the API read UTC. They now share `connect_once`.
+  - the reference adapter treated coverage bounds as closed while the catalogue writes them half-open, so `--since 2026-08-01Z` returned July's file as well.
+  - `deploy/ingest.toml.example`'s `raw_root` is relative to the settings file, so copying that file to the repository root and leaving the value alone would put the raw store *beside* the repository rather than inside it. Found by following the runbook's own instruction; both now say so.
+  - a Python socket guard cannot see `psycopg[binary]`, which reaches the network through libpq in C. The integration gate therefore claims only that nothing *in Python* reached anything, and says so.
+- **Not built:**
+  - an adapter against any real archive. The first source is adopted when its licence and terms are recorded (D-134), and D-136 — whether its records may be republished inside the evidence dataset — is still open;
+  - any runtime use of archive data. No module in `platform` outside `meridian.store` may import the four archive store modules, and a test with its own positive control says so;
+  - environmental and space-weather sources, which are Stage 31 through these same adapters and not a second subsystem (D-132).
 
 **Stage 13's software is built.** Its decisions are D-116 through D-128, and `docs/OPERATIONS.md` § Station reception describes it.
 - **MSP 0.3 is live end to end.** The platform validates, hashes and stores the optional reception evidence: noise floor, gain, SNR samples and the `decode` block. The client sends it and refuses, before queueing, anything the platform would refuse. Digests of 0.2 bodies are unchanged (D-118).

@@ -3213,6 +3213,19 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-134 every ingested source is credited | `ATTRIBUTION.md` |
 | Modules 18 to 20, and Stages 31 to 33 | `PROJECT.md` §5.6, §19; `SOFTWARE-IMPLEMENTATION-ROADMAP.md`; `GLOSSARY.md` |
 
+**Landed 2026-09-21**, building the ingest subsystem and its completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-138 a fourth distribution, the dependency pointing one way | `ingest/`; `deploy/Dockerfile`'s `--no-install-package meridian-ingest`; `tests/unit/test_layout.py`; `tests/unit/test_import_boundaries.py` |
+| D-139 archive receptions stored apart from our own | `deploy/migrations/sql/0016_archive_ingest.sql`; `DATA-MODEL.md` |
+| D-140 the provenance tables created once, at Stage 14 | 0016 and the four `meridian/store/` modules over it |
+| D-141 an immutable raw store, and no remote string as a filename | `meridian_ingest/{provenance,raw_manifest,raw_layout,raw_store}.py`; `deploy/tools/backup.py`; `OPERATIONS.md` |
+| D-142 no test reaches the network, and the first adapter is ours | `meridian_ingest/adapters/reference.py`; `tests/unit/test_ingest_gate.py`; `tests/integration/test_ingest_gate.py` |
+| — the completion gate, and how to run it by hand | `OPERATIONS.md` § External archive ingest |
+
+**The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
+
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.

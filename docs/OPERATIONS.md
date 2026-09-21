@@ -277,7 +277,7 @@ Decisions this section puts into practice: D-133, D-134, and D-138 to D-142.
 
 ### It is not in the deployment image, deliberately
 
-`deploy/Dockerfile` installs `meridian`, `meridian-client` and `meridian-sim` by name. `meridian-ingest` is outside that allowlist, so the machine that must work without an archive does not carry the code that talks to one — and a fifth distribution has to be added to the list deliberately rather than arriving by default (D-138). Run it from a checkout instead:
+`deploy/Dockerfile` excludes `meridian-ingest` by name. Its metadata is copied in, because uv reads every workspace member to resolve the lockfile, but the package itself is never installed — so the machine that has to keep receiving when every archive is unreachable does not carry the code that talks to one (D-138). `tests/unit/test_layout.py` checks that absence, which makes putting it in the image a decision rather than a default. Run it from a checkout instead:
 
 ```bash
 uv sync
