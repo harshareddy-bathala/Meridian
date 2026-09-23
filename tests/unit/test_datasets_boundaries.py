@@ -11,10 +11,19 @@ Two lines, both read from the source rather than from a running import:
   training and evaluation input, and a runtime path that read one would be
   scheduling on the past without saying so.
 
+Stage 16 adds two more:
+
+* **Only the export side propagates.** Archive passes are computed once, at
+  export, and frozen (D-150); ``archive_passes`` takes the orbit's plain
+  types and is handed a propagator, and nothing that labels imports one.
+* **The propensity imports nothing that holds an outcome.** D-152 is kept by
+  the estimator's signature; this keeps it at the module line too, so a later
+  import of labels or evidence into the estimator fails here.
+
 Each has a positive control: the scan run on a module known to cross the line,
 without which an empty list of crossings proves nothing.
 
-Reference: docs/DECISIONS.md D-143, D-145.
+Reference: docs/DECISIONS.md D-143, D-145, D-150, D-152.
 """
 
 from __future__ import annotations
@@ -22,6 +31,8 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLATFORM = REPO_ROOT / "platform" / "src" / "meridian"
@@ -114,3 +125,61 @@ def test_the_command_is_seen_importing_it() -> None:
         module.startswith("meridian.datasets.")
         for _, module in imported_modules(command)
     )
+
+
+MAY_PROPAGATE = frozenset({"export.py"})
+"""Holds the orbit service. ``archive_passes`` holds only the orbit's types."""
+
+OUTCOME_FREE = {
+    "propensity.py": frozenset({"meridian.datasets.selection_config"}),
+    "weighting.py": frozenset({"meridian.datasets.propensity"}),
+}
+"""The estimator and the weights, and everything each may import from Meridian."""
+
+
+def orbit_imports(path: Path) -> list[str]:
+    return [
+        module
+        for _, module in imported_modules(path)
+        if module == "meridian.orbit" or module.startswith("meridian.orbit.")
+    ]
+
+
+def test_nothing_that_labels_imports_the_orbit() -> None:
+    crossings = [
+        f"{path.name} imports {module}"
+        for path in labelling_modules()
+        if path.name != "archive_passes.py"
+        for module in orbit_imports(path)
+    ]
+
+    assert crossings == []
+
+
+def test_archive_passes_takes_types_and_is_handed_a_propagator() -> None:
+    assert orbit_imports(DATASETS / "archive_passes.py") == ["meridian.orbit.types"]
+
+
+def test_the_export_is_seen_holding_the_orbit_service() -> None:
+    """Positive control for the two tests above."""
+    (export,) = MAY_PROPAGATE
+
+    assert "meridian.orbit.skyfield_service" in orbit_imports(DATASETS / export)
+
+
+@pytest.mark.parametrize("name", sorted(OUTCOME_FREE))
+def test_the_propensity_imports_nothing_that_holds_an_outcome(name: str) -> None:
+    ours = {
+        module
+        for _, module in imported_modules(DATASETS / name)
+        if module.startswith("meridian.")
+    }
+
+    assert ours <= OUTCOME_FREE[name]
+
+
+def test_the_module_that_joins_outcomes_is_seen_doing_so() -> None:
+    """Positive control: ``selection`` pairs outcomes with estimates, after."""
+    modules = {module for _, module in imported_modules(DATASETS / "selection.py")}
+
+    assert "meridian.datasets.labels" in modules

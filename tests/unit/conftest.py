@@ -10,10 +10,13 @@ Reference: docs/DECISIONS.md D-143, D-144.
 
 from __future__ import annotations
 
+import socket
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from meridian.datasets.canonical import canonical_line
@@ -239,3 +242,32 @@ def raw_snapshot(datasets_root: Path) -> RawSnapshot:
         ).path
 
     return publish
+
+
+@dataclass
+class NetworkGuard:
+    """Refuses every database connection and socket, and remembers each attempt."""
+
+    attempts: list[str] = field(default_factory=list)
+
+    def refuse(self, what: str) -> OSError:
+        self.attempts.append(what)
+        return OSError(f"the gate test has no network; {what} was attempted")
+
+
+@pytest.fixture
+def no_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[NetworkGuard]:
+    """Close every door a labelling run could use to reach a database."""
+    guard = NetworkGuard()
+
+    def refuse_psycopg(*_args: object, **_kwargs: object) -> None:
+        raise guard.refuse("psycopg.connect")
+
+    def refuse_socket(*_args: object, **_kwargs: object) -> None:
+        raise guard.refuse("socket.connect")
+
+    monkeypatch.setattr(psycopg, "connect", refuse_psycopg)
+    monkeypatch.setattr(psycopg.Connection, "connect", refuse_psycopg)
+    monkeypatch.setattr(socket.socket, "connect", refuse_socket)
+    monkeypatch.setattr(socket, "create_connection", refuse_socket)
+    yield guard
