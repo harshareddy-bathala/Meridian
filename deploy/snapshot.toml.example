@@ -56,3 +56,9 @@ elevation_bands_deg = [15.0, 30.0, 60.0]
 
 # Width of a local-solar-hour band. Must divide 24, so every band is equal.
 hour_band_h = 4
+
+# The least propensity a weight is computed from: a pass attempted with a
+# lower propensity is weighted as if it had this one, so no weight exceeds its
+# inverse — 20 at the default — and the report counts how many were floored
+# (D-153). Greater than 0, at most 1.
+floor = 0.05

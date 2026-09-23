@@ -21,9 +21,11 @@ under one threshold or one set of cells cannot be mistaken for another.
   is used rather than a coarser cell's;
 * ``elevation_bands_deg`` — the edges between maximum-elevation bands;
 * ``hour_band_h`` — the width of a local-solar-hour band, which must divide a
-  day so every band is the same width.
+  day so every band is the same width;
+* ``floor`` — the least propensity a weight is computed from, so no weight
+  exceeds its inverse (D-153).
 
-Reference: docs/DECISIONS.md D-150, D-151, D-152.
+Reference: docs/DECISIONS.md D-150, D-151, D-152, D-153.
 """
 
 from __future__ import annotations
@@ -60,7 +62,7 @@ _COMPLETENESS = frozenset(
         "archive_match_tolerance_s",
     )
 )
-_PROPENSITY = frozenset(("min_cell", "elevation_bands_deg", "hour_band_h"))
+_PROPENSITY = frozenset(("min_cell", "elevation_bands_deg", "hour_band_h", "floor"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,11 +107,12 @@ class CompletenessConfig:
 
 @dataclass(frozen=True, slots=True)
 class PropensityConfig:
-    """The ``[propensity]`` table (D-152)."""
+    """The ``[propensity]`` table (D-152, D-153)."""
 
     min_cell: int = 20
     elevation_bands_deg: tuple[float, ...] = (15.0, 30.0, 60.0)
     hour_band_h: int = 4
+    floor: float = 0.05
 
     def __post_init__(self) -> None:
         """Refuse a cell size of nothing, edges off the sky, or ragged hour bands."""
@@ -123,6 +126,9 @@ class PropensityConfig:
         if _HOURS % self.hour_band_h:
             message = f"propensity.hour_band_h = {self.hour_band_h} does not divide 24"
             raise LabelConfigError(message)
+        if not 0 < number("propensity.floor", self.floor) <= 1:
+            message = f"propensity.floor = {self.floor} is outside (0, 1]"
+            raise LabelConfigError(message)
 
     def parameters(self) -> dict[str, object]:
         """The values, for the manifest."""
@@ -130,6 +136,7 @@ class PropensityConfig:
             "min_cell": self.min_cell,
             "elevation_bands_deg": list(self.elevation_bands_deg),
             "hour_band_h": self.hour_band_h,
+            "floor": self.floor,
         }
 
 
@@ -176,6 +183,7 @@ def parse_propensity(value: object) -> PropensityConfig:
             values.get("hour_band_h", default.hour_band_h),
             (1, _HOURS),
         ),
+        floor=number("propensity.floor", values.get("floor", default.floor)),
     )
 
 

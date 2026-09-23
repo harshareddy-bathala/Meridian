@@ -47,6 +47,7 @@ def test_the_defaults_are_the_decisions() -> None:
             "min_cell": 20,
             "elevation_bands_deg": [15.0, 30.0, 60.0],
             "hour_band_h": 4,
+            "floor": 0.05,
         },
     }
 
@@ -132,6 +133,8 @@ def test_one_elevation_band_is_a_list_with_no_edges() -> None:
         ("[propensity]\nelevation_bands_deg = [90]\n", "outside 0..90"),
         ("[propensity]\nhour_band_h = 5\n", "does not divide 24"),
         ("[propensity]\nhour_band_h = 0\n", "outside"),
+        ("[propensity]\nfloor = 0\n", "outside \\(0, 1\\]"),
+        ("[propensity]\nfloor = 1.5\n", "outside \\(0, 1\\]"),
     ],
     ids=[
         "not-a-table",
@@ -143,6 +146,8 @@ def test_one_elevation_band_is_a_list_with_no_edges() -> None:
         "zenith-edge",
         "ragged-hours",
         "no-hours",
+        "no-floor",
+        "floor-above-one",
     ],
 )
 def test_a_propensity_table_that_cannot_be_obeyed_is_refused(
