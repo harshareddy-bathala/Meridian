@@ -12,7 +12,9 @@ arriving mid-dump is simply in the next backup.
 holds external artefacts exactly as they were retrieved, it is not in Postgres,
 and it is the one thing here that cannot be recreated without going back to a
 source that may have withdrawn it (D-141). A backup that quietly omitted it
-would be discovered at the worst possible moment.
+would be discovered at the worst possible moment. **Nor does it take the dataset
+snapshots** under `data/datasets`: a raw snapshot is taken at the moment it is
+exported and cannot be taken again (D-144), so it is named on every run too.
 
 The dump is written to `<out>.partial` and renamed only once `pg_dump` has exited
 cleanly, so a file at `--out` is always a complete dump — an interrupted backup
@@ -71,6 +73,27 @@ def raw_store_note(root: Path = RAW_STORE) -> str:
     """
     state = "" if root.is_dir() else " (nothing there)"
     return f"not in this dump   {root}{state} — the ingest raw store (D-141)"
+
+
+DATASETS_ROOT = Path("data/datasets")
+"""The default datasets root, which this tool never touches either.
+
+The documented default for the same reason as :data:`RAW_STORE`: a host tool
+cannot import the platform to ask where ``MERIDIAN_DATASETS_ROOT`` points.
+"""
+
+
+def datasets_note(root: Path = DATASETS_ROOT) -> str:
+    """One line naming the dataset snapshots this backup did not take.
+
+    Args:
+        root: Where the datasets root is expected to be.
+
+    Returns:
+        A sentence for the operator, saying whether that tree is there at all.
+    """
+    state = "" if root.is_dir() else " (nothing there)"
+    return f"not in this dump   {root}{state} — dataset snapshots (D-144)"
 
 
 def dump_command(compose: Compose) -> list[str]:
@@ -154,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  manifest             {manifest_path(args.out)}")
     print(f"  {raw_store_note()}")
     print("  copy that tree yourself — docs/OPERATIONS.md § External archive ingest")
+    print(f"  {datasets_note()}")
+    print("  copy that tree yourself — docs/OPERATIONS.md § Dataset snapshots")
     return 0
 
 

@@ -256,3 +256,15 @@ def test_a_restore_without_a_manifest_changes_nothing(
 
     assert restore.main([str(dump), "--yes"]) == 1
     assert "no manifest" in capsys.readouterr().err
+
+
+def test_the_backup_names_the_dataset_snapshots_it_did_not_take(
+    backup: ModuleType, tmp_path: Path
+) -> None:
+    """A raw snapshot cannot be exported again with the same ``as_of`` (D-144)."""
+    present = tmp_path / "datasets"
+    present.mkdir()
+
+    assert str(present) in backup.datasets_note(present)
+    assert "nothing there" not in backup.datasets_note(present)
+    assert "nothing there" in backup.datasets_note(tmp_path / "absent")
