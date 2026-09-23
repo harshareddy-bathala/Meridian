@@ -8,7 +8,7 @@ Every command runs from the repository root. `compose` below is shorthand for:
 docker compose -f deploy/docker-compose.yml
 ```
 
-Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, and D-138 to D-142 for external archive ingest. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, and D-143 to D-147 for dataset snapshots. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
 
 ---
 
@@ -81,7 +81,8 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Run the simulator | `compose --profile sim up -d` — `SIMULATOR_*` in `deploy/.env` set count, seed and scenario |
 | Check the public surface | `python deploy/tools/verify_public_surface.py https://<hostname>` |
 | Fetch and load an external archive | `uv run meridian-ingest …` — its own binary, not in the image; § External archive ingest |
-| Build a dataset snapshot | `meridian snapshot` — not built yet; Stage 15 |
+| Freeze the database into a raw snapshot | `compose run --rm --no-deps … api meridian snapshot export --since <ISO-8601 Z>` — § Dataset snapshots |
+| Label a raw snapshot | `uv run meridian snapshot label <dir>` — needs no database; § Dataset snapshots |
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
 **Scheduling needs no command.** The `jobs` service generates passes and schedules them under configuration A every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
@@ -377,6 +378,108 @@ The tree is read-only by construction: a record's directory is sealed after publ
 
 ---
 
+## Dataset snapshots
+
+Prediction and evaluation never read the live tables. They read an **immutable snapshot**, so every number in a report can be regenerated from a snapshot, a configuration and a seed (rule 8). There are two steps, and only the first one needs the database (D-143):
+
+1. **`export`** freezes the database into a **raw snapshot**: every table the labels need, read at a single instant, plus the registry's answer to "was this station listening", stored next to each closed assignment.
+2. **`label`** turns a raw snapshot and a labelling configuration into an **evaluation dataset**: one label per pass (D-146, D-147), plus the archive's receptions in the archive's own vocabulary. It opens files and nothing else.
+
+Decisions this section puts into practice: D-143 to D-147.
+
+### Where they go
+
+Everything goes under one **datasets root**: `--root`, else `$MERIDIAN_DATASETS_ROOT`, else `data/datasets`. The `data/` directory is gitignored.
+
+```text
+data/datasets/
+├── snapshots/<as_of>-<hash12>/    raw snapshots: one .jsonl per table, listening.jsonl, manifest.json
+└── evaluation/<hash12>/           evaluation datasets: labels.jsonl, archive_receptions.jsonl, manifest.json
+```
+
+- **Names come from content.** A directory is named after the sha256 of its manifest. That manifest lists every file's digest and row count, and the hash leaves out only `created_at`. So the name *is* the check, and two runs that produce the same content land in the same directory. The second run writes nothing and says `already held, identically`.
+- **Directories are read-only.** Each directory is sealed when it is published, so `rm -rf` fails until you `chmod -R u+w`. As with the raw store, that is immutability working, not a permissions fault.
+
+### The commands
+
+| Task | Command |
+|---|---|
+| Freeze the database from a start time to now | `meridian snapshot export --since <ISO-8601 Z>` — reads `DATABASE_URL` |
+| Label a raw snapshot | `meridian snapshot label <raw snapshot dir> [--config snapshot.toml]` |
+| Check a snapshot or dataset against its manifest | `meridian snapshot verify <dir>` |
+
+- **There is no `--until`.** A raw snapshot ends at its export transaction's own `now()`. Several tables hold current state rather than history, so a snapshot can only describe *now*.
+- **`--since` must carry its offset**, for the same reason as in `meridian-ingest`.
+- **Labelling settings:** copy `deploy/snapshot.toml.example`. Its values are the defaults, and unknown keys are refused. The settings are hashed by value into the dataset's manifest, so a changed setting gives a different dataset rather than an overwritten one.
+- **What `label` prints:**
+  - every non-zero count by name, with measured and simulated always kept apart;
+  - how many confirmed-listening silences it could not judge (`satellite_state_indeterminate`). EVALUATION.md §5 asks for that share to be stated beside any figure that depends on it.
+
+### Exporting from the deployment
+
+The deployment does not publish the database port, so `export` runs inside the compose network. Mount a host directory as the datasets root so the snapshot outlives the container:
+
+```bash
+mkdir -p data/datasets
+compose run --rm --no-deps --user "$(id -u):$(id -g)" \
+  -v "$PWD/data/datasets:/datasets" -e MERIDIAN_DATASETS_ROOT=/datasets \
+  api meridian snapshot export --since 2026-08-01T00:00:00Z
+```
+
+**`export` only reads.** Its transaction is `REPEATABLE READ, READ ONLY`, so the scheduler and the API carry on while it runs, and every table is read at the same instant.
+
+**Labelling needs no deployment at all.** Run it from a checkout, on any machine that holds the raw snapshot:
+
+```bash
+uv run meridian snapshot label data/datasets/snapshots/<as_of>-<hash12>
+```
+
+### Exit codes
+
+| | Means |
+|---|---|
+| 0 | It ran and succeeded |
+| 1 | It ran and failed: the database was unreachable, `--since` was unreadable, the settings were refused, or it was pointed at something that is not a raw snapshot |
+| 2 | The command line was wrong |
+| **3** | **The snapshot or dataset no longer matches its manifest** |
+
+Code 3 means the same here as it does in `meridian-ingest verify`. `label` returns it too: a raw snapshot that fails its own check is refused, not labelled.
+
+### The completion gate, at a prompt
+
+Stage 15's gate is that **the same raw snapshot and the same configuration always produce the same evaluation dataset hash.** To demonstrate it:
+
+```bash
+uv run meridian snapshot label data/datasets/snapshots/<dir>      # (written)
+uv run meridian snapshot label data/datasets/snapshots/<dir>      # already held, identically
+unshare -rn uv run meridian snapshot --root /tmp/elsewhere label data/datasets/snapshots/<dir>
+```
+
+All three print the same hash. The last one runs with no network interfaces at all, into a root that has never seen the dataset.
+
+Two test files assert the same thing:
+- `tests/unit/test_snapshot_gate.py` labels one snapshot three ways, under a guard that fails if anything opens a connection. A positive control shows the guard firing. It also labels in two processes with different hash seeds.
+- `tests/integration/test_snapshot_gate.py` exports from a database, **deletes every source row**, and labels again.
+
+### When `verify` exits 3
+
+The directory's bytes are no longer the bytes that were written. Anything computed from them now would be computed from something no export produced.
+
+- **A raw snapshot:** restore it from your copy, then run `verify` again. With no copy, a new `export` gives a *new* snapshot with a new name. That is not a repair: the rows may have changed since.
+- **An evaluation dataset:** delete it (`chmod -R u+w` first) and run `label` again from its raw snapshot. Its manifest's `derived_from` names which raw snapshot that is.
+
+### Snapshots are not in the database backup
+
+`deploy/tools/backup.py` names the datasets root it did not take on every run (D-144). **A raw snapshot cannot be recreated.** It is the database as it stood at one instant, and a later export describes a later instant. Any figure computed from a snapshot needs that snapshot kept, so copy the snapshots yourself:
+
+```bash
+tar -C data -czf backups/datasets-$(date -u +%F).tar.gz datasets
+```
+
+Evaluation datasets can always be regenerated from their raw snapshot and settings, so the raw snapshots are the part that matters.
+
+---
+
 ## Backup and restore
 
 Host tools, standard library only (D-115). They reach the database through `compose exec db`, so no password appears on the host's command line.
@@ -397,7 +500,7 @@ python deploy/tools/backup.py --out backups/meridian-$(date -u +%F).dump
 
 **A dump is a secret.** It holds every station's token hash and every invite. `backups/` and `*.dump` are gitignored; keep them off shared drives.
 
-**A dump is not the whole deployment.** It takes nothing from the ingest raw store, which holds external artefacts exactly as they were retrieved and cannot be recreated without going back to a source that may no longer serve them (D-141). `backup.py` names that path on every run; copying it is § External archive ingest above.
+**A dump is not the whole deployment.** It takes nothing from the ingest raw store, which holds external artefacts exactly as they were retrieved and cannot be recreated without going back to a source that may no longer serve them (D-141). `backup.py` names that path on every run; copying it is § External archive ingest above. Nor does it take the dataset snapshots (D-144); § Dataset snapshots above.
 
 ### Restore
 
