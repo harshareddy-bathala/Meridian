@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 __all__ = [
+    "ArchivePassRow",
     "ArchiveReception",
     "AssignmentRow",
     "HeartbeatRow",
@@ -92,6 +93,19 @@ class ArchiveReception:
     satellite_key_kind: str
     started_at: datetime
     archive_outcome: str
+    archive_station_id: int
+    """Whose reception it was, which is what completeness counts it against."""
+
+
+@dataclass(frozen=True, slots=True)
+class ArchivePassRow:
+    """A pass an archive station could have received, as the export froze it (D-150)."""
+
+    archive_station_id: int
+    satellite_id: str
+    aos: datetime
+    los: datetime
+    max_elevation_deg: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +120,8 @@ class SnapshotRows:
     """Assignment id to the registry's frozen answer (D-145)."""
 
     archive: tuple[ArchiveReception, ...]
+    archive_passes: tuple[ArchivePassRow, ...] = ()
+    """What each archive station could have received (D-150)."""
 
 
 def parse_rows(files: Mapping[str, bytes]) -> SnapshotRows:
@@ -153,8 +169,19 @@ def parse_rows(files: Mapping[str, bytes]) -> SnapshotRows:
                 satellite_key_kind=_text(one, "satellite_key_kind"),
                 started_at=_instant(one, "started_at"),
                 archive_outcome=_text(one, "archive_outcome"),
+                archive_station_id=_int(one, "archive_station_id"),
             )
             for one in _lines(files, "archive_observations")
+        ),
+        archive_passes=tuple(
+            ArchivePassRow(
+                archive_station_id=_int(one, "archive_station_id"),
+                satellite_id=_text(one, "satellite_id"),
+                aos=_instant(one, "aos"),
+                los=_instant(one, "los"),
+                max_elevation_deg=_number(one, "max_elevation_deg"),
+            )
+            for one in _lines(files, "archive_passes")
         ),
     )
 
@@ -235,6 +262,14 @@ def _int(row: Mapping[str, object], name: str) -> int:
         message = f"{name} is {value!r}, not an integer"
         raise MalformedSnapshotError(message)
     return value
+
+
+def _number(row: Mapping[str, object], name: str) -> float:
+    value = _field(row, name)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        message = f"{name} is {value!r}, not a number"
+        raise MalformedSnapshotError(message)
+    return float(value)
 
 
 def _bool(row: Mapping[str, object], name: str) -> bool:

@@ -16,6 +16,7 @@ import pytest
 
 from meridian.datasets.canonical import canonical_line
 from meridian.datasets.label_config import (
+    CompletenessConfig,
     LabelConfig,
     LabelConfigError,
     config_sha256,
@@ -28,12 +29,76 @@ from meridian.datasets.snapshot_rows import MalformedSnapshotError, parse_rows
 
 
 def test_the_defaults_are_the_decisions() -> None:
-    """24 hours to settle (D-146); 12 hours either side and two attempts (D-147)."""
+    """24 hours to settle (D-146); 12 hours either side and two attempts (D-147);
+    0.8 and its sensitivity band (D-151); the horizon and two minutes (D-150)."""
     assert LabelConfig().parameters() == {
         "settle_margin_s": 86_400,
         "silent_window_s": 43_200,
         "silent_min_attempts": 2,
+        "completeness": {
+            "threshold": 0.8,
+            "sensitivity": [0.5, 0.6, 0.7, 0.8, 0.9],
+            "archive_min_elevation_deg": 0.0,
+            "archive_match_tolerance_s": 120,
+        },
     }
+
+
+def test_the_completeness_table_overrides_only_what_it_names() -> None:
+    config = parse_label_config(
+        "[completeness]\nthreshold = 0.75\nsensitivity = [0.6, 0.75, 1]\n"
+    )
+
+    assert config.completeness == CompletenessConfig(
+        threshold=0.75, sensitivity=(0.6, 0.75, 1.0)
+    )
+    assert config.settle_margin_s == LabelConfig().settle_margin_s
+
+
+def test_a_whole_number_ratio_is_the_same_setting_as_its_float() -> None:
+    """``threshold = 1`` and ``threshold = 1.0`` hash alike: one setting."""
+    whole = parse_label_config("[completeness]\nthreshold = 1\n")
+    decimal = parse_label_config("[completeness]\nthreshold = 1.0\n")
+
+    assert config_sha256(whole) == config_sha256(decimal)
+
+
+@pytest.mark.parametrize(
+    ("text", "match"),
+    [
+        ("completeness = 0.8\n", "must be a table"),
+        ("[completeness]\nthresold = 0.8\n", "unknown completeness settings"),
+        ("[completeness]\nthreshold = 1.2\n", "outside 0..1"),
+        ("[completeness]\nthreshold = '0.8'\n", "must be a number"),
+        ("[completeness]\nthreshold = true\n", "must be a number"),
+        ("[completeness]\nsensitivity = 0.8\n", "must be a list"),
+        ("[completeness]\nsensitivity = []\n", "at least one"),
+        ("[completeness]\nsensitivity = [0.9, 0.5]\n", "must rise"),
+        ("[completeness]\nsensitivity = [0.5, 0.5]\n", "must rise"),
+        ("[completeness]\narchive_min_elevation_deg = 90\n", "outside 0..90"),
+        ("[completeness]\narchive_match_tolerance_s = 1.5\n", "whole number"),
+        ("[completeness]\narchive_match_tolerance_s = 3601\n", "outside"),
+    ],
+    ids=[
+        "not-a-table",
+        "misspelt",
+        "above-one",
+        "text",
+        "bool",
+        "not-a-list",
+        "empty",
+        "falling",
+        "repeated",
+        "zenith",
+        "fractional-seconds",
+        "over-an-hour",
+    ],
+)
+def test_a_completeness_table_that_cannot_be_obeyed_is_refused(
+    text: str, match: str
+) -> None:
+    with pytest.raises(LabelConfigError, match=match):
+        parse_label_config(text)
 
 
 def test_every_key_is_optional_and_each_overrides_its_default() -> None:
@@ -112,6 +177,7 @@ def files(**overrides: bytes) -> dict[str, bytes]:
             "heartbeats",
             "listening",
             "archive_observations",
+            "archive_passes",
         )
     }
     return (

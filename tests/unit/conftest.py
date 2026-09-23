@@ -123,6 +123,7 @@ WORLD: Mapping[str, Sequence[Mapping[str, object]]] = {
     "archive_observations": [
         {
             "archive_observation_id": 1,
+            "archive_station_id": 1,
             "source_id": "reference_archive",
             "satellite_key": "norad:57166",
             "satellite_key_kind": "norad",

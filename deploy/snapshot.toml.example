@@ -21,3 +21,23 @@ silent_window_s = 43200
 # listening confirmed, or an archive's `no_data` — needed to call a satellite
 # silent rather than indeterminate (D-147). 1 .. 100.
 silent_min_attempts = 2
+
+[completeness]
+
+# The completeness — attempted passes over eligible passes, per station-day — at
+# or above which a station-day is kept for primary evaluation (D-151). 0 .. 1.
+threshold = 0.8
+
+# Thresholds every report also states retained and excluded station-days at, so
+# a reader can judge the threshold rather than trust it (D-151). Rising, no
+# repeats, each 0 .. 1.
+sensitivity = [0.5, 0.6, 0.7, 0.8, 0.9]
+
+# An archive station's computed pass counts as available only if it peaks at or
+# above this elevation. Applied at labelling, so changing it needs no new
+# export (D-150). 0 .. 90, degrees.
+archive_min_elevation_deg = 0.0
+
+# How far outside a computed window an archive reception may start and still be
+# that pass — the station's clock and elements are not ours (D-150). 0 .. 3600.
+archive_match_tolerance_s = 120

@@ -504,6 +504,7 @@ def test_an_archive_reception_is_evidence_for_a_measured_pass(
             satellite_key_kind="norad",
             started_at=AOS + timedelta(hours=2),
             archive_outcome=outcome,
+            archive_station_id=1,
         ),
     )
 
@@ -512,7 +513,7 @@ def test_an_archive_reception_is_evidence_for_a_measured_pass(
 
 def test_two_archive_no_data_rows_call_a_satellite_silent() -> None:
     silent = ArchiveReception(
-        "norad:57166", "norad", AOS + timedelta(hours=1), "no_data"
+        "norad:57166", "norad", AOS + timedelta(hours=1), "no_data", 1
     )
 
     snapshot = reported("no_signal", archive=(silent, silent))
@@ -521,7 +522,7 @@ def test_two_archive_no_data_rows_call_a_satellite_silent() -> None:
 
 
 def test_an_archive_key_we_cannot_match_is_not_evidence() -> None:
-    unmatched = ArchiveReception("NOAA 19", "source_name", AOS, "decoded")
+    unmatched = ArchiveReception("NOAA 19", "source_name", AOS, "decoded", 1)
 
     assert (
         label(reported("no_signal", archive=(unmatched,))).label
@@ -537,7 +538,7 @@ def test_an_archive_is_never_evidence_about_a_simulated_pass() -> None:
         observations=(report("as_1", "no_signal"),),
         heartbeats=(heard(target),),
         listening={"as_1": True},
-        archive=(ArchiveReception("norad:57166", "norad", AOS, "decoded"),),
+        archive=(ArchiveReception("norad:57166", "norad", AOS, "decoded", 1),),
     )
 
     assert label(snapshot).label == "satellite_state_indeterminate"
@@ -586,7 +587,7 @@ def test_a_pass_made_simulated_by_its_assignment_is_judged_as_simulated() -> Non
         observations=(report("as_1", "no_signal"),),
         heartbeats=(heard(target),),
         listening={"as_1": True},
-        archive=(ArchiveReception("norad:57166", "norad", AOS, "decoded"),),
+        archive=(ArchiveReception("norad:57166", "norad", AOS, "decoded", 1),),
     )
 
     labelled = label(snapshot)
