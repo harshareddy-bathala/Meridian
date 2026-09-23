@@ -322,6 +322,31 @@ What the ingested products say about a registered area over time. **Every point 
 
 ---
 
+## Dataset snapshots *(files, not tables)*
+
+Stage 15's two artefacts are directories on disk, not rows. Each is content-addressed and sealed read-only, and each carries a `manifest.json` listing its files with their sha256 and row counts. The directory's hash is the sha256 of that manifest's canonical bytes, with `created_at` left out (D-144). Rows are canonical JSON Lines, one table per file, in primary-key order (D-070's rules).
+
+### Raw snapshot — `data/datasets/snapshots/<as_of>-<hash prefix>/`
+
+Written by `meridian snapshot export`, the only step that reads the database, inside one `REPEATABLE READ, READ ONLY` transaction. `as_of` is that transaction's time and cannot be chosen, because several columns are current state rather than history (D-143). It holds, for passes from `--since` to `as_of`:
+
+- `passes`, `assignments`, and every `observations` revision submitted by `as_of`;
+- `listening` — per settled scheduled assignment, `listening_confirmed` as `Registry.was_listening()` answered it at export (D-145) — and the `heartbeats` overlapping those windows;
+- the `element_sets` the passes were computed from, `satellites` with their `transmitters`, and `stations` with their `capabilities`, effective from `registered_at` until `deleted_at`;
+- `archive_stations`, `archive_observations` and `ingest_provenance`, kept in their own files and their own vocabulary.
+
+Every row that has a `simulated` column keeps it. **A raw snapshot is outside the database backup and cannot be retaken**, since no later export can have the same `as_of`.
+
+### Evaluation dataset — `data/datasets/evaluation/<hash prefix>/`
+
+Written by `meridian snapshot label` from a raw snapshot and a labelling configuration, with no database, clock or network — so the same two inputs always give the same hash, which is Stage 15's gate.
+
+- `labels.jsonl` — one row per geometrically available pass: keys, `label` or `exclusion_reason`, `source_outcome`, `listening_confirmed`, `scheduled_by` and `simulated`. The labels and their order of precedence are D-146; the satellite-silent evidence is D-147.
+- `archive_receptions.jsonl` — archive receptions with their own outcome vocabulary and provenance. They never receive a Meridian label.
+- `manifest.json` — the raw snapshot's hash, the transformation version, the configuration's sha256, the settle margin, and the measured and simulated counts reported apart.
+
+---
+
 ## Conventions
 
 - **All timestamps UTC**, stored as `timestamptz`. No exceptions, no local time anywhere.
