@@ -43,12 +43,12 @@ from datetime import datetime, timedelta
 from meridian.datasets.evidence import EvidenceIndex, OwnReception, satellite_state
 from meridian.datasets.label_config import LabelConfig
 from meridian.datasets.physical_passes import PhysicalPass, group_physical_passes
-from meridian.datasets.snapshot_rows import (
-    AssignmentRow,
-    ObservationRow,
-    PassRow,
-    SnapshotRows,
+from meridian.datasets.pooled_evidence import (
+    OUTCOME_ORDER,
+    PooledEvidence,
+    pool_evidence,
 )
+from meridian.datasets.snapshot_rows import AssignmentRow, PassRow, SnapshotRows
 
 __all__ = [
     "EXCLUSIONS",
@@ -86,9 +86,6 @@ EXCLUSIONS = (
 """Why a row is kept out of training and yield scoring, first reason first.
 The two satellite labels are excluded from yield scoring and counted apart
 (``EVALUATION.md`` §5); a simulated row is excluded whatever its label (D-078)."""
-
-OUTCOME_ORDER = ("decoded", "signal_no_decode", "no_signal", "aborted", "not_attempted")
-"""Most informative first: where two assignments of one pass both reported."""
 
 _UNAVAILABLE = frozenset(("aborted", "not_attempted"))
 _SATELLITE_LABELS = {
@@ -149,16 +146,6 @@ class _Context:
     config: LabelConfig
 
 
-@dataclass(frozen=True, slots=True)
-class _Evidence:
-    """What one pass's scheduled assignments add up to."""
-
-    scheduled: tuple[AssignmentRow, ...]
-    report: ObservationRow | None
-    listening: bool | None
-    simulated: bool
-
-
 def label_passes(
     rows: SnapshotRows, *, as_of: datetime, config: LabelConfig
 ) -> tuple[LabelledPass, ...]:
@@ -173,17 +160,7 @@ def label_passes(
         One labelled row per physical pass, in representative pass-id order.
     """
     physical = group_physical_passes(rows.passes)
-    by_pass = _group(rows.assignments)
-    latest = _latest_reports(rows.observations)
-    evidence = {
-        one.representative.pass_id: _pool(
-            one,
-            tuple(held for member in one.pass_ids for held in by_pass.get(member, ())),
-            latest,
-            rows.listening,
-        )
-        for one in physical
-    }
+    evidence = pool_evidence(physical, rows)
     context = _Context(
         heard=_heartbeat_times(rows),
         index=EvidenceIndex.build(_own_receptions(physical, evidence), rows.archive),
@@ -217,7 +194,7 @@ def label_counts(labelled: Iterable[LabelledPass]) -> dict[str, int]:
 
 
 def _label(
-    physical: PhysicalPass, evidence: _Evidence, context: _Context
+    physical: PhysicalPass, evidence: PooledEvidence, context: _Context
 ) -> LabelledPass:
     """Rules 1 and 2 exclude the pass; otherwise rules 3 to 9 label it."""
     target = physical.representative
@@ -230,7 +207,7 @@ def _label(
     return _row(physical, evidence, label, _exclusion(label, evidence.simulated))
 
 
-def _outcome_label(target: PassRow, evidence: _Evidence, context: _Context) -> str:
+def _outcome_label(target: PassRow, evidence: PooledEvidence, context: _Context) -> str:
     """Rules 3 to 9: what the report, the heartbeats and the registry say.
 
     Rules 3 to 8 are a first-match table, read top to bottom as D-146 writes
@@ -280,7 +257,7 @@ def _exclusion(label: str, simulated: bool) -> str | None:
 
 def _row(
     physical: PhysicalPass,
-    evidence: _Evidence,
+    evidence: PooledEvidence,
     label: str | None,
     excluded: str | None,
 ) -> LabelledPass:
@@ -302,65 +279,8 @@ def _row(
     )
 
 
-def _pool(
-    physical: PhysicalPass,
-    assignments: tuple[AssignmentRow, ...],
-    latest: Mapping[str, ObservationRow],
-    listening: Mapping[str, bool],
-) -> _Evidence:
-    """Pool a physical pass's scheduled assignments into one body of evidence.
-
-    Assignments to any prediction of the rise count, in assignment-id order.
-    """
-    scheduled = tuple(
-        sorted(
-            (one for one in assignments if one.decision == "scheduled"),
-            key=lambda one: one.assignment_id,
-        )
-    )
-    reports = [
-        latest[one.assignment_id] for one in scheduled if one.assignment_id in latest
-    ]
-    report = min(reports, key=_informativeness, default=None)
-    answers = [
-        listening[one.assignment_id]
-        for one in scheduled
-        if one.assignment_id in listening
-    ]
-    return _Evidence(
-        scheduled=scheduled,
-        report=report,
-        listening=any(answers) if answers else None,
-        simulated=physical.simulated
-        or any(one.simulated for one in scheduled)
-        or any(one.simulated for one in reports),
-    )
-
-
-def _informativeness(report: ObservationRow) -> tuple[int, str]:
-    """Rank a report by :data:`OUTCOME_ORDER`, then by id, so ties are stable."""
-    rank = (
-        OUTCOME_ORDER.index(report.outcome)
-        if report.outcome in OUTCOME_ORDER
-        else len(OUTCOME_ORDER)
-    )
-    return rank, report.assignment_id
-
-
-def _latest_reports(
-    observations: Iterable[ObservationRow],
-) -> dict[str, ObservationRow]:
-    """Each assignment's latest revision. The export kept only those by ``as_of``."""
-    latest: dict[str, ObservationRow] = {}
-    for one in observations:
-        held = latest.get(one.assignment_id)
-        if held is None or one.revision > held.revision:
-            latest[one.assignment_id] = one
-    return latest
-
-
 def _own_receptions(
-    physical: Iterable[PhysicalPass], evidence: Mapping[int, _Evidence]
+    physical: Iterable[PhysicalPass], evidence: Mapping[int, PooledEvidence]
 ) -> list[OwnReception]:
     """Every pass that was reported on, as evidence about its satellite."""
     return [
@@ -402,13 +322,3 @@ def _heard_during(
         if first < len(times) and times[first] < one.end_at:
             return True
     return False
-
-
-def _group(
-    assignments: Iterable[AssignmentRow],
-) -> dict[int, tuple[AssignmentRow, ...]]:
-    """Assignments by pass, each group in assignment-id order."""
-    grouped: dict[int, list[AssignmentRow]] = {}
-    for one in sorted(assignments, key=lambda one: one.assignment_id):
-        grouped.setdefault(one.pass_id, []).append(one)
-    return {pass_id: tuple(held) for pass_id, held in grouped.items()}
