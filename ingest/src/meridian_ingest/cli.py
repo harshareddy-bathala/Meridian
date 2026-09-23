@@ -30,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 
 from meridian.config import load_settings as load_platform_settings
+from meridian.store.archive_observations import NormalisationDisagreementError
 from meridian.store.pool import DatabaseUnreachableError, connect_once
 from meridian_ingest import __version__
 from meridian_ingest.adapters import REGISTRY, UnknownSourceError, normaliser_for
@@ -38,7 +39,8 @@ from meridian_ingest.config import ConfigurationError, IngestSettings, load_sett
 from meridian_ingest.console import refuse as _refuse
 from meridian_ingest.console import say as _say
 from meridian_ingest.console import warn as _warn
-from meridian_ingest.load import load_source
+from meridian_ingest.load import TermsChangedError, load_source
+from meridian_ingest.normalise.records import NormalisationError
 from meridian_ingest.raw_store import RawStore, RawStoreError
 
 __all__ = ["EXIT_CORRUPT", "EXIT_FAILED", "EXIT_USAGE", "main"]
@@ -74,7 +76,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _refuse(f"meridian-ingest: {exc}")
     try:
         return _dispatch(args, settings)
-    except (UnknownSourceError, RawStoreError, ConfigurationError) as exc:
+    except (
+        UnknownSourceError,
+        RawStoreError,
+        ConfigurationError,
+        TermsChangedError,
+        NormalisationError,
+        NormalisationDisagreementError,
+    ) as exc:
         return _refuse(f"meridian-ingest {args.command}: {exc}")
 
 

@@ -18,10 +18,13 @@ from pathlib import Path
 
 import pytest
 
+from meridian.store.archive_observations import NormalisationDisagreementError
 from meridian_ingest import cli
 from meridian_ingest.adapters.reference import REFERENCE_SOURCE
 from meridian_ingest.cli import EXIT_CORRUPT, EXIT_FAILED, EXIT_USAGE, main
 from meridian_ingest.cli_fetch import check_attribution
+from meridian_ingest.load import TermsChangedError
+from meridian_ingest.normalise.records import NormalisationError
 from meridian_ingest.raw_layout import ARTEFACT_NAME
 
 SOURCE = "reference_archive"
@@ -354,3 +357,34 @@ def test_load_commits_each_artefact_on_its_own(
         run(config, "load")
 
     assert seen == [True]
+
+
+@pytest.mark.usefixtures("raw")
+@pytest.mark.parametrize(
+    "error",
+    [
+        TermsChangedError("reference_archive is already registered under other terms"),
+        NormalisationError("a reception with no start"),
+        NormalisationDisagreementError("one key, two bodies"),
+    ],
+    ids=["terms-changed", "normalisation", "disagreement"],
+)
+def test_a_load_that_is_refused_says_why_without_a_traceback(
+    error: Exception,
+    config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exit 1 and the error's own sentence, like every other refusal here."""
+
+    def refuse(*_args: object) -> object:
+        raise error
+
+    monkeypatch.setattr(cli, "connect_once", lambda _settings: _Connection())
+    monkeypatch.setattr(cli, "load_source", refuse)
+
+    assert run(config, "load") == EXIT_FAILED
+
+    said = capsys.readouterr().err
+    assert str(error) in said
+    assert "Traceback" not in said
