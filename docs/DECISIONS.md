@@ -3057,6 +3057,131 @@ A stage whose input we do not control is the one place a test suite quietly acqu
 
 ---
 
+## D-143 — A snapshot is exported once, and labelled offline as often as needed
+
+**2026-09-23 · accepted** · *`meridian.datasets`, `meridian snapshot`, Stage 15*
+
+Stage 15's gate is that the same raw snapshot and the same transformation configuration always produce the same evaluation dataset hash. That sentence has two inputs, and this entry makes them two steps — Stage 14's fetch-then-normalise split, applied to our own tables.
+
+**`meridian snapshot export` is the only step that reads the database.** It reads every table it needs inside one `REPEATABLE READ, READ ONLY` transaction, so all of them are read at the same instant, and writes them to an immutable directory: the **raw snapshot**.
+
+**`meridian snapshot label` is a pure function** of a raw snapshot and a labelling configuration file. It opens no database, reads no clock and reaches no network, and it writes the **evaluation dataset**. The gate is proven on this step, and it can be — nothing it could read differs between two runs.
+
+**`as_of` is the export transaction's own time, and cannot be chosen.** Several columns are current state rather than history: `assignments.state` moves from `issued` to `expired` by reconciliation, `stations.token_revoked_at` is cleared when a token is reissued, and `satellite_transmitters.active` has no history at all. A snapshot "as of last Tuesday" read today would mix Tuesday's rows with today's states and present the mixture as Tuesday. An operator chooses where the snapshot starts (`--since`); where it ends is when it was taken, and the manifest says so.
+
+**What an export cannot reconstruct is written down rather than approximated.**
+
+- **Capabilities** have no `created_at`. They are written at registration and soft-deleted, so a capability is taken as effective from `stations.registered_at` until `deleted_at`.
+- **Token revocation** is current state and is not used by any label.
+- **Transmitter status** is current state. It is exported for reference and is not used as evidence that a satellite was silent in the past (D-147).
+
+**Features are not computed here.** The raw snapshot carries element sets, priorities and capabilities so that Stage 17 can compute features from it; the evaluation dataset carries labels, keys and provenance. Putting features in Stage 15 would fix the feature set before the prediction stage has decided it.
+
+*Rejected: labelling straight from the database.* The gate could then only be tested against a database that nobody else holds, and rule 8 asks that someone who was not in the room can regenerate the number.
+
+---
+
+## D-144 — Snapshots are canonical JSON Lines in content-addressed directories
+
+**2026-09-23 · accepted** · *`meridian.datasets`, `data/datasets/`, Stage 15*
+
+**One file per table, one row per line, rows ordered by primary key.** Each line is rendered by D-070's rules: sorted keys, no whitespace, timestamps in UTC truncated to milliseconds, arrays in stored order, and `NaN` refused. Files are uncompressed.
+
+**Each directory has a `manifest.json`** listing every file with its sha256 and row count, the schema revision, `since` and `as_of`, the simulated and measured counts, and — for an evaluation dataset — the raw snapshot it came from, the transformation version, and the sha256 of the labelling configuration's resolved values — not of the file's bytes, so a comment or a reordered key changes no hash, and an absent file and one spelling out the defaults, which give the same labels, give the same hash. The directory's **content hash is the sha256 of the manifest's canonical bytes with `created_at` left out**, so taking the same inputs twice gives the same hash while the manifest still records when each was made.
+
+**The hash names the directory, and the directory is sealed.** It is written under a scratch name, synced, renamed into place and made read-only — the raw store's publication (D-141). A raw snapshot is `data/datasets/snapshots/<as_of>-<hash prefix>/`, an evaluation dataset `data/datasets/evaluation/<hash prefix>/`.
+
+**No table records them in Stage 15.** The files are what an outsider regenerates from, and Stage 30's `dataset_exports` refers to a snapshot by its hash, which needs no foreign key. That also keeps this stage free of a migration.
+
+**A raw snapshot is outside the database backup, and cannot be retaken.** Because `as_of` cannot be chosen (D-143), a snapshot lost is a snapshot gone. `deploy/tools/backup.py` names the directory it did not take, as it does for the raw store.
+
+*Rejected: Parquet.* It needs `pyarrow`, and its bytes are not promised to be identical across library versions — so the hash would depend on which version wrote it, which is the one property this stage exists to remove.
+
+*Rejected: gzip.* Its header carries a modification time, so two identical exports would hash differently.
+
+---
+
+## D-145 — Listening evidence is frozen at export by the registry, never re-derived
+
+**2026-09-23 · accepted** · *`meridian.datasets.export`, `Registry.was_listening`, Stage 15*
+
+Rule 7 makes `Registry.was_listening()` the only authority on whether a station was listening, and `ARCHITECTURE.md` says to encode that in one place and never duplicate it. The labeller runs with no database (D-143), so it cannot call the registry.
+
+**The export calls it, and stores the answer.** For every scheduled assignment whose window has closed, the export asks the registry with the assignment's own station, satellite, frequency, mode and window, and writes `listening_confirmed` beside the assignment in `listening.jsonl`. The heartbeats overlapping each window are exported as well, so the answer can be checked by hand.
+
+**The labeller only reads that column.** It contains no Doppler tolerance, no heartbeat matching and no window arithmetic, so a change to what "listening" means is made in the registry and reaches the next snapshot, and cannot drift apart from it.
+
+*Rejected: re-implementing the check over exported heartbeats.* It would put the definition of a miss in two places, which is the failure rule 7 exists to prevent.
+
+---
+
+## D-146 — What a pass is labelled, and in what order the rules apply
+
+**2026-09-23 · accepted** · *`meridian.datasets.labels`, Stage 15*
+
+**The unit is a geometrically available pass** — one `passes` row, which is already per station and satellite. A pass exists whether or not anyone scheduled it, and that is what Stage 16's completeness ratio divides by.
+
+**Several assignments can share a pass.** `assignment_decision_unique` is `(pass_id, model_config)`, because configurations A and B are scheduled over the same horizon to be compared. The reception is physical, not per configuration, so the evidence is pooled:
+
+- `scheduled_by` lists, sorted, every configuration that scheduled the pass;
+- the observation used is the latest revision (by `submitted_at`, up to `as_of`) across the pass's assignments, and where more than one assignment reported, the most informative outcome wins in the order `decoded`, `signal_no_decode`, `no_signal`, `aborted`, `not_attempted`;
+- listening is confirmed if it is confirmed for any of them.
+
+**The first rule that matches decides:**
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | The pass's window ends after `as_of − settle_margin` | excluded: `report_window_open` |
+| 2 | No assignment scheduled it | excluded: `not_scheduled` |
+| 3 | Every scheduled assignment is `expired` and none reported | `assignment_declined` |
+| 4 | The observation is `decoded` | `successful_reception` |
+| 5 | The observation is `signal_no_decode` | `signal_no_decode` |
+| 6 | The observation is `aborted` or `not_attempted` | `station_unavailable` |
+| 7 | No signal or no observation, and no heartbeat at all overlaps the window | `station_unavailable` |
+| 8 | No signal or no observation, heartbeats exist, and listening is not confirmed | `station_not_confirmed_listening` |
+| 9 | No signal or no observation, and listening is confirmed | `confirmed_miss`, `satellite_silent` or `satellite_state_indeterminate`, by D-147 |
+
+`satellite_silent` and `satellite_state_indeterminate` are also excluded from yield scoring, with the reason `satellite_silent` or `satellite_state_indeterminate`, and counted apart (`EVALUATION.md` §5).
+
+**The settle margin is 24 hours by default** and is set in the labelling configuration, which the manifest hashes. A station holds unsent observations in a durable queue across an outage; without a margin, a report still on its way would be labelled as absence.
+
+**`simulated` is a column on every row, not a label.** The roadmap lists "simulated observation" beside the outcomes. Making it a label would hide what the simulated pass actually did, and leave the simulator unable to exercise the labeller that its runs exist to test. Every row carries `simulated`; a simulated row also carries the exclusion reason `simulated`, so no training or evaluation code can use it by default (D-078); and the manifest counts the two populations apart. Rule 5 is met at this layer by the column, as it is at every other.
+
+**"Cancelled or revoked" becomes `assignment_declined`.** The schema has no cancelled or revoked assignment. `expired` is the decline case (`DATA-MODEL.md`), and token revocation is current state that cannot be dated (D-143). A label named for events the data cannot record would always be empty, or wrong.
+
+**Each labelled row carries** the pass and station keys, `label` or `exclusion_reason`, the observation's own `outcome` verbatim as `source_outcome`, `listening_confirmed`, `scheduled_by` and `simulated`. Stages 26 and 27 reuse these label names where they overlap rather than coining new ones.
+
+*Rejected: a row per assignment.* Configurations A and B would each claim the same reception, and every count drawn from the dataset would double it.
+
+---
+
+## D-147 — A satellite is called silent only on contemporaneous evidence
+
+**2026-09-23 · accepted** · *`meridian.datasets.labels`, `EVALUATION.md` §5, Stage 15*
+
+A station confirmed listening that heard nothing has either missed the pass or been listening to a satellite that was not transmitting. `EVALUATION.md` §5 says to tell them apart by cross-checking contemporaneous observations of the same satellite elsewhere, and to mark the rest `indeterminate`.
+
+**The evidence is every reception of the same satellite within ± 12 hours of the pass**, from two places:
+
+- our own observations at any station, including this one's other passes, from the same population as the pass — a simulated reception is never evidence about a measured pass, nor the other way round;
+- archive receptions, matched when their `satellite_key_kind` is `norad` and the key, which ingest stores as `norad:<number>`, equals our `satellite_id`, and used only for measured passes, since an archive describes the real sky.
+
+**The decision:**
+
+- any contemporaneous reception with a signal (`decoded` or `signal_no_decode`, in either vocabulary) → `confirmed_miss`. The satellite was transmitting; this station did not hear it.
+- otherwise, at least **two** contemporaneous attempts that heard nothing — our own `no_signal` with listening confirmed, or archive `no_data` — → `satellite_silent`.
+- otherwise → `satellite_state_indeterminate`, and the manifest reports what fraction of confirmed-listening absences that is.
+
+**The window and the count are configuration**, hashed into the manifest with the rest.
+
+**Archive data is read here and not at runtime.** D-102 keeps loss diagnosis on our own evidence because diagnosis runs live. Labelling is offline, reads a frozen snapshot, and produces training input — which is what `CLAUDE.md` says external data is for.
+
+*Rejected: `satellite_transmitters.active`.* It is today's status, applied to every past pass, and it cannot be null, so "unknown" could never be reached.
+
+*Rejected: calling every confirmed-listening absence a miss.* With one physical station and sparse archives, a dormant satellite would appear as the station failing, and every reliability figure downstream would inherit it.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -3225,6 +3350,17 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-141 an immutable raw store, and no remote string as a filename | `meridian_ingest/{provenance,raw_manifest,raw_layout,raw_store}.py`; `deploy/tools/backup.py`; `OPERATIONS.md` |
 | D-142 no test reaches the network, and the first adapter is ours | `meridian_ingest/adapters/reference.py`; `tests/unit/test_ingest_gate.py`; `tests/integration/test_ingest_gate.py` |
 | — the completion gate, and how to run it by hand | `OPERATIONS.md` § External archive ingest |
+
+**Landed 2026-09-23**, building dataset snapshots, the labels and Stage 15's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-143 export once, label offline | `meridian/datasets/export.py` (the only step that opens a database); `meridian/datasets/evaluation.py`; `meridian/cli_snapshot.py` |
+| D-144 canonical JSON Lines in content-addressed directories | `meridian/datasets/{canonical,manifest,manifest_parse,publish}.py`; `meridian/store/snapshot_reads.py`; `deploy/tools/backup.py`; `DATA-MODEL.md` |
+| D-145 listening frozen at export by the registry | `meridian/datasets/export.py` (`listening.jsonl`); `meridian/datasets/labels.py` reads the answer only |
+| D-146 the labels and their precedence | `meridian/datasets/labels.py`; `tests/unit/test_datasets_labels.py` |
+| D-147 silence judged on contemporaneous evidence | `meridian/datasets/evidence.py`; `meridian/datasets/label_config.py`; `deploy/snapshot.toml.example` |
+| — the completion gate, and how to run it by hand | `tests/unit/test_snapshot_gate.py`; `tests/integration/test_snapshot_gate.py`; `OPERATIONS.md` § Dataset snapshots |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

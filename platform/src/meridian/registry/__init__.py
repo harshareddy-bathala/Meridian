@@ -15,10 +15,11 @@ promises without reading any SQL at all.
 §4.1's decision table is composed there, out of ``meridian.store`` calls.
 
 **Implementation status.** All four methods are implemented in
-``psycopg_registry``. ``was_listening`` has no production caller yet — the
-module that consumes it, ``meridian.reliability``, is Phase 3 — so its
-correctness rests entirely on ``tests/integration/test_was_listening.py``
-rather than on anything exercising it in anger.
+``psycopg_registry``. ``was_listening``'s one production caller is
+``meridian.datasets.export``, which freezes its answers into each raw snapshot
+so the labeller never re-derives them (D-145); ``meridian.reliability``, its
+other consumer, is Phase 3. Its correctness rests on
+``tests/integration/test_was_listening.py``.
 
 Reference: docs/MSP-SPEC.md §4.1; docs/ARCHITECTURE.md; docs/DECISIONS.md
 D-017, D-020, D-023, D-034.

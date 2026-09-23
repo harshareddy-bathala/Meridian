@@ -67,7 +67,7 @@ We use Conventional Commits. The format is:
 
 ### Scopes
 
-Use the module name: `orbit`, `prediction`, `scheduler`, `registry`, `observations`, `reliability`, `store`, `api`, `client`, `simulator`, `dashboard`, `site`, `firmware`, `ingest`, `deploy`, `docs`, `msp`, `repo`.
+Use the module name: `orbit`, `prediction`, `scheduler`, `registry`, `observations`, `reliability`, `store`, `api`, `datasets`, `client`, `simulator`, `dashboard`, `site`, `firmware`, `ingest`, `deploy`, `docs`, `msp`, `repo`.
 
 There is no `platform` scope and no `sim` scope: name the module, or use `repo` for a change that genuinely spans several.
 

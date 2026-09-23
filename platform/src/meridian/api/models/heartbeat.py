@@ -104,8 +104,12 @@ class HeartbeatRequestBody(BaseModel):
     # perfect clock and one that cannot measure its own are opposite cases, and
     # treating them alike corrupts every timing figure derived from them — which
     # is why the default is None rather than 0.0 (MSP §4.2, D-025).
-    clock_offset_s: float | None = None
-    clock_uncertainty_s: float | None = None
+    # Finite, as the observation's floats are: Python's JSON reader accepts
+    # `NaN` and `Infinity`, Postgres stores them, and a dataset snapshot —
+    # canonical JSON, which has neither — could then never be exported over a
+    # window holding that heartbeat (D-070, D-144).
+    clock_offset_s: float | None = Field(default=None, allow_inf_nan=False)
+    clock_uncertainty_s: float | None = Field(default=None, allow_inf_nan=False)
 
     health: dict[str, Any] = Field(default_factory=dict)
 

@@ -46,7 +46,32 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-09-21. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-09-23. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stage 15's software is built.** Its decisions are D-143 through D-147, and `docs/OPERATIONS.md` § Dataset snapshots is its runbook.
+- **The completion gate passes, and is demonstrable at a prompt.** The same raw snapshot and the same configuration always produce the same evaluation dataset hash. Run `meridian snapshot label` twice and the second run reports `already held, identically`; run it under `unshare -rn` into a fresh root and it names the same directory.
+- **Two steps, and only the first reads the database** (D-143):
+  - `meridian snapshot export --since …` reads every table inside one `REPEATABLE READ, READ ONLY` transaction. Its `as_of` is that transaction's own `now()` and is never chosen, because several tables hold current state rather than history.
+  - `meridian snapshot label` is a pure function of a raw snapshot and a labelling configuration. It reads no database, no clock and no network.
+- **Snapshots are files, not tables** (D-144):
+  - canonical JSON Lines, one file per table, rows in primary-key order;
+  - each directory is named after its manifest's sha256, which leaves out only `created_at`;
+  - directories are published by fsync-and-rename and sealed read-only;
+  - `meridian snapshot verify` exits 3 on a damaged snapshot, as `meridian-ingest verify` does.
+  - No migration was needed.
+- **Listening is asked once, at export, and stored** (D-145). `Registry.was_listening` stays the only definition of "was listening" (rule 7). Its answer for each closed, scheduled assignment is frozen in `listening.jsonl`, and the labeller reads that answer and never re-derives it.
+- **Every pass gets one label by a fixed precedence** (D-146):
+  - Simulated is a column and an exclusion, never a label, so the two populations are counted apart in every manifest.
+  - Windows that have not settled are excluded until they are older than a 24-hour margin, so a late report is not mistaken for absence.
+  - Archive receptions keep their own vocabulary and never become a `confirmed_miss`.
+- **A satellite is called silent only on evidence from the same period and population** (D-147). `satellite_transmitters.active` is current state, so it cannot say whether a satellite was transmitting in August. A confirmed-listening silence is judged against receptions of that satellite near that time: heard means `confirmed_miss`, repeatedly unheard means `satellite_silent`, and anything else is `satellite_state_indeterminate`, whose share `label` prints.
+- **The gate is asserted both ways:**
+  - `tests/unit/test_snapshot_gate.py` labels one snapshot three times, the third through `cli.main`, under a guard that refuses `psycopg.connect` and every Python socket, and `export` under the same guard is its positive control. It also labels in two interpreters with different hash seeds.
+  - `tests/integration/test_snapshot_gate.py` exports from a database, **deletes every source row**, and labels again to the same hash. A second export after the delete, hashing differently, is its control.
+- **Not built:**
+  - selection-bias tooling over these datasets, which is Stage 16;
+  - a table recording which snapshot a published package came from. That is `dataset_exports` (`DATA-MODEL.md`), which references `snapshot_sha256` without a foreign key;
+  - any history of transmitter status. D-147 is how the labels cope with not having one.
 
 **Stage 14's software is built.** Its decisions are D-138 through D-142, and `docs/OPERATIONS.md` § External archive ingest is its runbook.
 - **The completion gate passes, and is demonstrable at a prompt.** An archive snapshot is downloaded once and then normalised repeatedly with nothing reachable — `uv run meridian-ingest normalise` twice and `diff`, or `unshare -rn` to take the network away rather than trust that it went unused.
@@ -67,6 +92,8 @@ flowchart TD
   - the reference adapter treated coverage bounds as closed while the catalogue writes them half-open, so `--since 2026-08-01Z` returned July's file as well.
   - `deploy/ingest.toml.example`'s `raw_root` is relative to the settings file, so copying that file to the repository root and leaving the value alone would put the raw store *beside* the repository rather than inside it. Found by following the runbook's own instruction; both now say so.
   - a Python socket guard cannot see `psycopg[binary]`, which reaches the network through libpq in C. The integration gate therefore claims only that nothing *in Python* reached anything, and says so.
+  - in review before merge: `meridian-ingest load` committed nothing until the whole run ended. Every artefact's transaction was a savepoint inside one implicit transaction, so a failure on the last artefact rolled back all the others. It now runs in autocommit and commits each artefact as it finishes.
+  - also in review: the raw store renamed files into place without an fsync, so a power cut could publish a truncated artefact. It now syncs each file before the rename and the directory after it.
 - **Not built:**
   - an adapter against any real archive. The first source is adopted when its licence and terms are recorded (D-134), and D-136 — whether its records may be republished inside the evidence dataset — is still open;
   - any runtime use of archive data. No module in `platform` outside `meridian.store` may import the four archive store modules, and a test with its own positive control says so;

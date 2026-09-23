@@ -8,8 +8,9 @@ amortize.
 
 ``serve`` runs the API as the image runs it — log level, worker count and the
 metrics directory several workers need (``cli_serve``); ``jobs`` and ``db`` are
-the scheduled work and the migration check beside it. A command whose stage has
-not arrived yet — ``snapshot``, ``report`` — reports which stage of
+the scheduled work and the migration check beside it; ``snapshot`` exports,
+labels and verifies Stage 15's datasets (``cli_snapshot``). A command whose stage
+has not arrived yet — ``report`` — reports which stage of
 docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md builds it and exits
 :data:`EXIT_NOT_IMPLEMENTED`, so a caller gets an answer rather than a
 traceback — see :data:`PENDING`.
@@ -38,6 +39,7 @@ from meridian.cli_jobs import add_jobs_parser, run_jobs
 from meridian.cli_passes import run_passes
 from meridian.cli_schedule import configurations, run_scheduler
 from meridian.cli_serve import add_serve_parser, run_serve
+from meridian.cli_snapshot import add_snapshot_parser, run_snapshot
 from meridian.config import load_settings
 from meridian.store import station_tokens, stations
 from meridian.store.pool import DatabaseUnreachableError, connect_once
@@ -64,13 +66,6 @@ class _Pending:
 
 
 PENDING: dict[str, _Pending] = {
-    "snapshot": _Pending(
-        stage="Stage 15 — dataset snapshots and labeling",
-        gate=(
-            "immutable, content-addressed evaluation snapshots that every "
-            "published number is regenerated from"
-        ),
-    ),
     "report": _Pending(
         stage="Stage 22 — reproducible evaluation and reports",
         gate="reports regenerated from a snapshot, a configuration and a seed",
@@ -293,7 +288,6 @@ def _add_pending_parsers(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     """Wire the commands Stage 12 documents and later stages build."""
-    subcommands.add_parser("snapshot", help="build a dataset snapshot (Stage 15)")
     subcommands.add_parser("report", help="generate an evaluation report (Stage 22)")
 
 
@@ -321,12 +315,15 @@ def _build_parser() -> argparse.ArgumentParser:
     add_serve_parser(subcommands)
     add_jobs_parser(subcommands)
     add_db_parser(subcommands)
+    add_snapshot_parser(subcommands)
     _add_pending_parsers(subcommands)
 
     return parser
 
 
-NEEDS_ACTION = frozenset({"catalogue", "db", "invite", "jobs", "passes", "station"})
+NEEDS_ACTION = frozenset(
+    {"catalogue", "db", "invite", "jobs", "passes", "snapshot", "station"}
+)
 """Commands that are a noun and mean nothing without a verb after them.
 
 ``meridian schedule`` is a verb already and carries its arguments directly, so
@@ -343,6 +340,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "passes": run_passes,
     "schedule": run_scheduler,
     "serve": run_serve,
+    "snapshot": run_snapshot,
     "station": _run_station,
 }
 """Every subcommand that does real work, and the handler that does it.
