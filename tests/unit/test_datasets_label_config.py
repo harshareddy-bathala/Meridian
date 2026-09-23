@@ -151,3 +151,10 @@ def test_a_row_missing_a_field_is_refused_by_name() -> None:
 
     with pytest.raises(MalformedSnapshotError, match="'los'"):
         parse_rows(files(**{"passes.jsonl": canonical_line(without)}))
+
+
+def test_the_example_file_spells_out_exactly_the_defaults() -> None:
+    """``deploy/snapshot.toml.example`` documents the defaults; it must not drift."""
+    example = Path(__file__).resolve().parents[2] / "deploy" / "snapshot.toml.example"
+
+    assert load_label_config(example) == LabelConfig()

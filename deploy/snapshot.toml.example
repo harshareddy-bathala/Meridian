@@ -1,0 +1,23 @@
+# Labelling settings for `meridian snapshot label --config <this file>`.
+#
+# Every key is optional; the values below are the defaults, taken from the
+# decisions that introduced them. An unknown key is refused rather than ignored,
+# so a misspelling cannot silently keep a default you believe you changed.
+#
+# The evaluation dataset's hash covers these *values*, not this file's bytes:
+# comments and key order change nothing, and a file spelling out the defaults
+# gives the same dataset as no file at all (D-144).
+
+# How long after a pass's window closes before a missing report is labelled as
+# absence rather than excluded as `report_window_open`. A station holds unsent
+# reports in a durable queue across an outage (D-146). 0 .. 2592000 (30 days).
+settle_margin_s = 86400
+
+# How far either side of a pass another reception of the same satellite still
+# counts as evidence of whether it was transmitting (D-147). 1 .. 604800.
+silent_window_s = 43200
+
+# Contemporaneous attempts that heard nothing — our own `no_signal` with
+# listening confirmed, or an archive's `no_data` — needed to call a satellite
+# silent rather than indeterminate (D-147). 1 .. 100.
+silent_min_attempts = 2

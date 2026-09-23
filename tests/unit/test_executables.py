@@ -137,17 +137,16 @@ def test_invite_create_without_a_database_fails_cleanly() -> None:
     assert "Traceback" not in result.stderr
 
 
-@pytest.mark.parametrize(
-    ("command", "stage"), [("snapshot", "Stage 15"), ("report", "Stage 22")]
-)
+@pytest.mark.parametrize(("command", "stage"), [("report", "Stage 22")])
 def test_unbuilt_commands_report_their_stage_instead_of_raising(
     command: str, stage: str
 ) -> None:
     """Exit 2 with the stage that builds the command, never a traceback.
 
-    Stage 12 documents every operator command, and these two belong to later
-    stages. A command that answers "not yet, and here is when" is discovered by
-    reading its output; one that is simply absent reads as a typo.
+    Stage 12 documents every operator command, and ``report`` belongs to a
+    later stage (``snapshot`` arrived with Stage 15). A command that answers
+    "not yet, and here is when" is discovered by reading its output; one that
+    is simply absent reads as a typo.
     """
     result = _run("-m", "meridian.cli", command)
 
