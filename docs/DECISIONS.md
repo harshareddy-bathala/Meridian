@@ -3239,7 +3239,7 @@ D-138 says the denominator stays ours: nothing here trusts an archive's own coun
 
 **It is computed at export and written as `archive_passes.jsonl`.** Propagation is floating-point work in a C extension. Freezing its answer once keeps labelling a function of files, which is D-145's reasoning applied to geometry instead of listening. The labeller's hash then depends on the bytes in the snapshot, not on the orbit library giving identical floats on every machine. The element set used for each satellite is the one current at the start of each UTC day in scope, which is how pass generation chooses one.
 
-**Capability is what the station has demonstrated.** Archives publish no capability in Stage 14 (`capability_json` is null in every row), so "could receive" cannot come from declared hardware. The denominator covers the satellites the station has at least one reception of in the snapshot, at or above a configured elevation floor (default 0°). This is narrower than true availability, so it favours completeness, and the decision says so here rather than letting a figure imply otherwise.
+**Capability is what the station has demonstrated.** An archive's capability description, where `capability_json` holds one at all, is in the archive's own vocabulary and is not read by anything here, so "could receive" cannot come from declared hardware. The denominator covers the satellites the station has at least one reception of in the snapshot, at or above a configured elevation floor (default 0°). This is narrower than true availability, so it favours completeness, and the decision says so here rather than letting a figure imply otherwise.
 
 **What cannot be computed is counted, not dropped:**
 
