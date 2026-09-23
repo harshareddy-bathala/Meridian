@@ -105,9 +105,9 @@ For each station-day, compute:
 completeness = observed_passes / geometrically_available_passes
 ```
 
-where the denominator is computed by us from element sets and the station's declared capability, not taken from the archive.
+where the denominator is computed by us from element sets and the station's declared capability, not taken from the archive. It counts physical passes, not predictions of them (D-148); what is eligible and what counts as observed are D-149; how an archive station's denominator is computed when it has declared no capability is D-150.
 
-Restrict primary SC-1 evaluation to station-days above a completeness threshold (initially 0.8, tuned and reported). Where nearly every available pass was observed, the counterfactual is nearly complete.
+Restrict primary SC-1 evaluation to station-days above a completeness threshold (initially 0.8, tuned and reported — D-151). Where nearly every available pass was observed, the counterfactual is nearly complete.
 
 **Report the completeness distribution alongside every result.** A result on 0.9-complete windows is much stronger than one on 0.3-complete windows, and hiding the difference is how projects fail review.
 
@@ -116,6 +116,8 @@ Restrict primary SC-1 evaluation to station-days above a completeness threshold 
 Where completeness is partial, apply inverse-propensity weighting. Fit a propensity model estimating P(observed | pass features) against the historical scheduling policy, then weight outcomes by the inverse.
 
 Report effective sample size. If it collapses, the estimate is unreliable and must be labelled as such rather than quoted.
+
+The propensity is estimated by counting within cells, never from an outcome (D-152); the floor, the diagnostics and the `unreliable` flag are D-153; and a result cannot be stated without its completeness, because the type that carries it requires it (D-154).
 
 ### 4.3 Mitigation three — prospective evaluation
 

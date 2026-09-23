@@ -333,7 +333,8 @@ Written by `meridian snapshot export`, the only step that reads the database, in
 - `passes`, `assignments`, and every `observations` revision submitted by `as_of`;
 - `listening` — per settled scheduled assignment, `listening_confirmed` as `Registry.was_listening()` answered it at export (D-145) — and the `heartbeats` overlapping those windows;
 - the `element_sets` the passes were computed from, `satellites` with their `transmitters`, and `stations` with their `capabilities`, effective from `registered_at` until `deleted_at`;
-- `archive_stations`, `archive_observations` and `ingest_provenance`, kept in their own files and their own vocabulary.
+- `archive_stations`, `archive_observations` and `ingest_provenance`, kept in their own files and their own vocabulary;
+- `archive_passes` *(Stage 16)* — the passes our orbit service says each archive station could have received, for the satellites it was seen receiving, propagated at export so labelling never propagates (D-150). What could not be computed is counted in the manifest, not left out.
 
 Every row that has a `simulated` column keeps it. **A raw snapshot is outside the database backup and cannot be retaken**, since no later export can have the same `as_of`.
 
@@ -341,8 +342,10 @@ Every row that has a `simulated` column keeps it. **A raw snapshot is outside th
 
 Written by `meridian snapshot label` from a raw snapshot and a labelling configuration, with no database, clock or network — so the same two inputs always give the same hash, which is Stage 15's gate.
 
-- `labels.jsonl` — one row per geometrically available pass: keys, `label` or `exclusion_reason`, `source_outcome`, `listening_confirmed`, `scheduled_by` and `simulated`. The labels and their order of precedence are D-146; the satellite-silent evidence is D-147.
+- `labels.jsonl` — one row per geometrically available **physical** pass, every prediction of one rise grouped and listed as `pass_ids` (D-148): keys, `label` or `exclusion_reason`, `source_outcome`, `listening_confirmed`, `scheduled_by` and `simulated`. The labels and their order of precedence are D-146; the satellite-silent evidence is D-147.
 - `archive_receptions.jsonl` — archive receptions with their own outcome vocabulary and provenance. They never receive a Meridian label.
+- `station_days.jsonl` *(Stage 16)* — per station-day and population: eligible passes, attempted passes, completeness, and whether the day is retained, `empty` or `inactive` (D-149 to D-151).
+- `propensities.jsonl` *(Stage 16)* — per eligible pass: its cell, the fallback level used, the propensity, the floored weight, and whether it had support (D-152, D-153).
 - `manifest.json` — the raw snapshot's hash, the transformation version, the configuration's sha256, the settle margin, and the measured and simulated counts reported apart.
 
 ---
@@ -404,9 +407,10 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 
 `observations_current` is the only one built. It exposes the highest revision per assignment, and it ships alongside the `observations` table because appending corrections rather than overwriting them is meaningless without something that reads the current one.
 
+`pass_completeness` is not a view. Completeness is `station_days.jsonl` in every evaluation dataset (D-149, D-154): a view over live tables would give a different answer each time it was read, and the ratio must be regenerable from a snapshot (rule 8).
+
 The rest wait on data Phase 1 does not yet produce:
 
-- `pass_completeness` — observed ÷ available, per station-day. Drives the selection-bias mitigation.
 - `timing_error` — first detection minus predicted AOS, joined to element-set age.
 - `sli_current` — the four service level indicators over a rolling window.
 
