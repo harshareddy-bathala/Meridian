@@ -3312,6 +3312,8 @@ Success is `successful_reception` among attempted passes with a usable yield lab
 
 **Unreliable is a flag, not a footnote.** A weighted estimate whose ESS is below max(30, 0.1 × n) is marked `unreliable: true`. `EVALUATION.md` §4.2 says such an estimate must be labelled rather than quoted; the flag is that label, carried in the data so no report can drop it.
 
+**At the default floor, only the 30 decides.** With every weight between 1 and 1 ÷ floor, ESS cannot fall below 4r ÷ (1 + r)² of n, where r is that ratio — about 0.18 n when r is 20. The 0.1 n clause can bind only when r exceeds about 38 — a floor below about 0.026. It stays in the rule because the floor is configuration, and a report made under a lower one must still carry the flag; `tests/unit/test_datasets_weighting.py` sets the floor to 0.01 to show that it does.
+
 *Rejected: bootstrap intervals.* They need a seed and many resamples to say roughly what the Wilson interval at the ESS already says, and they would make the report's bytes depend on the resample count.
 
 ---
