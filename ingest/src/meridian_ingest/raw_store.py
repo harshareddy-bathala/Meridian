@@ -53,6 +53,8 @@ from meridian_ingest.raw_layout import (
     digest_on_disk,
     directory_name,
     seal_files,
+    sync_directory,
+    write_synced,
 )
 from meridian_ingest.raw_manifest import RawManifest, manifest_bytes, parse_manifest
 
@@ -158,8 +160,9 @@ class RawStore:
         scratch.mkdir(parents=True)
         try:
             manifest = capture(scratch, provenance, chunks)
-            (scratch / MANIFEST_NAME).write_bytes(manifest_bytes(manifest))
+            write_synced(scratch / MANIFEST_NAME, manifest_bytes(manifest))
             seal_files(scratch)
+            sync_directory(scratch)
             return self._place(scratch, manifest)
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
@@ -300,6 +303,7 @@ class RawStore:
         except OSError as exc:
             return self._already_stored(final, raw_path, manifest, exc)
         final.chmod(0o555)
+        sync_directory(final.parent)
         return PublishedArtefact(raw_path=raw_path, manifest=manifest, written=True)
 
     def _already_stored(

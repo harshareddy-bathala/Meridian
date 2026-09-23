@@ -21,6 +21,7 @@ Reference: docs/DECISIONS.md D-141.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from collections.abc import Iterable
 from datetime import UTC
@@ -42,6 +43,8 @@ __all__ = [
     "digest_on_disk",
     "directory_name",
     "seal_files",
+    "sync_directory",
+    "write_synced",
 ]
 
 ARTEFACT_NAME = "artefact.bin"
@@ -113,6 +116,8 @@ def capture(
             streamed.update(chunk)
             counted += len(chunk)
             handle.write(chunk)
+        handle.flush()
+        os.fsync(handle.fileno())
     if counted == 0:
         message = f"{provenance.original_identifier} produced no bytes"
         raise EmptyArtefactError(message)
@@ -143,6 +148,42 @@ def digest_on_disk(path: Path) -> tuple[bytes, int]:
             digest.update(block)
             length += len(block)
     return digest.digest(), length
+
+
+def write_synced(path: Path, data: bytes) -> None:
+    """Write a small file and make sure it has reached the disk.
+
+    Args:
+        path: Where to write it.
+        data: Its whole contents.
+    """
+    with path.open("wb") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def sync_directory(path: Path) -> None:
+    """Make a directory's entries durable: what it holds, and what was renamed in.
+
+    Args:
+        path: The directory to sync.
+
+    Note:
+        **Why publication needs this.** A rename is atomic but not durable on
+        its own. After a power loss, the new name can survive while the file
+        contents it points at were never written, or the rename itself can be
+        lost. So the files are synced before the scratch directory moves, and
+        the directory it moved into is synced after. This tree is the one thing
+        here that cannot be fetched again from a source that has withdrawn it
+        (D-141), so a truncated artefact left under a valid name is the failure
+        worth the few milliseconds.
+    """
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def seal_files(scratch: Path) -> None:

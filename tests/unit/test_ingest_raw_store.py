@@ -190,6 +190,34 @@ def test_publishing_leaves_no_scratch_behind(store: RawStore) -> None:
     assert store.sweep(SOURCE) == ()
 
 
+def test_publishing_syncs_everything_it_renames_into_place(
+    store: RawStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bytes, the manifest, the directory that moves, and where it moves to.
+
+    A rename is atomic but not durable. Without these four, a power loss can
+    leave a valid name over a truncated artefact in the one tree that cannot
+    be fetched again (D-141). Compared by inode, since the scratch directory
+    is the published one under a new name.
+    """
+    synced: set[tuple[int, int]] = set()
+    real_fsync = raw_layout.os.fsync
+
+    def record(descriptor: int) -> None:
+        facts = raw_layout.os.fstat(descriptor)
+        synced.add((facts.st_dev, facts.st_ino))
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(raw_layout.os, "fsync", record)
+
+    published = store.publish(a_provenance(), [BODY])
+
+    final = store.root / published.raw_path
+    for path in (final / ARTEFACT_NAME, final / MANIFEST_NAME, final, final.parent):
+        facts = path.stat()
+        assert (facts.st_dev, facts.st_ino) in synced, f"{path.name} was not synced"
+
+
 def test_verify_accepts_an_intact_record(store: RawStore) -> None:
     published = store.publish(a_provenance(), [BODY])
 
