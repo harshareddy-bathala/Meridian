@@ -226,7 +226,7 @@ def test_a_station_with_no_altitude_is_propagated_at_sea_level_and_counted() -> 
 
 def test_a_satellite_not_keyed_by_norad_number_is_counted() -> None:
     orbit, result = compute(
-        [station()], [reception(MIDNIGHT_23, key="LUME-1", kind="name")]
+        [station()], [reception(MIDNIGHT_23, key="LUME-1", kind="source_name")]
     )
 
     assert orbit.searches == []

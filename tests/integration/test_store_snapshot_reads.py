@@ -295,7 +295,7 @@ def test_an_archive_satellite_keyed_by_name_brings_no_element_set(
     schedule_rows.element_set_at(satellite, SINCE - timedelta(days=2), "manual")
     station = schedule_rows.archive_reception(satellite, INSIDE)
     rollback.execute(
-        "update archive_observations set satellite_key_kind = 'name'"
+        "update archive_observations set satellite_key_kind = 'source_name'"
         " where archive_station_id = %s",
         (station,),
     )
