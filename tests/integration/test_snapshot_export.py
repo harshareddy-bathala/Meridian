@@ -220,7 +220,12 @@ def test_an_archive_station_s_passes_are_propagated_and_frozen(
     assert passes
     assert {one["archive_station_id"] for one in passes} == {station}
     assert {one["satellite_id"] for one in passes} == {satellite}
-    assert all(one["aos"].startswith("2026-08-14T") for one in passes)
+    # The day of the reception, and the hour before it: the first search leads
+    # by an hour so a pass already in progress can place a reception (D-150).
+    first = datetime(2026, 8, 14, tzinfo=UTC) - timedelta(hours=1)
+    rises = [datetime.fromisoformat(one["aos"]) for one in passes]
+    assert all(first <= aos < first + timedelta(hours=25) for aos in rises)
+    assert any(aos.date().isoformat() == "2026-08-14" for aos in rises)
     counts = published.manifest.counts
     assert counts["archive_passes"] == len(passes)
     assert counts["archive_denominator.stations_without_location"] == 1
