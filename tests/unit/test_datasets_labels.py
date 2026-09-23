@@ -57,6 +57,7 @@ def a_pass(
         los=aos + timedelta(minutes=11),
         max_elevation_deg=40.0,
         element_set_epoch=aos - timedelta(hours=6),
+        computed_at=aos - timedelta(hours=5),
         simulated=simulated,
     )
 
@@ -655,3 +656,23 @@ def test_listening_answers_for_other_assignments_do_not_leak() -> None:
     snapshot = with_listening(reported("no_signal", confirmed=None), {"as_9": True})
 
     assert label(snapshot).label == "station_not_confirmed_listening"
+
+
+def test_a_rise_that_begins_before_since_is_left_out_whole() -> None:
+    """D-148: seen whole across the boundary, and dropped whole, never halved."""
+    first = a_pass()
+    newer = a_second_prediction(first)
+    snapshot = rows(
+        passes=(first, newer, a_pass(3, aos=AOS + timedelta(hours=2))),
+        assignments=(assigned(first),),
+        observations=(report("as_1", "decoded"),),
+    )
+
+    labelled = label_passes(
+        snapshot,
+        as_of=AS_OF,
+        config=LabelConfig(),
+        since=first.aos + timedelta(seconds=1),
+    )
+
+    assert [one.pass_ids for one in labelled] == [(3,)]

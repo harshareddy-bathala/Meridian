@@ -3192,7 +3192,9 @@ D-063 keeps every prediction: a newer element set that predicts the same rise is
 
 **Predictions of the same station and satellite whose `[aos, los)` windows overlap are one physical pass.** Overlap is the test rather than equal `aos`, because two element sets disagree on acquisition by seconds and neither of them is the true one. Grouping is transitive: A overlaps B and B overlaps C makes one pass. It runs in `(station, satellite, aos, pass_id)` order, so it has one answer.
 
-**The representative prediction is the newest one available before the pass.** That is the member whose element-set epoch is latest while still not after the group's earliest `aos`, with ties broken by the lowest `pass_id`. Where every member was predicted from a later epoch, the member with the earliest epoch is used. The representative's geometry is what completeness and the propensity see, so neither can use elements from after the pass (rule 6, applied to features as well as splits).
+**The representative prediction is the newest one available before the pass.** Of the members whose `computed_at` is not after the group's earliest `aos`, it is the one whose element-set epoch is latest, with ties broken by the lowest `pass_id`. Where every member was computed after the rise, the one computed first is used. Availability is judged by when the prediction was made, not by its elements' epoch: element sets are published hours after their epoch, so an epoch before the pass can still be knowledge from after it. The representative's geometry is what completeness and the propensity see, so neither can use elements from after the pass (rule 6, applied to features as well as splits).
+
+**A rise is in a snapshot whole or not at all.** Two predictions of one rise can fall either side of `--since` by seconds. Export therefore reads every prediction whose window ends after `since`, and labelling keeps a physical pass only if it rises at or after `since`. Scoping by `aos` alone would export the later prediction without the earlier, scheduled one, and label the rise `not_scheduled` at every snapshot boundary.
 
 **Evidence is pooled across members**, exactly as D-146 already pools it across configurations. Assignments to any member schedule the physical pass; the most informative latest report wins; listening is confirmed if confirmed for any member. Each labelled row lists its members as `pass_ids`, sorted, and keys on the representative's `pass_id`.
 
@@ -3222,7 +3224,7 @@ D-063 keeps every prediction: a newer element set that predicts the same rise is
 
 **Observed means the historical policy attempted it,** not that it succeeded and not that its label is usable:
 
-- for our stations, some assignment of the pass received a report;
+- for our stations, some assignment of the pass received a report, or the registry confirmed the station was listening. A confirmed silence with no report is an attempt that heard nothing (rule 7), and it is labelled `confirmed_miss` or a satellite state; counting it as unattempted would score a miss the policy was never credited with trying;
 - for an archive station, one of its receptions matches the pass (D-150).
 
 Completeness measures the selection. Whether an attempted pass carries a usable yield label is a separate number, reported beside it and never folded into it. Folding it in would make a station that attempts everything but loses a report look like a station that chose not to attempt.
@@ -3238,6 +3240,8 @@ Completeness measures the selection. Whether an attempted pass carries a usable 
 D-138 says the denominator stays ours: nothing here trusts an archive's own count of what was available. So Stage 16 computes the passes each archive station could have received, with our orbit service and our element sets.
 
 **It is computed at export and written as `archive_passes.jsonl`.** Propagation is floating-point work in a C extension. Freezing its answer once keeps labelling a function of files, which is D-145's reasoning applied to geometry instead of listening. The labeller's hash then depends on the bytes in the snapshot, not on the orbit library giving identical floats on every machine. The element set used for each satellite is the one current at the start of each UTC day in scope, which is how pass generation chooses one.
+
+**A station's first search starts an hour early.** Search keeps only passes that rise inside it, so a reception just after the span or the snapshot begins may belong to a pass that rose just before. That pass is computed so the reception can be placed, and, like our own rises before `since` (D-148), it is in no denominator.
 
 **Capability is what the station has demonstrated.** An archive's capability description, where `capability_json` holds one at all, is in the archive's own vocabulary and is not read by anything here, so "could receive" cannot come from declared hardware. The denominator covers the satellites the station has at least one reception of in the snapshot, at or above a configured elevation floor (default 0°). This is narrower than true availability, so it favours completeness, and the decision says so here rather than letting a figure imply otherwise.
 
@@ -3518,7 +3522,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 |---|---|
 | D-148 the physical pass is the unit, `labels-2` | `meridian/datasets/{physical_passes,pooled_evidence,labels}.py`; `DATA-MODEL.md` |
 | D-149 eligible, attempted and usable, per UTC station-day | `meridian/datasets/completeness.py`; `meridian/datasets/selection.py` |
-| D-150 the archive denominator, computed and frozen at export | `meridian/datasets/archive_passes.py`; `meridian/datasets/export.py`; `meridian/store/snapshot_reads.py`; `DATA-MODEL.md` |
+| D-150 the archive denominator, computed and frozen at export | `meridian/datasets/{archive_passes,archive_matching}.py`; `meridian/datasets/export.py`; `meridian/store/snapshot_reads.py`; `DATA-MODEL.md` |
 | D-151 the threshold, the distribution and the sensitivity table | `meridian/datasets/{selection_config,completeness,result_reader,completeness_report}.py`; `deploy/snapshot.toml.example` |
 | D-152 a binned propensity that never sees an outcome | `meridian/datasets/propensity.py`; `tests/unit/test_datasets_boundaries.py` |
 | D-153 the floor, support, ESS and the `unreliable` flag | `meridian/datasets/weighting.py`; `deploy/snapshot.toml.example` |

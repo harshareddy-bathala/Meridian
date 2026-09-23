@@ -8,8 +8,10 @@ Reference: docs/DECISIONS.md D-148, D-149, D-150, D-151.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 
+from meridian.datasets.archive_matching import match_receptions
 from meridian.datasets.completeness import (
     STATUSES,
     StationDay,
@@ -119,6 +121,22 @@ def test_attempted_is_a_report_not_a_success() -> None:
     assert (day.eligible, day.attempted, day.usable) == (2, 1, 1)
 
 
+def test_a_confirmed_silence_with_no_report_was_attempted() -> None:
+    """Rule 7: the registry confirmed it listened, so it tried and heard nothing.
+
+    Usable is never more than attempted: a miss the weights score is a pass
+    the policy is counted as having taken.
+    """
+    passes = [
+        labelled(label="confirmed_miss", reported=False),
+        labelled(label="station_not_confirmed_listening", reported=False),
+    ]
+
+    day = only(own_station_days(passes, CONFIG))
+
+    assert (day.eligible, day.attempted, day.usable) == (2, 1, 1)
+
+
 def test_usable_counts_only_what_a_yield_label_can_score() -> None:
     passes = [
         labelled(label="successful_reception"),
@@ -202,6 +220,16 @@ def computed(
     )
 
 
+def archive_days(
+    passes: Sequence[ArchivePassRow],
+    receptions: Sequence[ArchiveReception],
+    config: CompletenessConfig,
+) -> tuple[tuple[StationDay, ...], int]:
+    """The days, and how many receptions no computed pass could place."""
+    matches = match_receptions(passes, receptions, config.archive_match_tolerance_s)
+    return archive_station_days(passes, matches, config), matches.unmatched
+
+
 def received(
     at: datetime,
     *,
@@ -222,7 +250,7 @@ def received(
 def test_a_reception_inside_a_computed_window_attempts_it() -> None:
     passes = [computed(3), computed(9)]
 
-    days, unmatched = archive_station_days(
+    days, unmatched = archive_days(
         passes, [received(passes[0].aos + timedelta(minutes=2))], CONFIG
     )
 
@@ -235,10 +263,8 @@ def test_the_tolerance_reaches_before_acquisition_and_no_further() -> None:
     target = computed(3)
     tolerance = timedelta(seconds=CONFIG.archive_match_tolerance_s)
 
-    inside, _ = archive_station_days(
-        [target], [received(target.aos - tolerance)], CONFIG
-    )
-    outside, unmatched = archive_station_days(
+    inside, _ = archive_days([target], [received(target.aos - tolerance)], CONFIG)
+    outside, unmatched = archive_days(
         [target],
         [received(target.aos - tolerance - timedelta(seconds=1))],
         CONFIG,
@@ -260,7 +286,7 @@ def test_the_nearest_acquisition_claims_a_reception_two_windows_could() -> None:
     second = computed(3 + 13 / 60)
     at = first.los + timedelta(seconds=90)
 
-    days, unmatched = archive_station_days([first, second], [received(at)], config)
+    days, unmatched = archive_days([first, second], [received(at)], config)
 
     assert (only(days).eligible, only(days).attempted) == (1, 1)
     assert unmatched == 0
@@ -270,7 +296,7 @@ def test_a_pass_below_the_floor_is_not_available() -> None:
     config = CompletenessConfig(archive_min_elevation_deg=10.0)
     low, high = computed(3, peak=6.0), computed(9, peak=45.0)
 
-    days, unmatched = archive_station_days(
+    days, unmatched = archive_days(
         [low, high], [received(low.aos + timedelta(minutes=1))], config
     )
 
@@ -281,9 +307,7 @@ def test_a_pass_below_the_floor_is_not_available() -> None:
 def test_an_unknown_outcome_is_attempted_but_not_usable() -> None:
     target = computed(3)
 
-    days, _ = archive_station_days(
-        [target], [received(target.aos, outcome="unknown")], CONFIG
-    )
+    days, _ = archive_days([target], [received(target.aos, outcome="unknown")], CONFIG)
 
     assert (only(days).attempted, only(days).usable) == (1, 0)
 
@@ -293,7 +317,7 @@ def test_a_day_inside_the_span_with_no_reception_is_inactive_not_zero() -> None:
     passes = [computed(3, day=DAY + timedelta(days=n)) for n in range(3)]
     receptions = [received(passes[0].aos), received(passes[2].aos)]
 
-    days, _ = archive_station_days(passes, receptions, CONFIG)
+    days, _ = archive_days(passes, receptions, CONFIG)
 
     assert [one.status for one in days] == ["retained", "inactive", "retained"]
     assert days[1].completeness is None
@@ -303,7 +327,7 @@ def test_a_day_inside_the_span_with_no_reception_is_inactive_not_zero() -> None:
 def test_days_outside_the_span_are_not_the_station_s() -> None:
     passes = [computed(3, day=DAY + timedelta(days=n)) for n in range(3)]
 
-    days, _ = archive_station_days(passes, [received(passes[1].aos)], CONFIG)
+    days, _ = archive_days(passes, [received(passes[1].aos)], CONFIG)
 
     assert [one.day for one in days] == [date(2026, 8, 15)]
 
@@ -312,7 +336,7 @@ def test_a_reception_the_denominator_could_not_place_is_counted() -> None:
     """No computed pass for its station, or a key that is not a NORAD number."""
     target = computed(3)
 
-    days, unmatched = archive_station_days(
+    days, unmatched = archive_days(
         [target],
         [
             received(target.aos, station=99),

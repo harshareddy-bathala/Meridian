@@ -156,6 +156,15 @@ def test_an_attempt_with_no_usable_outcome_carries_no_weight() -> None:
     assert result.weighted == 1
 
 
+def test_a_usable_outcome_the_policy_did_not_attempt_carries_no_weight() -> None:
+    """Rates are among attempted passes (D-153), whatever else is usable."""
+    passes = [scored(1, 2), scored(1, 2, attempted=False, usable=True)]
+
+    result = weigh(passes, model="binned-1", floor=FLOOR)
+
+    assert result.weighted == 1
+
+
 def test_nothing_to_weight_says_so_and_is_unreliable() -> None:
     result = weigh([scored(0, 3, attempted=False)], model="binned-1", floor=FLOOR)
 

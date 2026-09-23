@@ -11,7 +11,7 @@ Reference: docs/DECISIONS.md D-149, D-150, D-152, D-153, D-154.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,12 @@ from meridian.datasets.evaluation import (
 )
 from meridian.datasets.label_config import LabelConfig
 from meridian.datasets.publish import read_directory
-from meridian.datasets.selection import NO_ELIGIBLE_PASSES
+from meridian.datasets.selection import NO_ELIGIBLE_PASSES, select
+from meridian.datasets.snapshot_rows import (
+    ArchivePassRow,
+    ArchiveReception,
+    SnapshotRows,
+)
 
 CREATED = datetime(2026, 9, 23, 7, 0, tzinfo=UTC)
 
@@ -152,3 +157,44 @@ def test_the_summary_is_part_of_the_hash(dataset: Any) -> None:
     again = read_directory(dataset.path)
 
     assert again.manifest.summary == dataset.manifest.summary
+
+
+def test_an_archive_pass_before_since_places_a_reception_but_is_not_available() -> None:
+    """D-148, D-150: computed so its reception is not unmatched; in no ratio."""
+    noon = datetime(2026, 9, 10, 12, 0, tzinfo=UTC)
+
+    def computed(aos: datetime) -> ArchivePassRow:
+        return ArchivePassRow(
+            archive_station_id=7,
+            satellite_id="norad:25544",
+            aos=aos,
+            los=aos + timedelta(minutes=10),
+            max_elevation_deg=40.0,
+        )
+
+    def heard(at: datetime) -> ArchiveReception:
+        return ArchiveReception(
+            satellite_key="norad:25544",
+            satellite_key_kind="norad",
+            started_at=at + timedelta(minutes=3),
+            archive_outcome="decoded",
+            archive_station_id=7,
+        )
+
+    early, late = noon - timedelta(hours=2), noon + timedelta(hours=2)
+    rows = SnapshotRows(
+        passes=(),
+        assignments=(),
+        observations=(),
+        heartbeats=(),
+        listening={},
+        archive=(heard(early), heard(late)),
+        archive_passes=(computed(early), computed(late)),
+    )
+
+    selection = select((), rows, LabelConfig(), since=noon)
+
+    (day,) = [one for one in selection.station_days if one.population == "archive"]
+    assert (day.eligible, day.attempted) == (1, 1)
+    assert selection.unmatched_receptions == 0
+    assert len(selection.scored) == 1

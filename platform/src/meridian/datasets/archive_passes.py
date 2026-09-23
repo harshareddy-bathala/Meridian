@@ -55,6 +55,10 @@ ARCHIVE_PASSES = "archive_passes"
 """The file is ``archive_passes.jsonl``."""
 
 _DAY = timedelta(days=1)
+_LEAD = timedelta(hours=1)
+"""How far before a station's span the first search starts, so a pass already
+in progress when the span or the snapshot begins is computed and a reception
+of it can be placed. Longer than any low-orbit pass."""
 
 _COUNTS = (
     "stations_without_location",
@@ -240,7 +244,8 @@ def _satellite_passes(
             search = PassSearch(
                 element_set=current.element_set,
                 site=site,
-                start=max(starts, propagation.since),
+                start=max(starts, propagation.since)
+                - (_LEAD if day == station.first_day else timedelta()),
                 end=min(starts + _DAY, propagation.as_of),
             )
             if search.start < search.end:

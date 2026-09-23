@@ -218,6 +218,7 @@ PASS = {
     "element_set_id": 7,
     "simulated": False,
     "max_elevation_deg": 61.4,
+    "computed_at": AOS,
 }
 
 ELEMENT_SET = {"id": 7, "satellite_id": "norad:57166", "epoch": AOS}
@@ -273,6 +274,14 @@ def test_longitudes_are_read_for_both_kinds_of_station() -> None:
     )
 
     assert rows.longitudes == {"st_a": 77.0, "archive:4": -1.5}
+
+
+def test_a_snapshot_from_before_stage_16_says_what_to_do() -> None:
+    held = files()
+    del held["archive_passes.jsonl"]
+
+    with pytest.raises(MalformedSnapshotError, match="export again"):
+        parse_rows(held)
 
 
 def test_a_pass_whose_element_set_is_not_held_is_refused() -> None:

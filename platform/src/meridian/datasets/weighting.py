@@ -147,7 +147,9 @@ def weigh(scored: Sequence[Scored], *, model: str, floor: float) -> IpwDiagnosti
     units = [
         (weight, one.success)
         for one in scored
-        if one.usable and (weight := weight_of(one.estimate, floor)) is not None
+        if one.usable
+        and one.estimate.candidate.attempted
+        and (weight := weight_of(one.estimate, floor)) is not None
     ]
     weights = [weight for weight, _ in units]
     total = fsum(weights)
@@ -165,7 +167,9 @@ def weigh(scored: Sequence[Scored], *, model: str, floor: float) -> IpwDiagnosti
         floored=sum(
             1
             for one in scored
-            if one.usable and one.estimate.attempted and one.estimate.propensity < floor
+            if one.usable
+            and one.estimate.candidate.attempted
+            and one.estimate.propensity < floor
         ),
         unweighted=_wilson(successes / len(units), len(units)) if units else None,
         weighted_rate=(

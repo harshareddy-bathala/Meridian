@@ -60,6 +60,7 @@ flowchart TD
 - **Not built:**
   - a fitted propensity model, which belongs with Stage 17's numerical dependencies;
   - randomised scheduling, which would give the weights something to work with;
+  - propagation of the archive denominator outside the export's transaction. It runs inside the `REPEATABLE READ` snapshot today, after every row is read. At one reference source that is seconds; with hundreds of archive stations it would hold the snapshot open for minutes, so it is owed before archive ingest grows (found in the Stage 16 review);
   - archive stations' declared capability as a denominator filter. Archives publish none in our vocabulary, so the denominator is the satellites a station demonstrably received, which favours completeness, and D-150 says so.
 
 **Stage 15's software is built.** Its decisions are D-143 through D-147, and `docs/OPERATIONS.md` § Dataset snapshots is its runbook.

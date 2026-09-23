@@ -24,6 +24,7 @@ def prediction(
     station: str = "st_a",
     satellite: str = "norad:57166",
 ) -> PassRow:
+    """By default computed a minute after its elements' epoch."""
     aos = AOS + timedelta(seconds=shift_s)
     return PassRow(
         pass_id=pass_id,
@@ -33,6 +34,7 @@ def prediction(
         los=aos + timedelta(minutes=11),
         max_elevation_deg=40.0,
         element_set_epoch=epoch,
+        computed_at=epoch + timedelta(minutes=1),
         simulated=False,
     )
 
@@ -102,15 +104,32 @@ def test_the_representative_is_the_newest_prediction_made_before_the_rise() -> N
     assert grouped[0].representative.pass_id == 2
 
 
+def test_an_early_epoch_published_after_the_pass_is_not_before_it() -> None:
+    """Elements from an hour before the rise, retrieved and computed after it.
+
+    By epoch it is the newest before the pass; by what was known then it did
+    not exist yet, so the older prediction represents the rise (D-148).
+    """
+    grouped = group_physical_passes(
+        [
+            prediction(1, epoch=EPOCH),
+            replace(
+                prediction(2, shift_s=2, epoch=AOS - timedelta(hours=1)),
+                computed_at=AOS + timedelta(hours=3),
+            ),
+        ]
+    )
+
+    assert grouped[0].representative.pass_id == 1
+
+
 def test_a_tie_on_epoch_goes_to_the_lowest_pass_id() -> None:
     (physical,) = group_physical_passes([prediction(5), prediction(4, shift_s=1)])
 
     assert physical.representative.pass_id == 4
 
 
-def test_with_no_prediction_from_before_the_rise_the_earliest_epoch_represents_it() -> (
-    None
-):
+def test_with_no_prediction_from_before_the_rise_the_first_made_represents_it() -> None:
     later = AOS + timedelta(hours=2)
     (physical,) = group_physical_passes(
         [

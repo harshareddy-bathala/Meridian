@@ -66,6 +66,7 @@ def _pass(pass_id: int, station: str, *, simulated: bool = False) -> dict[str, o
         "los": AOS + timedelta(minutes=11),
         "max_elevation_deg": 40.0,
         "element_set_id": 1,
+        "computed_at": AOS - timedelta(hours=5),
         "simulated": simulated,
     }
 

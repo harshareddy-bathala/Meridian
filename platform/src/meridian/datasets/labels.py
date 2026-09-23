@@ -147,7 +147,11 @@ class _Context:
 
 
 def label_passes(
-    rows: SnapshotRows, *, as_of: datetime, config: LabelConfig
+    rows: SnapshotRows,
+    *,
+    as_of: datetime,
+    config: LabelConfig,
+    since: datetime | None = None,
 ) -> tuple[LabelledPass, ...]:
     """Label every pass in a raw snapshot.
 
@@ -155,11 +159,18 @@ def label_passes(
         rows: The snapshot's rows.
         as_of: The snapshot's own instant, from its manifest.
         config: The labelling configuration.
+        since: The snapshot's start, from its manifest. A rise that begins
+            before it is not labelled: the export reads predictions of it from
+            either side of ``since`` only so it can be seen whole (D-148).
 
     Returns:
         One labelled row per physical pass, in representative pass-id order.
     """
-    physical = group_physical_passes(rows.passes)
+    physical = tuple(
+        one
+        for one in group_physical_passes(rows.passes)
+        if since is None or one.first_aos >= since
+    )
     evidence = pool_evidence(physical, rows)
     context = _Context(
         heard=_heartbeat_times(rows),

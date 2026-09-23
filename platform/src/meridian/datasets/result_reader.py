@@ -22,7 +22,13 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date
 
-from meridian.datasets.completeness import POPULATIONS, STATUSES, StationDay, summarise
+from meridian.datasets.completeness import (
+    POPULATIONS,
+    STATUSES,
+    StationDay,
+    reaches,
+    summarise,
+)
 from meridian.datasets.manifest_parse import (
     MalformedManifestError,
     mapping,
@@ -77,7 +83,8 @@ def read_results(
     if not manifest.summary:
         message = (
             f"{dataset.path} was labelled before Stage 16 and carries no "
-            "completeness; label its raw snapshot again"
+            "completeness; label its raw snapshot again, or export again if that"
+            " snapshot is from before Stage 16 too"
         )
         raise NoSelectionError(message)
     config = parse_completeness(manifest.parameters.get("completeness", {}))
@@ -113,8 +120,8 @@ def _day(row: object, threshold: float) -> StationDay:
     eligible = whole(held.get("eligible"), "station day eligible")
     attempted = whole(held.get("attempted"), "station day attempted")
     if status in _RATED:
-        # The same division ``completeness`` judges by, so 7/10 at 0.7 agrees.
-        status = "retained" if attempted / eligible >= threshold else "below_threshold"
+        judged = reaches(attempted, eligible, threshold)
+        status = "retained" if judged else "below_threshold"
     return StationDay(
         population=text(held.get("population"), "station day population"),
         station=text(held.get("station"), "station day station"),

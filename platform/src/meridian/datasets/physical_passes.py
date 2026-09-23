@@ -12,11 +12,13 @@ overlap are one physical pass**, transitively. Overlap rather than equal
 neither is the true one.
 
 **The representative is the newest prediction available before the pass**:
-the member whose element-set epoch is latest while not after the group's
-earliest ``aos``, lowest ``pass_id`` on a tie. Where every member came from a
-later epoch, the one from the earliest epoch is used. Its geometry is what
-completeness and the propensity read, so neither sees elements from after the
-pass.
+of the members computed no later than the group's earliest ``aos``, the one
+whose element-set epoch is latest, lowest ``pass_id`` on a tie. Where every
+member was computed after the rise, the one computed first is used.
+Availability is when the prediction was made, not its elements' epoch: sets
+are published hours after their epoch, so an epoch before the pass can still be
+knowledge from after it. The representative's geometry is what completeness
+and the propensity read, so neither sees a prediction made after the pass.
 
 Reference: docs/DECISIONS.md D-063, D-148.
 """
@@ -44,6 +46,11 @@ class PhysicalPass:
     def pass_ids(self) -> tuple[int, ...]:
         """Every member's id, sorted."""
         return tuple(one.pass_id for one in self.members)
+
+    @property
+    def first_aos(self) -> datetime:
+        """The earliest acquisition any member predicts: when the rise begins."""
+        return min(one.aos for one in self.members)
 
     @property
     def last_los(self) -> datetime:
@@ -96,15 +103,13 @@ def _overlapping(predictions: list[PassRow]) -> list[list[PassRow]]:
 
 def _physical(members: list[PassRow]) -> PhysicalPass:
     rises = min(one.aos for one in members)
-    before = [one for one in members if one.element_set_epoch <= rises]
+    before = [one for one in members if one.computed_at <= rises]
     if before:
         representative = max(
             before, key=lambda one: (one.element_set_epoch, -one.pass_id)
         )
     else:
-        representative = min(
-            members, key=lambda one: (one.element_set_epoch, one.pass_id)
-        )
+        representative = min(members, key=lambda one: (one.computed_at, one.pass_id))
     return PhysicalPass(
         representative=representative,
         members=tuple(sorted(members, key=lambda one: one.pass_id)),

@@ -25,14 +25,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
+from meridian.datasets.archive_matching import ReceptionMatches, match_receptions
 from meridian.datasets.completeness import (
     POPULATIONS,
     STATUSES,
     USABLE_LABELS,
     StationDay,
     archive_station_days,
-    match_receptions,
+    own_attempted,
     own_eligible,
     own_station_days,
     summarise,
@@ -41,7 +43,7 @@ from meridian.datasets.label_config import LabelConfig
 from meridian.datasets.labels import LabelledPass
 from meridian.datasets.propensity import BinnedPropensity, Candidate
 from meridian.datasets.result import EvaluationResult, NotWeighted
-from meridian.datasets.snapshot_rows import SnapshotRows
+from meridian.datasets.snapshot_rows import ArchivePassRow, SnapshotRows
 from meridian.datasets.weighting import Scored, weigh, weight_of
 
 __all__ = [
@@ -125,7 +127,11 @@ class Selection:
 
 
 def select(
-    labelled: Sequence[LabelledPass], rows: SnapshotRows, config: LabelConfig
+    labelled: Sequence[LabelledPass],
+    rows: SnapshotRows,
+    config: LabelConfig,
+    *,
+    since: datetime | None = None,
 ) -> Selection:
     """Station-days, propensities and weights for both populations.
 
@@ -133,15 +139,26 @@ def select(
         labelled: Every labelled physical pass, as :func:`label_passes` gave it.
         rows: The raw snapshot's rows, for peaks, longitudes and the archive.
         config: The labelling configuration.
+        since: The snapshot's start. An archive pass rising before it is used
+            to place a reception, and is in no denominator — as our own rises
+            before it are not labelled (D-148, D-150).
 
     Returns:
         The selection, ready to be written.
     """
-    archive_days, unmatched = archive_station_days(
-        rows.archive_passes, rows.archive, config.completeness
+    matches = match_receptions(
+        rows.archive_passes,
+        rows.archive,
+        config.completeness.archive_match_tolerance_s,
     )
+    available = tuple(
+        one for one in rows.archive_passes if since is None or one.aos >= since
+    )
+    archive_days = archive_station_days(available, matches, config.completeness)
     days = own_station_days(labelled, config.completeness) + archive_days
-    pairs = _own(labelled, rows) + _archive(rows, archive_days, config)
+    pairs = _own(labelled, rows) + _archive(
+        available, rows, archive_days, matches, config
+    )
     model = BinnedPropensity(config.propensity)
     estimates = model.estimate([candidate for candidate, _ in pairs])
     scored = tuple(
@@ -166,7 +183,7 @@ def select(
         scored=scored,
         model=model.name,
         floor=floor,
-        unmatched_receptions=unmatched,
+        unmatched_receptions=matches.unmatched,
         results=results,
     )
 
@@ -185,7 +202,7 @@ def _own(
                 aos=one.aos,
                 max_elevation_deg=peaks[one.pass_id],
                 longitude_deg=rows.longitudes.get(one.station_id),
-                attempted=one.source_outcome is not None,
+                attempted=own_attempted(one),
             ),
             _Outcome(
                 usable=one.label in USABLE_LABELS,
@@ -198,16 +215,17 @@ def _own(
 
 
 def _archive(
-    rows: SnapshotRows, days: Sequence[StationDay], config: LabelConfig
+    available: Sequence[ArchivePassRow],
+    rows: SnapshotRows,
+    days: Sequence[StationDay],
+    matches: ReceptionMatches,
+    config: LabelConfig,
 ) -> list[tuple[Candidate, _Outcome]]:
     """The archive's computed passes on active days, at or above the floor."""
     settings = config.completeness
     active = {(day.station, day.day) for day in days if day.status != "inactive"}
-    matches = match_receptions(
-        rows.archive_passes, rows.archive, settings.archive_match_tolerance_s
-    )
     pairs = []
-    for one in rows.archive_passes:
+    for one in available:
         station = f"archive:{one.archive_station_id}"
         if (station, one.aos.date()) not in active or (
             one.max_elevation_deg < settings.archive_min_elevation_deg

@@ -85,16 +85,18 @@ class SnapshotTable:
     so the same rows always render as the same bytes."""
 
 
-_SCOPED_PASSES = "select id from passes where aos >= %(since)s and aos < %(as_of)s"
+_PASS_SCOPE = "los > %(since)s and aos < %(as_of)s"
+"""Every prediction whose window reaches past ``since``, not only those rising
+after it. Two predictions of one rise can fall either side of ``since`` by
+seconds; reading both lets labelling see the rise whole and keep it or drop it
+whole, rather than label half of it ``not_scheduled`` (D-148)."""
+
+_SCOPED_PASSES = f"select id from passes where {_PASS_SCOPE}"
 _SCOPED_ASSIGNMENTS = (
     f"select assignment_id from assignments where pass_id in ({_SCOPED_PASSES})"
 )
-_SCOPED_STATIONS = (
-    "select station_id from passes where aos >= %(since)s and aos < %(as_of)s"
-)
-_SCOPED_SATELLITES = (
-    "select satellite_id from passes where aos >= %(since)s and aos < %(as_of)s"
-)
+_SCOPED_STATIONS = f"select station_id from passes where {_PASS_SCOPE}"
+_SCOPED_SATELLITES = f"select satellite_id from passes where {_PASS_SCOPE}"
 _SCOPED_ARCHIVE = (
     "select archive_observation_id from archive_observations"
     " where started_at >= %(since)s and started_at < %(as_of)s"
@@ -123,7 +125,7 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         "select id, satellite_id, station_id, aos, los, max_elevation_deg,"
         " max_elevation_at, aos_azimuth_deg, los_azimuth_deg, element_set_id,"
         " min_elevation_deg, computed_at, simulated"
-        " from passes where aos >= %(since)s and aos < %(as_of)s order by id",
+        f" from passes where {_PASS_SCOPE} order by id",
     ),
     SnapshotTable(
         "assignments",
@@ -171,7 +173,7 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         "select id, satellite_id, epoch, retrieved_at, line1, line2, source,"
         " content_sha256 from element_sets where id in ("
         "  select element_set_id from passes"
-        "  where aos >= %(since)s and aos < %(as_of)s"
+        f"  where {_PASS_SCOPE}"
         f"  union {_CURRENT_FOR_ARCHIVE})"
         " order by id",
     ),

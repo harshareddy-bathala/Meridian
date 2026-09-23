@@ -32,6 +32,10 @@ __all__ = [
 ]
 
 
+_SINCE_STAGE_16 = frozenset(("archive_passes",))
+"""Files an export made before Stage 16 does not hold."""
+
+
 class MalformedSnapshotError(ValueError):
     """A raw snapshot row without a field a label needs, or with the wrong type."""
 
@@ -51,6 +55,10 @@ class PassRow:
     element_set_epoch: datetime
     """The epoch of the element set this prediction was computed from, which
     decides which prediction of a rise represents it (D-148)."""
+
+    computed_at: datetime
+    """When the prediction was made: whether it was available before the pass
+    (D-148)."""
 
     simulated: bool
 
@@ -224,6 +232,7 @@ def _pass(row: Mapping[str, object], epochs: Mapping[int, datetime]) -> PassRow:
         los=_instant(row, "los"),
         max_elevation_deg=_number(row, "max_elevation_deg"),
         element_set_epoch=epochs[element_set_id],
+        computed_at=_instant(row, "computed_at"),
         simulated=_bool(row, "simulated"),
     )
 
@@ -252,6 +261,11 @@ def _lines(files: Mapping[str, bytes], name: str) -> list[Mapping[str, object]]:
         data = files[f"{name}.jsonl"]
     except KeyError as exc:
         message = f"the raw snapshot has no {name}.jsonl"
+        if name in _SINCE_STAGE_16:
+            message += (
+                ": it was exported before Stage 16, which computes the archive"
+                " denominator at export (D-150); export again to label it"
+            )
         raise MalformedSnapshotError(message) from exc
     rows: list[Mapping[str, object]] = []
     for number, line in enumerate(data.splitlines(), start=1):

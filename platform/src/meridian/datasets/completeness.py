@@ -6,7 +6,9 @@ populations, never pooled (D-053):
 
 * **our stations**: one labelled physical pass each (D-148). Eligible if it is
   measured, its report window has settled and its satellite was not judged
-  silent; attempted if some assignment of it received a report;
+  silent; attempted if some assignment of it received a report, or the
+  registry confirmed the station was listening — a confirmed silence is an
+  attempt that heard nothing (rule 7);
 * **archive stations**: one computed pass each (D-150), eligible if it peaks at
   or above the configured floor; attempted if one of the station's receptions
   of that satellite starts inside its window, widened by the tolerance.
@@ -39,9 +41,10 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from math import ceil
 
+from meridian.datasets.archive_matching import ReceptionMatches
 from meridian.datasets.label_config import CompletenessConfig
 from meridian.datasets.labels import LabelledPass
-from meridian.datasets.snapshot_rows import ArchivePassRow, ArchiveReception
+from meridian.datasets.snapshot_rows import ArchivePassRow
 
 __all__ = [
     "POPULATIONS",
@@ -49,12 +52,12 @@ __all__ = [
     "USABLE_LABELS",
     "CompletenessSummary",
     "Distribution",
-    "ReceptionMatches",
     "StationDay",
     "archive_station_days",
-    "match_receptions",
+    "own_attempted",
     "own_eligible",
     "own_station_days",
+    "reaches",
     "summarise",
 ]
 
@@ -65,6 +68,11 @@ USABLE_LABELS = frozenset(
     ("successful_reception", "signal_no_decode", "confirmed_miss")
 )
 _NOT_ELIGIBLE = frozenset(("report_window_open", "simulated"))
+_HEARD_NOTHING = frozenset(
+    ("confirmed_miss", "satellite_silent", "satellite_state_indeterminate")
+)
+"""Labels only a confirmed-listening silence reaches (D-146 rule 9): an attempt,
+reported or not."""
 _BINS = 10
 
 
@@ -178,7 +186,7 @@ def own_station_days(
         if own_eligible(one):
             held = _Tally(
                 eligible=held.eligible + 1,
-                attempted=held.attempted + (one.source_outcome is not None),
+                attempted=held.attempted + own_attempted(one),
                 usable=held.usable + (one.label in USABLE_LABELS),
             )
         tallies[key] = held
@@ -190,19 +198,19 @@ def own_station_days(
 
 def archive_station_days(
     passes: Sequence[ArchivePassRow],
-    receptions: Iterable[ArchiveReception],
+    matches: ReceptionMatches,
     config: CompletenessConfig,
-) -> tuple[tuple[StationDay, ...], int]:
+) -> tuple[StationDay, ...]:
     """Archive stations' days, from their computed passes and their receptions.
 
     Only a station with computed passes has days: one without was not placed
     at export, and the manifest already counts why (D-150).
 
-    Returns:
-        The station-days, and how many receptions matched no computed pass —
-        each one a reception the denominator could not place.
+    Args:
+        passes: The archive's computed passes.
+        matches: Where :func:`match_receptions` placed the receptions.
+        config: The completeness settings.
     """
-    matches = match_receptions(passes, receptions, config.archive_match_tolerance_s)
     tallies: dict[tuple[int, date], _Tally] = {
         (station, day): _Tally()
         for station, days in matches.heard.items()
@@ -220,7 +228,7 @@ def archive_station_days(
                 attempted=held.attempted + (candidate in matches.attempted),
                 usable=held.usable + (candidate in matches.usable),
             )
-    rows = tuple(
+    return tuple(
         _day(
             "archive",
             f"archive:{station}",
@@ -233,59 +241,6 @@ def archive_station_days(
             ),
         )
         for (station, day), tally in sorted(tallies.items())
-    )
-    return rows, matches.unmatched
-
-
-@dataclass(frozen=True, slots=True)
-class ReceptionMatches:
-    """Which passes the receptions claim, and the days each station was heard."""
-
-    heard: dict[int, set[date]]
-    attempted: frozenset[ArchivePassRow]
-    usable: frozenset[ArchivePassRow]
-    succeeded: frozenset[ArchivePassRow]
-    """Matched by a ``decoded`` reception: an archive success (D-153)."""
-
-    unmatched: int
-
-
-def match_receptions(
-    passes: Sequence[ArchivePassRow],
-    receptions: Iterable[ArchiveReception],
-    tolerance_s: int,
-) -> ReceptionMatches:
-    """Place each reception on the computed pass it belongs to, if any."""
-    by_pair: dict[tuple[int, str], list[ArchivePassRow]] = {}
-    for candidate in passes:
-        pair = (candidate.archive_station_id, candidate.satellite_id)
-        by_pair.setdefault(pair, []).append(candidate)
-    placed = {candidate.archive_station_id for candidate in passes}
-    heard: dict[int, set[date]] = {}
-    attempted: set[ArchivePassRow] = set()
-    usable: set[ArchivePassRow] = set()
-    succeeded: set[ArchivePassRow] = set()
-    unmatched = 0
-    for reception in receptions:
-        match = _matching_pass(reception, by_pair, tolerance_s)
-        if reception.archive_station_id in placed:
-            heard.setdefault(reception.archive_station_id, set()).add(
-                reception.started_at.date()
-            )
-        if match is None:
-            unmatched += 1
-            continue
-        attempted.add(match)
-        if reception.archive_outcome != "unknown":
-            usable.add(match)
-        if reception.archive_outcome == "decoded":
-            succeeded.add(match)
-    return ReceptionMatches(
-        heard=heard,
-        attempted=frozenset(attempted),
-        usable=frozenset(usable),
-        succeeded=frozenset(succeeded),
-        unmatched=unmatched,
     )
 
 
@@ -309,12 +264,26 @@ def summarise(
         sensitivity=tuple(
             (
                 threshold,
-                kept := sum(1 for one in rated if _reaches(one, threshold)),
+                kept := sum(
+                    1
+                    for one in rated
+                    if reaches(one.attempted, one.eligible, threshold)
+                ),
                 len(rated) - kept,
             )
             for threshold in config.sensitivity
         ),
     )
+
+
+def own_attempted(one: LabelledPass) -> bool:
+    """A report arrived, or the registry confirmed the station listened (rule 7)."""
+    return one.source_outcome is not None or one.label in _HEARD_NOTHING
+
+
+def reaches(attempted: int, eligible: int, threshold: float) -> bool:
+    """Whether a day this complete is retained: the one comparison, everywhere."""
+    return attempted / eligible >= threshold
 
 
 def own_eligible(one: LabelledPass) -> bool:
@@ -330,7 +299,7 @@ def _status(tally: _Tally, threshold: float, *, active: bool = True) -> str:
         return "inactive"
     if tally.eligible == 0:
         return "empty"
-    if tally.attempted / tally.eligible >= threshold:
+    if reaches(tally.attempted, tally.eligible, threshold):
         return "retained"
     return "below_threshold"
 
@@ -349,35 +318,8 @@ def _day(
     )
 
 
-def _matching_pass(
-    reception: ArchiveReception,
-    by_pair: dict[tuple[int, str], list[ArchivePassRow]],
-    tolerance_s: int,
-) -> ArchivePassRow | None:
-    """The computed pass a reception belongs to: nearest acquisition wins."""
-    if reception.satellite_key_kind != "norad":
-        return None
-    widen = timedelta(seconds=tolerance_s)
-    candidates = [
-        one
-        for one in by_pair.get(
-            (reception.archive_station_id, reception.satellite_key), []
-        )
-        if one.aos - widen <= reception.started_at < one.los + widen
-    ]
-    return min(
-        candidates,
-        key=lambda one: (abs(one.aos - reception.started_at), one.aos),
-        default=None,
-    )
-
-
 def _span(first: date, last: date) -> list[date]:
     return [first + timedelta(days=n) for n in range((last - first).days + 1)]
-
-
-def _reaches(day: StationDay, threshold: float) -> bool:
-    return day.attempted / day.eligible >= threshold
 
 
 def _distribution(rated: Sequence[StationDay]) -> Distribution:

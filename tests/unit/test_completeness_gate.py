@@ -248,6 +248,7 @@ def deterministic_world() -> dict[str, list[dict[str, object]]]:
                 "los": aos + timedelta(minutes=11),
                 "max_elevation_deg": 70.0 if taken else 10.0,
                 "element_set_id": 1,
+                "computed_at": AOS - timedelta(hours=5),
                 "simulated": False,
             }
         )

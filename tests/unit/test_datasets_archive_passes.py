@@ -32,6 +32,8 @@ SINCE = datetime(2014, 1, 22, 6, 0, tzinfo=UTC)
 AS_OF = datetime(2014, 1, 25, 18, 0, tzinfo=UTC)
 DAY = timedelta(days=1)
 MIDNIGHT_23 = datetime(2014, 1, 23, tzinfo=UTC)
+LEAD = timedelta(hours=1)
+"""A station's first search starts this early, so a pass in progress is found."""
 
 
 @dataclass
@@ -133,7 +135,7 @@ def test_a_station_is_propagated_every_day_from_its_first_reception_to_its_last(
     )
 
     assert [one.start for one in orbit.searches] == [
-        MIDNIGHT_23,
+        MIDNIGHT_23 - LEAD,
         MIDNIGHT_23 + DAY,
         MIDNIGHT_23 + 2 * DAY,
     ]
@@ -146,12 +148,14 @@ def test_a_station_is_propagated_every_day_from_its_first_reception_to_its_last(
 
 
 def test_the_first_and_last_days_are_clipped_to_the_scope() -> None:
+    """Clipped, less the lead: a pass rising just before ``since`` can still be
+    what a reception just after it belongs to."""
     orbit, _ = compute(
         [station()],
         [reception(SINCE + timedelta(hours=1)), reception(AS_OF - timedelta(hours=1))],
     )
 
-    assert orbit.searches[0].start == SINCE
+    assert orbit.searches[0].start == SINCE - LEAD
     assert orbit.searches[-1].end == AS_OF
 
 
@@ -274,8 +278,8 @@ def test_rows_are_in_station_satellite_and_time_order() -> None:
     )
 
     assert [(row["archive_station_id"], row["aos"]) for row in result.rows] == [
-        (9, MIDNIGHT_23 + timedelta(hours=1)),
-        (10, MIDNIGHT_23 + timedelta(hours=1)),
+        (9, MIDNIGHT_23),
+        (10, MIDNIGHT_23),
         (10, MIDNIGHT_23 + DAY + timedelta(hours=1)),
     ]
 
@@ -287,10 +291,10 @@ def test_each_row_carries_the_geometry_and_the_set_it_came_from() -> None:
     assert row == {
         "archive_station_id": 1,
         "satellite_id": ISS,
-        "aos": MIDNIGHT_23 + timedelta(hours=1),
-        "los": MIDNIGHT_23 + timedelta(hours=1, minutes=10),
+        "aos": MIDNIGHT_23,
+        "los": MIDNIGHT_23 + timedelta(minutes=10),
         "max_elevation_deg": 42.0,
-        "max_elevation_at": MIDNIGHT_23 + timedelta(hours=1, minutes=5),
+        "max_elevation_at": MIDNIGHT_23 + timedelta(minutes=5),
         "aos_azimuth_deg": 10.0,
         "los_azimuth_deg": 190.0,
         "element_set_id": 1,

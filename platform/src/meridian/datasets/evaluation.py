@@ -95,8 +95,10 @@ def build_evaluation_dataset(
         message = f"{raw.path} is an {raw.manifest.kind}, not a raw snapshot"
         raise NotARawSnapshotError(message)
     rows = parse_rows(raw.files)
-    labelled = label_passes(rows, as_of=raw.manifest.as_of, config=config)
-    selection = select(labelled, rows, config)
+    labelled = label_passes(
+        rows, as_of=raw.manifest.as_of, config=config, since=raw.manifest.since
+    )
+    selection = select(labelled, rows, config, since=raw.manifest.since)
     files = {
         LABELS_FILE: b"".join(canonical_line(one.row()) for one in labelled),
         ARCHIVE_RECEPTIONS: _archive_receptions(raw),

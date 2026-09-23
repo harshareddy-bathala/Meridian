@@ -167,6 +167,27 @@ def test_only_passes_inside_the_interval_are_read(
     assert [one["id"] for one in rows(rollback, "passes")] == [seeded["inside"]]
 
 
+def test_a_prediction_rising_just_before_since_comes_with_its_assignment(
+    rollback: Any, schedule_rows: Any
+) -> None:
+    """D-148: its window reaches past ``since``, so the rise is seen whole."""
+    station = schedule_rows.station("st_edge", simulated=False)
+    element_set = schedule_rows.satellite()
+    straddling = schedule_rows.pass_(
+        station, SINCE - timedelta(seconds=2), element_set_id=element_set
+    )
+    ended = schedule_rows.pass_(
+        station, SINCE - timedelta(minutes=30), element_set_id=element_set
+    )
+    schedule_rows.assignment("as_edge", straddling)
+
+    ids = [one["id"] for one in rows(rollback, "passes")]
+
+    assert straddling in ids
+    assert ended not in ids
+    assert "as_edge" in [one["assignment_id"] for one in rows(rollback, "assignments")]
+
+
 @pytest.mark.usefixtures("seeded")
 def test_a_pass_brings_its_assignments_and_nothing_elses(rollback: Any) -> None:
     assert [one["assignment_id"] for one in rows(rollback, "assignments")] == ["as_in"]
