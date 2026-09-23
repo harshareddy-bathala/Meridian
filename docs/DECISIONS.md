@@ -3087,7 +3087,7 @@ Stage 15's gate is that the same raw snapshot and the same transformation config
 
 **One file per table, one row per line, rows ordered by primary key.** Each line is rendered by D-070's rules: sorted keys, no whitespace, timestamps in UTC truncated to milliseconds, arrays in stored order, and `NaN` refused. Files are uncompressed.
 
-**Each directory has a `manifest.json`** listing every file with its sha256 and row count, the schema revision, `since` and `as_of`, the simulated and measured counts, and — for an evaluation dataset — the raw snapshot it came from, the transformation version, and the sha256 of the configuration file. The directory's **content hash is the sha256 of the manifest's canonical bytes with `created_at` left out**, so taking the same inputs twice gives the same hash while the manifest still records when each was made.
+**Each directory has a `manifest.json`** listing every file with its sha256 and row count, the schema revision, `since` and `as_of`, the simulated and measured counts, and — for an evaluation dataset — the raw snapshot it came from, the transformation version, and the sha256 of the labelling configuration's resolved values — not of the file's bytes, so a comment or a reordered key changes no hash, and an absent file and one spelling out the defaults, which give the same labels, give the same hash. The directory's **content hash is the sha256 of the manifest's canonical bytes with `created_at` left out**, so taking the same inputs twice gives the same hash while the manifest still records when each was made.
 
 **The hash names the directory, and the directory is sealed.** It is written under a scratch name, synced, renamed into place and made read-only — the raw store's publication (D-141). A raw snapshot is `data/datasets/snapshots/<as_of>-<hash prefix>/`, an evaluation dataset `data/datasets/evaluation/<hash prefix>/`.
 
@@ -3163,8 +3163,8 @@ A station confirmed listening that heard nothing has either missed the pass or b
 
 **The evidence is every reception of the same satellite within ± 12 hours of the pass**, from two places:
 
-- our own measured observations at any station, including this one's other passes — simulated rows are never evidence about measured ones;
-- archive receptions, matched when their `satellite_key_kind` is `norad` and the key equals ours after the `norad:` prefix.
+- our own observations at any station, including this one's other passes, from the same population as the pass — a simulated reception is never evidence about a measured pass, nor the other way round;
+- archive receptions, matched when their `satellite_key_kind` is `norad` and the key equals ours after the `norad:` prefix, and used only for measured passes, since an archive describes the real sky.
 
 **The decision:**
 
