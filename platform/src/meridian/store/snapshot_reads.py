@@ -133,7 +133,14 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         " h.held_assignments, h.listening_assignment_id, h.listening_satellite_id,"
         " h.listening_freq_hz, h.listening_mode, h.health_json, h.clock_offset_s,"
         " h.clock_uncertainty_s, h.simulated"
-        " from heartbeats h where h.received_at <= %(as_of)s and exists ("
+        " from heartbeats h where h.received_at <= %(as_of)s"
+        # A lower bound the planner can use: without it the exists() below is
+        # evaluated against every heartbeat ever received, decompressing old
+        # chunks to do it. The earliest scoped window is the exact bound, and
+        # an uncorrelated subquery lets TimescaleDB exclude chunks at run time.
+        "  and h.received_at >= (select min(start_at) from assignments"
+        f"   where pass_id in ({_SCOPED_PASSES}))"
+        " and exists ("
         "  select 1 from assignments a"
         f"  where a.pass_id in ({_SCOPED_PASSES})"
         "  and a.station_id = h.station_id"
