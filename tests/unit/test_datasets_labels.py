@@ -420,9 +420,12 @@ def test_evidence_about_another_satellite_does_not_count() -> None:
 def test_an_archive_reception_is_evidence_for_a_measured_pass(
     outcome: str, expected: str
 ) -> None:
+    """Keyed as ingest stores it, ``norad:<number>`` — see
+    test_ingest_reference_adapter.py's namespacing test — which is our own
+    ``satellite_id`` form, so the two compare as stored."""
     archive = (
         ArchiveReception(
-            satellite_key="57166",
+            satellite_key="norad:57166",
             satellite_key_kind="norad",
             started_at=AOS + timedelta(hours=2),
             archive_outcome=outcome,
@@ -433,7 +436,9 @@ def test_an_archive_reception_is_evidence_for_a_measured_pass(
 
 
 def test_two_archive_no_data_rows_call_a_satellite_silent() -> None:
-    silent = ArchiveReception("57166", "norad", AOS + timedelta(hours=1), "no_data")
+    silent = ArchiveReception(
+        "norad:57166", "norad", AOS + timedelta(hours=1), "no_data"
+    )
 
     snapshot = reported("no_signal", archive=(silent, silent))
 
@@ -457,7 +462,7 @@ def test_an_archive_is_never_evidence_about_a_simulated_pass() -> None:
         observations=(report("as_1", "no_signal"),),
         heartbeats=(heard(target),),
         listening={"as_1": True},
-        archive=(ArchiveReception("57166", "norad", AOS, "decoded"),),
+        archive=(ArchiveReception("norad:57166", "norad", AOS, "decoded"),),
     )
 
     assert label(snapshot).label == "satellite_state_indeterminate"
@@ -474,6 +479,45 @@ def test_a_heartbeat_outside_the_window_does_not_count() -> None:
     )
 
     assert label(snapshot).label == "station_unavailable"
+
+
+def test_a_heartbeat_on_the_closing_instant_belongs_to_the_next_window() -> None:
+    """Half-open ``[start_at, end_at)``, as ``Registry.was_listening`` reads it."""
+    target = a_pass()
+    window = assigned(target)
+    on_the_edge = HeartbeatRow(station_id=target.station_id, received_at=window.end_at)
+    snapshot = rows(
+        passes=(target,),
+        assignments=(window,),
+        observations=(report("as_1", "no_signal"),),
+        heartbeats=(on_the_edge,),
+        listening={"as_1": True},
+    )
+
+    assert label(snapshot).label == "station_unavailable"
+
+
+def test_a_pass_made_simulated_by_its_assignment_is_judged_as_simulated() -> None:
+    """The population the row is counted under is the one its evidence comes from.
+
+    The pass row says measured; its assignment says simulated, so the labelled
+    row is simulated — and an archive, which describes the real sky, must not
+    be its evidence.
+    """
+    target = a_pass()
+    snapshot = rows(
+        passes=(target,),
+        assignments=(assigned(target, simulated=True),),
+        observations=(report("as_1", "no_signal"),),
+        heartbeats=(heard(target),),
+        listening={"as_1": True},
+        archive=(ArchiveReception("norad:57166", "norad", AOS, "decoded"),),
+    )
+
+    labelled = label(snapshot)
+
+    assert labelled.simulated is True
+    assert labelled.label == "satellite_state_indeterminate"
 
 
 def test_the_settle_margin_is_measured_from_the_widest_window() -> None:

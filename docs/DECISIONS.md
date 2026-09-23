@@ -3164,7 +3164,7 @@ A station confirmed listening that heard nothing has either missed the pass or b
 **The evidence is every reception of the same satellite within ± 12 hours of the pass**, from two places:
 
 - our own observations at any station, including this one's other passes, from the same population as the pass — a simulated reception is never evidence about a measured pass, nor the other way round;
-- archive receptions, matched when their `satellite_key_kind` is `norad` and the key equals ours after the `norad:` prefix, and used only for measured passes, since an archive describes the real sky.
+- archive receptions, matched when their `satellite_key_kind` is `norad` and the key, which ingest stores as `norad:<number>`, equals our `satellite_id`, and used only for measured passes, since an archive describes the real sky.
 
 **The decision:**
 

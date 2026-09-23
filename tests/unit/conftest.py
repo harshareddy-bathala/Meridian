@@ -118,7 +118,7 @@ WORLD: Mapping[str, Sequence[Mapping[str, object]]] = {
         {
             "archive_observation_id": 1,
             "source_id": "reference_archive",
-            "satellite_key": "57166",
+            "satellite_key": "norad:57166",
             "satellite_key_kind": "norad",
             "started_at": AOS + timedelta(hours=1),
             "archive_outcome": "no_data",

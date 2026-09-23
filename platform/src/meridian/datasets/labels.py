@@ -244,6 +244,7 @@ def _outcome_label(target: PassRow, evidence: _Evidence, context: _Context) -> s
     state = satellite_state(
         target,
         context.index,
+        simulated=evidence.simulated,
         window_s=context.config.silent_window_s,
         min_silent_attempts=context.config.silent_min_attempts,
     )
@@ -358,11 +359,16 @@ def _heard_during(
     scheduled: tuple[AssignmentRow, ...],
     heard: Mapping[str, list[datetime]],
 ) -> bool:
-    """Whether any heartbeat from the station arrived inside any scheduled window."""
+    """Whether any heartbeat from the station arrived inside any scheduled window.
+
+    Windows are half-open, ``[start_at, end_at)``, as ``Registry.was_listening``
+    reads them, so a heartbeat on the boundary of two back-to-back windows
+    belongs to the later one only.
+    """
     times = heard.get(station_id, [])
     for one in scheduled:
         first = bisect_left(times, one.start_at)
-        if first < len(times) and times[first] <= one.end_at:
+        if first < len(times) and times[first] < one.end_at:
             return True
     return False
 

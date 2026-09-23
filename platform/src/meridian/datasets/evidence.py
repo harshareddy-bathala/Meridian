@@ -11,8 +11,9 @@ same time, and marks the rest indeterminate. This module is that look.
   other passes — the latest revision of each report, from the same population
   as the pass: a simulated reception is never evidence about a measured pass,
   nor the other way round;
-* archive receptions, matched when their key is a NORAD number equal to ours,
-  and used only for measured passes, since an archive describes the real sky.
+* archive receptions, matched when their key is a NORAD key equal to our
+  satellite id — ingest stores both as ``norad:<number>`` — and used only for
+  measured passes, since an archive describes the real sky.
 
 **What it concludes**, in order:
 
@@ -29,9 +30,11 @@ Reference: docs/DECISIONS.md D-145, D-147; docs/EVALUATION.md §5.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Literal, TypeVar
 
 from meridian.datasets.snapshot_rows import ArchiveReception, PassRow
 
@@ -46,9 +49,9 @@ __all__ = [
 SIGNAL = frozenset(("decoded", "signal_no_decode"))
 """Outcomes that prove a transmitter was on. The two vocabularies agree here."""
 
-NORAD_PREFIX = "norad:"
-
 SatelliteState = Literal["transmitting", "silent", "indeterminate"]
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,33 +68,66 @@ class OwnReception:
 
 @dataclass(frozen=True, slots=True)
 class EvidenceIndex:
-    """Every reception a pass might be judged against, grouped by satellite."""
+    """Every reception a pass might be judged against, by satellite, in time order.
 
-    own: dict[str, tuple[OwnReception, ...]]
-    archive: dict[str, tuple[ArchiveReception, ...]]
+    Each satellite's receptions are sorted by when they began, with the start
+    times held beside them, so a window is found by bisection rather than by
+    reading every reception of the satellite once per pass.
+    """
+
+    own: dict[str, tuple[tuple[datetime, ...], tuple[OwnReception, ...]]]
+    archive: dict[str, tuple[tuple[datetime, ...], tuple[ArchiveReception, ...]]]
 
     @classmethod
     def build(
         cls, own: list[OwnReception], archive: tuple[ArchiveReception, ...]
     ) -> EvidenceIndex:
-        """Group receptions by satellite id; archive rows we cannot match drop out."""
+        """Group receptions by satellite id; archive rows we cannot match drop out.
+
+        An archive row matches when its kind is ``norad``: ingest writes that
+        key as ``norad:<number>``, the same form as our ``satellite_id``, so
+        the two are compared as they are stored.
+        """
         by_satellite: dict[str, list[OwnReception]] = {}
         for one in own:
             by_satellite.setdefault(one.satellite_id, []).append(one)
         matched: dict[str, list[ArchiveReception]] = {}
         for row in archive:
             if row.satellite_key_kind == "norad":
-                matched.setdefault(NORAD_PREFIX + row.satellite_key, []).append(row)
+                matched.setdefault(row.satellite_key, []).append(row)
         return cls(
-            own={key: tuple(value) for key, value in by_satellite.items()},
-            archive={key: tuple(value) for key, value in matched.items()},
+            own={
+                key: _by_time(value, lambda one: (one.at.aos, one.pass_id))
+                for key, value in by_satellite.items()
+            },
+            archive={
+                key: _by_time(value, lambda row: (row.started_at, row.archive_outcome))
+                for key, value in matched.items()
+            },
         )
+
+
+def _by_time(
+    held: list[T], key: Callable[[T], tuple[datetime, object]]
+) -> tuple[tuple[datetime, ...], tuple[T, ...]]:
+    """Receptions in time order, beside their start times for bisection."""
+    ordered = tuple(sorted(held, key=key))
+    return tuple(key(one)[0] for one in ordered), ordered
+
+
+def _between(
+    held: tuple[tuple[datetime, ...], tuple[T, ...]], start: datetime, end: datetime
+) -> tuple[T, ...]:
+    """The receptions that began in ``[start, end]``."""
+    times, rows = held
+    return rows[bisect_left(times, start) : bisect_right(times, end)]
 
 
 def satellite_state(
     target: PassRow,
     index: EvidenceIndex,
     *,
+    simulated: bool,
     window_s: int,
     min_silent_attempts: int,
 ) -> SatelliteState:
@@ -100,6 +136,9 @@ def satellite_state(
     Args:
         target: The pass whose station was confirmed listening and heard nothing.
         index: Every reception in the snapshot.
+        simulated: The pass's population as its labelled row states it — the
+            pass, its assignments and its report pooled — so the evidence is
+            chosen by the same answer the row is counted under.
         window_s: How far either side of the pass a reception still counts.
         min_silent_attempts: Attempts that heard nothing needed to call it silent.
 
@@ -108,10 +147,8 @@ def satellite_state(
     """
     start = target.aos - timedelta(seconds=window_s)
     end = target.los + timedelta(seconds=window_s)
-    own = _own_evidence(target, index, start, end)
-    archive = (
-        (0, 0) if target.simulated else _archive_evidence(target, index, start, end)
-    )
+    own = _own_evidence(target, index, simulated, start, end)
+    archive = (0, 0) if simulated else _archive_evidence(target, index, start, end)
     signals, silences = own[0] + archive[0], own[1] + archive[1]
     if signals:
         return "transmitting"
@@ -121,14 +158,19 @@ def satellite_state(
 
 
 def _own_evidence(
-    target: PassRow, index: EvidenceIndex, start: datetime, end: datetime
+    target: PassRow,
+    index: EvidenceIndex,
+    simulated: bool,
+    start: datetime,
+    end: datetime,
 ) -> tuple[int, int]:
     """Signals and confirmed silences among our own other passes in the window."""
     signals = silences = 0
-    for one in index.own.get(target.satellite_id, ()):
-        if one.pass_id == target.pass_id or one.simulated != target.simulated:
+    held = index.own.get(target.satellite_id, ((), ()))
+    for one in _between(held, start, end):
+        if one.pass_id == target.pass_id or one.simulated != simulated:
             continue
-        if start <= one.at.aos and one.at.los <= end:
+        if one.at.los <= end:
             signals += one.outcome in SIGNAL
             silences += one.outcome == "no_signal" and one.listening_confirmed
     return signals, silences
@@ -138,11 +180,7 @@ def _archive_evidence(
     target: PassRow, index: EvidenceIndex, start: datetime, end: datetime
 ) -> tuple[int, int]:
     """Signals and ``no_data`` among the archive's receptions in the window."""
-    within = [
-        row
-        for row in index.archive.get(target.satellite_id, ())
-        if start <= row.started_at <= end
-    ]
+    within = _between(index.archive.get(target.satellite_id, ((), ())), start, end)
     signals = sum(1 for row in within if row.archive_outcome in SIGNAL)
     silences = sum(1 for row in within if row.archive_outcome == "no_data")
     return signals, silences
