@@ -1,10 +1,12 @@
 """Guards on the repository layout itself.
 
-Two properties of the layout: that ``platform/`` never shadows the standard
-library's ``platform`` module, and that the client distribution's dependency list
-cannot reach a database. Both fail in ways that are expensive to diagnose and
-cheap to prevent — the first as an ``AttributeError`` raised from inside pip, the
-second not at all until someone reads the file.
+Three properties of the layout: that ``platform/`` never shadows the standard
+library's ``platform`` module, that the client distribution's dependency list
+cannot reach a database, and that every workspace member is either shipped in the
+runtime image or deliberately excluded from it. All three fail in ways that are
+expensive to diagnose and cheap to prevent — the first as an ``AttributeError``
+raised from inside pip, the second not at all until someone reads the file, and
+the third as an archive layer quietly installed on a station (D-138).
 
 The two orbit assertions at the end of this file are about ``meridian.orbit``
 rather than about the layout, and would be easier to find beside the rest of the
@@ -14,6 +16,8 @@ orbit tests.
 from __future__ import annotations
 
 import platform as stdlib_platform
+import re
+import tomllib
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -46,6 +50,44 @@ def test_client_distribution_cannot_reach_the_database() -> None:
     dependencies = pyproject.split("dependencies = [")[1].split("]")[0]
     for banned in ("psycopg", "sqlalchemy", "fastapi", 'meridian"'):
         assert banned not in dependencies, f"{banned} must not be a client dependency"
+
+
+def test_every_workspace_member_is_shipped_or_excluded_from_the_image() -> None:
+    """The runtime image installs exactly the distributions the platform runs.
+
+    ``uv sync --all-packages`` installs every workspace member, so a member added
+    later arrives in the image by default rather than by decision. D-138 says the
+    archive layer must not sit on the machine that has to keep receiving when
+    every archive is unreachable, and the independence test is the reason.
+
+    So each member is one of two things and never both: copied into the image, or
+    named as excluded from every sync step. A fifth distribution fails here until
+    somebody says which it is.
+    """
+    root = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    members = root["tool"]["uv"]["workspace"]["members"]
+    dockerfile = (REPO_ROOT / "deploy" / "Dockerfile").read_text(encoding="utf-8")
+    syncs = [
+        line
+        for line in dockerfile.splitlines()
+        if "uv sync" in line and not line.lstrip().startswith("#")
+    ]
+    assert syncs, "no uv sync step in deploy/Dockerfile"
+
+    for member in members:
+        member_pyproject = REPO_ROOT / member / "pyproject.toml"
+        name = tomllib.loads(member_pyproject.read_text(encoding="utf-8"))["project"][
+            "name"
+        ]
+        shipped = f"COPY {member}/ {member}/" in dockerfile
+        # Whole tokens, not substrings: "meridian" occurs inside "meridian-ingest".
+        excluded = all(
+            name in re.findall(r"--no-install-package\s+(\S+)", line) for line in syncs
+        )
+        assert shipped != excluded, (
+            f"{member} ({name}): copy its source into the image or exclude it from"
+            " every uv sync step — it is currently both or neither"
+        )
 
 
 def test_require_utc_rejects_naive_and_offset_datetimes() -> None:

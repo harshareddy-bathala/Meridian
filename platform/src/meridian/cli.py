@@ -30,8 +30,6 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-import psycopg
-
 from meridian import __version__
 from meridian.cli_catalogue import run_catalogue
 from meridian.cli_db import add_db_parser, run_db
@@ -42,7 +40,7 @@ from meridian.cli_schedule import configurations, run_scheduler
 from meridian.cli_serve import add_serve_parser, run_serve
 from meridian.config import load_settings
 from meridian.store import station_tokens, stations
-from meridian.store.pool import CONNECT_TIMEOUT_S
+from meridian.store.pool import DatabaseUnreachableError, connect_once
 
 __all__ = ["main"]
 
@@ -113,10 +111,10 @@ def _run_station(args: argparse.Namespace) -> int:
     """
     settings = load_settings()
     try:
-        conn = psycopg.connect(settings.psycopg_url, connect_timeout=CONNECT_TIMEOUT_S)
-    except (psycopg.Error, OSError) as exc:
+        conn = connect_once(settings)
+    except DatabaseUnreachableError as exc:
         print(  # noqa: T201 — this is a CLI; stderr is the interface
-            f"meridian station: cannot reach the database: {exc}", file=sys.stderr
+            f"meridian station: {exc}", file=sys.stderr
         )
         return EXIT_FAILED
 

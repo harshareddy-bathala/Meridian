@@ -251,12 +251,12 @@ One row per evidence-dataset package; the package itself is files, as `products`
 
 ---
 
-## Ingest and regional tables *(planned)*
+## Ingest and archive tables
 
-Five tables for modules 18 and 19. None exists; the column tuples are the intent, settled when Stages 31 and 32 write their migrations. What they share is decided in D-132, D-133 and D-134:
+Seven tables and a view, for modules 18 and 19. **Four are built**, by migration `0016`: `ingest_sources` and `ingest_records` — the provenance pair, created here and reused unchanged by Stage 31 rather than duplicated (D-140) — and `archive_stations` and `archive_observations`, which hold what an archive published about somebody else's receptions (D-139). The remaining three are **planned**, and their column tuples are the intent until Stages 31 and 32 write their migrations. What all of them share is decided in D-132, D-133, D-134 and D-140:
 
 - **Raw arrivals are append-only.** A re-fetch that differs is a new row, never an overwrite — the discipline D-015 applies to observations, applied to data we did not author either.
-- **Provenance is complete or the record is refused.** Source, original identifier, source version, retrieval time, licence, checksum and transformation version, for every record, whatever it carries.
+- **Provenance is complete or the record is refused.** Source, original identifier, source version, retrieval time, licence and checksum, for every record, whatever it carries. The version of the transformation that produced a value sits on the normalised row rather than on the arrival (D-140): an artefact is retrieved once and may be normalised many times.
 - **A tile is marked as a tile**, and a tile row may never be read for a number (D-133).
 - **None of these tables carries `simulated`.** They describe the world, not a station's reception; where such a value becomes a feature of a simulated station's pass, the flag stays on the observation, where it has always been.
 - **No secret is stored in any of them.** Keys and registration credentials are supplied as secrets, per `GIT-WORKFLOW.md` Rule 4.
@@ -264,32 +264,58 @@ Five tables for modules 18 and 19. None exists; the column tuples are the intent
 ### `ingest_sources`
 `(source_id, source_class, name, licence, terms_url, access_constraint, attribution_entry, added_at, active)`
 
-One row per source we take data from. `licence` and `terms_url` are recorded here and in `ATTRIBUTION.md` before the first retrieval (D-134); `attribution_entry` names the entry, so a record can be traced to the terms it arrived under — which is what decides whether the evidence dataset may republish it (D-136). `access_constraint` is `none`, `key_counted` or `registration`.
+One row per source we take data from, created by Stage 14's migration and **insert-only**: a change of terms is a new `source_id`, so stored records keep pointing at the terms they arrived under (D-140). `licence` and `terms_url` are recorded here and in `ATTRIBUTION.md` before the first retrieval (D-134); `attribution_entry` names the entry, so a record can be traced to the terms it arrived under — which is what decides whether the evidence dataset may republish it (D-136). `access_constraint` is `none`, `key_counted` or `registration`.
 
 ### `ingest_records`
-`(record_id, source_id, original_identifier, source_version, payload_kind, retrieved_at, sha256, transformation_version, raw_path, valid_from, valid_to, spatial_extent, superseded_by)`
+`(record_id, source_id, original_identifier, source_version, payload_kind, retrieved_at, sha256, raw_path, media_type, byte_count, valid_from, valid_to, spatial_extent, superseded_by)`
 
-One row per retrieved artefact — Stage 14's provenance list, as columns. `sha256` is of the raw bytes as downloaded, before any normalisation, so the hash proves what arrived rather than what we made of it. `superseded_by` links a re-fetch that differs to the row it replaces, and nothing is deleted.
+One row per retrieved artefact — Stage 14's provenance list, as columns. `raw_path` locates the artefact inside the raw store, relative to its root, and no part of it comes from the source (D-141). `sha256` is of the raw bytes as downloaded, before any normalisation, so the hash proves what arrived rather than what we made of it. `superseded_by` links a re-fetch that differs to the row it replaces, and nothing is deleted.
 
 `valid_from`/`valid_to` is the interval the artefact *describes*, which is not `retrieved_at` and is not interchangeable with it: a feature lookup selects on what the artefact describes and on when it was published, never on when we happened to fetch it (D-131).
 
 `payload_kind` is `data` or `tile`. A `tile` row exists to be displayed and referenced; **no query may derive a value from one** (D-133).
 
-### `environment_samples`
+### `archive_stations`
+`(archive_station_id, record_id, source_id, source_station_key, name, lat_deg, lon_deg, alt_m, capability_json, content_sha256, denominator_inputs, first_seen_at)`
+
+A station as an archive published it — never a row in `stations`, which holds stations that registered, hold a token and send heartbeats.
+
+**Content-keyed, exactly as `element_sets` is** (D-057). A station whose published coordinates change becomes a new row rather than silently rewriting every completeness denominator already computed from the old ones. A location is stored as a pair or not at all: a latitude without a longitude is not a place, and would be used as one.
+
+**`denominator_inputs` is generated** — `neither`, `location_only` or `location_and_capability` — so Stage 16 can *count and publish* how many stations it can compute a denominator for. A ratio computed over the stations we happened to have coordinates for, reported as though it covered all of them, is this project's own methodological threat arriving through the back door.
+
+### `archive_observations`
+`(archive_observation_id, record_id, source_id, source_observation_id, transformation_version, content_sha256, archive_station_id, satellite_key, satellite_key_kind, started_at, ended_at, max_elevation_deg, centre_freq_hz, mode, archive_outcome, source_outcome, peak_snr_db, frames_decoded, loaded_at)`
+
+A reception as an archive published it. `observations` cannot hold one: it is keyed `(assignment_id, revision, started_at)`, its `observation_id` is generated from `(assignment_id, revision)` (D-027), and `station_id` references our own `stations` — so an archive reception has no assignment and no registered station to key it by (D-139).
+
+**`archive_outcome` is deliberately not MSP's five.** It is `decoded`, `signal_no_decode`, `no_data` or `unknown`. `no_signal` would assert that a station was verifiably listening and heard nothing (rule 7, D-010), and no heartbeat exists for somebody else's station; `no_data` claims only that the archive holds none. Different values mean an accidental `union` of the two tables fails a `CHECK` instead of returning a plausible number. `source_outcome` keeps the archive's own string verbatim, so every mapping stays auditable.
+
+**`satellite_key` has no foreign key to `satellites`**, and that is the decision rather than an omission. An FK would force the load path either to drop receptions for objects we do not track — a second selection filter stacked invisibly on the archive's own — or to insert into `satellites`, letting an external archive decide what pass generation propagates. The key is canonical text with its `satellite_key_kind`, joined at read time; coverage is reported as a number, never applied as a filter.
+
+`transformation_version` is part of the key, so re-normalising an artefact under a new normaliser appends rather than overwrites (D-140).
+
+### `ingest_provenance` *(view)*
+
+Every stored artefact beside the terms it arrived under, joining `ingest_records` to `ingest_sources`. The provenance columns are `not null` on both sides, so "is every record's licence recorded?" is a query that returns zero by construction rather than by the loader behaving.
+
+**None of these four is a hypertable, and none is compressed.** `element_sets` is the precedent: append-only, time-stamped, read in bulk rather than in recent windows. Making one a hypertable later is supported and cheap; undoing it is not, and `downgrade()` always raises. Compression would also be perverse — archive receptions are months old when they load, so a policy on `started_at` would compress a chunk on creation and every backfill would write into a compressed one.
+
+### `environment_samples` *(planned)*
 `(sample_id, record_id, quantity, observed_at, published_at, value, value_unit, area_id, method)`
 
 The normalised scalar values features are read from — an index, a condition, a composite's value over an area. `area_id` is null for a global or point value.
 
 **`published_at` is the load-bearing column.** It is when the value became available, and the pre-pass rule reads it: the value used for a pass is the latest one whose `published_at` precedes the pass (D-131). A later revision of the same `observed_at` is a new row with a later `published_at`, and a model that selects on `observed_at` alone has read the future.
 
-### `areas_of_interest`
+### `areas_of_interest` *(planned)*
 `(area_id, label, geometry, centroid_lat_deg, centroid_lon_deg, area_km2, created_at, active, notes)`
 
 A place and a label — nothing else. **No owner, no contact, no address**: an area of interest describes ground, and the moment it describes a person it becomes personal data the project does not hold (`PROJECT.md` §16). Who may register one, and whether a registration is public, is open (D-137).
 
 `geometry` is the registered extent; the centroid and area are derived and stored so a listing does not need the geometry. `active` retires an area without deleting its series, because a series that vanishes cannot be checked against what was published from it.
 
-### `area_series`
+### `area_series` *(planned)*
 `(area_id, quantity, observed_at, value, value_unit, record_id, method, computed_at)`
 
 What the ingested products say about a registered area over time. **Every point names the `record_id` it was computed from** and the `method` version that computed it, so a chart on the dashboard can be traced to an artefact with a checksum and a licence. Recomputing with a new method appends; it never rewrites an earlier series.

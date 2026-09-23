@@ -53,10 +53,11 @@ Data we take rather than code we read, recorded here for the same reasons (D-134
 
 **Licence and terms are recorded separately.** A licence says what the data is; terms of use often constrain redistribution independently of it, and that constraint is what decides whether the evidence dataset may republish a record or must reference it by identifier and checksum (D-104, D-136).
 
-**Nothing has been retrieved yet.** The classes below are the candidates Stage 31 will implement, named as classes rather than as a commitment to any vendor (D-132). Each row's licence and terms are filled in from the source's own published statement, by the commit that adds its adapter and before it fetches anything — deliberately left unfilled here rather than guessed, because an unverified licence in this file is worse than an empty one.
+**Nothing has been retrieved yet.** Stage 14 builds the ingest subsystem against a reference adapter of our own (D-142), so no row below has been fetched from. The classes are the candidates Stages 14 and 31 will implement, named as classes rather than as a commitment to any vendor (D-132). Each row's licence and terms are filled in from the source's own published statement, by the commit that adds its adapter and before it fetches anything — deliberately left unfilled here rather than guessed, because an unverified licence in this file is worse than an empty one.
 
 | Source class | Used for | Access constraint | Licence and terms |
 |---|---|---|---|
+| An **archive of amateur ground-station receptions** | Training and evaluation input, simulator outcome distributions, and Stage 16's observed count (D-138) | Varies by archive; registration or a free key | *to record before first retrieval* |
 | Published **geomagnetic and solar activity indices** | Ionospheric disturbance as a candidate feature (D-131) | Typically no key | *to record before first retrieval* |
 | A **local atmospheric conditions** service | Cloud cover, for the reception verdict | Free key, requests counted | *to record before first retrieval* |
 | **Near-real-time global imagery tiles** | Display only — never sampled for a value (D-133) | Typically no key | *to record before first retrieval* |
@@ -66,6 +67,8 @@ Data we take rather than code we read, recorded here for the same reasons (D-134
 | **Aerosol** products | Regional monitoring, candidate context | Registration for downloads | *to record before first retrieval* |
 | **Night-time lights** composites | Regional monitoring | Registration for downloads | *to record before first retrieval* |
 | A **national geoportal for India** | Regional products for our own region | Registration for downloads | *to record before first retrieval* |
+
+**The reference adapter's fixtures are ours.** Stage 14's first adapter reads synthetic artefacts written by us for the purpose, not a recording of any real source, so nothing in this repository redistributes anyone's data and D-136 stays open until a real source is adopted (D-142).
 
 **Keys and registration credentials are secrets** and appear nowhere in this repository, per `GIT-WORKFLOW.md` Rule 4. Which of these sources is actually adopted is Stage 31's to settle; a class listed here and never used is removed rather than left implying a relationship we do not have.
 

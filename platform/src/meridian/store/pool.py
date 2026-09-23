@@ -31,9 +31,22 @@ __all__ = [
     "POOL_MAX_SIZE",
     "POOL_MIN_SIZE",
     "SESSION_PARAMETERS",
+    "DatabaseUnreachableError",
+    "connect_once",
     "is_database_reachable",
     "open_pool",
 ]
+
+
+class DatabaseUnreachableError(RuntimeError):
+    """A connection that could not be opened.
+
+    One error for every way libpq can fail to reach a server, so a command can
+    print a sentence and exit rather than showing an operator a psycopg
+    traceback. What to say about it is the caller's — this module opens
+    connections and makes no decisions about them.
+    """
+
 
 POOL_MIN_SIZE = 1
 """Connections opened before the pool reports itself ready.
@@ -110,6 +123,44 @@ def open_pool(settings: Settings) -> ConnectionPool[Connection[tuple[object, ...
     )
     pool.open(wait=False)
     return pool
+
+
+def connect_once(settings: Settings) -> Connection[tuple[object, ...]]:
+    """One short-lived connection, configured exactly as a pooled one is.
+
+    Args:
+        settings: Runtime configuration. Only ``psycopg_url`` is read.
+
+    Returns:
+        An open connection the caller owns, normally in a ``with`` block.
+
+    Raises:
+        DatabaseUnreachableError: The server could not be reached.
+
+    Note:
+        **Why this exists rather than a bare ``psycopg.connect`` at each call
+        site.** A command invocation is one short-lived process with nothing for
+        a pool to amortize, so six of them opened their own connection — and
+        none of them passed :data:`SESSION_PARAMETERS`, which the pool has
+        always passed. The session time zone is in that set, and DATA-MODEL.md
+        says every timestamp is UTC with no exceptions; a connection that did
+        not say so returned instants tagged with whatever zone the server
+        happened to default to. Same instants, different ``tzinfo``, and
+        nothing pointing at the difference.
+
+        It is also what lets ``meridian-ingest`` reach the database without
+        importing a driver: this package is the one that talks to Postgres,
+        including about how you connect to it.
+    """
+    try:
+        return psycopg.connect(
+            settings.psycopg_url,
+            connect_timeout=CONNECT_TIMEOUT_S,
+            options=_session_options(),
+        )
+    except (psycopg.Error, OSError) as exc:
+        message = f"cannot reach the database: {exc}"
+        raise DatabaseUnreachableError(message) from exc
 
 
 def _session_options() -> str:

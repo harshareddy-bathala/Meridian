@@ -132,6 +132,24 @@ def test_the_dump_is_custom_format_so_restore_can_read_it_from_stdin(
     assert "--format=custom" in backup.dump_command(compose_db.Compose("c.yml"))[-1]
 
 
+def test_the_backup_names_the_raw_store_it_did_not_take(
+    backup: ModuleType, tmp_path: Path
+) -> None:
+    """A dump is not the whole deployment, and the operator hears that at dump time.
+
+    The ingest raw store is not in Postgres and cannot be recreated without
+    going back to a source that may no longer serve it (D-141). A backup that
+    silently omitted it would be discovered at the worst possible moment, so
+    the tool says which tree it left behind and whether anything is in it.
+    """
+    present = tmp_path / "raw"
+    present.mkdir()
+
+    assert str(present) in backup.raw_store_note(present)
+    assert "nothing there" not in backup.raw_store_note(present)
+    assert "nothing there" in backup.raw_store_note(tmp_path / "absent")
+
+
 def test_the_database_name_is_a_psql_variable_when_recreating(
     compose_db: ModuleType, restore: ModuleType
 ) -> None:

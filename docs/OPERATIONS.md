@@ -8,7 +8,7 @@ Every command runs from the repository root. `compose` below is shorthand for:
 docker compose -f deploy/docker-compose.yml
 ```
 
-Decisions this page puts into practice: D-109 to D-115, and D-120 to D-128 for station reception. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, and D-138 to D-142 for external archive ingest. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
 
 ---
 
@@ -80,6 +80,7 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | One scheduling round now | `compose exec jobs meridian jobs run --once` |
 | Run the simulator | `compose --profile sim up -d` — `SIMULATOR_*` in `deploy/.env` set count, seed and scenario |
 | Check the public surface | `python deploy/tools/verify_public_surface.py https://<hostname>` |
+| Fetch and load an external archive | `uv run meridian-ingest …` — its own binary, not in the image; § External archive ingest |
 | Build a dataset snapshot | `meridian snapshot` — not built yet; Stage 15 |
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
@@ -268,6 +269,114 @@ While a pass is open, the heartbeat says `listening` only while the receiver is 
 
 ---
 
+## External archive ingest
+
+Somebody else's observation archive, retrieved once and then read locally for good. **Nothing in the deployment depends on it.** The platform schedules, receives, decodes, monitors and reports with this subsystem uninstalled and every archive unreachable; what it produces is training input for Stage 15's snapshots and Stage 16's completeness figures, and nothing at runtime reads it (D-138).
+
+Decisions this section puts into practice: D-133, D-134, and D-138 to D-142.
+
+### It is not in the deployment image, deliberately
+
+`deploy/Dockerfile` excludes `meridian-ingest` by name. Its metadata is copied in, because uv reads every workspace member to resolve the lockfile, but the package itself is never installed — so the machine that has to keep receiving when every archive is unreachable does not carry the code that talks to one (D-138). `tests/unit/test_layout.py` checks that absence, which makes putting it in the image a decision rather than a default. Run it from a checkout instead:
+
+```bash
+uv sync
+uv run meridian-ingest sources
+```
+
+**There is no `meridian ingest` subcommand.** `meridian/cli.py` imports every `cli_*` module at start-up, so a subcommand would put the archive layer one import away from the scheduling path. A separate binary also means an operator who never installs this still has a complete Meridian, which is the independence test at a shell prompt.
+
+### Settings
+
+```bash
+cp deploy/ingest.toml.example ingest.toml
+```
+
+With no settings file at all, the defaults fetch the reference archive into `data/ingest/raw` and the gate below runs. The file is looked for at `$MERIDIAN_INGEST_CONFIG`, then `./ingest.toml`, then nowhere — and a path in that variable which does not exist is an error rather than a fall-back, because running on defaults an operator believes they replaced is the failure worth avoiding.
+
+- **`raw_root` is relative to the settings file**, not to the working directory. The example's value assumes the file stays in `deploy/`; copied to the repository root and left alone, it puts the tree *beside* the repository instead of inside it, so change it to `data/ingest/raw` there.
+- **Unknown keys are refused**, so a typo is a message rather than a setting that quietly did nothing.
+- **No credential belongs in the file.** A source needing a key names the environment variable that holds one (`api_key_env`), and `<NAME>_FILE` takes precedence for a secret mounted as a file. A key pasted in as a value is refused by name.
+
+### The commands
+
+| Task | Command |
+|---|---|
+| What may be fetched, and under what terms | `uv run meridian-ingest sources` |
+| Retrieve artefacts | `uv run meridian-ingest fetch [--since <ISO-8601 Z>] [--until <ISO-8601 Z>] [--limit N]` |
+| Normalise, writing nothing | `uv run meridian-ingest normalise` |
+| Re-hash the raw store | `uv run meridian-ingest verify` |
+| Load into the archive tables | `uv run meridian-ingest load` — reads `DATABASE_URL` |
+
+Every verb takes `--source <id>`; without it, each acts on every enabled source. A named source is used whether or not the settings file disabled it, because naming it is an operator overriding their own default.
+
+**`fetch` is the only command that opens a socket.** The other four read the raw store and have no way to reach an archive — normalisation is typed to take bytes and a manifest, with no client, no URL and no clock anywhere in its signature (D-142).
+
+**A timestamp must carry its offset.** `--since 2026-08-01T00:00:00` is refused; write `2026-08-01T00:00:00Z`. An operator outside UTC would otherwise fetch a different month, quietly, with every retrieved file looking exactly as legitimate as the right one. Bounds are half-open, `[since, until)`.
+
+**`fetch` checks `ATTRIBUTION.md` before opening a socket** (D-134). It refuses when that file is found and the source's attribution entry is missing from it. When no such file is found above the working directory — an installation outside a checkout — it says so and continues: the obligation is enforced by a test over every registered source, and a runtime check that silently passed would be worse than one which admits it could not run.
+
+### Exit codes
+
+| | Means |
+|---|---|
+| 0 | It ran and succeeded |
+| 1 | It ran and failed |
+| 2 | The command line was wrong |
+| **3** | **`verify` found a stored artefact that no longer matches its manifest** |
+
+Three is its own code so that a monitoring script can tell *"verify could not run"* from *"the raw store is damaged"*. Those call for different people.
+
+### The completion gate, at a prompt
+
+Stage 14's gate is that **an archive snapshot can be downloaded once, then repeatedly normalised and evaluated without network access.** Demonstrate it:
+
+```bash
+uv run meridian-ingest fetch
+uv run meridian-ingest normalise > first.txt
+uv run meridian-ingest normalise > second.txt
+diff first.txt second.txt          # empty
+```
+
+`normalise` prints a digest per reception, so the comparison is over what would be *stored* rather than over a count that two different transformations could share. To take the network away rather than trust that it went unused:
+
+```bash
+unshare -rn uv run meridian-ingest normalise
+```
+
+That runs in a network namespace with no interfaces at all, and prints the same thing.
+
+> The reference archive's artefacts ship inside the distribution, so its `fetch` needs no network either. A real source's would — which is exactly why the gate is about every command *after* the fetch.
+
+The same gate is asserted in `tests/unit/test_ingest_gate.py`, which publishes a snapshot, **deletes the fixtures it came from**, and then normalises three times under a guard that fails the test if anything in Python opens a connection. Both the guard and the deletion have positive controls, because a gate passing with an inert guard is the one failure that looks done.
+
+### When `verify` exits 3
+
+```text
+meridian-ingest verify: reference_archive/20260921T041950Z-e9b998767990 is 1555 bytes hashing to 0471a8620429, but its manifest records 1554 bytes hashing to e9b998767990
+1 of 3 artefacts do not match their manifests. The raw store is not in the database backup — restore it from your own copy (docs/OPERATIONS.md).
+```
+
+The bytes on disk are no longer the bytes that arrived, so anything derived from them from now on would be derived from something nobody retrieved.
+
+1. **Restore the raw store** from your own copy — see below.
+2. **If you have none, re-fetch that source.** The digest of what arrived is in `ingest_records.sha256`, so a re-fetch returning the same bytes is recognised as the same record and writes nothing new; one returning different bytes becomes a new record and supersedes the old, in a single transaction.
+3. **Rows already loaded from that artefact are not wrong.** They were derived before the damage. `archive_observations.content_sha256` is what says whether a re-normalisation agrees with them.
+
+### The raw store is not in the database backup
+
+`deploy/tools/backup.py` dumps Postgres and takes none of `raw_root`. It prints the path it did not take on every run, so the gap is read at backup time rather than discovered at restore time.
+
+**That tree is the one thing here which cannot be recreated without going back to the source** — and a source may have withdrawn the artefact, changed its terms, or stopped existing. Copy it yourself, on the same schedule as the dump:
+
+```bash
+tar -C data/ingest -czf backups/raw-$(date -u +%F).tar.gz raw
+```
+
+The tree is read-only by construction: a record's directory is sealed after publication, so `rm -rf` on it fails until you `chmod -R u+w` first. That is immutability working, not a permissions fault.
+
+---
+
 ## Backup and restore
 
 Host tools, standard library only (D-115). They reach the database through `compose exec db`, so no password appears on the host's command line.
@@ -287,6 +396,8 @@ python deploy/tools/backup.py --out backups/meridian-$(date -u +%F).dump
 - **Harmless warning:** `pg_dump` warns about circular foreign keys on `continuous_agg`. That is TimescaleDB's own catalogue, and it does not affect a full dump.
 
 **A dump is a secret.** It holds every station's token hash and every invite. `backups/` and `*.dump` are gitignored; keep them off shared drives.
+
+**A dump is not the whole deployment.** It takes nothing from the ingest raw store, which holds external artefacts exactly as they were retrieved and cannot be recreated without going back to a source that may no longer serve them (D-141). `backup.py` names that path on every run; copying it is § External archive ingest above.
 
 ### Restore
 

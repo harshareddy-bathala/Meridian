@@ -124,11 +124,12 @@ meridian/
 ├── deploy/               compose, migrations, Prometheus rules, Grafana, backup tools
 ├── firmware/             (planned) Arduino rotator controller
 ├── dashboard/            web front end, served by the platform
-├── ingest/               (planned) external archive adapters
+├── ingest/               distribution: meridian-ingest
+│   └── src/meridian_ingest/     external archive adapters, raw store, loader
 └── analysis/             (planned) notebooks and evaluation scripts
 ```
 
-**Three Python distributions, `src/` layout, per D-012.** `platform/` is a distribution root, not an import package — **never create `platform/__init__.py`**. `platform` is a stdlib module name, and shadowing it produces `AttributeError`s from inside third-party libraries at import time. The client and simulator are separate distributions so the reference client installs on a Pi without `fastapi` or `psycopg`, which enforces "the station client knows nothing about the database" at install time rather than at review time.
+**Four Python distributions, `src/` layout, per D-012 and D-138.** `platform/` is a distribution root, not an import package — **never create `platform/__init__.py`**. `platform` is a stdlib module name, and shadowing it produces `AttributeError`s from inside third-party libraries at import time. The client and simulator are separate distributions so the reference client installs on a Pi without `fastapi` or `psycopg`, which enforces "the station client knows nothing about the database" at install time rather than at review time. `meridian-ingest` imports `meridian` and is imported by nothing, and the platform image does not install it, so the machine that must keep receiving with every archive unreachable does not carry the code that talks to one (D-138).
 
 ---
 
@@ -166,13 +167,9 @@ Key points that constrain implementation:
 
 ## Current phase
 
-**Phase 1 — Foundations (weeks 1–7).**
+**Phase 1 — Foundations — is done.** Its exit criterion, a virtual station visible on the public site from outside the college network, was met on 2026-09-14 (D-088).
 
-In scope now: data model and store, orbit service with pass prediction, MSP draft, station registry, a simulated station registering and appearing on the dashboard.
-
-Not yet: prediction models, scheduler optimisation, reliability layer, hardware. Do not scaffold these beyond empty module stubs with documented interfaces.
-
-**Phase 1 exit criterion:** a virtual station is visible on the public site from outside the college network.
+Work now follows the stage order in `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md`, whose "Where the build has got to" section says which stage is next. Do not scaffold a module ahead of the stage that builds it: prediction models, scheduler optimisation, the reliability layer and hardware stay empty stubs with documented interfaces until their stages arrive.
 
 ---
 

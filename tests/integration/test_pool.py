@@ -14,6 +14,8 @@ import pytest
 from meridian.config import Settings, load_settings
 from meridian.store.pool import (
     POOL_MAX_SIZE,
+    DatabaseUnreachableError,
+    connect_once,
     is_database_reachable,
     open_pool,
 )
@@ -100,3 +102,38 @@ def test_the_pool_is_bounded(settings: Settings) -> None:
         assert pool.max_size == POOL_MAX_SIZE
     finally:
         pool.close()
+
+
+def test_a_one_shot_connection_is_pinned_to_utc_like_a_pooled_one(
+    settings: Settings,
+) -> None:
+    """The twin of the test above, and the reason ``connect_once`` exists.
+
+    Six commands opened their own connection with a bare ``psycopg.connect``
+    and none of them passed the session parameters, so ``meridian passes
+    generate`` read instants tagged with whatever zone the server defaulted to
+    while the API read them as UTC. Same moments, different ``tzinfo``, and
+    nothing anywhere saying so.
+    """
+    with connect_once(settings) as conn, conn.cursor() as cur:
+        cur.execute("show timezone")
+        row = cur.fetchone()
+
+        assert row is not None
+        assert row[0] == "UTC"
+
+
+def test_a_one_shot_connection_to_nothing_raises_one_named_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """So a command prints a sentence instead of a psycopg traceback.
+
+    Port 1 is reserved and nothing listens on it, the same address the health
+    check test uses for the same reason.
+    """
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://meridian:meridian@127.0.0.1:1/meridian"
+    )
+
+    with pytest.raises(DatabaseUnreachableError, match="cannot reach the database"):
+        connect_once(load_settings())

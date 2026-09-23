@@ -1,0 +1,74 @@
+{
+  "schema": "reference-archive/1",
+  "covers": "2026-07",
+  "stations": [
+    {
+      "key": "gs-dublin",
+      "name": "Rooftop, Dublin",
+      "lat": 53.3498,
+      "lon": -6.2603,
+      "alt_m": 20.0,
+      "capability": {
+        "band": "vhf",
+        "modes": [
+          "lrpt"
+        ]
+      }
+    },
+    {
+      "key": "gs-galway",
+      "name": "Galway west",
+      "lat": 53.2707,
+      "lon": -9.0568,
+      "alt_m": 12.0,
+      "capability": null
+    }
+  ],
+  "receptions": [
+    {
+      "id": "obs-2607-001",
+      "station": "gs-dublin",
+      "object": {
+        "norad": 57166
+      },
+      "start": "2026-07-04T09:41:18Z",
+      "end": "2026-07-04T09:52:10Z",
+      "max_elevation": 64.2,
+      "frequency_hz": 137100000,
+      "mode": "lrpt",
+      "result": "decoded",
+      "frames": 812,
+      "snr_db": 11.4
+    },
+    {
+      "id": "obs-2607-002",
+      "station": "gs-galway",
+      "object": {
+        "norad": 25338
+      },
+      "start": "2026-07-11T18:02:44Z",
+      "end": "2026-07-11T18:11:59Z",
+      "max_elevation": 18.7,
+      "frequency_hz": 137620000,
+      "mode": "lrpt",
+      "result": "partial",
+      "frames": 0,
+      "snr_db": 4.1
+    },
+    {
+      "id": "obs-2607-003",
+      "station": "gs-dublin",
+      "object": {
+        "name": "UNKNOWN-OBJECT-7"
+      },
+      "start": "2026-07-19T03:22:07Z",
+      "end": "2026-07-19T03:31:40Z",
+      "max_elevation": 41.0,
+      "frequency_hz": 137100000,
+      "mode": "lrpt",
+      "result": "nothing",
+      "frames": 0,
+      "snr_db": null
+    }
+  ]
+}

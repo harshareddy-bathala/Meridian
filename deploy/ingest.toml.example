@@ -1,0 +1,85 @@
+# meridian-ingest settings. Copy to `ingest.toml` and edit.
+#
+# Every value below is a default: with no file at all, `meridian-ingest` fetches
+# the reference archive into `data/ingest/raw` and the completion gate runs. The
+# file is for departing from the defaults, not for repeating them.
+#
+# Where this file is looked for, in order:
+#   1. $MERIDIAN_INGEST_CONFIG, if set. A path here that does not exist is an
+#      error rather than a fall-back — running on defaults an operator believes
+#      they replaced is the failure this avoids.
+#   2. ./ingest.toml
+#   3. nowhere: the defaults below.
+#
+# **No credential belongs in this file.** A source that needs a key names the
+# environment variable holding one; see `api_key_env` at the bottom. Unknown
+# keys are refused rather than ignored, so a typo is a message and not a setting
+# that quietly did nothing.
+
+# Where retrieved artefacts are held, unchanged, forever (D-141).
+#
+# Relative to *this file*, not to the working directory, so the line means the
+# same tree whichever directory the command is run from. `data/` is already
+# gitignored, which matters here more than anywhere else: these bytes belong to
+# somebody else, and committing them is the redistribution question D-136 leaves
+# open.
+#
+# **The `../` below assumes this file stays in `deploy/`.** Copied to the
+# repository root and left as it is, it puts the raw store *beside* the
+# repository rather than inside it — change it to `data/ingest/raw` there. The
+# tree still works; it is just somewhere nobody looks, which is the worst place
+# for the one thing that cannot be re-downloaded.
+#
+# **This tree is not in the database backup.** `deploy/tools/backup.py` dumps
+# Postgres and takes none of this. It is also the one thing that cannot be
+# recreated without going back to the source, which is what the stage's
+# completion gate rests on — so copy it yourself, and see docs/OPERATIONS.md.
+raw_root = "../data/ingest/raw"
+
+# Seconds before a request is abandoned, applied to connect, read and write.
+timeout_s = 30.0
+
+# How an archive operator reaches a human about our traffic. Appended to the
+# user agent when set, and worth setting: being reachable is the other half of
+# being polite, and an operator who can ask is an operator who does not block.
+# contact = "you@example.org"
+
+# How long to wait before asking again, when asking again is worth doing.
+#
+# Full jitter: each delay is drawn from the whole interval up to a ceiling that
+# doubles. A `Retry-After` from the server replaces this outright — unless it is
+# longer than max_delay_s, which stops the fetch instead. Waiting an hour inside
+# a command is a hung process, not politeness.
+[retry]
+attempts = 4
+base_delay_s = 1.0
+max_delay_s = 30.0
+
+# One table per source. The id must be one an adapter is registered for;
+# anything else is refused, naming the ids that exist.
+[sources.reference_archive]
+# The fixture-backed source shipped with the distribution (D-142). Its artefacts
+# are synthetic and ours, its URLs are under `.invalid`, and it exists so the
+# completion gate can be demonstrated by somebody who has configured nothing.
+enabled = true
+
+# The most requests one fetch of this source may make, retries included. It is
+# spent *before* each request, so the ceiling is never exceeded; when it runs
+# out the command says which artefact it stopped before, and you resume there.
+request_budget = 50
+
+# An example of a real source, once one is adopted. Adding it here is refused
+# until an adapter carries its licence, its terms and its ATTRIBUTION.md entry
+# (D-134) — the entry lands before the first retrieval, not after it.
+#
+# [sources.some_archive]
+# base_url = "https://archive.example.org/api/v2/"   # https only
+#
+# The NAME of an environment variable, never the key. The key is read at the
+# moment a fetch needs it and is never held on a settings object, so no
+# traceback or log line can print it. `SOME_ARCHIVE_KEY_FILE` wins over
+# `SOME_ARCHIVE_KEY` and keeps the value out of the process environment, where
+# `docker inspect` and /proc/<pid>/environ show it to anyone on the host
+# (D-114). Pasting the key here instead of its name is refused, by name, with
+# instructions to rotate it.
+# api_key_env = "SOME_ARCHIVE_KEY"

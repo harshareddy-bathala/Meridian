@@ -102,6 +102,11 @@ def test_all_expected_tables_exist(conn) -> None:
         "assignments",
         "observations",
         "heartbeats",
+        # Stage 14's ingest and archive tables (0016, D-139, D-140).
+        "ingest_sources",
+        "ingest_records",
+        "archive_stations",
+        "archive_observations",
     }
     assert expected <= tables
 
@@ -171,6 +176,20 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:
     # boolean here would be derivable from `source` and so able to disagree
     # with it.
     assert "element_sets" not in carrying
+    # D-139 exempts the ingest and archive tables for the same reason: they
+    # describe what somebody else published, not what one of our stations
+    # received, and the table name is the label. What replaces the column is
+    # that these rows are never pooled with `observations` — which the
+    # outcome vocabulary below makes a CHECK violation rather than a habit.
+    assert not (
+        {
+            "ingest_sources",
+            "ingest_records",
+            "archive_stations",
+            "archive_observations",
+        }
+        & carrying
+    )
 
 
 def test_outcome_enum_is_exactly_the_msp_five(scalar) -> None:
@@ -699,3 +718,315 @@ def test_a_scheduled_assignment_names_no_conflict(fixtures) -> None:
         "asg_clean",
     )
     assert stored[0] == (55.0, None)
+
+
+# --- Migration 0016's ingest and archive tables ------------------------------
+#
+# The completion gate for Stage 14 is that a snapshot downloaded once can be
+# normalised repeatedly with no network. These tests are about the half of that
+# the schema owns: provenance that cannot be incomplete, arrivals that cannot be
+# overwritten, and archive rows that cannot be mistaken for our own.
+
+
+@pytest.fixture
+def archive_fixtures(rollback):
+    """One source and one retrieved artefact, the smallest graph these hang off."""
+    rollback(
+        "insert into ingest_sources (source_id, source_class, name, licence,"
+        " terms_url, access_constraint, attribution_entry)"
+        " values (%s, %s, %s, %s, %s, %s, %s)",
+        "reference_archive",
+        "archive_receptions",
+        "Reference archive",
+        "CC-BY-4.0",
+        "https://example.invalid/terms",
+        "none",
+        "Ingested data sources: reference adapter",
+    )
+    return rollback
+
+
+def _insert_record(
+    execute, *, identifier: str = "art-1", sha: bytes = ZERO_HASH
+) -> int:
+    rows = execute(
+        "insert into ingest_records (source_id, original_identifier, source_version,"
+        " payload_kind, retrieved_at, sha256, raw_path, media_type, byte_count)"
+        " values (%s, %s, %s, %s, now(), %s, %s, %s, %s) returning record_id",
+        "reference_archive",
+        identifier,
+        "v1",
+        "data",
+        sha,
+        f"reference_archive/20260920T000000Z-{identifier}/artefact.bin",
+        "application/json",
+        128,
+    )
+    return int(rows[0][0])
+
+
+def test_a_source_without_its_terms_cannot_be_registered(rollback) -> None:
+    """D-134 in the database rather than in a reviewer's memory.
+
+    A blank licence would let a record exist that arrived under terms nobody
+    wrote down — which is precisely the state ATTRIBUTION.md exists to make
+    impossible, and the one that cannot be repaired afterwards because the
+    retrieval has already happened.
+    """
+    with pytest.raises(psycopg.errors.CheckViolation):
+        rollback(
+            "insert into ingest_sources (source_id, source_class, name, licence,"
+            " terms_url, access_constraint, attribution_entry)"
+            " values (%s, %s, %s, %s, %s, %s, %s)",
+            "no_terms",
+            "archive_receptions",
+            "Nameless",
+            "   ",
+            "https://example.invalid/terms",
+            "none",
+            "entry",
+        )
+
+
+def test_an_identical_refetch_is_one_row(archive_fixtures) -> None:
+    """The same bytes retrieved twice conflict rather than duplicating.
+
+    This is what makes a re-run of `fetch` cheap and safe: the loader takes the
+    id it already has. A *differing* re-fetch has a different digest and so
+    inserts, which is how supersession stays visible.
+    """
+    first = _insert_record(archive_fixtures)
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _insert_record(archive_fixtures)
+    assert first > 0
+
+
+def test_a_differing_refetch_supersedes_rather_than_overwrites(
+    archive_fixtures,
+) -> None:
+    """Append-only: nothing is rewritten, and the old row says what replaced it."""
+    first = _insert_record(archive_fixtures)
+    second = _insert_record(archive_fixtures, sha=OTHER_HASH)
+    archive_fixtures(
+        "update ingest_records set superseded_by = %s where record_id = %s",
+        second,
+        first,
+    )
+
+    stored = archive_fixtures(
+        "select superseded_by from ingest_records where record_id = %s", first
+    )
+    assert stored[0][0] == second
+
+
+def test_a_record_cannot_supersede_itself(archive_fixtures) -> None:
+    record_id = _insert_record(archive_fixtures)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        archive_fixtures(
+            "update ingest_records set superseded_by = %s where record_id = %s",
+            record_id,
+            record_id,
+        )
+
+
+@pytest.mark.parametrize(
+    "raw_path",
+    [
+        "/etc/passwd",
+        "../outside/artefact.bin",
+        "reference_archive/../../artefact.bin",
+        "",
+    ],
+)
+def test_a_raw_path_leaving_the_store_is_refused(archive_fixtures, raw_path) -> None:
+    """D-141: the store's layout is ours, and a path is never a remote string.
+
+    The constraint is the second line of defence — the writer builds the path
+    from our own timestamp and our own checksum — but it is the one that stays
+    true when somebody writes a second writer.
+    """
+    with pytest.raises(psycopg.errors.CheckViolation):
+        archive_fixtures(
+            "insert into ingest_records (source_id, original_identifier,"
+            " source_version, payload_kind, retrieved_at, sha256, raw_path,"
+            " media_type, byte_count)"
+            " values (%s, %s, %s, %s, now(), %s, %s, %s, %s)",
+            "reference_archive",
+            "escaping",
+            "v1",
+            "data",
+            ZERO_HASH,
+            raw_path,
+            "application/json",
+            1,
+        )
+
+
+def _insert_archive_observation(execute, record_id: int, **overrides) -> None:
+    values = {
+        "source_observation_id": "obs-1",
+        "transformation_version": "reference-1",
+        "satellite_key": "norad:99999",
+        "satellite_key_kind": "norad",
+        "archive_outcome": "decoded",
+    }
+    values.update(overrides)
+    execute(
+        "insert into archive_observations (record_id, source_id,"
+        " source_observation_id, transformation_version, content_sha256,"
+        " satellite_key, satellite_key_kind, started_at, archive_outcome)"
+        " values (%s, %s, %s, %s, %s, %s, %s, now(), %s)",
+        record_id,
+        "reference_archive",
+        values["source_observation_id"],
+        values["transformation_version"],
+        ZERO_HASH,
+        values["satellite_key"],
+        values["satellite_key_kind"],
+        values["archive_outcome"],
+    )
+
+
+def test_an_archive_reception_cannot_claim_an_msp_outcome(archive_fixtures) -> None:
+    """`no_signal` asserts a station was listening; we hold no heartbeat for one.
+
+    Rule 7 makes "absence is not a miss" load-bearing for every reliability
+    figure, and the evidence that distinguishes the two is a heartbeat we do not
+    have for somebody else's station. Different values mean an accidental union
+    of the two tables fails here rather than returning a plausible number.
+    """
+    record_id = _insert_record(archive_fixtures)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_archive_observation(
+            archive_fixtures, record_id, archive_outcome="no_signal"
+        )
+
+
+def test_an_unknown_satellite_is_stored_and_creates_no_catalogue_row(
+    archive_fixtures,
+) -> None:
+    """No FK to `satellites` (D-139), and deliberately so.
+
+    An FK would force the loader either to drop receptions for objects we do not
+    track — a second selection filter stacked on the archive's own, invisible
+    downstream — or to insert into `satellites`, letting an external archive
+    decide what pass generation propagates. Coverage is a number we report, not
+    a filter we apply.
+    """
+    before = archive_fixtures("select count(*) from satellites")[0][0]
+    record_id = _insert_record(archive_fixtures)
+    _insert_archive_observation(
+        archive_fixtures, record_id, satellite_key="norad:00001"
+    )
+
+    stored = archive_fixtures(
+        "select satellite_key from archive_observations where record_id = %s",
+        record_id,
+    )
+    after = archive_fixtures("select count(*) from satellites")[0][0]
+
+    assert stored == [("norad:00001",)]
+    assert after == before
+
+
+def test_renormalising_under_a_new_version_appends(archive_fixtures) -> None:
+    """Retrieval and transformation are separate events (D-140).
+
+    The same artefact normalised again under a new normaliser is a second row,
+    not an overwritten one — which is why `transformation_version` is part of
+    the key and is not a column on the arrival.
+    """
+    record_id = _insert_record(archive_fixtures)
+    _insert_archive_observation(archive_fixtures, record_id)
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _insert_archive_observation(archive_fixtures, record_id)
+
+
+def test_denominator_inputs_says_what_stage_16_can_compute(archive_fixtures) -> None:
+    """Incomplete stations are counted and published, never silently dropped.
+
+    A completeness denominator computed only over the stations we happened to
+    have coordinates for, reported as though it covered all of them, is this
+    project's own methodological threat arriving through the back door.
+    """
+    record_id = _insert_record(archive_fixtures)
+    for key, lat, lon, capability in (
+        ("nowhere", None, None, None),
+        ("located", 51.5, -0.1, None),
+        ("described", 51.5, -0.1, '{"modes": ["lrpt"]}'),
+    ):
+        archive_fixtures(
+            "insert into archive_stations (record_id, source_id, source_station_key,"
+            " lat_deg, lon_deg, capability_json, content_sha256)"
+            " values (%s, %s, %s, %s, %s, %s, %s)",
+            record_id,
+            "reference_archive",
+            key,
+            lat,
+            lon,
+            capability,
+            ZERO_HASH,
+        )
+
+    stored = archive_fixtures(
+        "select source_station_key, denominator_inputs from archive_stations"
+        " order by source_station_key"
+    )
+    assert stored == [
+        ("described", "location_and_capability"),
+        ("located", "location_only"),
+        ("nowhere", "neither"),
+    ]
+
+
+def test_a_half_published_location_is_refused(archive_fixtures) -> None:
+    """A latitude without a longitude is not a location, and would be used as one."""
+    record_id = _insert_record(archive_fixtures)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        archive_fixtures(
+            "insert into archive_stations (record_id, source_id, source_station_key,"
+            " lat_deg, content_sha256) values (%s, %s, %s, %s, %s)",
+            record_id,
+            "reference_archive",
+            "half",
+            51.5,
+            ZERO_HASH,
+        )
+
+
+def test_every_stored_artefact_carries_its_terms(archive_fixtures) -> None:
+    """ "Were we allowed to use this?" is one query returning no nulls.
+
+    A property of the schema rather than of the loader: the provenance columns
+    are `not null` on both sides of the join, so the view cannot produce a
+    record whose licence nobody recorded.
+    """
+    _insert_record(archive_fixtures)
+    incomplete = archive_fixtures(
+        "select count(*) from ingest_provenance"
+        " where licence is null or terms_url is null or attribution_entry is null"
+    )
+    assert incomplete[0][0] == 0
+
+
+def test_the_ingest_tables_are_plain_tables(conn) -> None:
+    """No hypertable and no compression policy on any of them.
+
+    Archive receptions are months old when they load, so a compression policy on
+    `started_at` would compress a chunk on creation and every backfill would
+    write into a compressed one. Making one a hypertable later is supported;
+    undoing it is not, and `downgrade()` always raises.
+    """
+    with conn.cursor() as cur:
+        cur.execute("select hypertable_name from timescaledb_information.hypertables")
+        hypertables = {r[0] for r in cur.fetchall()}
+
+    assert not (
+        {
+            "ingest_sources",
+            "ingest_records",
+            "archive_stations",
+            "archive_observations",
+        }
+        & hypertables
+    )

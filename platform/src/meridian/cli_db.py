@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import psycopg
 
 from meridian.config import load_settings
-from meridian.store.pool import CONNECT_TIMEOUT_S
+from meridian.store.pool import DatabaseUnreachableError, connect_once
 from meridian.store.schema_revision import (
     find_current_revision,
     find_head_revision,
@@ -112,11 +112,9 @@ def run_db(_args: argparse.Namespace) -> int:
 
     settings = load_settings()
     try:
-        with psycopg.connect(
-            settings.psycopg_url, connect_timeout=CONNECT_TIMEOUT_S
-        ) as conn:
+        with connect_once(settings) as conn:
             current = find_current_revision(conn)
-    except (psycopg.Error, OSError) as exc:
+    except (DatabaseUnreachableError, psycopg.Error, OSError) as exc:
         print(  # noqa: T201
             f"meridian db status: cannot reach the database: {exc}", file=sys.stderr
         )

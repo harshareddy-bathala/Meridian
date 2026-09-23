@@ -35,21 +35,32 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 # and depends on nothing, so a plain `uv sync --no-dev` would install an empty
 # environment with no alembic and no meridian on it.
 #
+# meridian-ingest is the exception, and it is excluded rather than omitted:
+# uv reads every member's pyproject to resolve the workspace, so its metadata
+# has to be here, while the package itself must not be. The archive layer on
+# the machine that has to keep receiving when every archive is unreachable is
+# precisely what the independence test forbids (D-138). Its absence is checked
+# by tests/unit/test_layout.py, so a fifth distribution is a decision rather
+# than a default.
+#
 # Dependency metadata first, so a source-only change does not re-resolve.
 COPY pyproject.toml uv.lock ./
 COPY platform/pyproject.toml platform/
 COPY client/pyproject.toml client/
 COPY simulator/pyproject.toml simulator/
+COPY ingest/pyproject.toml ingest/
 RUN mkdir -p platform/src/meridian client/src/meridian_client simulator/src/meridian_sim \
+            ingest/src/meridian_ingest \
     && touch platform/src/meridian/__init__.py \
             client/src/meridian_client/__init__.py \
             simulator/src/meridian_sim/__init__.py \
-    && uv sync --frozen --no-dev --no-editable --all-packages
+            ingest/src/meridian_ingest/__init__.py \
+    && uv sync --frozen --no-dev --no-editable --all-packages --no-install-package meridian-ingest
 
 COPY platform/ platform/
 COPY client/ client/
 COPY simulator/ simulator/
-RUN uv sync --frozen --no-dev --no-editable --all-packages
+RUN uv sync --frozen --no-dev --no-editable --all-packages --no-install-package meridian-ingest
 
 
 FROM python:3.11.15-slim-bookworm@sha256:d29f48a31a8b408ed19272ca1e7b10ebae13b240a27e862d3d4217c528e2e0c3 AS runtime

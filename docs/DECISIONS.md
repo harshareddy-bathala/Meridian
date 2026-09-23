@@ -2965,6 +2965,98 @@ A tile has been through a colour map, a projection, resampling and lossy compres
 
 ---
 
+## D-138 — Ingest is a fourth distribution, and the dependency points one way
+
+**2026-09-19 · accepted** · *`ingest/src/meridian_ingest/`, root `pyproject.toml`, `deploy/Dockerfile`, Stage 14*
+
+`CLAUDE.md`'s layout has placed `ingest/` at the top level beside `platform/` since Stage 0, and D-012 makes each such root a distribution. Stage 14 is where that stops being a plan.
+
+**`meridian-ingest` is a fourth workspace member.** It depends on `meridian`; `meridian` never depends on it. The arrow is one-way, and it is the independence test in install form — the same argument that made the station client its own distribution, where "the client knows nothing about the database" is enforced when it installs rather than when it is reviewed. A platform that could import the archive layer would put an external archive one import away from the scheduling path.
+
+**It is not installed into the runtime image.** `deploy/Dockerfile` syncs every workspace package, which would place the archive layer on the machine that must keep working when every archive is unreachable. The sync names the three shipped distributions instead, so a fourth arrives only on purpose.
+
+**Its command is `meridian-ingest`, not a `meridian` subcommand.** `cli.py` imports every `cli_*` module eagerly, so a subcommand would make the platform import ingest at start-up. A separate binary also means an operator who never installs it still has a complete Meridian — the independence test visible at a shell prompt.
+
+**What archive data may be used for**, stated narrowly because D-053 forbids comparing our totals with another network's and the temptation to do it anyway will live in these tables: fitting the simulator's outcome distributions, cross-checking a satellite our own station heard nothing from, and training and evaluation input under Stage 16's weighting. Never a runtime input to scheduling or reception (D-102), and never a published comparison.
+
+**The completeness denominator stays ours.** Stage 16 computes what was available from our own orbit service. No table here holds an archive's own availability count and no schedule feed is normalised, so the wrong denominator is unavailable rather than merely discouraged.
+
+*Rejected: a package inside `meridian`.* Nothing would then stop the import going the other way, and the property this whole stage rests on would be a convention instead of a fact.
+
+---
+
+## D-139 — Archive receptions are stored apart from our own
+
+**2026-09-19 · accepted** · *`archive_observations`, `archive_stations`, `observations.provenance`, Stage 14*
+
+`DATA-MODEL.md` has listed `observations.provenance ∈ {station, archive, manual}` since Stage 1, but the table cannot hold an archive reception. It is keyed `(assignment_id, revision, started_at)`, its `observation_id` is generated from `(assignment_id, revision)` (D-027), and `station_id` references our own `stations`. A reception someone else made has no Meridian assignment and no registered station, so storing one means inventing both. The enum anticipates rows the key forbids, and this entry settles it.
+
+**Archive receptions go in `archive_observations`, the observing station in `archive_stations`.** `observations` stays the record of our own network, which keeps every reliability number computed from rows whose listening evidence we actually hold — rule 7 means nothing where no heartbeat exists.
+
+**`observations.provenance` keeps its now-unused `archive` value.** Narrowing the CHECK means altering a constraint on a compressed hypertable, which D-119 established we may not assume is safe on TimescaleDB 2.29, and the column is published by the public API. The value is retired by a `comment on column` — catalogue-only, and safe — and in the model: `insert_observation` never sets it.
+
+**The archive gets its own outcome vocabulary.** `no_data`, not `no_signal`: `no_signal` asserts that a station was verifiably listening and heard nothing (D-010), and we hold no heartbeat for someone else's station. Different values mean an accidental `union` of the two tables fails a CHECK instead of quietly returning a plausible number. `source_outcome` keeps the archive's own string verbatim, so every mapping stays auditable.
+
+**No foreign key to `satellites`.** An FK would force the load path either to drop receptions for objects we do not track — a second selection filter stacked invisibly on the archive's own — or to insert into `satellites`, which would let an external archive decide what pass generation propagates. `satellite_key` is canonical text with its kind, joined at read time; coverage is reported as a number, never applied as a filter.
+
+**Neither table carries `simulated`.** `element_sets` is the documented exception the conformance test already names, exempt because its provenance lives in `source`; these are the same case, and here the table name is the label. The obligation that replaces the column is that archive rows are never pooled with `observations`.
+
+*Rejected: a synthetic `stations` row per archive station.* It would fill the registry with stations that never registered, never held a token and never sent a heartbeat, and every query that counts stations would have to learn to exclude them.
+
+---
+
+## D-140 — The provenance tables are created once, at Stage 14
+
+**2026-09-19 · accepted** · *`DATA-MODEL.md` Ingest and regional tables, migration 0016, Stages 14 and 31*
+
+`DATA-MODEL.md` introduced `ingest_sources` and `ingest_records` as planned for Stages 31 and 32 (D-132). Stage 14 needs both first, and two tables with one purpose would be the second set of provenance conventions D-132 exists to prevent.
+
+**Stage 14 creates them; Stage 31 uses them unchanged**, adding its own sample tables against them. `environment_samples`, `areas_of_interest` and `area_series` remain Stage 31's and 32's.
+
+**`transformation_version` moves off `ingest_records`.** Retrieval and transformation are separate events: re-normalising one artefact under a new normaliser would have to overwrite that column, which is the one thing an append-only arrival forbids. It belongs on the normalised row — `archive_observations` here, `environment_samples` later — where a second normalisation appends rather than rewrites.
+
+**`ingest_sources` is insert-only, and changed terms mean a new `source_id`.** Stored records keep pointing at the terms they actually arrived under. `licence`, `terms_url` and `attribution_entry` are `not null` and non-empty, which puts D-134 in the database rather than in a reviewer's memory: no source can be registered without its terms written down, so no record can exist that arrived under terms nobody recorded.
+
+*Rejected: leaving the tuples to Stage 31.* Migrations are forward-only (`GIT-WORKFLOW.md` Rule 9), so a column the archive path needs costs less now than as a retrofit onto a table that already holds rows.
+
+---
+
+## D-141 — The raw store is immutable, and no remote string becomes a filename
+
+**2026-09-19 · accepted** · *`meridian_ingest/raw_store.py`, `data/ingest/raw/`, Stage 14*
+
+Stage 14's completion gate is that a snapshot is downloaded once and then normalised repeatedly with no network. That makes the raw store the thing the gate rests on, and the one artefact in this system that cannot be recreated without going back to the source.
+
+**The layout is `<raw root>/<source id>/<retrieved at>-<hash prefix>/`**, holding the bytes exactly as received and a manifest of the provenance fields beside them. `source_id` is ours and pattern-checked, and the directory name is our timestamp and our checksum: **no string from a remote source is ever a path element**. `original_identifier` lives in the manifest and the database only. That is `capture_folder.py`'s lesson applied by construction instead of by validation.
+
+**Publication is a directory rename.** Bytes stream into a scratch directory, hashed as they arrive and re-hashed from disk afterwards — the stream proves the wire, the re-read proves the disk — and the manifest is written inside before the directory is renamed into place (D-068). A rename onto a non-empty directory fails, so immutability is the filesystem's rather than ours, and a crash leaves a scratch directory with no manifest, which is never mistaken for a record. The unit of publication is the directory, because half of one would be a manifest describing bytes that are not there.
+
+**A differing re-fetch is a new row**, linked from the one it replaces by `superseded_by` in the same transaction; an identical re-fetch conflicts on `(source_id, original_identifier, sha256)` and returns the existing id. Filling a column that was null is the only update in the whole write path.
+
+**A source that goes back to an earlier version is reported, not re-linked.** If A is superseded by B and a later fetch returns A's bytes again, that fetch conflicts onto A's row: nothing is inserted, its raw directory has no row of its own, and `superseded_by` goes on naming B. Re-linking would mean rewriting a filled column. `meridian-ingest load` names each such artefact instead, and nothing reads supersession before Stage 16, which settles what "current" means if it needs to (found auditing Stage 14, 2026-09-23).
+
+**The raw store is outside the database backup.** `deploy/tools/backup.py` dumps Postgres; this tree is not in it. The runbook says so, and the backup names the root it did not take, rather than leaving an operator to find out after losing the one thing the gate depends on.
+
+*Rejected: raw bytes in the database.* The gate wants a tree an operator can copy to a laptop, and a multi-megabyte artefact per row slows every dump for something never queried by content.
+
+---
+
+## D-142 — No test reaches the network, and the first adapter is ours
+
+**2026-09-19 · accepted** · *`tests/unit/test_ingest_gate.py`, `meridian_ingest/adapters/`, Stage 14*
+
+A stage whose input we do not control is the one place a test suite quietly acquires a dependency on somebody else's uptime.
+
+**Adapters are exercised against recorded fixtures, and a live fetch is a manual command an operator runs.** CI never opens a socket to a source. The gate test installs a guard over `socket.socket` itself rather than over module bindings, so a module that imported the name earlier still gets an object that raises — and it carries a positive control asserting that a connection attempt really does fail. Without that control the gate can pass because the guard is inert, which is the worst failure available, because it looks like success.
+
+**Normalisation cannot reach a network, by signature.** It takes bytes and their manifest, read from the raw store: no client, no adapter, no URL, no clock. There is no argument through which it could fetch anything, which is what makes the gate provable rather than asserted.
+
+**The first adapter is fixture-backed, over synthetic artefacts we author.** A recorded fixture from a real source would be that source's data committed to a public repository, which is exactly the redistribution question D-136 leaves open. The real source is adopted when its licence and terms are recorded (D-134), and `fetch` refuses, before opening a socket, if the source's attribution entry is missing.
+
+*Rejected: recording a fixture from a real archive now.* It would settle D-136 by accident, in a commit about test plumbing.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -3122,6 +3214,19 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-133 a tile is not a measurement | `ARCHITECTURE.md` Rules; `DATA-MODEL.md`; Stages 31 and 32 |
 | D-134 every ingested source is credited | `ATTRIBUTION.md` |
 | Modules 18 to 20, and Stages 31 to 33 | `PROJECT.md` §5.6, §19; `SOFTWARE-IMPLEMENTATION-ROADMAP.md`; `GLOSSARY.md` |
+
+**Landed 2026-09-21**, building the ingest subsystem and its completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-138 a fourth distribution, the dependency pointing one way | `ingest/`; `deploy/Dockerfile`'s `--no-install-package meridian-ingest`; `tests/unit/test_layout.py`; `tests/unit/test_import_boundaries.py` |
+| D-139 archive receptions stored apart from our own | `deploy/migrations/sql/0016_archive_ingest.sql`; `DATA-MODEL.md` |
+| D-140 the provenance tables created once, at Stage 14 | 0016 and the four `meridian/store/` modules over it |
+| D-141 an immutable raw store, and no remote string as a filename | `meridian_ingest/{provenance,raw_manifest,raw_layout,raw_store}.py`; `deploy/tools/backup.py`; `OPERATIONS.md` |
+| D-142 no test reaches the network, and the first adapter is ours | `meridian_ingest/adapters/reference.py`; `tests/unit/test_ingest_gate.py`; `tests/integration/test_ingest_gate.py` |
+| — the completion gate, and how to run it by hand | `OPERATIONS.md` § External archive ingest |
+
+**The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
 
