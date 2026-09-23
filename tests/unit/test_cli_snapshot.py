@@ -102,6 +102,31 @@ def test_labelling_a_damaged_snapshot_exits_3(
     assert run(datasets_root, "label", str(raw)) == EXIT_CORRUPT
 
 
+def test_labelling_a_path_that_is_not_there_exits_1_not_3(
+    datasets_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo is not tampering: 3 is kept for a snapshot that has changed."""
+    code = run(datasets_root, "label", str(tmp_path / "typo"))
+
+    assert code == EXIT_FAILED
+    assert "is not a directory" in capsys.readouterr().err
+
+
+def test_a_root_that_cannot_be_written_is_refused_with_a_sentence(
+    raw_snapshot: Any,
+    world: Any,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    blocked = tmp_path / "a-file"
+    blocked.write_text("not a directory\n", encoding="utf-8")
+
+    code = run(blocked, "label", str(raw_snapshot(world)))
+
+    assert code == EXIT_FAILED
+    assert "Traceback" not in capsys.readouterr().err
+
+
 def test_the_root_can_come_from_the_environment(
     raw_snapshot: Any,
     world: Any,

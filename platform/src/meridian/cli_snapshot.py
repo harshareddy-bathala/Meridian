@@ -133,11 +133,15 @@ def _export(args: argparse.Namespace) -> int:
     try:
         since = _since(args.since)
         published = _export_from_database(since, _root(args))
+    except DamagedSnapshotError as exc:
+        _refuse("export", str(exc))
+        return EXIT_CORRUPT
     except (
         DatabaseUnreachableError,
         SchemaMissingError,
         ValueError,
         psycopg.Error,
+        OSError,
     ) as exc:
         return _refuse("export", str(exc))
     _report("raw snapshot", published)
@@ -174,6 +178,8 @@ def _export_from_database(since: datetime, root: Path) -> PublishedDirectory:
 
 def _label(args: argparse.Namespace) -> int:
     """``meridian snapshot label``."""
+    if not Path(args.snapshot).is_dir():
+        return _refuse("label", f"{args.snapshot} is not a directory")
     try:
         config = load_label_config(args.config)
         raw = read_directory(args.snapshot)
@@ -183,7 +189,12 @@ def _label(args: argparse.Namespace) -> int:
     except DamagedSnapshotError as exc:
         _refuse("label", str(exc))
         return EXIT_CORRUPT
-    except (LabelConfigError, NotARawSnapshotError, MalformedSnapshotError) as exc:
+    except (
+        LabelConfigError,
+        NotARawSnapshotError,
+        MalformedSnapshotError,
+        OSError,
+    ) as exc:
         return _refuse("label", str(exc))
     _report("evaluation dataset", published)
     _say(f"  indeterminate      {_indeterminate(published.manifest)}")
