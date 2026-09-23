@@ -55,6 +55,7 @@ def a_pass(
         satellite_id=satellite,
         aos=aos,
         los=aos + timedelta(minutes=11),
+        element_set_epoch=aos - timedelta(hours=6),
         simulated=simulated,
     )
 
@@ -131,8 +132,12 @@ def reported(
 def other_pass(
     pass_id: int, outcome: str, *, listening: bool = True, **fields: Any
 ) -> dict[str, Any]:
-    """A second pass of the same satellite from another station, reported."""
-    other = a_pass(pass_id, station="st_b", **fields)
+    """The same satellite from a station of its own, reported.
+
+    One station per pass: two passes of one satellite over one station at one
+    time are one rise, and would be grouped into one physical pass (D-148).
+    """
+    other = a_pass(pass_id, station=f"st_{pass_id}", **fields)
     return {
         "passes": (other,),
         "assignments": (assigned(other),),
@@ -330,6 +335,76 @@ def test_a_configuration_that_was_never_recorded_sorts_first() -> None:
     )
 
     assert label(snapshot).scheduled_by == (None, "A")
+
+
+def a_second_prediction(target: PassRow, pass_id: int = 2) -> PassRow:
+    """The same rise predicted again from a newer element set, seconds apart."""
+    return replace(
+        target,
+        pass_id=pass_id,
+        aos=target.aos + timedelta(seconds=3),
+        los=target.los + timedelta(seconds=3),
+        element_set_epoch=target.element_set_epoch + timedelta(hours=4),
+    )
+
+
+def test_a_rise_predicted_twice_and_scheduled_once_is_one_scheduled_pass() -> None:
+    """D-148: the second prediction is not a pass nobody took."""
+    first = a_pass()
+    newer = a_second_prediction(first)
+    snapshot = rows(
+        passes=(first, newer),
+        assignments=(assigned(newer),),
+        observations=(report("as_2", "decoded"),),
+    )
+
+    (labelled,) = label_passes(snapshot, as_of=AS_OF, config=LabelConfig())
+
+    assert labelled.pass_ids == (1, 2)
+    assert labelled.pass_id == 2
+    assert labelled.label == "successful_reception"
+    assert label_counts((labelled,))["excluded.not_scheduled.measured"] == 0
+
+
+def test_a_rise_predicted_twice_and_never_scheduled_is_counted_once() -> None:
+    first = a_pass()
+
+    labelled = label_passes(
+        rows(passes=(first, a_second_prediction(first))),
+        as_of=AS_OF,
+        config=LabelConfig(),
+    )
+
+    assert [one.exclusion_reason for one in labelled] == ["not_scheduled"]
+
+
+def test_listening_confirmed_for_one_prediction_counts_for_the_rise() -> None:
+    first = a_pass()
+    newer = a_second_prediction(first)
+    snapshot = rows(
+        passes=(first, newer),
+        assignments=(assigned(first), assigned(newer)),
+        observations=(report("as_2", "no_signal"),),
+        heartbeats=(heard(first),),
+        listening={"as_1": True, "as_2": False},
+    )
+
+    (labelled,) = label_passes(snapshot, as_of=AS_OF, config=LabelConfig())
+
+    assert labelled.listening_confirmed is True
+
+
+def test_the_settle_margin_is_measured_from_the_latest_prediction() -> None:
+    first = a_pass(aos=AS_OF - timedelta(hours=24, minutes=12))
+    later = replace(
+        a_second_prediction(first), los=AS_OF - timedelta(hours=23, minutes=59)
+    )
+
+    (labelled,) = label_passes(
+        rows(passes=(first, later)), as_of=AS_OF, config=LabelConfig()
+    )
+
+    assert labelled.exclusion_reason == "report_window_open"
 
 
 def test_the_latest_revision_is_the_report() -> None:

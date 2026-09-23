@@ -94,9 +94,12 @@ PASS = {
     "satellite_id": "norad:57166",
     "aos": AOS,
     "los": AOS,
+    "element_set_id": 7,
     "simulated": False,
     "max_elevation_deg": 61.4,
 }
+
+ELEMENT_SET = {"id": 7, "satellite_id": "norad:57166", "epoch": AOS}
 
 
 def files(**overrides: bytes) -> dict[str, bytes]:
@@ -111,7 +114,14 @@ def files(**overrides: bytes) -> dict[str, bytes]:
             "archive_observations",
         )
     }
-    return empty | {"passes.jsonl": canonical_line(PASS)} | overrides
+    return (
+        empty
+        | {
+            "passes.jsonl": canonical_line(PASS),
+            "element_sets.jsonl": canonical_line(ELEMENT_SET),
+        }
+        | overrides
+    )
 
 
 def test_rows_are_read_back_typed() -> None:
@@ -119,7 +129,14 @@ def test_rows_are_read_back_typed() -> None:
 
     assert read.pass_id == 1
     assert read.aos == AOS
+    assert read.element_set_epoch == AOS
     assert read.simulated is False
+
+
+def test_a_pass_whose_element_set_is_not_held_is_refused() -> None:
+    """The export always writes the sets its passes name; a gap is damage."""
+    with pytest.raises(MalformedSnapshotError, match="element set 7"):
+        parse_rows(files(**{"element_sets.jsonl": b""}))
 
 
 def test_a_file_the_labeller_needs_must_be_there() -> None:

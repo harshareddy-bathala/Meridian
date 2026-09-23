@@ -59,6 +59,7 @@ def _pass(pass_id: int, station: str, *, simulated: bool = False) -> dict[str, o
         "station_id": station,
         "aos": AOS,
         "los": AOS + timedelta(minutes=11),
+        "element_set_id": 1,
         "simulated": simulated,
     }
 
@@ -105,6 +106,9 @@ WORLD: Mapping[str, Sequence[Mapping[str, object]]] = {
         _observation(1, "decoded"),
         _observation(2, "no_signal"),
         _observation(3, "decoded", simulated=True),
+    ],
+    "element_sets": [
+        {"id": 1, "satellite_id": "norad:57166", "epoch": AOS - timedelta(hours=6)},
     ],
     "heartbeats": [
         {"station_id": "st_b", "received_at": AOS + timedelta(minutes=2)},

@@ -44,6 +44,10 @@ class PassRow:
     satellite_id: str
     aos: datetime
     los: datetime
+    element_set_epoch: datetime
+    """The epoch of the element set this prediction was computed from, which
+    decides which prediction of a rise represents it (D-148)."""
+
     simulated: bool
 
 
@@ -117,8 +121,11 @@ def parse_rows(files: Mapping[str, bytes]) -> SnapshotRows:
         MalformedSnapshotError: A needed file is missing, or a row lacks a
             field or has one of the wrong type.
     """
+    epochs = {
+        _int(one, "id"): _instant(one, "epoch") for one in _lines(files, "element_sets")
+    }
     return SnapshotRows(
-        passes=tuple(_pass(one) for one in _lines(files, "passes")),
+        passes=tuple(_pass(one, epochs) for one in _lines(files, "passes")),
         assignments=tuple(_assignment(one) for one in _lines(files, "assignments")),
         observations=tuple(
             ObservationRow(
@@ -152,13 +159,21 @@ def parse_rows(files: Mapping[str, bytes]) -> SnapshotRows:
     )
 
 
-def _pass(row: Mapping[str, object]) -> PassRow:
+def _pass(row: Mapping[str, object], epochs: Mapping[int, datetime]) -> PassRow:
+    element_set_id = _int(row, "element_set_id")
+    if element_set_id not in epochs:
+        message = (
+            f"pass {row.get('id')!r} names element set {element_set_id},"
+            " which the snapshot does not hold"
+        )
+        raise MalformedSnapshotError(message)
     return PassRow(
         pass_id=_int(row, "id"),
         station_id=_text(row, "station_id"),
         satellite_id=_text(row, "satellite_id"),
         aos=_instant(row, "aos"),
         los=_instant(row, "los"),
+        element_set_epoch=epochs[element_set_id],
         simulated=_bool(row, "simulated"),
     )
 
