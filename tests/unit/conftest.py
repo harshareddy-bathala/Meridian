@@ -61,6 +61,7 @@ def _pass(pass_id: int, station: str, *, simulated: bool = False) -> dict[str, o
         "station_id": station,
         "aos": AOS,
         "los": AOS + timedelta(minutes=11),
+        "max_elevation_deg": 40.0,
         "element_set_id": 1,
         "simulated": simulated,
     }
@@ -135,6 +136,66 @@ WORLD: Mapping[str, Sequence[Mapping[str, object]]] = {
 }
 """Three passes of one satellite: one decoded, one confirmed silent (a miss,
 because pass 1 heard the satellite), and one simulated — plus an archive row."""
+
+
+ARCHIVE_DAY = datetime(2026, 9, 10, tzinfo=UTC)
+
+
+def _archive_pass(day: int, hour: int, peak: float) -> dict[str, object]:
+    aos = ARCHIVE_DAY + timedelta(days=day, hours=hour)
+    return {
+        "archive_station_id": 7,
+        "satellite_id": "norad:25544",
+        "aos": aos,
+        "los": aos + timedelta(minutes=10),
+        "max_elevation_deg": peak,
+    }
+
+
+def _heard(n: int, day: int, hour: int, outcome: str) -> dict[str, object]:
+    return {
+        "archive_observation_id": n,
+        "archive_station_id": 7,
+        "source_id": "reference_archive",
+        "satellite_key": "norad:25544",
+        "satellite_key_kind": "norad",
+        "started_at": ARCHIVE_DAY + timedelta(days=day, hours=hour, seconds=30),
+        "archive_outcome": outcome,
+        "source_outcome": outcome,
+    }
+
+
+ARCHIVE_WORLD: Mapping[str, Sequence[Mapping[str, object]]] = {
+    **WORLD,
+    "stations": [
+        {"station_id": "st_a", "lon_deg": 77.6},
+        {"station_id": "st_b", "lon_deg": 77.6},
+    ],
+    "archive_stations": [{"archive_station_id": 7, "lon_deg": -1.5}],
+    "archive_passes": [
+        _archive_pass(0, 1, 40.0),
+        _archive_pass(0, 5, 40.0),
+        _archive_pass(0, 9, 10.0),
+        _archive_pass(1, 3, 40.0),
+        _archive_pass(2, 3, 40.0),
+    ],
+    "archive_observations": [
+        _heard(11, 0, 1, "decoded"),
+        _heard(12, 0, 5, "no_data"),
+        _heard(13, 2, 3, "unknown"),
+    ],
+}
+""":data:`WORLD`, and one archive station over three days. Day 0: three
+passes, two heard — one decoded, one ``no_data`` — and the 10° one not, so it
+is 2/3 complete and its low pass has no support. Day 1: nothing heard, so
+``inactive``. Day 2: its one pass heard, outcome ``unknown`` — attempted but
+not usable. Every 40° pass was attempted, so that cell is certain."""
+
+
+@pytest.fixture
+def archive_world() -> Mapping[str, Sequence[Mapping[str, object]]]:
+    """:data:`ARCHIVE_WORLD`, for tests that cannot import from a conftest."""
+    return ARCHIVE_WORLD
 
 
 @pytest.fixture

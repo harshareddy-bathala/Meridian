@@ -234,6 +234,8 @@ def files(**overrides: bytes) -> dict[str, bytes]:
             "listening",
             "archive_observations",
             "archive_passes",
+            "stations",
+            "archive_stations",
         )
     }
     return (
@@ -252,7 +254,25 @@ def test_rows_are_read_back_typed() -> None:
     assert read.pass_id == 1
     assert read.aos == AOS
     assert read.element_set_epoch == AOS
+    assert read.max_elevation_deg == 61.4
     assert read.simulated is False
+
+
+def test_longitudes_are_read_for_both_kinds_of_station() -> None:
+    """An archive station with no published location has no longitude."""
+    rows = parse_rows(
+        files(
+            **{
+                "stations.jsonl": canonical_line({"station_id": "st_a", "lon_deg": 77}),
+                "archive_stations.jsonl": canonical_line(
+                    {"archive_station_id": 4, "lon_deg": -1.5}
+                )
+                + canonical_line({"archive_station_id": 5, "lon_deg": None}),
+            }
+        )
+    )
+
+    assert rows.longitudes == {"st_a": 77.0, "archive:4": -1.5}
 
 
 def test_a_pass_whose_element_set_is_not_held_is_refused() -> None:

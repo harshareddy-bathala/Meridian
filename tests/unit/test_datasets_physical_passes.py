@@ -31,6 +31,7 @@ def prediction(
         satellite_id=satellite,
         aos=aos,
         los=aos + timedelta(minutes=11),
+        max_elevation_deg=40.0,
         element_set_epoch=epoch,
         simulated=False,
     )

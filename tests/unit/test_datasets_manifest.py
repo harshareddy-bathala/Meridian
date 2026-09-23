@@ -113,11 +113,28 @@ def test_anything_the_directory_holds_changes_the_hash(change: dict[str, Any]) -
         {"transformation_version": "labels-2"},
         {"config_sha256": hashlib.sha256(b"settle_margin_s = 3600").digest()},
         {"parameters": {"settle_margin_s": 3600, "silent_window_s": 43200}},
+        {"summary": {"populations": {"own": {"ess": 2.5}}}},
     ],
-    ids=["raw-snapshot", "transformation", "config", "parameters"],
+    ids=["raw-snapshot", "transformation", "config", "parameters", "summary"],
 )
 def test_an_evaluation_datasets_inputs_change_its_hash(change: dict[str, Any]) -> None:
     assert content_sha256(evaluation(**change)) != content_sha256(evaluation())
+
+
+def test_a_summary_reads_back_as_it_was_written() -> None:
+    """Floats, nulls and nesting survive the round trip, so the hash does too."""
+    summary = {"populations": {"own": {"ess": 8 / 3, "unweighted": None}}}
+    manifest = evaluation(summary=summary)
+
+    assert parse_manifest(manifest_bytes(manifest)).summary == summary
+
+
+def test_a_manifest_without_a_summary_is_written_as_it_always_was() -> None:
+    """Stage 15's manifests keep their hash: no summary, no ``summary`` key."""
+    written = json.loads(manifest_bytes(evaluation()))
+
+    assert "summary" not in written
+    assert parse_manifest(manifest_bytes(evaluation())).summary == {}
 
 
 def test_a_file_entry_is_measured_from_its_bytes() -> None:
@@ -215,8 +232,9 @@ def test_an_evaluation_dataset_must_name_its_inputs() -> None:
         {"derived_from": RAW_HASH},
         {"transformation_version": "labels-1"},
         {"parameters": {"settle_margin_s": 1}},
+        {"summary": {"populations": {}}},
     ],
-    ids=["derived-from", "transformation", "parameters"],
+    ids=["derived-from", "transformation", "parameters", "summary"],
 )
 def test_a_raw_snapshot_is_not_derived_from_anything(lineage: dict[str, Any]) -> None:
     with pytest.raises(MalformedManifestError, match="read from the database"):

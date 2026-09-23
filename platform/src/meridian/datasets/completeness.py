@@ -46,10 +46,14 @@ from meridian.datasets.snapshot_rows import ArchivePassRow, ArchiveReception
 __all__ = [
     "POPULATIONS",
     "STATUSES",
+    "USABLE_LABELS",
+    "CompletenessSummary",
     "Distribution",
-    "PopulationSummary",
+    "ReceptionMatches",
     "StationDay",
     "archive_station_days",
+    "match_receptions",
+    "own_eligible",
     "own_station_days",
     "summarise",
 ]
@@ -57,7 +61,7 @@ __all__ = [
 POPULATIONS = ("own", "archive")
 STATUSES = ("retained", "below_threshold", "empty", "inactive")
 
-_USABLE_LABELS = frozenset(
+USABLE_LABELS = frozenset(
     ("successful_reception", "signal_no_decode", "confirmed_miss")
 )
 _NOT_ELIGIBLE = frozenset(("report_window_open", "simulated"))
@@ -112,7 +116,7 @@ class Distribution:
 
 
 @dataclass(frozen=True, slots=True)
-class PopulationSummary:
+class CompletenessSummary:
     """One population's completeness, as every report must state it (D-151)."""
 
     population: str
@@ -168,11 +172,11 @@ def own_station_days(
             continue
         key = (one.station_id, one.aos.date())
         held = tallies.get(key, _Tally())
-        if _own_eligible(one):
+        if own_eligible(one):
             held = _Tally(
                 eligible=held.eligible + 1,
                 attempted=held.attempted + (one.source_outcome is not None),
-                usable=held.usable + (one.label in _USABLE_LABELS),
+                usable=held.usable + (one.label in USABLE_LABELS),
             )
         tallies[key] = held
     return tuple(
@@ -195,7 +199,7 @@ def archive_station_days(
         The station-days, and how many receptions matched no computed pass —
         each one a reception the denominator could not place.
     """
-    matches = _match(passes, receptions, config.archive_match_tolerance_s)
+    matches = match_receptions(passes, receptions, config.archive_match_tolerance_s)
     tallies: dict[tuple[int, date], _Tally] = {
         (station, day): _Tally()
         for station, days in matches.heard.items()
@@ -231,20 +235,24 @@ def archive_station_days(
 
 
 @dataclass(frozen=True, slots=True)
-class _Matches:
+class ReceptionMatches:
     """Which passes the receptions claim, and the days each station was heard."""
 
     heard: dict[int, set[date]]
     attempted: frozenset[ArchivePassRow]
     usable: frozenset[ArchivePassRow]
+    succeeded: frozenset[ArchivePassRow]
+    """Matched by a ``decoded`` reception: an archive success (D-153)."""
+
     unmatched: int
 
 
-def _match(
+def match_receptions(
     passes: Sequence[ArchivePassRow],
     receptions: Iterable[ArchiveReception],
     tolerance_s: int,
-) -> _Matches:
+) -> ReceptionMatches:
+    """Place each reception on the computed pass it belongs to, if any."""
     by_pair: dict[tuple[int, str], list[ArchivePassRow]] = {}
     for candidate in passes:
         pair = (candidate.archive_station_id, candidate.satellite_id)
@@ -253,6 +261,7 @@ def _match(
     heard: dict[int, set[date]] = {}
     attempted: set[ArchivePassRow] = set()
     usable: set[ArchivePassRow] = set()
+    succeeded: set[ArchivePassRow] = set()
     unmatched = 0
     for reception in receptions:
         match = _matching_pass(reception, by_pair, tolerance_s)
@@ -266,24 +275,27 @@ def _match(
         attempted.add(match)
         if reception.archive_outcome != "unknown":
             usable.add(match)
-    return _Matches(
+        if reception.archive_outcome == "decoded":
+            succeeded.add(match)
+    return ReceptionMatches(
         heard=heard,
         attempted=frozenset(attempted),
         usable=frozenset(usable),
+        succeeded=frozenset(succeeded),
         unmatched=unmatched,
     )
 
 
 def summarise(
     days: Sequence[StationDay], population: str, config: CompletenessConfig
-) -> PopulationSummary:
+) -> CompletenessSummary:
     """One population's summary: statuses, distribution, sensitivity (D-151)."""
     own = [one for one in days if one.population == population]
     rated = [one for one in own if one.completeness is not None]
     statuses = dict.fromkeys(STATUSES, 0)
     for one in own:
         statuses[one.status] += 1
-    return PopulationSummary(
+    return CompletenessSummary(
         population=population,
         threshold=config.threshold,
         statuses=statuses,
@@ -302,7 +314,10 @@ def summarise(
     )
 
 
-def _own_eligible(one: LabelledPass) -> bool:
+def own_eligible(one: LabelledPass) -> bool:
+    """Measured, settled, and not a silent satellite (D-149)."""
+    if one.simulated:
+        return False
     return one.exclusion_reason not in _NOT_ELIGIBLE and one.label != "satellite_silent"
 
 

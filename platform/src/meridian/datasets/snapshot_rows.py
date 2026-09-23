@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 __all__ = [
@@ -45,6 +45,9 @@ class PassRow:
     satellite_id: str
     aos: datetime
     los: datetime
+    max_elevation_deg: float
+    """The peak, a pre-pass feature the propensity reads (D-152)."""
+
     element_set_epoch: datetime
     """The epoch of the element set this prediction was computed from, which
     decides which prediction of a rise represents it (D-148)."""
@@ -123,6 +126,10 @@ class SnapshotRows:
     archive_passes: tuple[ArchivePassRow, ...] = ()
     """What each archive station could have received (D-150)."""
 
+    longitudes: Mapping[str, float] = field(default_factory=dict)
+    """Each located station's longitude: ours by ``station_id``, an archive
+    station's as ``archive:<id>``. Absent where no location is held."""
+
 
 def parse_rows(files: Mapping[str, bytes]) -> SnapshotRows:
     """Read the files a label needs out of a raw snapshot.
@@ -183,7 +190,22 @@ def parse_rows(files: Mapping[str, bytes]) -> SnapshotRows:
             )
             for one in _lines(files, "archive_passes")
         ),
+        longitudes=_longitudes(files),
     )
+
+
+def _longitudes(files: Mapping[str, bytes]) -> dict[str, float]:
+    """Our stations' longitudes, and the archive stations' that publish one."""
+    ours = {
+        _text(one, "station_id"): _number(one, "lon_deg")
+        for one in _lines(files, "stations")
+    }
+    theirs = {
+        f"archive:{_int(one, 'archive_station_id')}": _number(one, "lon_deg")
+        for one in _lines(files, "archive_stations")
+        if one.get("lon_deg") is not None
+    }
+    return ours | theirs
 
 
 def _pass(row: Mapping[str, object], epochs: Mapping[int, datetime]) -> PassRow:
@@ -200,6 +222,7 @@ def _pass(row: Mapping[str, object], epochs: Mapping[int, datetime]) -> PassRow:
         satellite_id=_text(row, "satellite_id"),
         aos=_instant(row, "aos"),
         los=_instant(row, "los"),
+        max_elevation_deg=_number(row, "max_elevation_deg"),
         element_set_epoch=epochs[element_set_id],
         simulated=_bool(row, "simulated"),
     )
