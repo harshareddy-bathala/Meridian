@@ -471,3 +471,74 @@ class _Nondeterministic:
                 dataclasses.replace(one, mode="changed") for one in batch.receptions
             ),
         )
+
+
+# --- the command, committing ------------------------------------------------
+
+
+@pytest.fixture
+def committed(database_url: str) -> Iterator[str]:
+    """For the one test that must see real commits: removes what it committed.
+
+    Every other test here rolls back, which is exactly why none of them could
+    notice a load that never committed per artefact.
+    """
+    yield database_url
+    with psycopg.connect(database_url, autocommit=True) as cleanup:
+        for table in (
+            "archive_observations",
+            "archive_stations",
+            "ingest_records",
+            "ingest_sources",
+        ):
+            cleanup.execute(f"delete from {table} where source_id = %s", (SOURCE,))
+
+
+def test_the_command_keeps_every_artefact_it_finished_before_one_failed(
+    committed: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One transaction per artefact, as ``load.py`` promises, through ``main``.
+
+    The second data artefact fails to normalise. The first must still be in the
+    tables afterwards, read on a connection of its own — before the fix the
+    whole run was one transaction, and the failure took the first one with it.
+    """
+    from meridian_ingest import load
+    from meridian_ingest.cli import EXIT_FAILED, main
+    from meridian_ingest.normalise.records import NormalisationError
+
+    config = tmp_path / "ingest.toml"
+    config.write_text('raw_root = "raw"\n', encoding="utf-8")
+    monkeypatch.setenv("DATABASE_URL", committed)
+    assert main(["--config", str(config), "fetch"]) == 0
+
+    class _FailsOnTheSecond:
+        transformation_version = TRANSFORMATION_VERSION
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def normalise(self, artefact: Any) -> Any:
+            self.calls += 1
+            if self.calls == 2:
+                raise NormalisationError("the second artefact is malformed")
+            return ReferenceNormaliser().normalise(artefact)
+
+    failing = _FailsOnTheSecond()
+    monkeypatch.setattr(load, "normaliser_for", lambda _source: failing)
+    capsys.readouterr()
+
+    assert main(["--config", str(config), "load"]) == EXIT_FAILED
+
+    said = capsys.readouterr().err
+    assert "the second artefact is malformed" in said
+    assert "Traceback" not in said
+    with psycopg.connect(committed) as fresh:
+        receptions = fresh.execute(
+            "select count(*) from archive_observations where source_id = %s",
+            (SOURCE,),
+        ).fetchone()[0]
+    assert receptions > 0

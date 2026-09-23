@@ -147,6 +147,11 @@ def load_source(conn: Connection, store: RawStore, source_id: str) -> LoadReport
         Artefacts load in retrieval order, which is the order the raw store
         lists them in, so a second run visits them identically and a
         supersession is recorded in the direction it actually happened.
+
+        **Each artefact commits on its own only on an autocommit connection.**
+        On one already inside a transaction, every artefact's block is a
+        savepoint, and nothing is kept until the caller commits. That is what
+        the tests want, and why ``meridian-ingest load`` sets autocommit.
     """
     registered = register_source(conn, adapter_for(source_id).descriptor)
     normaliser = normaliser_for(source_id)

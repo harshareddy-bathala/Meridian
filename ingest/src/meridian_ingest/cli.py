@@ -189,6 +189,12 @@ def _run_load(args: argparse.Namespace, settings: IngestSettings) -> int:
         conn = connect_once(load_platform_settings())
     except DatabaseUnreachableError as exc:
         return _refuse(f"meridian-ingest load: {exc}")
+    # Autocommit, so each artefact's `conn.transaction()` in `load_artefact` is
+    # a real transaction that commits when it closes. Without it the first
+    # statement opens one run-wide transaction, every artefact becomes a
+    # savepoint inside it, and a failure in the last artefact rolls back all
+    # the ones that had finished — the opposite of "resumed by running again".
+    conn.autocommit = True
     with conn:
         for source_id in _chosen(args, settings):
             report = load_source(conn, store, source_id)

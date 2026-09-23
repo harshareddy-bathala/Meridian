@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from meridian_ingest import cli
 from meridian_ingest.adapters.reference import REFERENCE_SOURCE
 from meridian_ingest.cli import EXIT_CORRUPT, EXIT_FAILED, EXIT_USAGE, main
 from meridian_ingest.cli_fetch import check_attribution
@@ -312,3 +313,44 @@ def test_load_without_a_database_fails_cleanly(
     said = capsys.readouterr().err
     assert "cannot reach the database" in said
     assert "Traceback" not in said
+
+
+class _Connection:
+    """Stands in for ``connect_once``'s connection: records how it was set up."""
+
+    def __init__(self) -> None:
+        self.autocommit = False
+
+    def __enter__(self) -> _Connection:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+
+@pytest.mark.usefixtures("raw")
+def test_load_commits_each_artefact_on_its_own(
+    config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Autocommit, so ``load_artefact``'s transaction is real and not a savepoint.
+
+    On a connection already inside a transaction, a failure in the last
+    artefact would roll back every one that had finished.
+    """
+    connection = _Connection()
+    seen: list[bool] = []
+
+    class _SeenError(Exception):
+        pass
+
+    def record(conn: _Connection, *_args: object) -> object:
+        seen.append(conn.autocommit)
+        raise _SeenError
+
+    monkeypatch.setattr(cli, "connect_once", lambda _settings: connection)
+    monkeypatch.setattr(cli, "load_source", record)
+
+    with pytest.raises(_SeenError):
+        run(config, "load")
+
+    assert seen == [True]
