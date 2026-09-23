@@ -41,3 +41,18 @@ archive_min_elevation_deg = 0.0
 # How far outside a computed window an archive reception may start and still be
 # that pass — the station's clock and elements are not ours (D-150). 0 .. 3600.
 archive_match_tolerance_s = 120
+
+[propensity]
+
+# The fewest available passes a cell needs before its own attempted-over-
+# available ratio is used; a sparser cell falls back to a coarser one — first
+# dropping the hour band, then the satellite (D-152). 1 .. 10000.
+min_cell = 20
+
+# Edges between maximum-elevation bands, in degrees: [15, 30, 60] makes four
+# bands, 0-15, 15-30, 30-60 and 60-90. Rising, each strictly between 0 and 90;
+# an empty list is one band.
+elevation_bands_deg = [15.0, 30.0, 60.0]
+
+# Width of a local-solar-hour band. Must divide 24, so every band is equal.
+hour_band_h = 4

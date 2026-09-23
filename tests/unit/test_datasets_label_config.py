@@ -19,6 +19,7 @@ from meridian.datasets.label_config import (
     CompletenessConfig,
     LabelConfig,
     LabelConfigError,
+    PropensityConfig,
     config_sha256,
     load_label_config,
     parse_label_config,
@@ -30,7 +31,8 @@ from meridian.datasets.snapshot_rows import MalformedSnapshotError, parse_rows
 
 def test_the_defaults_are_the_decisions() -> None:
     """24 hours to settle (D-146); 12 hours either side and two attempts (D-147);
-    0.8 and its sensitivity band (D-151); the horizon and two minutes (D-150)."""
+    0.8 and its sensitivity band (D-151); the horizon and two minutes (D-150);
+    cells of twenty, three elevation edges and four-hour bands (D-152)."""
     assert LabelConfig().parameters() == {
         "settle_margin_s": 86_400,
         "silent_window_s": 43_200,
@@ -40,6 +42,11 @@ def test_the_defaults_are_the_decisions() -> None:
             "sensitivity": [0.5, 0.6, 0.7, 0.8, 0.9],
             "archive_min_elevation_deg": 0.0,
             "archive_match_tolerance_s": 120,
+        },
+        "propensity": {
+            "min_cell": 20,
+            "elevation_bands_deg": [15.0, 30.0, 60.0],
+            "hour_band_h": 4,
         },
     }
 
@@ -95,6 +102,50 @@ def test_a_whole_number_ratio_is_the_same_setting_as_its_float() -> None:
     ],
 )
 def test_a_completeness_table_that_cannot_be_obeyed_is_refused(
+    text: str, match: str
+) -> None:
+    with pytest.raises(LabelConfigError, match=match):
+        parse_label_config(text)
+
+
+def test_the_propensity_table_overrides_only_what_it_names() -> None:
+    config = parse_label_config("[propensity]\nelevation_bands_deg = [10, 45]\n")
+
+    assert config.propensity == PropensityConfig(elevation_bands_deg=(10.0, 45.0))
+
+
+def test_one_elevation_band_is_a_list_with_no_edges() -> None:
+    config = parse_label_config("[propensity]\nelevation_bands_deg = []\n")
+
+    assert config.propensity.elevation_bands_deg == ()
+
+
+@pytest.mark.parametrize(
+    ("text", "match"),
+    [
+        ("propensity = 20\n", "must be a table"),
+        ("[propensity]\nmin_cells = 20\n", "unknown propensity settings"),
+        ("[propensity]\nmin_cell = 0\n", "outside"),
+        ("[propensity]\nmin_cell = 2.5\n", "whole number"),
+        ("[propensity]\nelevation_bands_deg = [30, 15]\n", "must rise"),
+        ("[propensity]\nelevation_bands_deg = [0]\n", "outside 0..90"),
+        ("[propensity]\nelevation_bands_deg = [90]\n", "outside 0..90"),
+        ("[propensity]\nhour_band_h = 5\n", "does not divide 24"),
+        ("[propensity]\nhour_band_h = 0\n", "outside"),
+    ],
+    ids=[
+        "not-a-table",
+        "misspelt",
+        "empty-cell",
+        "fractional-cell",
+        "falling",
+        "horizon-edge",
+        "zenith-edge",
+        "ragged-hours",
+        "no-hours",
+    ],
+)
+def test_a_propensity_table_that_cannot_be_obeyed_is_refused(
     text: str, match: str
 ) -> None:
     with pytest.raises(LabelConfigError, match=match):
