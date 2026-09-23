@@ -15,12 +15,17 @@ does not have. So it is called here, once per closed assignment, and its answer
 is stored. The labeller reads the answer and nothing else, so the definition of
 a miss stays in one place (D-145).
 
+**An archive station's denominator is computed here too** (D-150). Our orbit
+service propagates each archive station's published location over the days it
+was active, and the passes it finds are frozen in ``archive_passes.jsonl`` —
+so labelling counts against a file, and never propagates.
+
 **The registry is handed in.** This module depends on the ``Registry``
 protocol, not on how a registry is built; the command builds one over the same
 connection, so the listening answers are read inside the same snapshot as the
 rows they describe.
 
-Reference: docs/DECISIONS.md D-143, D-144, D-145.
+Reference: docs/DECISIONS.md D-143, D-144, D-145, D-150.
 """
 
 from __future__ import annotations
@@ -33,9 +38,16 @@ from pathlib import Path
 
 from psycopg import IsolationLevel
 
+from meridian.datasets.archive_passes import (
+    ARCHIVE_PASSES,
+    ArchiveRows,
+    PassFinder,
+    compute_archive_passes,
+)
 from meridian.datasets.canonical import canonical_line
 from meridian.datasets.manifest import Manifest, SourceEntry, content_sha256, file_entry
 from meridian.datasets.publish import PublishedDirectory, publish_directory
+from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.registry import ListeningQuery, Registry
 from meridian.store.schema_revision import find_current_revision
 from meridian.store.snapshot_reads import (
@@ -77,6 +89,8 @@ class _Rows:
 
     tables: Mapping[str, Sequence[Mapping[str, object]]]
     listening: Sequence[Mapping[str, object]]
+    archive_passes: Sequence[Mapping[str, object]]
+    archive_counts: Mapping[str, int]
 
 
 @contextmanager
@@ -137,10 +151,14 @@ def export_snapshot(
         message = "the database records no migration; run `meridian db upgrade`"
         raise SchemaMissingError(message)
     scope = SnapshotScope(since=since, as_of=snapshot_instant(conn))
-    rows = _read(conn, registry, scope)
+    rows = _read(conn, registry, scope, SkyfieldOrbitService())
     files = {
         f"{name}.jsonl": _jsonl(table)
-        for name, table in (*rows.tables.items(), (LISTENING, rows.listening))
+        for name, table in (
+            *rows.tables.items(),
+            (LISTENING, rows.listening),
+            (ARCHIVE_PASSES, rows.archive_passes),
+        )
     }
     manifest = Manifest(
         kind="raw_snapshot",
@@ -166,8 +184,10 @@ def export_snapshot(
     return publish_directory(root / SNAPSHOTS, name, manifest, files)
 
 
-def _read(conn: Connection, registry: Registry, scope: SnapshotScope) -> _Rows:
-    """Every table, and the listening answer for each closed assignment."""
+def _read(
+    conn: Connection, registry: Registry, scope: SnapshotScope, orbit: PassFinder
+) -> _Rows:
+    """Every table, the listening answers, and the archive stations' passes."""
     tables = {one.name: read_table(conn, one, scope) for one in SNAPSHOT_TABLES}
     satellite_of = {one["id"]: one["satellite_id"] for one in tables["passes"]}
     listening = [
@@ -175,7 +195,22 @@ def _read(conn: Connection, registry: Registry, scope: SnapshotScope) -> _Rows:
         for one in tables["assignments"]
         if one["decision"] == "scheduled" and _closed(one, scope.as_of)
     ]
-    return _Rows(tables=tables, listening=listening)
+    archive = compute_archive_passes(
+        ArchiveRows(
+            stations=tables["archive_stations"],
+            receptions=tables["archive_observations"],
+            element_sets=tables["element_sets"],
+        ),
+        since=scope.since,
+        as_of=scope.as_of,
+        orbit=orbit,
+    )
+    return _Rows(
+        tables=tables,
+        listening=listening,
+        archive_passes=archive.rows,
+        archive_counts=archive.counts,
+    )
 
 
 def _closed(assignment: Mapping[str, object], as_of: datetime) -> bool:
@@ -218,7 +253,8 @@ def _counts(rows: _Rows) -> dict[str, int]:
     confirmed = sum(1 for one in rows.listening if one["listening_confirmed"])
     counts["listening.confirmed"] = confirmed
     counts["listening.not_confirmed"] = len(rows.listening) - confirmed
-    return counts
+    counts["archive_passes"] = len(rows.archive_passes)
+    return counts | dict(rows.archive_counts)
 
 
 def _jsonl(rows: Sequence[Mapping[str, object]]) -> bytes:

@@ -38,8 +38,10 @@ RAW_TABLES = (
     "archive_stations",
     "ingest_records",
     "listening",
+    "archive_passes",
 )
-"""What an export writes: every snapshot table, and the frozen listening answers."""
+"""What an export writes: every snapshot table, the frozen listening answers,
+and the archive stations' computed passes."""
 
 SOURCE = SourceEntry(
     source_id="reference_archive",

@@ -202,6 +202,31 @@ def test_exporting_twice_in_one_transaction_is_one_snapshot(
     assert second.written is False
 
 
+# --- the archive denominator (D-150) ---------------------------------------------
+
+
+def test_an_archive_station_s_passes_are_propagated_and_frozen(
+    rollback: Any, root: Path, schedule_rows: Any
+) -> None:
+    """Our element set, the station's published location, real propagation."""
+    satellite = "norad:25544"
+    schedule_rows.element_set_at(satellite, SINCE - timedelta(days=1), "manual")
+    station = schedule_rows.archive_reception(satellite, CLOSED)
+    schedule_rows.archive_reception(satellite, CLOSED, location=None)
+
+    published = export(rollback, RecordingRegistry(), root)
+
+    passes = lines(read_directory(published.path), "archive_passes.jsonl")
+    assert passes
+    assert {one["archive_station_id"] for one in passes} == {station}
+    assert {one["satellite_id"] for one in passes} == {satellite}
+    assert all(one["aos"].startswith("2026-08-14T") for one in passes)
+    counts = published.manifest.counts
+    assert counts["archive_passes"] == len(passes)
+    assert counts["archive_denominator.stations_without_location"] == 1
+    assert counts["archive_denominator.stations_without_altitude"] == 1
+
+
 # --- the transaction -----------------------------------------------------------
 
 

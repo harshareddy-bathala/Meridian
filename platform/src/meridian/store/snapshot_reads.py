@@ -25,12 +25,14 @@ not published as-is, and Stage 30's evidence dataset decides what may be.
 depend on: their assignments, every observation revision submitted by
 ``as_of``, the heartbeats received inside each assignment's window, and the
 element sets, stations, capabilities, satellites and transmitters they name.
-Archive receptions are scoped by ``started_at`` over the same interval. Nothing
+Archive receptions are scoped by ``started_at`` over the same interval, and
+bring the element sets current at each UTC day's start for every satellite
+they name, so the export can compute an archive station's denominator (D-150). Nothing
 outside the interval is read, so a pass near ``since`` has less contemporaneous
 evidence than one in the middle — which the labeller reports as indeterminate,
 not as a miss (D-147).
 
-Reference: docs/DECISIONS.md D-139, D-143, D-144, D-145.
+Reference: docs/DECISIONS.md D-139, D-143, D-144, D-145, D-150.
 """
 
 from __future__ import annotations
@@ -97,6 +99,23 @@ _SCOPED_ARCHIVE = (
     "select archive_observation_id from archive_observations"
     " where started_at >= %(since)s and started_at < %(as_of)s"
 )
+_CURRENT_FOR_ARCHIVE = (
+    "select current.id"
+    " from (select distinct satellite_key from archive_observations"
+    "  where satellite_key_kind = 'norad'"
+    "  and started_at >= %(since)s and started_at < %(as_of)s) received"
+    " cross join generate_series("
+    "  date_trunc('day', %(since)s::timestamptz, 'UTC'),"
+    "  %(as_of)s::timestamptz, interval '1 day') as day (starts)"
+    " cross join lateral ("
+    "  select e.id from element_sets e"
+    "  where e.satellite_id = received.satellite_key and e.epoch <= day.starts"
+    "  order by e.epoch desc, e.retrieved_at desc, e.id desc limit 1) current"
+)
+"""For each satellite an archive station received in scope, the element set
+current at the start of every UTC day in scope — the set pass generation would
+have used (``find_element_set_current_at``), and what the export propagates an
+archive station's denominator from (D-150)."""
 
 SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
     SnapshotTable(
@@ -152,7 +171,8 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         "select id, satellite_id, epoch, retrieved_at, line1, line2, source,"
         " content_sha256 from element_sets where id in ("
         "  select element_set_id from passes"
-        "  where aos >= %(since)s and aos < %(as_of)s)"
+        "  where aos >= %(since)s and aos < %(as_of)s"
+        f"  union {_CURRENT_FOR_ARCHIVE})"
         " order by id",
     ),
     SnapshotTable(
