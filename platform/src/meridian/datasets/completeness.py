@@ -125,6 +125,9 @@ class CompletenessSummary:
     """Station-days by status, every status present."""
 
     eligible: int
+    """Over the days with a ratio: an ``inactive`` day's passes are not the
+    station's to have declined (D-150), so they are in no total."""
+
     attempted: int
     usable: int
     distribution: Distribution
@@ -299,9 +302,9 @@ def summarise(
         population=population,
         threshold=config.threshold,
         statuses=statuses,
-        eligible=sum(one.eligible for one in own),
-        attempted=sum(one.attempted for one in own),
-        usable=sum(one.usable for one in own),
+        eligible=sum(one.eligible for one in rated),
+        attempted=sum(one.attempted for one in rated),
+        usable=sum(one.usable for one in rated),
         distribution=_distribution(rated),
         sensitivity=tuple(
             (

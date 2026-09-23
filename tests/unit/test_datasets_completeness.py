@@ -415,3 +415,13 @@ def test_the_summary_renders_as_plain_values() -> None:
         "retained": 1,
         "excluded": 0,
     }
+
+
+def test_an_inactive_day_s_passes_are_in_no_total() -> None:
+    """D-150: the day's row keeps its count; the population's totals do not."""
+    inactive = a_day(0, 3, n=1, status="inactive")
+
+    summary = summarise([a_day(2, 3), inactive], "own", CONFIG)
+
+    assert (summary.eligible, summary.attempted) == (3, 2)
+    assert summary.statuses["inactive"] == 1
