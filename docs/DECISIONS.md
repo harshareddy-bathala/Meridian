@@ -3512,6 +3512,19 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-147 silence judged on contemporaneous evidence | `meridian/datasets/evidence.py`; `meridian/datasets/label_config.py`; `deploy/snapshot.toml.example` |
 | — the completion gate, and how to run it by hand | `tests/unit/test_snapshot_gate.py`; `tests/integration/test_snapshot_gate.py`; `OPERATIONS.md` § Dataset snapshots |
 
+**Landed 2026-09-23**, building completeness and selection-bias tooling and Stage 16's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-148 the physical pass is the unit, `labels-2` | `meridian/datasets/{physical_passes,pooled_evidence,labels}.py`; `DATA-MODEL.md` |
+| D-149 eligible, attempted and usable, per UTC station-day | `meridian/datasets/completeness.py`; `meridian/datasets/selection.py` |
+| D-150 the archive denominator, computed and frozen at export | `meridian/datasets/archive_passes.py`; `meridian/datasets/export.py`; `meridian/store/snapshot_reads.py`; `DATA-MODEL.md` |
+| D-151 the threshold, the distribution and the sensitivity table | `meridian/datasets/{selection_config,completeness,result_reader,completeness_report}.py`; `deploy/snapshot.toml.example` |
+| D-152 a binned propensity that never sees an outcome | `meridian/datasets/propensity.py`; `tests/unit/test_datasets_boundaries.py` |
+| D-153 the floor, support, ESS and the `unreliable` flag | `meridian/datasets/weighting.py`; `deploy/snapshot.toml.example` |
+| D-154 the gate is a type | `meridian/datasets/{result,selection,evaluation}.py`; the manifest's optional `summary` in `meridian/datasets/manifest.py`; `meridian/cli_snapshot.py` |
+| — the completion gate, and how to run it by hand | `tests/unit/test_completeness_gate.py`; `OPERATIONS.md` § Dataset snapshots |
+
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.

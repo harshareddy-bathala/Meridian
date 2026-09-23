@@ -344,9 +344,9 @@ Written by `meridian snapshot label` from a raw snapshot and a labelling configu
 
 - `labels.jsonl` — one row per geometrically available **physical** pass, every prediction of one rise grouped and listed as `pass_ids` (D-148): keys, `label` or `exclusion_reason`, `source_outcome`, `listening_confirmed`, `scheduled_by` and `simulated`. The labels and their order of precedence are D-146; the satellite-silent evidence is D-147.
 - `archive_receptions.jsonl` — archive receptions with their own outcome vocabulary and provenance. They never receive a Meridian label.
-- `station_days.jsonl` *(Stage 16)* — per station-day and population: eligible passes, attempted passes, completeness, and whether the day is retained, `empty` or `inactive` (D-149 to D-151).
-- `propensities.jsonl` *(Stage 16)* — per eligible pass: its cell, the fallback level used, the propensity, the floored weight, and whether it had support (D-152, D-153).
-- `manifest.json` — the raw snapshot's hash, the transformation version, the configuration's sha256, the settle margin, and the measured and simulated counts reported apart.
+- `station_days.jsonl` *(Stage 16)* — per station-day and population (`own`, or `archive` with the station as `archive:<id>`): eligible, attempted and usable passes, completeness, and a status of `retained`, `below_threshold`, `empty` or `inactive` (D-149 to D-151). Simulated passes have no station-days.
+- `propensities.jsonl` *(Stage 16)* — per eligible pass: its population, station, satellite, `aos`, peak elevation and whether it was attempted; the model, the fallback level used, the cell and its available and attempted counts; the propensity; and the floored weight, null for a pass not attempted (D-152, D-153). A propensity of 0 is a pass with no support. **No outcome is written here.**
+- `manifest.json` — the raw snapshot's hash, the transformation version, the configuration's sha256 and values, and the measured and simulated counts reported apart. From Stage 16 it also counts station-days by population and status, and carries a **`summary`**: per population, the completeness summary (statuses, totals, deciles, histogram, sensitivity) and either the weight diagnostics or a stated reason there are none (D-154). `summary` is optional in the format, and written and hashed only when present, so a manifest from before Stage 16 keeps its bytes and its hash; `meridian snapshot completeness` refuses a dataset without one.
 
 ---
 

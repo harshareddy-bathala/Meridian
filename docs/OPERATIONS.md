@@ -83,6 +83,7 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Fetch and load an external archive | `uv run meridian-ingest …` — its own binary, not in the image; § External archive ingest |
 | Freeze the database into a raw snapshot | `compose run --rm --no-deps … api meridian snapshot export --since <ISO-8601 Z>` — § Dataset snapshots |
 | Label a raw snapshot | `uv run meridian snapshot label <dir>` — needs no database; § Dataset snapshots |
+| Read a dataset's completeness and weights | `uv run meridian snapshot completeness <dataset dir>` — § Completeness and weights |
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
 **Scheduling needs no command.** The `jobs` service generates passes and schedules them under configuration A every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
@@ -383,9 +384,9 @@ The tree is read-only by construction: a record's directory is sealed after publ
 Prediction and evaluation never read the live tables. They read an **immutable snapshot**, so every number in a report can be regenerated from a snapshot, a configuration and a seed (rule 8). There are two steps, and only the first one needs the database (D-143):
 
 1. **`export`** freezes the database into a **raw snapshot**: every table the labels need, read at a single instant, plus the registry's answer to "was this station listening", stored next to each closed assignment.
-2. **`label`** turns a raw snapshot and a labelling configuration into an **evaluation dataset**: one label per pass (D-146, D-147), plus the archive's receptions in the archive's own vocabulary. It opens files and nothing else.
+2. **`label`** turns a raw snapshot and a labelling configuration into an **evaluation dataset**: one label per physical pass (D-146 to D-148), the archive's receptions in the archive's own vocabulary, and how both populations were selected — completeness per station-day and a propensity per eligible pass (D-149 to D-153). It opens files and nothing else.
 
-Decisions this section puts into practice: D-143 to D-147.
+Decisions this section puts into practice: D-143 to D-154.
 
 ### Where they go
 
@@ -394,7 +395,8 @@ Everything goes under one **datasets root**: `--root`, else `$MERIDIAN_DATASETS_
 ```text
 data/datasets/
 ├── snapshots/<as_of>-<hash12>/    raw snapshots: one .jsonl per table, listening.jsonl, manifest.json
-└── evaluation/<hash12>/           evaluation datasets: labels.jsonl, archive_receptions.jsonl, manifest.json
+└── evaluation/<hash12>/           evaluation datasets: labels.jsonl, archive_receptions.jsonl,
+                                   station_days.jsonl, propensities.jsonl, manifest.json
 ```
 
 - **Names come from content.** A directory is named after the sha256 of its manifest. That manifest lists every file's digest and row count, and the hash leaves out only `created_at`. So the name *is* the check, and two runs that produce the same content land in the same directory. The second run writes nothing and says `already held, identically`.
@@ -406,6 +408,7 @@ data/datasets/
 |---|---|
 | Freeze the database from a start time to now | `meridian snapshot export --since <ISO-8601 Z>` — reads `DATABASE_URL` |
 | Label a raw snapshot | `meridian snapshot label <raw snapshot dir> [--config snapshot.toml]` |
+| Print a dataset's completeness and weights | `meridian snapshot completeness <dataset dir> [--threshold 0.7]` |
 | Check a snapshot or dataset against its manifest | `meridian snapshot verify <dir>` |
 
 - **There is no `--until`.** A raw snapshot ends at its export transaction's own `now()`. Several tables hold current state rather than history, so a snapshot can only describe *now*.
@@ -414,6 +417,27 @@ data/datasets/
 - **What `label` prints:**
   - every non-zero count by name, with measured and simulated always kept apart;
   - how many confirmed-listening silences it could not judge (`satellite_state_indeterminate`). EVALUATION.md §5 asks for that share to be stated beside any figure that depends on it.
+- **`export` also computes the archive's denominator** (D-150): for each located archive station, the passes of every satellite it was seen receiving, propagated with our element sets. What it could not compute — a station with no location, a satellite not in our catalogue or with no element set — is counted in the manifest under `archive_denominator.*`, never dropped.
+
+### Completeness and weights
+
+Every evaluation dataset says how its passes were selected (D-154), and `completeness` prints it for both populations — our stations and the archive's, never summed:
+
+```bash
+uv run meridian snapshot completeness data/datasets/evaluation/<hash12>
+uv run meridian snapshot completeness data/datasets/evaluation/<hash12> --threshold 0.7
+```
+
+- **Station-days** by status. `retained` and `below_threshold` are judged against the threshold; `empty` had nothing eligible; `inactive` is an archive station's day, inside its span of receptions, on which it received nothing — not scored 0, because with no heartbeat an off station and an idle one look the same (D-150).
+- **Eligible, attempted, usable.** Attempted is the policy's choice; usable is whether the outcome can be scored. They are never folded together (D-149).
+- **The distribution and the sensitivity table**: deciles, a histogram in tenths, and retained and excluded days at each of `[completeness] sensitivity` (D-151).
+- **The weights** (D-153): unweighted and weighted success rates with Wilson intervals, the effective sample size, and how many passes were `unsupported` (propensity 0), `certain` (propensity 1) and `floored`. A weighted rate whose effective sample size is below max(30, 0.1 n) ends in **`UNRELIABLE`**: `EVALUATION.md` §4.2 says to label it, not quote it.
+
+**`--threshold` re-judges the station-days without labelling again.** The station-days are in the dataset, so any threshold can be read off them; the weights cover every eligible pass whatever the threshold, so they do not change. To make another threshold *the* dataset's, set `[completeness] threshold` and label again — it is hashed, so that is a new dataset.
+
+**Expect our own station's weights to be `UNRELIABLE`, and most passes `certain` or `unsupported`.** The baseline scheduler is deterministic: within a cell of similar passes it takes all or none, so there is no counterfactual to weight toward. That is a positivity finding to report, not a fault (D-152); prospective randomisation (`EVALUATION.md` §4.3) is its remedy.
+
+The settings are `[completeness]` and `[propensity]` in `deploy/snapshot.toml.example`.
 
 ### Exporting from the deployment
 
@@ -439,11 +463,11 @@ uv run meridian snapshot label data/datasets/snapshots/<as_of>-<hash12>
 | | Means |
 |---|---|
 | 0 | It ran and succeeded |
-| 1 | It ran and failed: the database was unreachable, `--since` was unreadable, the settings were refused, or it was pointed at something that is not a raw snapshot |
+| 1 | It ran and failed: the database was unreachable, `--since` was unreadable, the settings or `--threshold` were refused, or it was pointed at the wrong kind of directory — `label` at a dataset, `completeness` at a raw snapshot or a dataset labelled before Stage 16 |
 | 2 | The command line was wrong |
 | **3** | **The snapshot or dataset no longer matches its manifest** |
 
-Code 3 means the same here as it does in `meridian-ingest verify`. `label` returns it too: a raw snapshot that fails its own check is refused, not labelled.
+Code 3 means the same here as it does in `meridian-ingest verify`. `label` and `completeness` return it too: a directory that fails its own check is refused, not read.
 
 ### The completion gate, at a prompt
 
@@ -457,7 +481,10 @@ unshare -rn uv run meridian snapshot --root /tmp/elsewhere label data/datasets/s
 
 All three print the same hash. The last one runs with no network interfaces at all, into a root that has never seen the dataset.
 
-Two test files assert the same thing:
+Stage 16's gate is that **every archive-derived result carries its completeness automatically**. To see it, label any raw snapshot — even one with no archive rows — and run `completeness` on the result: both populations print, and a population with nothing to weight says why rather than printing nothing.
+
+Test files assert both:
+- `tests/unit/test_completeness_gate.py` labels an empty snapshot, one of our stations only and one with an archive station, and finds the selection in each. It checks that one archive reception fewer lowers completeness, that a deterministic policy is reported as certain and unsupported, and that changing every outcome leaves `propensities.jsonl` byte-identical.
 - `tests/unit/test_snapshot_gate.py` labels one snapshot three ways, under a guard that refuses `psycopg.connect` and every Python socket. A positive control shows the guard firing. It also labels in two processes with different hash seeds.
 - `tests/integration/test_snapshot_gate.py` exports from a database, **deletes every source row**, and labels again.
 
