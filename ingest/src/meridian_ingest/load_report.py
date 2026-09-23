@@ -36,6 +36,17 @@ class ArtefactLoad:
     be explainable this month.
     """
 
+    reverted_past: int | None = None
+    """The record that superseded this artefact's bytes, when one already had.
+
+    Set when a re-fetch is identical to a record that a *later* fetch replaced
+    — the source went back to an earlier version. The identical bytes conflict
+    onto the older row, so nothing is inserted and nothing is re-linked, and
+    ``superseded_by`` goes on naming a version the source no longer serves.
+    Reported rather than repaired: the column is filled once and never
+    rewritten, and nothing reads supersession before Stage 16 (D-141).
+    """
+
     skipped: str | None = None
     """Why nothing was normalised, or None when something was."""
 
@@ -64,6 +75,11 @@ class LoadReport:
     def skipped(self) -> tuple[ArtefactLoad, ...]:
         """Artefacts nothing was derived from, and why."""
         return tuple(one for one in self.artefacts if one.skipped is not None)
+
+    @property
+    def reverted(self) -> tuple[ArtefactLoad, ...]:
+        """Artefacts whose bytes match a record a later fetch had superseded."""
+        return tuple(one for one in self.artefacts if one.reverted_past is not None)
 
     @property
     def stations_written(self) -> int:

@@ -36,6 +36,7 @@ from meridian.store.archive_observations import (
 from meridian.store.archive_stations import NewArchiveStation, insert_archive_station
 from meridian.store.ingest_records import (
     NewIngestRecord,
+    find_ingest_record_by_id,
     find_ingest_records_for_source,
     insert_ingest_record,
     mark_ingest_record_superseded,
@@ -198,12 +199,16 @@ def load_artefact(
         superseded = (
             _supersede(conn, manifest, arrival.record_id) if arrival.written else ()
         )
+        reverted_past = (
+            None if arrival.written else _superseded_by(conn, arrival.record_id)
+        )
         if manifest.provenance.payload_kind == "tile":
             return ArtefactLoad(
                 raw_path=raw_path,
                 record_id=arrival.record_id,
                 record_written=arrival.written,
                 superseded=superseded,
+                reverted_past=reverted_past,
                 skipped="tile",
             )
         batch = normaliser.normalise(stored)
@@ -216,6 +221,7 @@ def load_artefact(
         record_id=arrival.record_id,
         record_written=arrival.written,
         superseded=superseded,
+        reverted_past=reverted_past,
         stations_written=stations.written,
         stations_already_held=stations.already_held,
         receptions_written=receptions.written,
@@ -345,6 +351,12 @@ def _supersede(
     return tuple(
         one for one in earlier if mark_ingest_record_superseded(conn, one, record_id)
     )
+
+
+def _superseded_by(conn: Connection, record_id: int) -> int | None:
+    """What replaced an already-recorded artefact, or None if nothing has."""
+    stored = find_ingest_record_by_id(conn, record_id)
+    return None if stored is None else stored.superseded_by
 
 
 def _new_source(descriptor: SourceDescriptor) -> NewIngestSource:

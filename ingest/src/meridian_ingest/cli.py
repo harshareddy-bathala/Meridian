@@ -219,6 +219,13 @@ def _run_load(args: argparse.Namespace, settings: IngestSettings) -> int:
                 )
             for skipped in report.skipped:
                 _say(f"    {skipped.raw_path}: {skipped.skipped}, nothing derived")
+            for reverted in report.reverted:
+                _warn(
+                    f"    {reverted.raw_path} matches record {reverted.record_id}, "
+                    f"which record {reverted.reverted_past} superseded: the source "
+                    "went back to an earlier version, and superseded_by still "
+                    "names the later one (D-141)"
+                )
             if report.wrote_nothing():
                 _say("    nothing new — this tree was already loaded")
     return 0

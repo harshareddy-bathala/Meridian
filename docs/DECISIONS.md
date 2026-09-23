@@ -3033,6 +3033,8 @@ Stage 14's completion gate is that a snapshot is downloaded once and then normal
 
 **A differing re-fetch is a new row**, linked from the one it replaces by `superseded_by` in the same transaction; an identical re-fetch conflicts on `(source_id, original_identifier, sha256)` and returns the existing id. Filling a column that was null is the only update in the whole write path.
 
+**A source that goes back to an earlier version is reported, not re-linked.** If A is superseded by B and a later fetch returns A's bytes again, that fetch conflicts onto A's row: nothing is inserted, its raw directory has no row of its own, and `superseded_by` goes on naming B. Re-linking would mean rewriting a filled column. `meridian-ingest load` names each such artefact instead, and nothing reads supersession before Stage 16, which settles what "current" means if it needs to (found auditing Stage 14, 2026-09-23).
+
 **The raw store is outside the database backup.** `deploy/tools/backup.py` dumps Postgres; this tree is not in it. The runbook says so, and the backup names the root it did not take, rather than leaving an operator to find out after losing the one thing the gate depends on.
 
 *Rejected: raw bytes in the database.* The gate wants a tree an operator can copy to a laptop, and a multi-megabyte artefact per row slows every dump for something never queried by content.

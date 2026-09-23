@@ -406,6 +406,28 @@ def test_a_supersession_is_recorded_once(
     assert [one.superseded for one in again.artefacts] == [(), ()]
 
 
+def test_a_source_that_went_back_to_an_earlier_version_is_reported(
+    rollback: Any, store: RawStore, tmp_path: Path
+) -> None:
+    """A, then B, then A again: the third fetch is named, not silently absorbed.
+
+    Its bytes conflict onto the first record, which B already superseded, so
+    ``superseded_by`` still names B. The column is filled once and never
+    rewritten (D-141), so the loader says so instead of repairing it.
+    """
+    first = fetch(store, JULY)
+    revised = _republished(store, tmp_path)
+    fetch(store, JULY, RETRIEVED_AT + timedelta(days=4))
+
+    report = load_source(rollback, store, SOURCE)
+
+    records = {
+        one.raw_path: one for one in find_ingest_records_for_source(rollback, SOURCE)
+    }
+    assert [one.record_id for one in report.reverted] == [records[first].record_id]
+    assert report.reverted[0].reverted_past == records[revised].record_id
+
+
 def _republished(store: RawStore, tmp_path: Path) -> str:
     """The same identifier, different bytes: the archive corrected its file."""
     revised = tmp_path / "fixtures"
