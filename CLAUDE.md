@@ -110,6 +110,7 @@ meridian/
 │       ├── reliability/  SLI computation, budget, chaos
 │       ├── store/        SQL access layer
 │       ├── api/          public + MSP endpoints
+│       ├── datasets/     snapshot export, canonical files, manifests, labels
 │       ├── jobs/         the `jobs` service: pass generation and scheduling on a timer
 │       ├── metrics/      Prometheus exposition and the scrape token check
 │       ├── pass_generation.py   the job that fills `passes` from local elements

@@ -3351,6 +3351,17 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-142 no test reaches the network, and the first adapter is ours | `meridian_ingest/adapters/reference.py`; `tests/unit/test_ingest_gate.py`; `tests/integration/test_ingest_gate.py` |
 | — the completion gate, and how to run it by hand | `OPERATIONS.md` § External archive ingest |
 
+**Landed 2026-09-23**, building dataset snapshots, the labels and Stage 15's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-143 export once, label offline | `meridian/datasets/export.py` (the only step that opens a database); `meridian/datasets/evaluation.py`; `meridian/cli_snapshot.py` |
+| D-144 canonical JSON Lines in content-addressed directories | `meridian/datasets/{canonical,manifest,manifest_parse,publish}.py`; `meridian/store/snapshot_reads.py`; `deploy/tools/backup.py`; `DATA-MODEL.md` |
+| D-145 listening frozen at export by the registry | `meridian/datasets/export.py` (`listening.jsonl`); `meridian/datasets/labels.py` reads the answer only |
+| D-146 the labels and their precedence | `meridian/datasets/labels.py`; `tests/unit/test_datasets_labels.py` |
+| D-147 silence judged on contemporaneous evidence | `meridian/datasets/evidence.py`; `meridian/datasets/label_config.py`; `deploy/snapshot.toml.example` |
+| — the completion gate, and how to run it by hand | `tests/unit/test_snapshot_gate.py`; `tests/integration/test_snapshot_gate.py`; `OPERATIONS.md` § Dataset snapshots |
+
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.

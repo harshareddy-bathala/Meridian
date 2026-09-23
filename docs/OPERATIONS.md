@@ -458,7 +458,7 @@ unshare -rn uv run meridian snapshot --root /tmp/elsewhere label data/datasets/s
 All three print the same hash. The last one runs with no network interfaces at all, into a root that has never seen the dataset.
 
 Two test files assert the same thing:
-- `tests/unit/test_snapshot_gate.py` labels one snapshot three ways, under a guard that fails if anything opens a connection. A positive control shows the guard firing. It also labels in two processes with different hash seeds.
+- `tests/unit/test_snapshot_gate.py` labels one snapshot three ways, under a guard that refuses `psycopg.connect` and every Python socket. A positive control shows the guard firing. It also labels in two processes with different hash seeds.
 - `tests/integration/test_snapshot_gate.py` exports from a database, **deletes every source row**, and labels again.
 
 ### When `verify` exits 3
