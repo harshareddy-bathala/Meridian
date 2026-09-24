@@ -79,6 +79,17 @@ def test_the_example_file_documents_the_defaults() -> None:
         ("min_station_history = true", "must be a whole number"),
         ("min_station_history = -1", "outside 0..10000"),
         ("configuration = ", "not TOML"),
+        ("train_until = 2026-09-01T00:00:00", "with a UTC offset"),
+        ("train_until = 2026-09-01", "with a UTC offset"),
+        (
+            "train_until = 2026-10-01T00:00:00Z\nvalidate_until = 2026-09-01T00:00:00Z",
+            "is not before validate_until",
+        ),
+        ("inverse_regularisation = 0.0", "must be a positive number"),
+        ("inverse_regularisation = inf", "must be a positive number"),
+        ('weighting = "propensity"', "weighting must be one of"),
+        ("seed = -1", "seed = -1 is outside"),
+        ("seed = 1.5", "seed must be a whole number"),
     ],
 )
 def test_a_setting_that_cannot_be_obeyed_is_refused_by_name(
@@ -104,6 +115,16 @@ def test_the_hash_is_of_the_values_not_the_file() -> None:
     assert model_config_sha256(one) != model_config_sha256(
         replace(one, population="own", configuration="D")
     )
+
+
+def test_the_split_dates_are_read_as_utc_instants() -> None:
+    config = parse_model_config(
+        "train_until = 2027-01-01T00:00:00Z\nvalidate_until = 2027-02-01T05:30:00+05:30"
+    )
+
+    assert config.train_until == datetime(2027, 1, 1, tzinfo=UTC)
+    assert config.validate_until == datetime(2027, 2, 1, tzinfo=UTC)
+    assert model_config_sha256(config) != model_config_sha256(ModelConfig())
 
 
 def test_a_file_that_is_not_there_is_refused(tmp_path: Path) -> None:

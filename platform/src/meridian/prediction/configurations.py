@@ -35,6 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from meridian.prediction.features import FEATURES
+from meridian.prediction.score import Route, route_for
 
 __all__ = [
     "CONFIGURATIONS",
@@ -48,9 +49,6 @@ __all__ = [
 
 GROUPS = ("elevation", "geometry", "ours", "conditions")
 """Every group a feature can belong to. ``conditions`` is empty until Stage 31."""
-
-CONFIGURED = "configured"
-GEOMETRY_FALLBACK = "geometry_fallback"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,43 +87,20 @@ FALLBACK = Configuration(
 """What a station without enough history is scored by: the orbit, nothing else."""
 
 
-@dataclass(frozen=True, slots=True)
-class Route:
-    """Which model scores a pass, and why."""
-
-    path: str
-    """``configured`` or ``geometry_fallback``."""
-
-    reason: str
-
-
 def route(
     configuration: Configuration, station_history: int, min_station_history: int
 ) -> Route:
     """The model a pass is scored by, given its station's settled record.
 
-    Args:
-        configuration: The configured model.
-        station_history: The station's settled, usable outcomes before the pass.
-        min_station_history: How many the configured model needs.
-
-    Returns:
-        The route, with its reason stated.
+    The rule itself lives in :mod:`meridian.prediction.score`, which the
+    scheduler imports without this module's feature table (D-155).
     """
-    if not configuration.reads_history:
-        return Route(CONFIGURED, f"configuration {configuration.name} reads no history")
-    if station_history >= min_station_history:
-        return Route(
-            CONFIGURED, f"{station_history} settled outcomes, enough for history"
-        )
-    if station_history == 0:
-        reason = "a new station: no settled outcomes"
-    else:
-        reason = (
-            f"{station_history} settled outcomes, below min_station_history"
-            f" {min_station_history}"
-        )
-    return Route(GEOMETRY_FALLBACK, reason)
+    return route_for(
+        configuration.name,
+        reads_history=configuration.reads_history,
+        station_history=station_history,
+        min_station_history=min_station_history,
+    )
 
 
 def objective(

@@ -15,6 +15,11 @@ negative, ``unknown`` out — the same rule completeness uses (D-153). An
 archive pass carries its peak elevation and nothing else we compute, so that
 is its one feature, and the model configuration refuses anything but A for it.
 
+**Weights are the dataset's own** (D-156). :func:`weighted` reads each
+example's inverse propensity from ``propensities.jsonl``, joined on population,
+station, satellite and ``aos``; an example the dataset gave no weight — a pass
+without support — is left out of a weighted fit and counted, never given 1.
+
 **Simulated passes are counted, never examples** (D-078). The counts travel
 with the examples, so fitting can refuse a dataset whose usable passes are all
 simulated with that reason, not with "too few examples".
@@ -22,25 +27,26 @@ simulated with that reason, not with "too few examples".
 Examples are in ``aos`` order, then station, then pass: the order a temporal
 split reads them in.
 
-Reference: docs/DECISIONS.md D-078, D-149, D-150, D-153, D-156, D-161.
+Reference: docs/DECISIONS.md D-078, D-149, D-150, D-152, D-153, D-156, D-161.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from meridian.datasets.archive_matching import match_receptions
 from meridian.datasets.completeness import USABLE_LABELS
 from meridian.datasets.labels import LabelledPass
+from meridian.datasets.row_fields import instant, jsonl_rows, optional_number, text
 from meridian.datasets.snapshot_rows import SnapshotRows
 from meridian.prediction.feature_rows import FeatureRows
 from meridian.prediction.features import compute_features
 from meridian.prediction.history import History, events_of
 from meridian.prediction.profiles import Environment
 
-__all__ = ["Example", "ExampleSet", "archive_examples", "own_examples"]
+__all__ = ["Example", "ExampleSet", "archive_examples", "own_examples", "weighted"]
 
 _SUCCESS = "successful_reception"
 
@@ -58,6 +64,9 @@ class Example:
     station_history: int
     """Settled, usable outcomes at the station before ``aos`` (D-161)."""
 
+    weight: float = 1.0
+    """Its inverse propensity in a weighted fit; 1 otherwise."""
+
 
 @dataclass(frozen=True, slots=True)
 class ExampleSet:
@@ -67,6 +76,9 @@ class ExampleSet:
     examples: tuple[Example, ...]
     simulated: int
     """Usable passes left out because they were simulated (D-078)."""
+
+    without_weight: int = 0
+    """Examples left out of a weighted fit because the dataset gave no weight."""
 
 
 def own_examples(
@@ -148,4 +160,37 @@ def archive_examples(
             for one in usable
         ),
         simulated=0,
+    )
+
+
+def weighted(found: ExampleSet, propensities: bytes) -> ExampleSet:
+    """The examples with their inverse-propensity weights, unweighted ones out.
+
+    Args:
+        found: One population's examples.
+        propensities: The evaluation dataset's ``propensities.jsonl``.
+
+    Returns:
+        The examples that have a weight, carrying it, and how many had none.
+    """
+    weights: dict[tuple[str, str, str, datetime], float | None] = {}
+    for row in jsonl_rows(propensities, "propensities.jsonl"):
+        key = (
+            text(row, "population"),
+            text(row, "station"),
+            text(row, "satellite_id"),
+            instant(row, "aos"),
+        )
+        weights[key] = optional_number(row, "weight")
+    kept = []
+    for one in found.examples:
+        weight = weights.get(
+            (one.population, one.station_id, one.satellite_id, one.aos)
+        )
+        if weight is not None:
+            kept.append(replace(one, weight=weight))
+    return replace(
+        found,
+        examples=tuple(kept),
+        without_weight=len(found.examples) - len(kept),
     )

@@ -222,7 +222,9 @@ def test_bytes_that_are_not_json_are_refused() -> None:
 
 
 def test_an_evaluation_dataset_must_name_its_inputs() -> None:
-    with pytest.raises(MalformedManifestError, match="names the raw snapshot"):
+    with pytest.raises(
+        MalformedManifestError, match="names the directory it was made from"
+    ):
         evaluation(config_sha256=None)
 
 

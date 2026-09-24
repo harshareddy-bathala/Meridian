@@ -13,7 +13,13 @@ decisions D-155 to D-163. In place so far:
 * ``model_config`` and ``configurations`` — A to D from one key, and the
   cold-start route (D-160, D-161);
 * ``examples`` — one population's examples, simulated passes counted apart
-  (D-156).
+  (D-156);
+* ``splits`` — temporal splits and rolling-origin folds, on dates (D-162);
+* ``fit`` — the one module importing scikit-learn: a calibrated logistic
+  regression, and the fallback beside it (D-155);
+* ``score`` — the standard library alone: a model file, a route and a
+  probability (D-161, D-163);
+* ``model_files`` — a fitted model published, and read back verified (D-163).
 
 When complete, this module provides:
 

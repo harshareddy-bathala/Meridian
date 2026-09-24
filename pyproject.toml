@@ -214,6 +214,13 @@ mypy_path = ["platform/src", "client/src", "simulator/src", "ingest/src"]
 module = ["sgp4.*", "skyfield.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# scikit-learn ships no type information either. It is imported by one module,
+# meridian.prediction.fit (D-155), which turns everything it returns into
+# floats before the numbers leave it.
+module = ["sklearn.*"]
+ignore_missing_imports = true
+
 # There is deliberately no `tests.*` override. CI type-checks
 # `platform/src client/src simulator/src` and not `tests/`, and mypy cannot load
 # the suite anyway: four directories each hold a `conftest.py`, none of them are

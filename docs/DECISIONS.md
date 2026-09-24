@@ -3436,7 +3436,7 @@ Four features are learned from a station's own settled history (D-157), and each
 
 **2026-09-24 · accepted** · *`meridian.prediction.score`, `EVALUATION.md` §2, Stage 17*
 
-**A station with fewer than `min_station_history` settled examples** (configuration) is scored by the geometry-only model, fitted alongside the configured one, and not by the configured model with its history features set to something. Every prediction carries `path` — `configured` or `geometry_fallback` — and the reason, so a report can count how many predictions came from each. The geometry-only model reads the `elevation` and `geometry` groups. A and B read no history, so they never take the route: they are geometry-only already.
+**A station with fewer than `min_station_history` settled examples** (configuration) is scored by the geometry-only model, fitted alongside the configured one on the same training span and calibrated on the same validation span, and not by the configured model with its history features set to something. Every prediction carries `path` — `configured` or `geometry_fallback` — and the reason, so a report can count how many predictions came from each. The geometry-only model reads the `elevation` and `geometry` groups. A and B read no history, so they never take the route: they are geometry-only already.
 
 **An unseen satellite, or a station with no interference or health history,** takes each missing feature at its prior with a count of zero (D-159). It never raises and never yields NaN. The roadmap's four cases — new station, unseen satellite, missing interference, missing health — each have a test.
 
@@ -3448,7 +3448,7 @@ Four features are learned from a station's own settled history (D-157), and each
 
 **The configuration names `train_until` and `validate_until`.** A pass is assigned by its `aos`: before the first is training, before the second is validation, and from there to the dataset's `as_of` is test. The test span is not read until evaluation. Every result states both dates.
 
-**Everything learned is learned on training data only:** feature scaling, the regularisation strength, and the profiles' priors. Platt calibration is fitted on validation. **Rolling-origin folds** — each training span ending later than the one before — give the variance of the reported figures.
+**Everything learned is learned on training data only:** the feature scaling and the coefficients. Platt calibration is fitted on validation, with Platt's smoothed targets so that a validation span the logit separates still gives a finite map. The regularisation strength is stated in the configuration (`inverse_regularisation`) and not tuned, and the profiles' priors are constants in code, so no choice is made by looking at any span. A fit refuses a span with fewer than 20 training or 10 validation examples, or with one outcome only, and says how many it found. **Rolling-origin folds** — each training span ending later than the one before — give the variance of the reported figures.
 
 **No function here accepts a shuffle,** and the split takes only dates. A test shows that no example after `train_until` reaches training, whatever order the examples arrive in.
 
@@ -3458,9 +3458,9 @@ Four features are learned from a station's own settled history (D-157), and each
 
 **2026-09-24 · accepted** · *`meridian.prediction.fit`, `DATA-MODEL.md`, Stage 17*
 
-**A fit publishes a directory named by its content hash,** by the same rules as a snapshot (D-144): fsync and rename, sealed read-only. It holds `model.json`: the feature list, the scaler, the coefficients, the calibration map, the geometry-only fallback model, the evaluation dataset's sha256, the configuration's sha256, the seed, and the versions of numpy and scikit-learn that fitted it.
+**A fit publishes a directory named by its content hash,** by the same rules as a snapshot (D-144): fsync and rename, sealed read-only. It holds `model.json`: the feature list, the scaler, the coefficients, the calibration map, the geometry-only fallback model, the evaluation dataset's sha256, the configuration's sha256, the seed, and the versions of numpy and scikit-learn that fitted it. The manifest is the snapshot manifest with a third kind, `model`, naming the dataset as `derived_from` and the configuration by hash, so a model is refused by the same reader, for the same reasons, as a dataset is. Models live under `<datasets root>/models/`.
 
-**Coefficients are rounded to 12 significant figures before hashing.** Refitting in the same environment reproduces the same hash. Across environments a solver may differ in its last bits, so the claim there is that predictions agree within 1e-9, not that the bytes match, and the gate states that limit instead of implying more.
+**Every stored number is rounded to 12 significant figures,** and the model is standardised and calibrated with the rounded values, so what is stored is exactly what was used. Refitting in the same environment reproduces the same hash. Across environments a solver may differ in its last bits, so the claim there is that predictions agree within 1e-9, not that the bytes match, and the gate states that limit instead of implying more.
 
 ---
 

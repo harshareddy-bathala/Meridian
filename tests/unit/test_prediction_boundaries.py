@@ -14,6 +14,9 @@ Two lines, read from the source rather than from a running import:
 * **The prediction module reaches no database, no network and no orbit.**
   Features are a pure function of a snapshot (D-157), tracks were frozen at
   export (D-158), and ``CLAUDE.md`` says prediction knows nothing about MSP.
+* **The scorer imports the standard library alone,** and nothing that reads a
+  model back imports the fitter: the scheduler scores on the Pi from a file
+  (D-155, D-163).
 
 Each has a positive control, without which an empty list of crossings proves
 nothing.
@@ -24,6 +27,7 @@ Reference: docs/DECISIONS.md D-155, D-157, D-158.
 from __future__ import annotations
 
 import ast
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -128,3 +132,37 @@ def test_the_scans_would_notice_a_crossing(tmp_path: Path) -> None:
     assert len(crossings([offender], FITTING_ONLY)) == 1
     assert len(crossings([offender], NUMERICAL)) == 2
     assert len(crossings([offender], UNREACHABLE_FROM_PREDICTION)) == 2
+
+
+SCORER = PREDICTION / "score.py"
+MODEL_READERS = (SCORER, PREDICTION / "model_files.py")
+
+
+def outside_the_standard_library(path: Path) -> list[str]:
+    return [
+        module
+        for _, module in imported_modules(path)
+        if module.split(".")[0] not in sys.stdlib_module_names
+    ]
+
+
+def test_the_scorer_imports_the_standard_library_alone() -> None:
+    """What the scheduler imports on the Pi reads a file and does arithmetic."""
+    assert list(imported_modules(SCORER))
+    assert outside_the_standard_library(SCORER) == []
+
+
+def test_reading_a_model_back_never_imports_the_fitter() -> None:
+    """``meridian model show`` and the scheduler must run without the extra."""
+    assert crossings(list(MODEL_READERS), ("meridian.prediction.fit",)) == []
+
+
+def test_the_standard_library_scan_would_notice_an_import(tmp_path: Path) -> None:
+    offender = tmp_path / "offender.py"
+    offender.write_text(
+        "import json\nfrom meridian.prediction.fit import fit_model\n",
+        encoding="utf-8",
+    )
+
+    assert outside_the_standard_library(offender) == ["meridian.prediction.fit"]
+    assert len(crossings([offender], ("meridian.prediction.fit",))) == 1

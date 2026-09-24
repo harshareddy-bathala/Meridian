@@ -22,3 +22,22 @@ population = "own"
 # it. Below this it is scored by the geometry-only model, and every prediction
 # says so (D-161). 0 .. 10000.
 min_station_history = 20
+
+# The split dates (D-162), as UTC date-times. A pass rising before train_until
+# trains; before validate_until, it calibrates; from there to the dataset's
+# as_of, it is test and is read only by `meridian model evaluate`. No default:
+# `meridian model fit` refuses a configuration that does not name both.
+# train_until = 2027-01-01T00:00:00Z
+# validate_until = 2027-02-01T00:00:00Z
+
+# scikit-learn's C for the L2 penalty (D-155): smaller is stronger. Stated,
+# never tuned, so no choice is made by looking at the test span.
+inverse_regularisation = 1.0
+
+# "none", or "ipw" to weight each example by its inverse propensity from the
+# dataset's propensities.jsonl (D-156). An example with no weight is left out
+# of a weighted fit and counted.
+weighting = "none"
+
+# Handed to the solver and recorded in the model. 0 .. 4294967295.
+seed = 0
