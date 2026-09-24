@@ -140,6 +140,91 @@ def test_the_root_can_come_from_the_environment(
     assert str(datasets_root / "evaluation") in capsys.readouterr().out
 
 
+# --- completeness ------------------------------------------------------------
+
+
+def labelled(root: Path, raw: Path, capsys: pytest.CaptureFixture[str]) -> str:
+    assert run(root, "label", str(raw)) == 0
+    return dataset_path(capsys.readouterr().out)
+
+
+def test_completeness_prints_both_populations(
+    raw_snapshot: Any,
+    archive_world: Any,
+    datasets_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    dataset = labelled(datasets_root, raw_snapshot(archive_world), capsys)
+
+    assert run(datasets_root, "completeness", dataset) == 0
+    printed = capsys.readouterr().out
+    assert "our stations" in printed
+    assert "archive stations" in printed
+    assert "threshold          0.8" in printed
+    assert "UNRELIABLE" in printed
+
+
+def test_completeness_at_another_threshold(
+    raw_snapshot: Any,
+    archive_world: Any,
+    datasets_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    dataset = labelled(datasets_root, raw_snapshot(archive_world), capsys)
+
+    assert run(datasets_root, "completeness", dataset, "--threshold", "0.6") == 0
+    printed = capsys.readouterr().out
+    assert "threshold          0.6" in printed
+    assert "retained 2 · below_threshold 0" in printed
+
+
+@pytest.mark.parametrize("threshold", ["1.5", "-0.1"])
+def test_completeness_refuses_a_threshold_off_the_scale(
+    raw_snapshot: Any,
+    archive_world: Any,
+    datasets_root: Path,
+    capsys: pytest.CaptureFixture[str],
+    threshold: str,
+) -> None:
+    dataset = labelled(datasets_root, raw_snapshot(archive_world), capsys)
+
+    assert (
+        run(datasets_root, "completeness", dataset, "--threshold", threshold)
+        == EXIT_FAILED
+    )
+    assert "outside 0..1" in capsys.readouterr().err
+
+
+def test_completeness_of_a_raw_snapshot_exits_1(
+    raw_snapshot: Any,
+    world: Any,
+    datasets_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw = raw_snapshot(world)
+
+    assert run(datasets_root, "completeness", str(raw)) == EXIT_FAILED
+    assert "label it first" in capsys.readouterr().err
+
+
+def test_completeness_of_a_damaged_dataset_exits_3(
+    raw_snapshot: Any,
+    archive_world: Any,
+    datasets_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    dataset = Path(labelled(datasets_root, raw_snapshot(archive_world), capsys))
+    days = dataset / "station_days.jsonl"
+    days.chmod(0o600)
+    days.write_bytes(days.read_bytes().replace(b'"attempted":2', b'"attempted":3'))
+
+    assert run(datasets_root, "completeness", str(dataset)) == EXIT_CORRUPT
+
+
+def test_completeness_of_nothing_exits_1(datasets_root: Path, tmp_path: Path) -> None:
+    assert run(datasets_root, "completeness", str(tmp_path / "absent")) == EXIT_FAILED
+
+
 # --- verify ------------------------------------------------------------------
 
 
@@ -150,7 +235,7 @@ def test_verify_accepts_an_intact_snapshot(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert run(datasets_root, "verify", str(raw_snapshot(world))) == 0
-    assert "is intact: a raw snapshot of 13 files" in capsys.readouterr().out
+    assert "is intact: a raw snapshot of 14 files" in capsys.readouterr().out
 
 
 def test_verify_exits_3_on_a_changed_byte(

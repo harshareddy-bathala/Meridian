@@ -1393,7 +1393,7 @@ That is the same defect class as a docstring describing a test that does not exi
 
 **Rejected: one row per physical pass, updated in place as better elements arrive.** It discards the prediction history, which is the input to the uncertainty model, and it makes `passes` mutable — the same mistake D-057 corrected in `element_sets`.
 
-*Consequence:* the completeness denominator must count **distinct physical passes**, not rows, because one pass may legitimately hold several predictions. The grouping rule belongs to the evaluation stage that computes the ratio, and is owed by it rather than assumed here.
+*Consequence:* the completeness denominator must count **distinct physical passes**, not rows, because one pass may legitimately hold several predictions. The grouping rule belongs to the evaluation stage that computes the ratio, and is owed by it rather than assumed here. *Settled by D-148.*
 
 ---
 
@@ -3121,6 +3121,8 @@ Rule 7 makes `Registry.was_listening()` the only authority on whether a station 
 
 **The unit is a geometrically available pass** — one `passes` row, which is already per station and satellite. A pass exists whether or not anyone scheduled it, and that is what Stage 16's completeness ratio divides by.
 
+*Amended by D-148:* the unit is a **physical** pass — every prediction of one rise, grouped — because D-063 keeps several `passes` rows for one pass, and labelling each row on its own counted the unscheduled predictions as passes nobody took.
+
 **Several assignments can share a pass.** `assignment_decision_unique` is `(pass_id, model_config)`, because configurations A and B are scheduled over the same horizon to be compared. The reception is physical, not per configuration, so the evidence is pooled:
 
 - `scheduled_by` lists, sorted, every configuration that scheduled the pass;
@@ -3179,6 +3181,158 @@ A station confirmed listening that heard nothing has either missed the pass or b
 *Rejected: `satellite_transmitters.active`.* It is today's status, applied to every past pass, and it cannot be null, so "unknown" could never be reached.
 
 *Rejected: calling every confirmed-listening absence a miss.* With one physical station and sparse archives, a dormant satellite would appear as the station failing, and every reliability figure downstream would inherit it.
+
+---
+
+## D-148 — The unit is a physical pass, not a prediction of one
+
+**2026-09-23 · accepted** · *`meridian.datasets.physical_passes`, `meridian.datasets.labels`, Stage 16; amends D-146*
+
+D-063 keeps every prediction: a newer element set that predicts the same rise is a second `passes` row, on purpose. Its consequence was written down and left owed: *the completeness denominator must count distinct physical passes, not rows.* D-146 then made the label unit "one `passes` row". The two disagree, and in the direction that hides the error. A pass predicted twice and scheduled once gives one scheduled row and one `not_scheduled` row, and completeness comes out about half what it really is. Stage 15's tests did not see this, because every fixture pass had one prediction.
+
+**Predictions of the same station and satellite whose `[aos, los)` windows overlap are one physical pass.** Overlap is the test rather than equal `aos`, because two element sets disagree on acquisition by seconds and neither of them is the true one. Grouping is transitive: A overlaps B and B overlaps C makes one pass. It runs in `(station, satellite, aos, pass_id)` order, so it has one answer.
+
+**The representative prediction is the newest one available before the pass.** Of the members whose `computed_at` is not after the group's earliest `aos`, it is the one whose element-set epoch is latest, with ties broken by the lowest `pass_id`. Where every member was computed after the rise, the one computed first is used. Availability is judged by when the prediction was made, not by its elements' epoch: element sets are published hours after their epoch, so an epoch before the pass can still be knowledge from after it. The representative's geometry is what completeness and the propensity see, so neither can use elements from after the pass (rule 6, applied to features as well as splits).
+
+**A rise is in a snapshot whole or not at all.** Two predictions of one rise can fall either side of `--since` by seconds. Export therefore reads every prediction whose window ends after `since`, and labelling keeps a physical pass only if it rises at or after `since`. Scoping by `aos` alone would export the later prediction without the earlier, scheduled one, and label the rise `not_scheduled` at every snapshot boundary.
+
+**Evidence is pooled across members**, exactly as D-146 already pools it across configurations. Assignments to any member schedule the physical pass; the most informative latest report wins; listening is confirmed if confirmed for any member. Each labelled row lists its members as `pass_ids`, sorted, and keys on the representative's `pass_id`.
+
+**`TRANSFORMATION_VERSION` becomes `labels-2`.** A dataset labelled per row can never share a hash with one labelled per physical pass (D-144).
+
+*Rejected: counting distinct `(station, satellite, aos)`.* Two element sets predict acquisitions seconds apart, so this counts the same pass twice. It is the bug moved rather than fixed.
+
+*Rejected: keeping only the latest prediction at pass generation.* D-063 rejected rewriting `passes`, because the prediction history is the uncertainty model's input.
+
+---
+
+## D-149 — What completeness divides, and by what
+
+**2026-09-23 · accepted** · *`meridian.datasets.completeness`, `EVALUATION.md` §4.1, Stage 16*
+
+`EVALUATION.md` §4.1 writes completeness as observed ÷ geometrically available, per station-day. Each term needs a definition before it can be computed the same way twice.
+
+**A station-day is the UTC date of the physical pass's `aos`.** Local days would put a station's day boundary in a different place for every longitude and move with daylight saving. A pass that crosses midnight belongs to the day it rises in, as D-059 assigns a pass to the horizon it rises in.
+
+**Available and eligible means all of these hold:**
+
+- the pass is measured, not simulated (D-078): the two populations are never in one ratio;
+- its report window has settled (D-146 rule 1): a pass still in its margin is neither observed nor missed yet;
+- it is not `satellite_silent` (D-147): a satellite that was not transmitting offered no opportunity.
+
+`satellite_state_indeterminate` stays in the denominator, because not knowing is not evidence that the opportunity was absent.
+
+**Observed means the historical policy attempted it,** not that it succeeded and not that its label is usable:
+
+- for our stations, some assignment of the pass received a report, or the registry confirmed the station was listening. A confirmed silence with no report is an attempt that heard nothing (rule 7), and it is labelled `confirmed_miss` or a satellite state; counting it as unattempted would score a miss the policy was never credited with trying;
+- for an archive station, one of its receptions matches the pass (D-150).
+
+Completeness measures the selection. Whether an attempted pass carries a usable yield label is a separate number, reported beside it and never folded into it. Folding it in would make a station that attempts everything but loses a report look like a station that chose not to attempt.
+
+**Our stations and archive stations are reported apart.** They are separate populations with separate policies, and D-053 forbids putting our totals beside another network's.
+
+---
+
+## D-150 — The archive denominator is computed by us and frozen at export
+
+**2026-09-23 · accepted** · *`meridian.datasets.archive_passes`, `meridian.datasets.export`, Stage 16*
+
+D-138 says the denominator stays ours: nothing here trusts an archive's own count of what was available. So Stage 16 computes the passes each archive station could have received, with our orbit service and our element sets.
+
+**It is computed at export and written as `archive_passes.jsonl`.** Propagation is floating-point work in a C extension. Freezing its answer once keeps labelling a function of files, which is D-145's reasoning applied to geometry instead of listening. The labeller's hash then depends on the bytes in the snapshot, not on the orbit library giving identical floats on every machine. The element set used for each satellite is the one current at the start of each UTC day in scope, which is how pass generation chooses one.
+
+**A station's first search starts an hour early.** Search keeps only passes that rise inside it, so a reception just after the span or the snapshot begins may belong to a pass that rose just before. That pass is computed so the reception can be placed, and, like our own rises before `since` (D-148), it is in no denominator.
+
+**Capability is what the station has demonstrated.** An archive's capability description, where `capability_json` holds one at all, is in the archive's own vocabulary and is not read by anything here, so "could receive" cannot come from declared hardware. The denominator covers the satellites the station has at least one reception of in the snapshot, at or above a configured elevation floor (default 0°). This is narrower than true availability, so it favours completeness, and the decision says so here rather than letting a figure imply otherwise.
+
+**What cannot be computed is counted, not dropped:**
+
+- a station without a location (`denominator_inputs = 'neither'`);
+- a received satellite that is not in our catalogue, or has no element set before the day.
+
+Each gets a count in the manifest. A denominator computed over the stations that happened to publish coordinates, and reported as though it covered all of them, is the selection bias arriving by the back door (migration 0016).
+
+**A reception matches a computed pass** when it names the same satellite and its `started_at` falls inside the pass window widened by a configured tolerance (default 120 s). The tolerance exists because the station's clock and elements are not ours.
+
+**An archive station's days run from its first reception in scope to its last.** A day inside that span with no reception is counted as `inactive` and kept out of the distribution. With no heartbeat, we cannot tell a station that was switched off from one that chose nothing, and scoring such a day 0 would claim the second. Days outside the span are not the station's at all.
+
+*Rejected: propagating at label time.* The gate's hash would then rest on bit-identical propagation across machines, which is a property of `sgp4` builds and not one we can promise.
+
+---
+
+## D-151 — Near-complete windows and how their threshold is reported
+
+**2026-09-23 · accepted** · *`meridian.datasets.completeness`, `meridian snapshot completeness`, `EVALUATION.md` §4.1, Stage 16*
+
+**The threshold is configuration, default `0.8`,** set in the labelling file's `[completeness]` table and hashed into the manifest like every other setting. A station-day at or above it is retained for primary evaluation.
+
+**Every report states, with no option to leave them out:**
+
+- the completeness distribution: count, deciles, and a histogram in tenths;
+- retained and excluded station-days, by population;
+- the same two counts at each sensitivity threshold, default `0.5, 0.6, 0.7, 0.8, 0.9`.
+
+A station-day with no eligible pass has no ratio. It is counted as `empty` and appears in no distribution.
+
+The sensitivity table is what lets a reader judge the threshold rather than trust it. A result that holds at 0.8 and collapses at 0.7 is a different finding from one that holds at both.
+
+---
+
+## D-152 — The propensity is binned, and never sees an outcome
+
+**2026-09-23 · accepted** · *`meridian.datasets.propensity`, `EVALUATION.md` §4.2, Stage 16*
+
+`EVALUATION.md` §4.2 asks for P(observed | pass features) under the historical policy. Stage 17 owns the numerical dependencies, and a propensity fitted here has to be one a viva can read by eye. So it is estimated by counting.
+
+**The estimate is observed ÷ available within a cell** of station × satellite × maximum-elevation band × local-solar-hour band. The default bands are elevation 0–15, 15–30, 30–60 and 60–90°, and hours in blocks of four. Local solar hour is UTC hour plus longitude ÷ 15, so it needs no timezone database and moves with the sun rather than a government.
+
+**A sparse cell falls back to a coarser one.** A cell with fewer than `min_cell` available passes (default 20) drops the hour band. If that is still sparse, it drops the satellite, and the coarsest level is station × elevation band. Every propensity row records the level it came from.
+
+**The estimator never sees an outcome.** Its only inputs are pre-pass features (taken from the representative prediction, D-148) and the attempted flag. It takes no label, no report and no reception. Future outcome information therefore cannot enter by construction, and a test that changes every outcome and finds every propensity unchanged is the check.
+
+**Our own station's policy is deterministic, and the diagnostics will say so.** The baseline scheduler takes the best pass by elevation and priority, so within a cell a pass is nearly always taken or nearly never. Propensities near 0 and 1 are a **positivity violation**: there is no counterfactual to weight toward. That is reported as the finding it is. The remedy is prospective randomisation (`EVALUATION.md` §4.3), and no weighting scheme stands in for it.
+
+**The estimator sits behind a `PropensityModel` protocol,** so Stage 17 can add a fitted model beside it, not in place of it. The binned estimate stays as the baseline that any fitted one is compared with.
+
+---
+
+## D-153 — How weights are floored, and when a weighted result is unreliable
+
+**2026-09-23 · accepted** · *`meridian.datasets.weighting`, `EVALUATION.md` §4.2, Stage 16*
+
+**Propensities are floored at `0.05` by default** (configuration), so no weight exceeds 20, and the report counts how many were floored. A floor biases the estimate towards the unweighted one. It is preferred to an unbounded weight because it fails visibly, and the count says by how much.
+
+**A pass in a cell with propensity 0 has no support.** Nothing like it was ever attempted, so no weight can represent it. It is excluded from the weighted estimate and counted as `unsupported`, never silently absorbed.
+
+**Reported every time:**
+
+- the unweighted success rate with a Wilson 95% interval;
+- the Hajek-weighted success rate (weights normalised to sum to one), with a Wilson interval taken at n = ESS;
+- the effective sample size, (Σw)² ÷ Σw²;
+- the weight distribution: min, quartiles, max, and the floored count;
+- an overlap histogram of propensity, in tenths, separately for attempted and not-attempted passes.
+
+Success is `successful_reception` among attempted passes with a usable yield label. For an archive station, it is `decoded` among its matched receptions.
+
+**Unreliable is a flag, not a footnote.** A weighted estimate whose ESS is below max(30, 0.1 × n) is marked `unreliable: true`. `EVALUATION.md` §4.2 says such an estimate must be labelled rather than quoted; the flag is that label, carried in the data so no report can drop it.
+
+**At the default floor, only the 30 decides.** With every weight between 1 and 1 ÷ floor, ESS cannot fall below 4r ÷ (1 + r)² of n, where r is that ratio — about 0.18 n when r is 20. The 0.1 n clause can bind only when r exceeds about 38 — a floor below about 0.026. It stays in the rule because the floor is configuration, and a report made under a lower one must still carry the flag; `tests/unit/test_datasets_weighting.py` sets the floor to 0.01 to show that it does.
+
+*Rejected: bootstrap intervals.* They need a seed and many resamples to say roughly what the Wilson interval at the ESS already says, and they would make the report's bytes depend on the resample count.
+
+---
+
+## D-154 — The completeness gate is a type
+
+**2026-09-23 · accepted** · *`meridian.datasets.result`, `meridian.datasets.evaluation`, Stage 16*
+
+Stage 16's gate is that every archive-derived result *automatically* includes completeness information and, where relevant, IPW diagnostics. "Automatically" rules out a report template someone remembers to fill in.
+
+**Completeness is written into every evaluation dataset.** `meridian snapshot label` writes `station_days.jsonl` and `propensities.jsonl` beside `labels.jsonl`, and a completeness summary into the manifest. No evaluation dataset exists without them, and any result drawn from one can reach them.
+
+**A result is an `EvaluationResult`.** It cannot be constructed without a `CompletenessSummary`, and it carries either `IpwDiagnostics` or `NotWeighted(reason)`. The reason is a stated one, such as "prospective, policy assigned by us", and never an absent field. Stage 17's figures are built as `EvaluationResult`s, so a figure without its completeness is a type error, not a review comment.
+
+*Rejected: a check in the report writer.* It guards one output path. A notebook, a second script or a copied number would each be a path it never sees.
 
 ---
 
@@ -3361,6 +3515,19 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-146 the labels and their precedence | `meridian/datasets/labels.py`; `tests/unit/test_datasets_labels.py` |
 | D-147 silence judged on contemporaneous evidence | `meridian/datasets/evidence.py`; `meridian/datasets/label_config.py`; `deploy/snapshot.toml.example` |
 | — the completion gate, and how to run it by hand | `tests/unit/test_snapshot_gate.py`; `tests/integration/test_snapshot_gate.py`; `OPERATIONS.md` § Dataset snapshots |
+
+**Landed 2026-09-23**, building completeness and selection-bias tooling and Stage 16's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-148 the physical pass is the unit, `labels-2` | `meridian/datasets/{physical_passes,pooled_evidence,labels}.py`; `DATA-MODEL.md` |
+| D-149 eligible, attempted and usable, per UTC station-day | `meridian/datasets/completeness.py`; `meridian/datasets/selection.py` |
+| D-150 the archive denominator, computed and frozen at export | `meridian/datasets/{archive_passes,archive_matching}.py`; `meridian/datasets/export.py`; `meridian/store/snapshot_reads.py`; `DATA-MODEL.md` |
+| D-151 the threshold, the distribution and the sensitivity table | `meridian/datasets/{selection_config,completeness,result_reader,completeness_report}.py`; `deploy/snapshot.toml.example` |
+| D-152 a binned propensity that never sees an outcome | `meridian/datasets/propensity.py`; `tests/unit/test_datasets_boundaries.py` |
+| D-153 the floor, support, ESS and the `unreliable` flag | `meridian/datasets/weighting.py`; `deploy/snapshot.toml.example` |
+| D-154 the gate is a type | `meridian/datasets/{result,selection,evaluation}.py`; the manifest's optional `summary` in `meridian/datasets/manifest.py`; `meridian/cli_snapshot.py` |
+| — the completion gate, and how to run it by hand | `tests/unit/test_completeness_gate.py`; `OPERATIONS.md` § Dataset snapshots |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

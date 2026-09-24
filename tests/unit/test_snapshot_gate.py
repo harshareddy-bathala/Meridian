@@ -17,16 +17,13 @@ Reference: docs/DECISIONS.md D-143, D-144.
 from __future__ import annotations
 
 import os
-import socket
 import subprocess
 import sys
-from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import psycopg
 import pytest
 
 from meridian.cli import main
@@ -41,35 +38,6 @@ LATE = datetime(2027, 3, 1, 12, 0, tzinfo=UTC)
 LABEL_IN_A_FRESH_PROCESS = (
     "import sys; from meridian.cli import main; sys.exit(main(sys.argv[1:]))"
 )
-
-
-@dataclass
-class NetworkGuard:
-    """Refuses every database connection and socket, and remembers each attempt."""
-
-    attempts: list[str] = field(default_factory=list)
-
-    def refuse(self, what: str) -> OSError:
-        self.attempts.append(what)
-        return OSError(f"the gate test has no network; {what} was attempted")
-
-
-@pytest.fixture
-def no_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[NetworkGuard]:
-    """Close every door a labelling run could use to reach a database."""
-    guard = NetworkGuard()
-
-    def refuse_psycopg(*_args: object, **_kwargs: object) -> None:
-        raise guard.refuse("psycopg.connect")
-
-    def refuse_socket(*_args: object, **_kwargs: object) -> None:
-        raise guard.refuse("socket.connect")
-
-    monkeypatch.setattr(psycopg, "connect", refuse_psycopg)
-    monkeypatch.setattr(psycopg.Connection, "connect", refuse_psycopg)
-    monkeypatch.setattr(socket.socket, "connect", refuse_socket)
-    monkeypatch.setattr(socket, "create_connection", refuse_socket)
-    yield guard
 
 
 def dataset_hash(path: Path) -> str:
@@ -93,7 +61,7 @@ def test_three_labellings_make_one_dataset(
     raw_snapshot: Any,
     world: Any,
     datasets_root: Path,
-    no_network: NetworkGuard,
+    no_network: Any,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Twice by the library, months apart, once at the prompt: one hash, one tree."""
@@ -121,7 +89,7 @@ def test_three_labellings_make_one_dataset(
 
 def test_the_guard_catches_a_run_that_does_reach_for_a_database(
     datasets_root: Path,
-    no_network: NetworkGuard,
+    no_network: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Positive control: without it, an empty attempt list would prove nothing."""

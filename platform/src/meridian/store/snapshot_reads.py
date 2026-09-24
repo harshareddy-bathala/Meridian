@@ -25,12 +25,14 @@ not published as-is, and Stage 30's evidence dataset decides what may be.
 depend on: their assignments, every observation revision submitted by
 ``as_of``, the heartbeats received inside each assignment's window, and the
 element sets, stations, capabilities, satellites and transmitters they name.
-Archive receptions are scoped by ``started_at`` over the same interval. Nothing
+Archive receptions are scoped by ``started_at`` over the same interval, and
+bring the element sets current at each UTC day's start for every satellite
+they name, so the export can compute an archive station's denominator (D-150). Nothing
 outside the interval is read, so a pass near ``since`` has less contemporaneous
 evidence than one in the middle — which the labeller reports as indeterminate,
 not as a miss (D-147).
 
-Reference: docs/DECISIONS.md D-139, D-143, D-144, D-145.
+Reference: docs/DECISIONS.md D-139, D-143, D-144, D-145, D-150.
 """
 
 from __future__ import annotations
@@ -83,20 +85,39 @@ class SnapshotTable:
     so the same rows always render as the same bytes."""
 
 
-_SCOPED_PASSES = "select id from passes where aos >= %(since)s and aos < %(as_of)s"
+_PASS_SCOPE = "los > %(since)s and aos < %(as_of)s"
+"""Every prediction whose window reaches past ``since``, not only those rising
+after it. Two predictions of one rise can fall either side of ``since`` by
+seconds; reading both lets labelling see the rise whole and keep it or drop it
+whole, rather than label half of it ``not_scheduled`` (D-148)."""
+
+_SCOPED_PASSES = f"select id from passes where {_PASS_SCOPE}"
 _SCOPED_ASSIGNMENTS = (
     f"select assignment_id from assignments where pass_id in ({_SCOPED_PASSES})"
 )
-_SCOPED_STATIONS = (
-    "select station_id from passes where aos >= %(since)s and aos < %(as_of)s"
-)
-_SCOPED_SATELLITES = (
-    "select satellite_id from passes where aos >= %(since)s and aos < %(as_of)s"
-)
+_SCOPED_STATIONS = f"select station_id from passes where {_PASS_SCOPE}"
+_SCOPED_SATELLITES = f"select satellite_id from passes where {_PASS_SCOPE}"
 _SCOPED_ARCHIVE = (
     "select archive_observation_id from archive_observations"
     " where started_at >= %(since)s and started_at < %(as_of)s"
 )
+_CURRENT_FOR_ARCHIVE = (
+    "select current.id"
+    " from (select distinct satellite_key from archive_observations"
+    "  where satellite_key_kind = 'norad'"
+    "  and started_at >= %(since)s and started_at < %(as_of)s) received"
+    " cross join generate_series("
+    "  date_trunc('day', %(since)s::timestamptz, 'UTC'),"
+    "  %(as_of)s::timestamptz, interval '1 day') as day (starts)"
+    " cross join lateral ("
+    "  select e.id from element_sets e"
+    "  where e.satellite_id = received.satellite_key and e.epoch <= day.starts"
+    "  order by e.epoch desc, e.retrieved_at desc, e.id desc limit 1) current"
+)
+"""For each satellite an archive station received in scope, the element set
+current at the start of every UTC day in scope — the set pass generation would
+have used (``find_element_set_current_at``), and what the export propagates an
+archive station's denominator from (D-150)."""
 
 SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
     SnapshotTable(
@@ -104,7 +125,7 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         "select id, satellite_id, station_id, aos, los, max_elevation_deg,"
         " max_elevation_at, aos_azimuth_deg, los_azimuth_deg, element_set_id,"
         " min_elevation_deg, computed_at, simulated"
-        " from passes where aos >= %(since)s and aos < %(as_of)s order by id",
+        f" from passes where {_PASS_SCOPE} order by id",
     ),
     SnapshotTable(
         "assignments",
@@ -152,7 +173,8 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         "select id, satellite_id, epoch, retrieved_at, line1, line2, source,"
         " content_sha256 from element_sets where id in ("
         "  select element_set_id from passes"
-        "  where aos >= %(since)s and aos < %(as_of)s)"
+        f"  where {_PASS_SCOPE}"
+        f"  union {_CURRENT_FOR_ARCHIVE})"
         " order by id",
     ),
     SnapshotTable(

@@ -1,7 +1,8 @@
 """What each geometrically available pass is labelled — D-146, as a pure function.
 
-The unit is a pass: one ``passes`` row, already per station and satellite, and
-the denominator of Stage 16's completeness ratio. Its label is decided by the
+The unit is a physical pass: every prediction of one rise over one station,
+grouped by :mod:`meridian.datasets.physical_passes` (D-148), and the
+denominator of Stage 16's completeness ratio. Its label is decided by the
 first of these that holds:
 
 1. its window closed less than ``settle_margin_s`` ago → excluded,
@@ -19,16 +20,17 @@ first of these that holds:
    ``satellite_silent`` or ``satellite_state_indeterminate``, by D-147.
 
 **Several assignments can share a pass** — configurations A and B are
-scheduled over one horizon to be compared — and the reception is physical, so
-their evidence is pooled: the most informative latest report wins, and
-listening counts as confirmed if the registry confirmed it for any of them.
+scheduled over one horizon to be compared, and a later run may schedule a
+newer prediction of the same rise — and the reception is physical, so their
+evidence is pooled: the most informative latest report wins, and listening
+counts as confirmed if the registry confirmed it for any of them.
 
 **No clock, no database, no file.** ``as_of`` comes from the snapshot, and the
 listening answers were frozen by the registry at export (D-145). The same rows
 and the same configuration always give the same labels, which is Stage 15's
 gate.
 
-Reference: docs/DECISIONS.md D-145, D-146, D-147.
+Reference: docs/DECISIONS.md D-145, D-146, D-147, D-148.
 """
 
 from __future__ import annotations
@@ -40,12 +42,13 @@ from datetime import datetime, timedelta
 
 from meridian.datasets.evidence import EvidenceIndex, OwnReception, satellite_state
 from meridian.datasets.label_config import LabelConfig
-from meridian.datasets.snapshot_rows import (
-    AssignmentRow,
-    ObservationRow,
-    PassRow,
-    SnapshotRows,
+from meridian.datasets.physical_passes import PhysicalPass, group_physical_passes
+from meridian.datasets.pooled_evidence import (
+    OUTCOME_ORDER,
+    PooledEvidence,
+    pool_evidence,
 )
+from meridian.datasets.snapshot_rows import AssignmentRow, PassRow, SnapshotRows
 
 __all__ = [
     "EXCLUSIONS",
@@ -57,9 +60,10 @@ __all__ = [
     "label_passes",
 ]
 
-TRANSFORMATION_VERSION = "labels-1"
+TRANSFORMATION_VERSION = "labels-2"
 """Bumped whenever a rule here changes, so two datasets made under different
-rules can never share a hash (D-144)."""
+rules can never share a hash (D-144). ``labels-2`` labels physical passes
+rather than predictions (D-148)."""
 
 LABELS = (
     "successful_reception",
@@ -83,9 +87,6 @@ EXCLUSIONS = (
 The two satellite labels are excluded from yield scoring and counted apart
 (``EVALUATION.md`` §5); a simulated row is excluded whatever its label (D-078)."""
 
-OUTCOME_ORDER = ("decoded", "signal_no_decode", "no_signal", "aborted", "not_attempted")
-"""Most informative first: where two assignments of one pass both reported."""
-
 _UNAVAILABLE = frozenset(("aborted", "not_attempted"))
 _SATELLITE_LABELS = {
     "transmitting": "confirmed_miss",
@@ -96,9 +97,14 @@ _SATELLITE_LABELS = {
 
 @dataclass(frozen=True, slots=True)
 class LabelledPass:
-    """One row of ``labels.jsonl``."""
+    """One row of ``labels.jsonl``: one physical pass."""
 
     pass_id: int
+    """The representative prediction's id (D-148)."""
+
+    pass_ids: tuple[int, ...]
+    """Every prediction of this rise, sorted."""
+
     station_id: str
     satellite_id: str
     aos: datetime
@@ -116,6 +122,7 @@ class LabelledPass:
         """The row as it is written."""
         return {
             "pass_id": self.pass_id,
+            "pass_ids": list(self.pass_ids),
             "station_id": self.station_id,
             "satellite_id": self.satellite_id,
             "aos": self.aos,
@@ -139,18 +146,12 @@ class _Context:
     config: LabelConfig
 
 
-@dataclass(frozen=True, slots=True)
-class _Evidence:
-    """What one pass's scheduled assignments add up to."""
-
-    scheduled: tuple[AssignmentRow, ...]
-    report: ObservationRow | None
-    listening: bool | None
-    simulated: bool
-
-
 def label_passes(
-    rows: SnapshotRows, *, as_of: datetime, config: LabelConfig
+    rows: SnapshotRows,
+    *,
+    as_of: datetime,
+    config: LabelConfig,
+    since: datetime | None = None,
 ) -> tuple[LabelledPass, ...]:
     """Label every pass in a raw snapshot.
 
@@ -158,25 +159,27 @@ def label_passes(
         rows: The snapshot's rows.
         as_of: The snapshot's own instant, from its manifest.
         config: The labelling configuration.
+        since: The snapshot's start, from its manifest. A rise that begins
+            before it is not labelled: the export reads predictions of it from
+            either side of ``since`` only so it can be seen whole (D-148).
 
     Returns:
-        One labelled row per pass, in pass-id order.
+        One labelled row per physical pass, in representative pass-id order.
     """
-    by_pass = _group(rows.assignments)
-    latest = _latest_reports(rows.observations)
-    evidence = {
-        one.pass_id: _pool(one, by_pass.get(one.pass_id, ()), latest, rows.listening)
-        for one in rows.passes
-    }
+    physical = tuple(
+        one
+        for one in group_physical_passes(rows.passes)
+        if since is None or one.first_aos >= since
+    )
+    evidence = pool_evidence(physical, rows)
     context = _Context(
         heard=_heartbeat_times(rows),
-        index=EvidenceIndex.build(_own_receptions(rows.passes, evidence), rows.archive),
+        index=EvidenceIndex.build(_own_receptions(physical, evidence), rows.archive),
         settled_by=as_of - timedelta(seconds=config.settle_margin_s),
         config=config,
     )
     return tuple(
-        _label(one, evidence[one.pass_id], context)
-        for one in sorted(rows.passes, key=lambda one: one.pass_id)
+        _label(one, evidence[one.representative.pass_id], context) for one in physical
     )
 
 
@@ -201,18 +204,21 @@ def label_counts(labelled: Iterable[LabelledPass]) -> dict[str, int]:
     return counts
 
 
-def _label(target: PassRow, evidence: _Evidence, context: _Context) -> LabelledPass:
+def _label(
+    physical: PhysicalPass, evidence: PooledEvidence, context: _Context
+) -> LabelledPass:
     """Rules 1 and 2 exclude the pass; otherwise rules 3 to 9 label it."""
-    ends = [target.los, *(one.end_at for one in evidence.scheduled)]
+    target = physical.representative
+    ends = [physical.last_los, *(one.end_at for one in evidence.scheduled)]
     if max(ends) > context.settled_by:
-        return _row(target, evidence, None, "report_window_open")
+        return _row(physical, evidence, None, "report_window_open")
     if not evidence.scheduled:
-        return _row(target, evidence, None, "not_scheduled")
+        return _row(physical, evidence, None, "not_scheduled")
     label = _outcome_label(target, evidence, context)
-    return _row(target, evidence, label, _exclusion(label, evidence.simulated))
+    return _row(physical, evidence, label, _exclusion(label, evidence.simulated))
 
 
-def _outcome_label(target: PassRow, evidence: _Evidence, context: _Context) -> str:
+def _outcome_label(target: PassRow, evidence: PooledEvidence, context: _Context) -> str:
     """Rules 3 to 9: what the report, the heartbeats and the registry say.
 
     Rules 3 to 8 are a first-match table, read top to bottom as D-146 writes
@@ -261,11 +267,16 @@ def _exclusion(label: str, simulated: bool) -> str | None:
 
 
 def _row(
-    target: PassRow, evidence: _Evidence, label: str | None, excluded: str | None
+    physical: PhysicalPass,
+    evidence: PooledEvidence,
+    label: str | None,
+    excluded: str | None,
 ) -> LabelledPass:
+    target = physical.representative
     configs = {one.model_config for one in evidence.scheduled}
     return LabelledPass(
         pass_id=target.pass_id,
+        pass_ids=physical.pass_ids,
         station_id=target.station_id,
         satellite_id=target.satellite_id,
         aos=target.aos,
@@ -279,70 +290,21 @@ def _row(
     )
 
 
-def _pool(
-    target: PassRow,
-    assignments: tuple[AssignmentRow, ...],
-    latest: Mapping[str, ObservationRow],
-    listening: Mapping[str, bool],
-) -> _Evidence:
-    """Pool one pass's scheduled assignments into one body of evidence."""
-    scheduled = tuple(one for one in assignments if one.decision == "scheduled")
-    reports = [
-        latest[one.assignment_id] for one in scheduled if one.assignment_id in latest
-    ]
-    report = min(reports, key=_informativeness, default=None)
-    answers = [
-        listening[one.assignment_id]
-        for one in scheduled
-        if one.assignment_id in listening
-    ]
-    return _Evidence(
-        scheduled=scheduled,
-        report=report,
-        listening=any(answers) if answers else None,
-        simulated=target.simulated
-        or any(one.simulated for one in scheduled)
-        or any(one.simulated for one in reports),
-    )
-
-
-def _informativeness(report: ObservationRow) -> tuple[int, str]:
-    """Rank a report by :data:`OUTCOME_ORDER`, then by id, so ties are stable."""
-    rank = (
-        OUTCOME_ORDER.index(report.outcome)
-        if report.outcome in OUTCOME_ORDER
-        else len(OUTCOME_ORDER)
-    )
-    return rank, report.assignment_id
-
-
-def _latest_reports(
-    observations: Iterable[ObservationRow],
-) -> dict[str, ObservationRow]:
-    """Each assignment's latest revision. The export kept only those by ``as_of``."""
-    latest: dict[str, ObservationRow] = {}
-    for one in observations:
-        held = latest.get(one.assignment_id)
-        if held is None or one.revision > held.revision:
-            latest[one.assignment_id] = one
-    return latest
-
-
 def _own_receptions(
-    passes: Iterable[PassRow], evidence: Mapping[int, _Evidence]
+    physical: Iterable[PhysicalPass], evidence: Mapping[int, PooledEvidence]
 ) -> list[OwnReception]:
     """Every pass that was reported on, as evidence about its satellite."""
     return [
         OwnReception(
-            pass_id=one.pass_id,
-            satellite_id=one.satellite_id,
-            at=one,
+            pass_id=one.representative.pass_id,
+            satellite_id=one.representative.satellite_id,
+            at=one.representative,
             outcome=pooled.report.outcome,
             listening_confirmed=bool(pooled.listening),
             simulated=pooled.simulated,
         )
-        for one in passes
-        if (pooled := evidence[one.pass_id]).report is not None
+        for one in physical
+        if (pooled := evidence[one.representative.pass_id]).report is not None
     ]
 
 
@@ -371,13 +333,3 @@ def _heard_during(
         if first < len(times) and times[first] < one.end_at:
             return True
     return False
-
-
-def _group(
-    assignments: Iterable[AssignmentRow],
-) -> dict[int, tuple[AssignmentRow, ...]]:
-    """Assignments by pass, each group in assignment-id order."""
-    grouped: dict[int, list[AssignmentRow]] = {}
-    for one in sorted(assignments, key=lambda one: one.assignment_id):
-        grouped.setdefault(one.pass_id, []).append(one)
-    return {pass_id: tuple(held) for pass_id, held in grouped.items()}

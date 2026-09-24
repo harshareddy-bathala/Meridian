@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 __all__ = [
+    "ArchivePassRow",
     "ArchiveReception",
     "AssignmentRow",
     "HeartbeatRow",
@@ -29,6 +30,10 @@ __all__ = [
     "SnapshotRows",
     "parse_rows",
 ]
+
+
+_SINCE_STAGE_16 = frozenset(("archive_passes",))
+"""Files an export made before Stage 16 does not hold."""
 
 
 class MalformedSnapshotError(ValueError):
@@ -44,6 +49,17 @@ class PassRow:
     satellite_id: str
     aos: datetime
     los: datetime
+    max_elevation_deg: float
+    """The peak, a pre-pass feature the propensity reads (D-152)."""
+
+    element_set_epoch: datetime
+    """The epoch of the element set this prediction was computed from, which
+    decides which prediction of a rise represents it (D-148)."""
+
+    computed_at: datetime
+    """When the prediction was made: whether it was available before the pass
+    (D-148)."""
+
     simulated: bool
 
 
@@ -88,6 +104,19 @@ class ArchiveReception:
     satellite_key_kind: str
     started_at: datetime
     archive_outcome: str
+    archive_station_id: int
+    """Whose reception it was, which is what completeness counts it against."""
+
+
+@dataclass(frozen=True, slots=True)
+class ArchivePassRow:
+    """A pass an archive station could have received, as the export froze it (D-150)."""
+
+    archive_station_id: int
+    satellite_id: str
+    aos: datetime
+    los: datetime
+    max_elevation_deg: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +131,12 @@ class SnapshotRows:
     """Assignment id to the registry's frozen answer (D-145)."""
 
     archive: tuple[ArchiveReception, ...]
+    archive_passes: tuple[ArchivePassRow, ...] = ()
+    """What each archive station could have received (D-150)."""
+
+    longitudes: Mapping[str, float] = field(default_factory=dict)
+    """Each located station's longitude: ours by ``station_id``, an archive
+    station's as ``archive:<id>``. Absent where no location is held."""
 
 
 def parse_rows(files: Mapping[str, bytes]) -> SnapshotRows:
@@ -117,8 +152,11 @@ def parse_rows(files: Mapping[str, bytes]) -> SnapshotRows:
         MalformedSnapshotError: A needed file is missing, or a row lacks a
             field or has one of the wrong type.
     """
+    epochs = {
+        _int(one, "id"): _instant(one, "epoch") for one in _lines(files, "element_sets")
+    }
     return SnapshotRows(
-        passes=tuple(_pass(one) for one in _lines(files, "passes")),
+        passes=tuple(_pass(one, epochs) for one in _lines(files, "passes")),
         assignments=tuple(_assignment(one) for one in _lines(files, "assignments")),
         observations=tuple(
             ObservationRow(
@@ -146,19 +184,55 @@ def parse_rows(files: Mapping[str, bytes]) -> SnapshotRows:
                 satellite_key_kind=_text(one, "satellite_key_kind"),
                 started_at=_instant(one, "started_at"),
                 archive_outcome=_text(one, "archive_outcome"),
+                archive_station_id=_int(one, "archive_station_id"),
             )
             for one in _lines(files, "archive_observations")
         ),
+        archive_passes=tuple(
+            ArchivePassRow(
+                archive_station_id=_int(one, "archive_station_id"),
+                satellite_id=_text(one, "satellite_id"),
+                aos=_instant(one, "aos"),
+                los=_instant(one, "los"),
+                max_elevation_deg=_number(one, "max_elevation_deg"),
+            )
+            for one in _lines(files, "archive_passes")
+        ),
+        longitudes=_longitudes(files),
     )
 
 
-def _pass(row: Mapping[str, object]) -> PassRow:
+def _longitudes(files: Mapping[str, bytes]) -> dict[str, float]:
+    """Our stations' longitudes, and the archive stations' that publish one."""
+    ours = {
+        _text(one, "station_id"): _number(one, "lon_deg")
+        for one in _lines(files, "stations")
+    }
+    theirs = {
+        f"archive:{_int(one, 'archive_station_id')}": _number(one, "lon_deg")
+        for one in _lines(files, "archive_stations")
+        if one.get("lon_deg") is not None
+    }
+    return ours | theirs
+
+
+def _pass(row: Mapping[str, object], epochs: Mapping[int, datetime]) -> PassRow:
+    element_set_id = _int(row, "element_set_id")
+    if element_set_id not in epochs:
+        message = (
+            f"pass {row.get('id')!r} names element set {element_set_id},"
+            " which the snapshot does not hold"
+        )
+        raise MalformedSnapshotError(message)
     return PassRow(
         pass_id=_int(row, "id"),
         station_id=_text(row, "station_id"),
         satellite_id=_text(row, "satellite_id"),
         aos=_instant(row, "aos"),
         los=_instant(row, "los"),
+        max_elevation_deg=_number(row, "max_elevation_deg"),
+        element_set_epoch=epochs[element_set_id],
+        computed_at=_instant(row, "computed_at"),
         simulated=_bool(row, "simulated"),
     )
 
@@ -187,6 +261,11 @@ def _lines(files: Mapping[str, bytes], name: str) -> list[Mapping[str, object]]:
         data = files[f"{name}.jsonl"]
     except KeyError as exc:
         message = f"the raw snapshot has no {name}.jsonl"
+        if name in _SINCE_STAGE_16:
+            message += (
+                ": it was exported before Stage 16, which computes the archive"
+                " denominator at export (D-150); export again to label it"
+            )
         raise MalformedSnapshotError(message) from exc
     rows: list[Mapping[str, object]] = []
     for number, line in enumerate(data.splitlines(), start=1):
@@ -220,6 +299,14 @@ def _int(row: Mapping[str, object], name: str) -> int:
         message = f"{name} is {value!r}, not an integer"
         raise MalformedSnapshotError(message)
     return value
+
+
+def _number(row: Mapping[str, object], name: str) -> float:
+    value = _field(row, name)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        message = f"{name} is {value!r}, not a number"
+        raise MalformedSnapshotError(message)
+    return float(value)
 
 
 def _bool(row: Mapping[str, object], name: str) -> bool:

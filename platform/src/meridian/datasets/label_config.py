@@ -1,8 +1,9 @@
-"""The labelling configuration: the three numbers D-146 and D-147 leave open.
+"""The labelling configuration: the numbers D-146 to D-152 leave open.
 
 Labelling is a pure function of a raw snapshot and this configuration, so the
-configuration is half of what an evaluation dataset's hash depends on. Three
-values, each with a default recorded in the decision that introduced it:
+configuration is half of what an evaluation dataset's hash depends on. Each
+value has a default recorded in the decision that introduced it. Three are
+top-level keys:
 
 * ``settle_margin_s`` — how long after a pass's window closes before an absent
   report is labelled as absence rather than excluded as still on its way. A
@@ -12,6 +13,10 @@ values, each with a default recorded in the decision that introduced it:
 * ``silent_min_attempts`` — how many contemporaneous attempts that heard
   nothing it takes to call a satellite silent rather than indeterminate
   (D-147).
+
+Two tables hold the selection-bias settings of Stage 16: ``[completeness]``
+(D-150, D-151) and ``[propensity]`` (D-152), described in
+:mod:`meridian.datasets.selection_config`.
 
 **Strict.** An unknown key, a wrong type or a value out of range is refused
 rather than ignored: a misspelled ``settle_margin_s`` that silently kept the
@@ -25,21 +30,30 @@ give the same one — they produce the same labels, which is what the hash is a
 promise about. D-144 says "the sha256 of the configuration file"; this is that,
 taken over the only part of the file that can change a label.
 
-Reference: docs/DECISIONS.md D-144, D-146, D-147.
+Reference: docs/DECISIONS.md D-144, D-146, D-147, D-150, D-151, D-152.
 """
 
 from __future__ import annotations
 
 import hashlib
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from meridian.datasets.canonical import canonical_bytes
+from meridian.datasets.config_checks import LabelConfigError, whole
+from meridian.datasets.selection_config import (
+    CompletenessConfig,
+    PropensityConfig,
+    parse_completeness,
+    parse_propensity,
+)
 
 __all__ = [
+    "CompletenessConfig",
     "LabelConfig",
     "LabelConfigError",
+    "PropensityConfig",
     "config_sha256",
     "load_label_config",
     "parse_label_config",
@@ -55,10 +69,6 @@ _LIMITS: dict[str, tuple[int, int]] = {
 nothing recent; a week either side is already not "contemporaneous"."""
 
 
-class LabelConfigError(ValueError):
-    """A labelling configuration that cannot be obeyed as written."""
-
-
 @dataclass(frozen=True, slots=True)
 class LabelConfig:
     """The resolved labelling configuration."""
@@ -66,21 +76,20 @@ class LabelConfig:
     settle_margin_s: int = _DAY_S
     silent_window_s: int = _DAY_S // 2
     silent_min_attempts: int = 2
+    completeness: CompletenessConfig = field(default_factory=CompletenessConfig)
+    propensity: PropensityConfig = field(default_factory=PropensityConfig)
 
     def __post_init__(self) -> None:
         """Refuse a value outside its bounds, or one that is not an integer."""
-        for name, (low, high) in _LIMITS.items():
-            value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int):
-                message = f"{name} must be a whole number, not {value!r}"
-                raise LabelConfigError(message)
-            if not low <= value <= high:
-                message = f"{name} = {value} is outside {low}..{high}"
-                raise LabelConfigError(message)
+        for name, limits in _LIMITS.items():
+            whole(name, getattr(self, name), limits)
 
     def parameters(self) -> dict[str, object]:
         """The values, for the manifest, where a reader sees them beside the hash."""
-        return {name: getattr(self, name) for name in _LIMITS}
+        return {name: getattr(self, name) for name in _LIMITS} | {
+            "completeness": self.completeness.parameters(),
+            "propensity": self.propensity.parameters(),
+        }
 
 
 def parse_label_config(text: str) -> LabelConfig:
@@ -101,11 +110,14 @@ def parse_label_config(text: str) -> LabelConfig:
     except tomllib.TOMLDecodeError as exc:
         message = f"the labelling configuration is not TOML: {exc}"
         raise LabelConfigError(message) from exc
-    unknown = sorted(set(stored) - set(_LIMITS))
+    known = {*_LIMITS, "completeness", "propensity"}
+    unknown = sorted(set(stored) - known)
     if unknown:
-        message = f"unknown labelling settings {unknown}; known: {sorted(_LIMITS)}"
+        message = f"unknown labelling settings {unknown}; known: {sorted(known)}"
         raise LabelConfigError(message)
-    return LabelConfig(**stored)
+    completeness = parse_completeness(stored.pop("completeness", {}))
+    propensity = parse_propensity(stored.pop("propensity", {}))
+    return LabelConfig(**stored, completeness=completeness, propensity=propensity)
 
 
 def load_label_config(path: Path | None) -> LabelConfig:

@@ -1,6 +1,6 @@
 """``meridian snapshot`` — export a raw snapshot, label it, and check either.
 
-Three verbs, and the line between the first two is Stage 15's argument (D-143):
+Four verbs, and the line between the first two is Stage 15's argument (D-143):
 
 * ``export --since …`` is the only one that opens a database. It reads every
   table inside one repeatable-read, read-only transaction, asks the registry
@@ -9,6 +9,9 @@ Three verbs, and the line between the first two is Stage 15's argument (D-143):
 * ``label <raw snapshot> [--config …]`` opens nothing but files. The same raw
   snapshot and the same configuration always give the same directory, so the
   gate is demonstrated by running it twice and reading the name.
+* ``completeness <dataset> [--threshold …]`` prints each population's
+  completeness and weight diagnostics, at the dataset's threshold or another
+  (D-151, D-153). It reads the dataset and nothing else.
 * ``verify <directory>`` checks a snapshot or dataset against its manifest,
   and exits :data:`EXIT_CORRUPT` when it does not match — the same code, for
   the same reason, as ``meridian-ingest verify``.
@@ -17,7 +20,7 @@ Everything goes under one datasets root: ``--root``, else
 ``MERIDIAN_DATASETS_ROOT``, else ``data/datasets`` — gitignored, and outside
 the database backup, which says so (D-144).
 
-Reference: docs/DECISIONS.md D-143, D-144, D-145, D-146, D-147.
+Reference: docs/DECISIONS.md D-143, D-144, D-145, D-146, D-147, D-151, D-153.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from pathlib import Path
 import psycopg
 
 from meridian.config import load_settings
+from meridian.datasets.completeness_report import report_lines
 from meridian.datasets.evaluation import NotARawSnapshotError, build_evaluation_dataset
 from meridian.datasets.export import (
     SchemaMissingError,
@@ -38,12 +42,13 @@ from meridian.datasets.export import (
     snapshot_transaction,
 )
 from meridian.datasets.label_config import LabelConfigError, load_label_config
-from meridian.datasets.manifest import Manifest, content_sha256
+from meridian.datasets.manifest import MalformedManifestError, Manifest, content_sha256
 from meridian.datasets.publish import (
     DamagedSnapshotError,
     PublishedDirectory,
     read_directory,
 )
+from meridian.datasets.result_reader import NoSelectionError, read_results
 from meridian.datasets.snapshot_rows import MalformedSnapshotError
 from meridian.registry.psycopg_registry import PsycopgRegistry
 from meridian.store.pool import DatabaseUnreachableError, connect_once
@@ -71,7 +76,7 @@ written", as ``meridian-ingest verify`` does."""
 def add_snapshot_parser(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """Wire ``meridian snapshot`` and its three actions."""
+    """Wire ``meridian snapshot`` and its four actions."""
     snapshot = subcommands.add_parser(
         "snapshot",
         help="export, label and verify dataset snapshots",
@@ -109,6 +114,17 @@ def add_snapshot_parser(
         default=None,
         help="labelling settings; see deploy/snapshot.toml.example",
     )
+    completeness = actions.add_parser(
+        "completeness",
+        help="print an evaluation dataset's completeness and weights",
+    )
+    completeness.add_argument("dataset", type=Path, help="an evaluation dataset")
+    completeness.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="judge station-days at this completeness instead of the dataset's",
+    )
     verify = actions.add_parser(
         "verify", help="check a snapshot or dataset against its manifest"
     )
@@ -117,7 +133,12 @@ def add_snapshot_parser(
 
 def run_snapshot(args: argparse.Namespace) -> int:
     """Run one ``meridian snapshot`` action."""
-    actions = {"export": _export, "label": _label, "verify": _verify}
+    actions = {
+        "export": _export,
+        "label": _label,
+        "completeness": _completeness,
+        "verify": _verify,
+    }
     return actions[args.action](args)
 
 
@@ -198,6 +219,30 @@ def _label(args: argparse.Namespace) -> int:
         return _refuse("label", str(exc))
     _report("evaluation dataset", published)
     _say(f"  indeterminate      {_indeterminate(published.manifest)}")
+    return 0
+
+
+def _completeness(args: argparse.Namespace) -> int:
+    """``meridian snapshot completeness``."""
+    if not Path(args.dataset).is_dir():
+        return _refuse("completeness", f"{args.dataset} is not a directory")
+    try:
+        dataset = read_directory(args.dataset)
+        results = read_results(dataset, threshold=args.threshold)
+    except DamagedSnapshotError as exc:
+        _refuse("completeness", str(exc))
+        return EXIT_CORRUPT
+    except (
+        NoSelectionError,
+        LabelConfigError,
+        MalformedManifestError,
+        OSError,
+    ) as exc:
+        return _refuse("completeness", str(exc))
+    _say(f"evaluation dataset {dataset.path}")
+    _say(f"  hash               {content_sha256(dataset.manifest).hex()}")
+    for line in report_lines(results):
+        _say(line)
     return 0
 
 

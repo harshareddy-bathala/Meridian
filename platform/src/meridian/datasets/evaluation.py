@@ -11,12 +11,19 @@ the configuration's hash (D-144).
   vocabulary, each beside the licence and terms it arrived under. They never
   receive a Meridian label: we hold no heartbeat for somebody else's station
   (D-139).
+* ``station_days.jsonl`` — completeness per station-day, both populations
+  (D-149, D-150).
+* ``propensities.jsonl`` — each eligible pass's propensity, the cell behind
+  it and its weight (D-152, D-153).
+
+The manifest's ``summary`` carries each population's completeness and weight
+diagnostics, so no evaluation dataset exists without them (D-154).
 
 **Nothing here reads a clock.** ``created_at`` is handed in, and it is the one
 field the hash leaves out, so the same raw snapshot and the same configuration
 always give the same directory name. That is Stage 15's gate.
 
-Reference: docs/DECISIONS.md D-139, D-143, D-144, D-146, D-147.
+Reference: docs/DECISIONS.md D-139, D-143, D-144, D-146, D-147, D-154.
 """
 
 from __future__ import annotations
@@ -35,12 +42,15 @@ from meridian.datasets.publish import (
     SnapshotDirectory,
     publish_directory,
 )
+from meridian.datasets.selection import select
 from meridian.datasets.snapshot_rows import parse_rows
 
 __all__ = [
     "ARCHIVE_RECEPTIONS",
     "EVALUATION",
     "LABELS_FILE",
+    "PROPENSITIES",
+    "STATION_DAYS",
     "NotARawSnapshotError",
     "build_evaluation_dataset",
 ]
@@ -50,6 +60,8 @@ EVALUATION = "evaluation"
 
 LABELS_FILE = "labels.jsonl"
 ARCHIVE_RECEPTIONS = "archive_receptions.jsonl"
+STATION_DAYS = "station_days.jsonl"
+PROPENSITIES = "propensities.jsonl"
 
 
 class NotARawSnapshotError(ValueError):
@@ -82,12 +94,20 @@ def build_evaluation_dataset(
     if raw.manifest.kind != "raw_snapshot":
         message = f"{raw.path} is an {raw.manifest.kind}, not a raw snapshot"
         raise NotARawSnapshotError(message)
+    rows = parse_rows(raw.files)
     labelled = label_passes(
-        parse_rows(raw.files), as_of=raw.manifest.as_of, config=config
+        rows, as_of=raw.manifest.as_of, config=config, since=raw.manifest.since
     )
+    selection = select(labelled, rows, config, since=raw.manifest.since)
     files = {
         LABELS_FILE: b"".join(canonical_line(one.row()) for one in labelled),
         ARCHIVE_RECEPTIONS: _archive_receptions(raw),
+        STATION_DAYS: b"".join(
+            canonical_line(one.row()) for one in selection.station_days
+        ),
+        PROPENSITIES: b"".join(
+            canonical_line(one) for one in selection.propensity_rows()
+        ),
     }
     manifest = Manifest(
         kind="evaluation_dataset",
@@ -96,12 +116,13 @@ def build_evaluation_dataset(
         as_of=raw.manifest.as_of,
         files=tuple(file_entry(name, data) for name, data in sorted(files.items())),
         created_at=created_at,
-        counts=label_counts(labelled),
+        counts=label_counts(labelled) | selection.counts(),
         sources=raw.manifest.sources,
         derived_from=content_sha256(raw.manifest),
         transformation_version=TRANSFORMATION_VERSION,
         config_sha256=config_sha256(config),
         parameters=config.parameters(),
+        summary=selection.summary(),
     )
     name = content_sha256(manifest).hex()[:12]
     return publish_directory(root / EVALUATION, name, manifest, files)

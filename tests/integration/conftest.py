@@ -158,6 +158,81 @@ class ScheduleRows:
                 ),
             )
 
+    def element_set_at(self, satellite_id: str, epoch: datetime, source: str) -> int:
+        """One more element set with a chosen epoch; ``source`` keeps it distinct.
+
+        The lines are :data:`LINE1` and :data:`LINE2` every time, so two sets of
+        one satellite differ only in provenance — which the content key allows.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "insert into satellites (satellite_id, name) values (%s, 'Test')"
+                " on conflict do nothing",
+                (satellite_id,),
+            )
+            cur.execute(
+                "insert into element_sets (satellite_id, epoch, line1, line2,"
+                " source) values (%s, %s, %s, %s, %s) returning id",
+                (satellite_id, epoch, LINE1, LINE2, source),
+            )
+            return int(cur.fetchone()[0])
+
+    def archive_reception(
+        self,
+        satellite_key: str,
+        started_at: datetime,
+        *,
+        location: tuple[float, float] | None = (12.9, 77.6),
+    ) -> int:
+        """One archive reception by its own archive station; returns the station id.
+
+        The source and artefact are shared by every call; each reception gets a
+        station of its own, published at ``location`` or with none.
+        """
+        n = next(self._hashes)
+        lat, lon = location if location is not None else (None, None)
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "insert into ingest_sources (source_id, source_class, name,"
+                " licence, terms_url, access_constraint, attribution_entry)"
+                " values ('reference_archive', 'archive_receptions',"
+                " 'Reference archive', 'CC-BY-4.0', 'https://example.invalid/terms',"
+                " 'none', 'The reference adapter''s fixtures are ours')"
+                " on conflict do nothing"
+            )
+            cur.execute(
+                "insert into ingest_records (source_id, original_identifier,"
+                " source_version, payload_kind, retrieved_at, sha256, raw_path,"
+                " media_type, byte_count) values ('reference_archive', %s, 'v1',"
+                " 'data', %s, %s, %s, 'application/json', 128) returning record_id",
+                (f"art-{n}", started_at, bytes([n % 256]) * 32, f"ref/{n}"),
+            )
+            record = int(cur.fetchone()[0])
+            cur.execute(
+                "insert into archive_stations (record_id, source_id,"
+                " source_station_key, content_sha256, lat_deg, lon_deg)"
+                " values (%s, 'reference_archive', %s, %s, %s, %s)"
+                " returning archive_station_id",
+                (record, f"gs-{n}", bytes([n % 256]) * 32, lat, lon),
+            )
+            station = int(cur.fetchone()[0])
+            cur.execute(
+                "insert into archive_observations (record_id, source_id,"
+                " source_observation_id, transformation_version, content_sha256,"
+                " archive_station_id, satellite_key, satellite_key_kind,"
+                " started_at, archive_outcome) values (%s, 'reference_archive',"
+                " %s, 'reference-1', %s, %s, %s, 'norad', %s, 'decoded')",
+                (
+                    record,
+                    f"obs-{n}",
+                    bytes([n % 256]) * 32,
+                    station,
+                    satellite_key,
+                    started_at,
+                ),
+            )
+        return station
+
 
 @pytest.fixture
 def schedule_rows(rollback: Any) -> ScheduleRows:

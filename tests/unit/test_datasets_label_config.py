@@ -16,8 +16,10 @@ import pytest
 
 from meridian.datasets.canonical import canonical_line
 from meridian.datasets.label_config import (
+    CompletenessConfig,
     LabelConfig,
     LabelConfigError,
+    PropensityConfig,
     config_sha256,
     load_label_config,
     parse_label_config,
@@ -28,12 +30,131 @@ from meridian.datasets.snapshot_rows import MalformedSnapshotError, parse_rows
 
 
 def test_the_defaults_are_the_decisions() -> None:
-    """24 hours to settle (D-146); 12 hours either side and two attempts (D-147)."""
+    """24 hours to settle (D-146); 12 hours either side and two attempts (D-147);
+    0.8 and its sensitivity band (D-151); the horizon and two minutes (D-150);
+    cells of twenty, three elevation edges and four-hour bands (D-152)."""
     assert LabelConfig().parameters() == {
         "settle_margin_s": 86_400,
         "silent_window_s": 43_200,
         "silent_min_attempts": 2,
+        "completeness": {
+            "threshold": 0.8,
+            "sensitivity": [0.5, 0.6, 0.7, 0.8, 0.9],
+            "archive_min_elevation_deg": 0.0,
+            "archive_match_tolerance_s": 120,
+        },
+        "propensity": {
+            "min_cell": 20,
+            "elevation_bands_deg": [15.0, 30.0, 60.0],
+            "hour_band_h": 4,
+            "floor": 0.05,
+        },
     }
+
+
+def test_the_completeness_table_overrides_only_what_it_names() -> None:
+    config = parse_label_config(
+        "[completeness]\nthreshold = 0.75\nsensitivity = [0.6, 0.75, 1]\n"
+    )
+
+    assert config.completeness == CompletenessConfig(
+        threshold=0.75, sensitivity=(0.6, 0.75, 1.0)
+    )
+    assert config.settle_margin_s == LabelConfig().settle_margin_s
+
+
+def test_a_whole_number_ratio_is_the_same_setting_as_its_float() -> None:
+    """``threshold = 1`` and ``threshold = 1.0`` hash alike: one setting."""
+    whole = parse_label_config("[completeness]\nthreshold = 1\n")
+    decimal = parse_label_config("[completeness]\nthreshold = 1.0\n")
+
+    assert config_sha256(whole) == config_sha256(decimal)
+
+
+@pytest.mark.parametrize(
+    ("text", "match"),
+    [
+        ("completeness = 0.8\n", "must be a table"),
+        ("[completeness]\nthresold = 0.8\n", "unknown completeness settings"),
+        ("[completeness]\nthreshold = 1.2\n", "outside 0..1"),
+        ("[completeness]\nthreshold = '0.8'\n", "must be a number"),
+        ("[completeness]\nthreshold = true\n", "must be a number"),
+        ("[completeness]\nsensitivity = 0.8\n", "must be a list"),
+        ("[completeness]\nsensitivity = []\n", "at least one"),
+        ("[completeness]\nsensitivity = [0.9, 0.5]\n", "must rise"),
+        ("[completeness]\nsensitivity = [0.5, 0.5]\n", "must rise"),
+        ("[completeness]\narchive_min_elevation_deg = 90\n", "outside 0..90"),
+        ("[completeness]\narchive_match_tolerance_s = 1.5\n", "whole number"),
+        ("[completeness]\narchive_match_tolerance_s = 3601\n", "outside"),
+    ],
+    ids=[
+        "not-a-table",
+        "misspelt",
+        "above-one",
+        "text",
+        "bool",
+        "not-a-list",
+        "empty",
+        "falling",
+        "repeated",
+        "zenith",
+        "fractional-seconds",
+        "over-an-hour",
+    ],
+)
+def test_a_completeness_table_that_cannot_be_obeyed_is_refused(
+    text: str, match: str
+) -> None:
+    with pytest.raises(LabelConfigError, match=match):
+        parse_label_config(text)
+
+
+def test_the_propensity_table_overrides_only_what_it_names() -> None:
+    config = parse_label_config("[propensity]\nelevation_bands_deg = [10, 45]\n")
+
+    assert config.propensity == PropensityConfig(elevation_bands_deg=(10.0, 45.0))
+
+
+def test_one_elevation_band_is_a_list_with_no_edges() -> None:
+    config = parse_label_config("[propensity]\nelevation_bands_deg = []\n")
+
+    assert config.propensity.elevation_bands_deg == ()
+
+
+@pytest.mark.parametrize(
+    ("text", "match"),
+    [
+        ("propensity = 20\n", "must be a table"),
+        ("[propensity]\nmin_cells = 20\n", "unknown propensity settings"),
+        ("[propensity]\nmin_cell = 0\n", "outside"),
+        ("[propensity]\nmin_cell = 2.5\n", "whole number"),
+        ("[propensity]\nelevation_bands_deg = [30, 15]\n", "must rise"),
+        ("[propensity]\nelevation_bands_deg = [0]\n", "outside 0..90"),
+        ("[propensity]\nelevation_bands_deg = [90]\n", "outside 0..90"),
+        ("[propensity]\nhour_band_h = 5\n", "does not divide 24"),
+        ("[propensity]\nhour_band_h = 0\n", "outside"),
+        ("[propensity]\nfloor = 0\n", "outside \\(0, 1\\]"),
+        ("[propensity]\nfloor = 1.5\n", "outside \\(0, 1\\]"),
+    ],
+    ids=[
+        "not-a-table",
+        "misspelt",
+        "empty-cell",
+        "fractional-cell",
+        "falling",
+        "horizon-edge",
+        "zenith-edge",
+        "ragged-hours",
+        "no-hours",
+        "no-floor",
+        "floor-above-one",
+    ],
+)
+def test_a_propensity_table_that_cannot_be_obeyed_is_refused(
+    text: str, match: str
+) -> None:
+    with pytest.raises(LabelConfigError, match=match):
+        parse_label_config(text)
 
 
 def test_every_key_is_optional_and_each_overrides_its_default() -> None:
@@ -94,9 +215,13 @@ PASS = {
     "satellite_id": "norad:57166",
     "aos": AOS,
     "los": AOS,
+    "element_set_id": 7,
     "simulated": False,
     "max_elevation_deg": 61.4,
+    "computed_at": AOS,
 }
+
+ELEMENT_SET = {"id": 7, "satellite_id": "norad:57166", "epoch": AOS}
 
 
 def files(**overrides: bytes) -> dict[str, bytes]:
@@ -109,9 +234,19 @@ def files(**overrides: bytes) -> dict[str, bytes]:
             "heartbeats",
             "listening",
             "archive_observations",
+            "archive_passes",
+            "stations",
+            "archive_stations",
         )
     }
-    return empty | {"passes.jsonl": canonical_line(PASS)} | overrides
+    return (
+        empty
+        | {
+            "passes.jsonl": canonical_line(PASS),
+            "element_sets.jsonl": canonical_line(ELEMENT_SET),
+        }
+        | overrides
+    )
 
 
 def test_rows_are_read_back_typed() -> None:
@@ -119,7 +254,40 @@ def test_rows_are_read_back_typed() -> None:
 
     assert read.pass_id == 1
     assert read.aos == AOS
+    assert read.element_set_epoch == AOS
+    assert read.max_elevation_deg == 61.4
     assert read.simulated is False
+
+
+def test_longitudes_are_read_for_both_kinds_of_station() -> None:
+    """An archive station with no published location has no longitude."""
+    rows = parse_rows(
+        files(
+            **{
+                "stations.jsonl": canonical_line({"station_id": "st_a", "lon_deg": 77}),
+                "archive_stations.jsonl": canonical_line(
+                    {"archive_station_id": 4, "lon_deg": -1.5}
+                )
+                + canonical_line({"archive_station_id": 5, "lon_deg": None}),
+            }
+        )
+    )
+
+    assert rows.longitudes == {"st_a": 77.0, "archive:4": -1.5}
+
+
+def test_a_snapshot_from_before_stage_16_says_what_to_do() -> None:
+    held = files()
+    del held["archive_passes.jsonl"]
+
+    with pytest.raises(MalformedSnapshotError, match="export again"):
+        parse_rows(held)
+
+
+def test_a_pass_whose_element_set_is_not_held_is_refused() -> None:
+    """The export always writes the sets its passes name; a gap is damage."""
+    with pytest.raises(MalformedSnapshotError, match="element set 7"):
+        parse_rows(files(**{"element_sets.jsonl": b""}))
 
 
 def test_a_file_the_labeller_needs_must_be_there() -> None:

@@ -164,6 +164,11 @@ class Manifest:
     and the silent-satellite window are readable beside the hash of the file
     they came from."""
 
+    summary: Mapping[str, object] = field(default_factory=dict)
+    """What an evaluation dataset says about its own selection — completeness
+    and weights, per population (D-154). Written, and hashed, only when there
+    is one, so a manifest without it hashes as it always did."""
+
     def __post_init__(self) -> None:
         """Refuse a manifest that could not describe one directory."""
         if self.kind not in KINDS:
@@ -192,7 +197,7 @@ class Manifest:
                 raise MalformedManifestError(message)
             _check_digest("derived_from", self.derived_from)
             _check_digest("config_sha256", self.config_sha256)
-        elif any(one is not None for one in lineage) or self.parameters:
+        elif any(one is not None for one in lineage) or self.parameters or self.summary:
             message = "a raw snapshot is read from the database, not derived"
             raise MalformedManifestError(message)
 
@@ -273,9 +278,9 @@ def parse_manifest(raw: bytes) -> Manifest:
     if stored.get("format") != MANIFEST_FORMAT:
         message = f"unknown manifest format {stored.get('format')!r}"
         raise MalformedManifestError(message)
-    if set(stored) != _FIELDS:
+    if not _FIELDS <= set(stored) <= _FIELDS | {"summary"}:
         missing = sorted(_FIELDS - set(stored))
-        unknown = sorted(set(stored) - _FIELDS)
+        unknown = sorted(set(stored) - _FIELDS - {"summary"})
         message = f"manifest fields missing {missing}, unknown {unknown}"
         raise MalformedManifestError(message)
     manifest = _from_json(stored)
@@ -291,7 +296,8 @@ def parse_manifest(raw: bytes) -> Manifest:
 
 def _hashed(manifest: Manifest) -> dict[str, object]:
     """Everything the hash covers, in canonical form. Files and sources sorted."""
-    return {
+    summary = {"summary": canonical_value(manifest.summary)} if manifest.summary else {}
+    return summary | {
         "format": MANIFEST_FORMAT,
         "kind": manifest.kind,
         "schema_revision": manifest.schema_revision,
@@ -359,6 +365,7 @@ def _from_json(stored: Mapping[str, object]) -> Manifest:
         ),
         config_sha256=optional_digest(stored["config_sha256"], "config_sha256"),
         parameters=dict(mapping(stored["parameters"], "parameters")),
+        summary=dict(mapping(stored.get("summary", {}), "summary")),
     )
 
 

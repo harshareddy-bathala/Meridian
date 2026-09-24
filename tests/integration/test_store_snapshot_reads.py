@@ -167,6 +167,27 @@ def test_only_passes_inside_the_interval_are_read(
     assert [one["id"] for one in rows(rollback, "passes")] == [seeded["inside"]]
 
 
+def test_a_prediction_rising_just_before_since_comes_with_its_assignment(
+    rollback: Any, schedule_rows: Any
+) -> None:
+    """D-148: its window reaches past ``since``, so the rise is seen whole."""
+    station = schedule_rows.station("st_edge", simulated=False)
+    element_set = schedule_rows.satellite()
+    straddling = schedule_rows.pass_(
+        station, SINCE - timedelta(seconds=2), element_set_id=element_set
+    )
+    ended = schedule_rows.pass_(
+        station, SINCE - timedelta(minutes=30), element_set_id=element_set
+    )
+    schedule_rows.assignment("as_edge", straddling)
+
+    ids = [one["id"] for one in rows(rollback, "passes")]
+
+    assert straddling in ids
+    assert ended not in ids
+    assert "as_edge" in [one["assignment_id"] for one in rows(rollback, "assignments")]
+
+
 @pytest.mark.usefixtures("seeded")
 def test_a_pass_brings_its_assignments_and_nothing_elses(rollback: Any) -> None:
     assert [one["assignment_id"] for one in rows(rollback, "assignments")] == ["as_in"]
@@ -257,3 +278,49 @@ def test_the_snapshot_instant_is_fixed_for_the_transaction(rollback: Any) -> Non
 
     assert first.tzinfo is not None
     assert snapshot_instant(rollback) == first
+
+
+def test_an_archive_satellite_brings_the_set_current_at_each_days_start(
+    rollback: Any, schedule_rows: Any
+) -> None:
+    """D-150: the sets an archive station's denominator is propagated from.
+
+    One set is current from before the interval, a second from 01:00 on the
+    reception's day — so it is current only from the next midnight — and a
+    third has an epoch nothing in the interval reaches.
+    """
+    satellite = "norad:88801"
+    day = datetime(2026, 8, 14, tzinfo=UTC)
+    old = schedule_rows.element_set_at(satellite, SINCE - timedelta(days=2), "manual")
+    newer = schedule_rows.element_set_at(
+        satellite, day + timedelta(hours=1), "celestrak"
+    )
+    schedule_rows.element_set_at(
+        satellite, datetime.now(UTC) + timedelta(days=30), "spacetrack"
+    )
+    schedule_rows.archive_reception(satellite, day + timedelta(hours=9))
+
+    held = [
+        one["id"]
+        for one in rows(rollback, "element_sets")
+        if one["satellite_id"] == satellite
+    ]
+
+    assert held == sorted([old, newer])
+
+
+def test_an_archive_satellite_keyed_by_name_brings_no_element_set(
+    rollback: Any, schedule_rows: Any
+) -> None:
+    satellite = "norad:88802"
+    schedule_rows.element_set_at(satellite, SINCE - timedelta(days=2), "manual")
+    station = schedule_rows.archive_reception(satellite, INSIDE)
+    rollback.execute(
+        "update archive_observations set satellite_key_kind = 'source_name'"
+        " where archive_station_id = %s",
+        (station,),
+    )
+
+    held = rows(rollback, "element_sets")
+
+    assert [one for one in held if one["satellite_id"] == satellite] == []

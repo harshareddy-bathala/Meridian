@@ -55,6 +55,9 @@ def a_pass(
         satellite_id=satellite,
         aos=aos,
         los=aos + timedelta(minutes=11),
+        max_elevation_deg=40.0,
+        element_set_epoch=aos - timedelta(hours=6),
+        computed_at=aos - timedelta(hours=5),
         simulated=simulated,
     )
 
@@ -131,8 +134,12 @@ def reported(
 def other_pass(
     pass_id: int, outcome: str, *, listening: bool = True, **fields: Any
 ) -> dict[str, Any]:
-    """A second pass of the same satellite from another station, reported."""
-    other = a_pass(pass_id, station="st_b", **fields)
+    """The same satellite from a station of its own, reported.
+
+    One station per pass: two passes of one satellite over one station at one
+    time are one rise, and would be grouped into one physical pass (D-148).
+    """
+    other = a_pass(pass_id, station=f"st_{pass_id}", **fields)
     return {
         "passes": (other,),
         "assignments": (assigned(other),),
@@ -332,6 +339,76 @@ def test_a_configuration_that_was_never_recorded_sorts_first() -> None:
     assert label(snapshot).scheduled_by == (None, "A")
 
 
+def a_second_prediction(target: PassRow, pass_id: int = 2) -> PassRow:
+    """The same rise predicted again from a newer element set, seconds apart."""
+    return replace(
+        target,
+        pass_id=pass_id,
+        aos=target.aos + timedelta(seconds=3),
+        los=target.los + timedelta(seconds=3),
+        element_set_epoch=target.element_set_epoch + timedelta(hours=4),
+    )
+
+
+def test_a_rise_predicted_twice_and_scheduled_once_is_one_scheduled_pass() -> None:
+    """D-148: the second prediction is not a pass nobody took."""
+    first = a_pass()
+    newer = a_second_prediction(first)
+    snapshot = rows(
+        passes=(first, newer),
+        assignments=(assigned(newer),),
+        observations=(report("as_2", "decoded"),),
+    )
+
+    (labelled,) = label_passes(snapshot, as_of=AS_OF, config=LabelConfig())
+
+    assert labelled.pass_ids == (1, 2)
+    assert labelled.pass_id == 2
+    assert labelled.label == "successful_reception"
+    assert label_counts((labelled,))["excluded.not_scheduled.measured"] == 0
+
+
+def test_a_rise_predicted_twice_and_never_scheduled_is_counted_once() -> None:
+    first = a_pass()
+
+    labelled = label_passes(
+        rows(passes=(first, a_second_prediction(first))),
+        as_of=AS_OF,
+        config=LabelConfig(),
+    )
+
+    assert [one.exclusion_reason for one in labelled] == ["not_scheduled"]
+
+
+def test_listening_confirmed_for_one_prediction_counts_for_the_rise() -> None:
+    first = a_pass()
+    newer = a_second_prediction(first)
+    snapshot = rows(
+        passes=(first, newer),
+        assignments=(assigned(first), assigned(newer)),
+        observations=(report("as_2", "no_signal"),),
+        heartbeats=(heard(first),),
+        listening={"as_1": True, "as_2": False},
+    )
+
+    (labelled,) = label_passes(snapshot, as_of=AS_OF, config=LabelConfig())
+
+    assert labelled.listening_confirmed is True
+
+
+def test_the_settle_margin_is_measured_from_the_latest_prediction() -> None:
+    first = a_pass(aos=AS_OF - timedelta(hours=24, minutes=12))
+    later = replace(
+        a_second_prediction(first), los=AS_OF - timedelta(hours=23, minutes=59)
+    )
+
+    (labelled,) = label_passes(
+        rows(passes=(first, later)), as_of=AS_OF, config=LabelConfig()
+    )
+
+    assert labelled.exclusion_reason == "report_window_open"
+
+
 def test_the_latest_revision_is_the_report() -> None:
     """A correction replaces what it corrects (D-015)."""
     snapshot = reported(
@@ -429,6 +506,7 @@ def test_an_archive_reception_is_evidence_for_a_measured_pass(
             satellite_key_kind="norad",
             started_at=AOS + timedelta(hours=2),
             archive_outcome=outcome,
+            archive_station_id=1,
         ),
     )
 
@@ -437,7 +515,7 @@ def test_an_archive_reception_is_evidence_for_a_measured_pass(
 
 def test_two_archive_no_data_rows_call_a_satellite_silent() -> None:
     silent = ArchiveReception(
-        "norad:57166", "norad", AOS + timedelta(hours=1), "no_data"
+        "norad:57166", "norad", AOS + timedelta(hours=1), "no_data", 1
     )
 
     snapshot = reported("no_signal", archive=(silent, silent))
@@ -446,7 +524,7 @@ def test_two_archive_no_data_rows_call_a_satellite_silent() -> None:
 
 
 def test_an_archive_key_we_cannot_match_is_not_evidence() -> None:
-    unmatched = ArchiveReception("NOAA 19", "source_name", AOS, "decoded")
+    unmatched = ArchiveReception("NOAA 19", "source_name", AOS, "decoded", 1)
 
     assert (
         label(reported("no_signal", archive=(unmatched,))).label
@@ -462,7 +540,7 @@ def test_an_archive_is_never_evidence_about_a_simulated_pass() -> None:
         observations=(report("as_1", "no_signal"),),
         heartbeats=(heard(target),),
         listening={"as_1": True},
-        archive=(ArchiveReception("norad:57166", "norad", AOS, "decoded"),),
+        archive=(ArchiveReception("norad:57166", "norad", AOS, "decoded", 1),),
     )
 
     assert label(snapshot).label == "satellite_state_indeterminate"
@@ -511,7 +589,7 @@ def test_a_pass_made_simulated_by_its_assignment_is_judged_as_simulated() -> Non
         observations=(report("as_1", "no_signal"),),
         heartbeats=(heard(target),),
         listening={"as_1": True},
-        archive=(ArchiveReception("norad:57166", "norad", AOS, "decoded"),),
+        archive=(ArchiveReception("norad:57166", "norad", AOS, "decoded", 1),),
     )
 
     labelled = label(snapshot)
@@ -578,3 +656,23 @@ def test_listening_answers_for_other_assignments_do_not_leak() -> None:
     snapshot = with_listening(reported("no_signal", confirmed=None), {"as_9": True})
 
     assert label(snapshot).label == "station_not_confirmed_listening"
+
+
+def test_a_rise_that_begins_before_since_is_left_out_whole() -> None:
+    """D-148: seen whole across the boundary, and dropped whole, never halved."""
+    first = a_pass()
+    newer = a_second_prediction(first)
+    snapshot = rows(
+        passes=(first, newer, a_pass(3, aos=AOS + timedelta(hours=2))),
+        assignments=(assigned(first),),
+        observations=(report("as_1", "decoded"),),
+    )
+
+    labelled = label_passes(
+        snapshot,
+        as_of=AS_OF,
+        config=LabelConfig(),
+        since=first.aos + timedelta(seconds=1),
+    )
+
+    assert [one.pass_ids for one in labelled] == [(3,)]
