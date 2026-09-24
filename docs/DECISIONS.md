@@ -3342,11 +3342,15 @@ Stage 16's gate is that every archive-derived result *automatically* includes co
 
 Stage 17 is where the roadmap allows numerical dependencies. Fitting a model needs them. Scoring a pass does not: the scheduler of Stage 18 runs in the `jobs` service on the station's Pi, and what it needs from a fitted logistic regression is a dot product and a sigmoid.
 
-**numpy and scikit-learn are an optional extra, `meridian[fit]`,** used by `meridian model fit` and nothing else. The platform image does not install it, as it does not install `meridian-ingest` (D-138), and `tests/unit/test_layout.py` checks that. **Scoring is plain Python** in `meridian.prediction.score`, which imports neither, and `tests/unit/test_prediction_boundaries.py` says so. A fitted model is a JSON file of coefficients (D-163), so what the Pi reads is data, not a pickled object from a library it does not have.
+**scikit-learn is an optional extra, `meridian[fit]`,** used by `meridian model fit` and nothing else, together with numpy, which the fitting module imports directly. The platform image does not install the extra, as it does not install `meridian-ingest` (D-138). `tests/unit/test_layout.py` checks the Dockerfile, and CI asks the built image that scikit-learn and scipy are absent. Only `meridian.prediction.fit` may import scikit-learn or scipy, in any distribution.
+
+**numpy is already in the image, and that is not this decision's doing.** skyfield depends on it, so it has been on the Pi since Stage 5. The first draft of this entry said the image carried no numerical stack; CI's image check found numpy there on the first run, and the claim is narrowed to scikit-learn and scipy, which are the heavy part.
+
+**Scoring is plain Python all the same,** in `meridian.prediction.score`, and no prediction module but `fit` imports numpy. `tests/unit/test_prediction_boundaries.py` checks both lines. The reason is not image size: a fitted model is a JSON file of coefficients (D-163), and a scorer that is a dot product and a sigmoid in the standard library gives the same probability from that file whichever numpy version is installed, or none. What the Pi reads is data, not a pickled object from a library it does not have.
 
 **The model is L2-regularised logistic regression.** The roadmap asks for a simple interpretable model first, and a coefficient per feature is something a viva can read. A more complex model is a later decision, taken if the ablation shows this one leaves signal on the table.
 
-*Rejected: numpy and scikit-learn as ordinary dependencies.* About 100 MB of scipy and scikit-learn in an image whose job is to receive, for a computation that is ten lines of Python. *Rejected: our own IRLS on numpy.* It would be an optimiser to write and test that a library already provides, which fails `CLAUDE.md`'s build-or-use test.
+*Rejected: scikit-learn as an ordinary dependency.* About 100 MB of scipy and scikit-learn in an image whose job is to receive, for a computation that is ten lines of Python. *Rejected: our own IRLS on numpy.* It would be an optimiser to write and test that a library already provides, which fails `CLAUDE.md`'s build-or-use test.
 
 ---
 

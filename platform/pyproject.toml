@@ -22,10 +22,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Fitting only (D-155). `meridian model fit` needs a numerical stack; scoring a
-# pass does not, and the jobs service that scores passes runs on the station's
-# Pi. So the stack is an extra the platform image never installs, and only
+# Fitting only (D-155). `meridian model fit` needs scikit-learn; scoring a pass
+# does not, and the jobs service that scores passes runs on the station's Pi.
+# So it is an extra the platform image never installs, and only
 # meridian.prediction.fit may import it (tests/unit/test_prediction_boundaries.py).
+# numpy is listed because fit imports it directly; it is in the image anyway,
+# through skyfield.
 fit = [
     "numpy>=2.0",
     "scikit-learn>=1.5",

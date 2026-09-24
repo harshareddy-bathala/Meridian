@@ -8,8 +8,8 @@ fitting needs is an extra the image never installs. All four fail in ways that
 are expensive to diagnose and cheap to prevent — the first as an
 ``AttributeError`` raised from inside pip, the second not at all until someone
 reads the file, the third as an archive layer quietly installed on a station
-(D-138), and the fourth as a hundred megabytes of scipy on a Pi that scores
-passes with a dot product (D-155).
+(D-138), and the fourth as a hundred megabytes of scikit-learn and scipy on a
+Pi that scores passes with a dot product (D-155).
 
 The two orbit assertions at the end of this file are about ``meridian.orbit``
 rather than about the layout, and would be easier to find beside the rest of the
@@ -93,16 +93,17 @@ def test_every_workspace_member_is_shipped_or_excluded_from_the_image() -> None:
         )
 
 
-NUMERICAL_STACK = ("numpy", "scikit-learn", "scipy")
+FIT_ONLY = ("scikit-learn", "scipy")
 
 
-def test_the_numerical_stack_is_an_extra_the_image_never_installs() -> None:
-    """D-155: fitting needs numpy and scikit-learn; the Pi's image carries neither.
+def test_the_fit_extra_is_never_installed_in_the_image() -> None:
+    """D-155: fitting needs scikit-learn; the Pi's image does not carry it.
 
-    They are the platform's ``fit`` extra, never a core dependency, and no
+    It is the platform's ``fit`` extra, never a core dependency, and no
     ``uv sync`` in ``deploy/Dockerfile`` asks for an extra. A core dependency
-    would put them in the image through ``--all-packages``; an ``--extra`` or
-    ``--all-extras`` flag would do it through the sync step.
+    would put it in the image through ``--all-packages``; an ``--extra`` or
+    ``--all-extras`` flag would do it through the sync step. numpy is not
+    checked: skyfield brings it into the image regardless, and D-155 says so.
     """
     project = tomllib.loads(
         (REPO_ROOT / "platform" / "pyproject.toml").read_text(encoding="utf-8")
@@ -116,7 +117,7 @@ def test_the_numerical_stack_is_an_extra_the_image_never_installs() -> None:
         if "uv sync" in line and not line.lstrip().startswith("#")
     ]
 
-    for name in NUMERICAL_STACK:
+    for name in FIT_ONLY:
         assert name not in core, f"{name} must not be a core platform dependency"
     assert "numpy" in fit
     assert "scikit-learn" in fit

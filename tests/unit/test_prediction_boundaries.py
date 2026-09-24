@@ -2,11 +2,15 @@
 
 Two lines, read from the source rather than from a running import:
 
-* **Only ``meridian.prediction.fit`` imports numpy or scikit-learn**, in any
+* **Only ``meridian.prediction.fit`` imports scikit-learn or scipy**, in any
   distribution. They are the ``meridian[fit]`` extra, which the platform image
   does not install (D-155). A second module importing them would work in every
   checkout, where the extra is installed for the tests, and fail on the Pi the
   first time the jobs service scored a pass.
+* **No other prediction module imports numpy either.** numpy is in the image
+  already, through skyfield, so this line is not about the Pi: scoring is plain
+  Python so that a model file gives the same probability whichever numpy is
+  installed, or none (D-163).
 * **The prediction module reaches no database, no network and no orbit.**
   Features are a pure function of a snapshot (D-157), tracks were frozen at
   export (D-158), and ``CLAUDE.md`` says prediction knows nothing about MSP.
@@ -27,8 +31,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PREDICTION = REPO_ROOT / "platform" / "src" / "meridian" / "prediction"
 DISTRIBUTIONS = ("platform", "client", "simulator", "ingest")
 
-NUMERICAL = ("numpy", "sklearn", "scipy", "joblib", "pandas")
-"""The ``fit`` extra and what it brings with it."""
+FITTING_ONLY = ("sklearn", "scipy", "joblib", "pandas")
+"""The ``fit`` extra's weight, and what it brings with it. Not in the image."""
+
+NUMERICAL = ("numpy", *FITTING_ONLY)
+"""What a prediction module other than ``fit`` may not import."""
 
 MAY_FIT = frozenset({PREDICTION / "fit.py"})
 
@@ -75,13 +82,20 @@ def crossings(paths: list[Path], banned: tuple[str, ...]) -> list[str]:
     ]
 
 
-def test_only_the_fitting_module_imports_a_numerical_stack() -> None:
+def test_only_the_fitting_module_imports_the_fit_extra() -> None:
     paths = [
         path
         for distribution in DISTRIBUTIONS
         for path in sorted((REPO_ROOT / distribution / "src").rglob("*.py"))
         if path not in MAY_FIT
     ]
+
+    assert paths
+    assert crossings(paths, FITTING_ONLY) == []
+
+
+def test_only_the_fitting_module_of_prediction_imports_numpy() -> None:
+    paths = [path for path in sorted(PREDICTION.rglob("*.py")) if path not in MAY_FIT]
 
     assert paths
     assert crossings(paths, NUMERICAL) == []
@@ -106,5 +120,6 @@ def test_the_scans_would_notice_a_crossing(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
+    assert len(crossings([offender], FITTING_ONLY)) == 1
     assert len(crossings([offender], NUMERICAL)) == 2
     assert len(crossings([offender], UNREACHABLE_FROM_PREDICTION)) == 2
