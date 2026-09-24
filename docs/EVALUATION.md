@@ -55,7 +55,7 @@ Elevation and operator priority are **inputs to our model, not competing baselin
 
 The two public rows are **candidate** features (D-131). They are ingested once with provenance and read from immutable snapshots, never from a live service, and the value used is the one published *before* the pass — a model that reads a later revision has read the future. They are never gates: no pass is skipped because an index was high or a forecast was cloudy, which would make an external service a runtime dependency and would leave exactly the passes the model needs unobserved (§4).
 
-**Cold start is a functional requirement.** A newly registered station has no history. The model must degrade gracefully to geometry-only prediction and recover as data accumulates. Implement this as an explicit fallback path, tested, not as an accident of missing features.
+**Cold start is a functional requirement.** A newly registered station has no history. The model must degrade gracefully to geometry-only prediction and recover as data accumulates. Implement this as an explicit fallback path, tested, not as an accident of missing features. How the path is chosen and recorded is D-161; the learned rows of the table above are D-159, and every one of them reads only outcomes settled before the pass it describes (D-157).
 
 ---
 
@@ -73,6 +73,8 @@ A combined model cannot show what our contribution added. The model layer **must
 **SC-1 is measured as D − B.** Not D − A, which would flatter us by taking credit for priority weighting that already exists.
 
 C matters independently: if our features carry no signal on their own, that is a finding worth reporting, and it changes what we claim.
+
+The four are chosen by one configuration key, and B differs from A in the objective rather than the model: priority weights the value of a pass and is never a model input (D-160). What counts as a training example is D-156.
 
 ### Isolating the public conditions
 
@@ -200,6 +202,8 @@ Every model ships with:
 - A **Brier score**, compared against a base-rate predictor (SC-2)
 - **Calibration by segment** — per band, per station, per element-set-age bucket, because aggregate calibration can hide segment-level failure
 
+A fitted model is a published directory whose `model.json` a reader can open, and it is scored without the libraries that fitted it (D-155, D-163).
+
 ---
 
 ## 8. Data splits
@@ -209,6 +213,8 @@ Every model ships with:
 Random splits leak future information: the same satellite, the same station and near-identical conditions appear on both sides, and the model looks far better than it is. Any use of `shuffle=True` on observation data is a bug.
 
 Report the split boundary date with every result.
+
+The boundaries are dates the configuration states, and everything learned — scaling, regularisation, calibration — is learned inside them (D-162).
 
 ---
 
