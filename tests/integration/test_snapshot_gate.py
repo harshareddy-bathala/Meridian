@@ -26,7 +26,7 @@ import pytest
 pytest.importorskip("psycopg")
 
 from meridian.datasets.evaluation import build_evaluation_dataset
-from meridian.datasets.export import export_snapshot
+from meridian.datasets.export import export_snapshot, read_snapshot
 from meridian.datasets.label_config import LabelConfig
 from meridian.datasets.manifest import content_sha256
 from meridian.datasets.publish import read_directory
@@ -80,7 +80,8 @@ def export(conn: Any, root: Path) -> Any:
     registry = PsycopgRegistry(
         conn, pepper="snapshot-gate", recovery_window_s=3600, now_utc=SILENT
     )
-    return export_snapshot(conn, registry, root=root, since=SINCE, created_at=CREATED)
+    read = read_snapshot(conn, registry, since=SINCE)
+    return export_snapshot(read, root=root, created_at=CREATED)
 
 
 def label(raw: Path, root: Path) -> Any:

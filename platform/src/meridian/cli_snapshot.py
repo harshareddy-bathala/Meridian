@@ -39,6 +39,7 @@ from meridian.datasets.evaluation import NotARawSnapshotError, build_evaluation_
 from meridian.datasets.export import (
     SchemaMissingError,
     export_snapshot,
+    read_snapshot,
     snapshot_transaction,
 )
 from meridian.datasets.label_config import LabelConfigError, load_label_config
@@ -183,18 +184,22 @@ def _since(text: str) -> datetime:
 
 
 def _export_from_database(since: datetime, root: Path) -> PublishedDirectory:
-    """One connection, one snapshot transaction, one registry over both."""
+    """One connection, one snapshot transaction, one registry over both.
+
+    The transaction ends before anything is propagated (D-158): what was read
+    is all the export needs afterwards.
+    """
     settings = load_settings()
-    with connect_once(settings) as conn, snapshot_transaction(conn):
-        registry = PsycopgRegistry(
-            conn,
-            pepper=settings.token_hash_pepper,
-            recovery_window_s=settings.registration_recovery_window_s,
-            now_utc=datetime.now(UTC),
-        )
-        return export_snapshot(
-            conn, registry, root=root, since=since, created_at=datetime.now(UTC)
-        )
+    with connect_once(settings) as conn:
+        with snapshot_transaction(conn):
+            registry = PsycopgRegistry(
+                conn,
+                pepper=settings.token_hash_pepper,
+                recovery_window_s=settings.registration_recovery_window_s,
+                now_utc=datetime.now(UTC),
+            )
+            read = read_snapshot(conn, registry, since=since)
+        return export_snapshot(read, root=root, created_at=datetime.now(UTC))
 
 
 def _label(args: argparse.Namespace) -> int:

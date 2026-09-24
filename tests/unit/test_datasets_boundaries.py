@@ -13,9 +13,10 @@ Two lines, both read from the source rather than from a running import:
 
 Stage 16 adds two more:
 
-* **Only the export side propagates.** Archive passes are computed once, at
-  export, and frozen (D-150); ``archive_passes`` takes the orbit's plain
-  types and is handed a propagator, and nothing that labels imports one.
+* **Only the export side propagates.** Archive passes and pass tracks are
+  computed once, at export, and frozen (D-150, D-158); ``archive_passes`` and
+  ``pass_tracks`` take the orbit's plain types and are handed a propagator,
+  and nothing that labels imports either of them or a propagator.
 * **The propensity imports nothing that holds an outcome.** D-152 is kept by
   the estimator's signature; this keeps it at the module line too, so a later
   import of labels or evidence into the estimator fails here.
@@ -23,7 +24,7 @@ Stage 16 adds two more:
 Each has a positive control: the scan run on a module known to cross the line,
 without which an empty list of crossings proves nothing.
 
-Reference: docs/DECISIONS.md D-143, D-145, D-150, D-152.
+Reference: docs/DECISIONS.md D-143, D-145, D-150, D-152, D-158.
 """
 
 from __future__ import annotations
@@ -128,7 +129,11 @@ def test_the_command_is_seen_importing_it() -> None:
 
 
 MAY_PROPAGATE = frozenset({"export.py"})
-"""Holds the orbit service. ``archive_passes`` holds only the orbit's types."""
+"""Holds the orbit service. The two modules below hold only the orbit's types."""
+
+HANDED_A_PROPAGATOR = frozenset({"archive_passes.py", "pass_tracks.py"})
+"""The export side's pure halves: rows and a propagator in, rows out (D-150,
+D-158). Nothing on the labelling path imports either."""
 
 OUTCOME_FREE = {
     "propensity.py": frozenset({"meridian.datasets.selection_config"}),
@@ -149,15 +154,39 @@ def test_nothing_that_labels_imports_the_orbit() -> None:
     crossings = [
         f"{path.name} imports {module}"
         for path in labelling_modules()
-        if path.name != "archive_passes.py"
+        if path.name not in HANDED_A_PROPAGATOR
         for module in orbit_imports(path)
     ]
 
     assert crossings == []
 
 
-def test_archive_passes_takes_types_and_is_handed_a_propagator() -> None:
-    assert orbit_imports(DATASETS / "archive_passes.py") == ["meridian.orbit.types"]
+@pytest.mark.parametrize("name", sorted(HANDED_A_PROPAGATOR))
+def test_the_export_side_takes_types_and_is_handed_a_propagator(name: str) -> None:
+    assert orbit_imports(DATASETS / name) == ["meridian.orbit.types"]
+
+
+def test_nothing_that_labels_imports_the_export_side() -> None:
+    """The tracks and the archive passes reach labelling as files, never as code."""
+    crossings = [
+        f"{path.name} imports {module}"
+        for path in labelling_modules()
+        if path.name not in HANDED_A_PROPAGATOR
+        for _, module in imported_modules(path)
+        if module.removeprefix("meridian.datasets.") + ".py" in HANDED_A_PROPAGATOR
+    ]
+
+    assert crossings == []
+
+
+def test_the_export_is_seen_importing_the_export_side() -> None:
+    """Positive control for the test above: the scan's match, on ``export``."""
+    held = {
+        module.removeprefix("meridian.datasets.") + ".py"
+        for _, module in imported_modules(DATASETS / "export.py")
+    }
+
+    assert held >= HANDED_A_PROPAGATOR
 
 
 def test_the_export_is_seen_holding_the_orbit_service() -> None:

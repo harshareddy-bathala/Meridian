@@ -22,6 +22,7 @@ psycopg = pytest.importorskip("psycopg")
 
 from meridian.datasets.export import (  # noqa: E402
     export_snapshot,
+    read_snapshot,
     snapshot_transaction,
 )
 from meridian.datasets.publish import read_directory  # noqa: E402
@@ -86,7 +87,8 @@ def seeded(rollback: Any, schedule_rows: Any) -> dict[str, Any]:
 
 
 def export(conn: Any, registry: Any, root: Path) -> Any:
-    return export_snapshot(conn, registry, root=root, since=SINCE, created_at=CREATED)
+    read = read_snapshot(conn, registry, since=SINCE)
+    return export_snapshot(read, root=root, created_at=CREATED)
 
 
 def lines(directory: Any, name: str) -> list[dict[str, Any]]:
@@ -191,10 +193,8 @@ def test_exporting_twice_in_one_transaction_is_one_snapshot(
     """One transaction, one instant, the same rows — so the same hash and name."""
     first = export(rollback, RecordingRegistry(), root)
     second = export_snapshot(
-        rollback,
-        RecordingRegistry(),
+        read_snapshot(rollback, RecordingRegistry(), since=SINCE),
         root=root,
-        since=SINCE,
         created_at=CREATED + timedelta(hours=1),
     )
 
@@ -230,6 +230,35 @@ def test_an_archive_station_s_passes_are_propagated_and_frozen(
     assert counts["archive_passes"] == len(passes)
     assert counts["archive_denominator.stations_without_location"] == 1
     assert counts["archive_denominator.stations_without_altitude"] == 1
+
+
+# --- pass tracks (D-158) ---------------------------------------------------------
+
+
+@pytest.mark.usefixtures("seeded")
+def test_every_measured_pass_is_tracked_from_its_own_element_set(
+    rollback: Any, root: Path
+) -> None:
+    """Real propagation over the stored station and set, every 30 s of the window."""
+    published = export(rollback, RecordingRegistry(), root)
+
+    raw = read_directory(published.path)
+    passes = {one["id"]: one for one in lines(raw, "passes.jsonl")}
+    tracks = lines(raw, "pass_tracks.jsonl")
+    assert sorted(one["pass_id"] for one in tracks) == sorted(passes)
+    for track in tracks:
+        window = passes[track["pass_id"]]
+        seconds = (
+            datetime.fromisoformat(window["los"])
+            - datetime.fromisoformat(window["aos"])
+        ).total_seconds()
+        assert track["start"] == window["aos"]
+        assert len(track["elevation_deg"]) == -(-seconds // 30)
+        assert len(track["azimuth_deg"]) == len(track["elevation_deg"])
+        assert all(0 <= one < 360 for one in track["azimuth_deg"])
+    counts = published.manifest.counts
+    assert counts["pass_tracks"] == len(tracks)
+    assert counts["pass_tracks.simulated_skipped"] == 0
 
 
 # --- the transaction -----------------------------------------------------------
