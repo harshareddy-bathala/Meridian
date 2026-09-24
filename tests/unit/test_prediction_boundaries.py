@@ -53,8 +53,13 @@ UNREACHABLE_FROM_PREDICTION = (
     "meridian.api",
     "meridian.config",
     "meridian.orbit",
+    "meridian.datasets.export",
+    "meridian.datasets.archive_passes",
+    "meridian.datasets.pass_tracks",
 )
-"""A driver, the network, the API, MSP's home, or a propagator."""
+"""A driver, the network, the API, MSP's home, a propagator, or the export
+side of ``meridian.datasets``, which holds all three. Features read frozen
+files (D-158); they never reach the code that froze them."""
 
 
 def imported_modules(path: Path) -> Iterator[tuple[int, str]]:

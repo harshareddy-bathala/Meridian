@@ -14,10 +14,16 @@ Reference: docs/DECISIONS.md D-143, D-146, D-147.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+
+from meridian.datasets.row_fields import MalformedSnapshotError, jsonl_rows
+from meridian.datasets.row_fields import flag as _bool
+from meridian.datasets.row_fields import instant as _instant
+from meridian.datasets.row_fields import integer as _int
+from meridian.datasets.row_fields import number as _number
+from meridian.datasets.row_fields import text as _text
 
 __all__ = [
     "ArchivePassRow",
@@ -34,10 +40,6 @@ __all__ = [
 
 _SINCE_STAGE_16 = frozenset(("archive_passes",))
 """Files an export made before Stage 16 does not hold."""
-
-
-class MalformedSnapshotError(ValueError):
-    """A raw snapshot row without a field a label needs, or with the wrong type."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,59 +269,4 @@ def _lines(files: Mapping[str, bytes], name: str) -> list[Mapping[str, object]]:
                 " denominator at export (D-150); export again to label it"
             )
         raise MalformedSnapshotError(message) from exc
-    rows: list[Mapping[str, object]] = []
-    for number, line in enumerate(data.splitlines(), start=1):
-        decoded: object = json.loads(line)
-        if not isinstance(decoded, dict):
-            message = f"{name}.jsonl line {number} is not an object"
-            raise MalformedSnapshotError(message)
-        rows.append(decoded)
-    return rows
-
-
-def _field(row: Mapping[str, object], name: str) -> object:
-    try:
-        return row[name]
-    except KeyError as exc:
-        message = f"a row has no {name!r}"
-        raise MalformedSnapshotError(message) from exc
-
-
-def _text(row: Mapping[str, object], name: str) -> str:
-    value = _field(row, name)
-    if not isinstance(value, str):
-        message = f"{name} is {value!r}, not text"
-        raise MalformedSnapshotError(message)
-    return value
-
-
-def _int(row: Mapping[str, object], name: str) -> int:
-    value = _field(row, name)
-    if isinstance(value, bool) or not isinstance(value, int):
-        message = f"{name} is {value!r}, not an integer"
-        raise MalformedSnapshotError(message)
-    return value
-
-
-def _number(row: Mapping[str, object], name: str) -> float:
-    value = _field(row, name)
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        message = f"{name} is {value!r}, not a number"
-        raise MalformedSnapshotError(message)
-    return float(value)
-
-
-def _bool(row: Mapping[str, object], name: str) -> bool:
-    value = _field(row, name)
-    if not isinstance(value, bool):
-        message = f"{name} is {value!r}, not true or false"
-        raise MalformedSnapshotError(message)
-    return value
-
-
-def _instant(row: Mapping[str, object], name: str) -> datetime:
-    value = _text(row, name)
-    if not value.endswith("Z"):
-        message = f"{name} is {value!r}, not a UTC timestamp"
-        raise MalformedSnapshotError(message)
-    return datetime.fromisoformat(value)
+    return jsonl_rows(data, f"{name}.jsonl")

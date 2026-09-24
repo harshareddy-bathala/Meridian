@@ -1,9 +1,14 @@
 """Feature extraction, yield model, horizon inference, calibration.
 
-**Phase 2. Not implemented** — this module is its interface and nothing else,
-built by Stage 17 of docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md.
+**Being built by Stage 17** of docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md, under
+decisions D-155 to D-163. In place so far:
 
-When implemented, this module provides:
+* ``feature_rows`` — the raw snapshot's geometry, tracks and bands, typed;
+* ``history`` — each station's settled outcomes, answering only for the past
+  (D-157);
+* ``features`` — geometry and station-history features for each labelled pass.
+
+When complete, this module provides:
 
 * ``P(decode | station, pass)`` for a candidate pass;
 * the learned per-azimuth horizon profile for a station;

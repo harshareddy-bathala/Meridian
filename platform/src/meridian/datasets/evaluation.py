@@ -35,6 +35,7 @@ from pathlib import Path
 
 from meridian.datasets.canonical import canonical_line
 from meridian.datasets.label_config import LabelConfig, config_sha256
+from meridian.datasets.label_rows import LABELS_FILE
 from meridian.datasets.labels import TRANSFORMATION_VERSION, label_counts, label_passes
 from meridian.datasets.manifest import Manifest, SourceEntry, content_sha256, file_entry
 from meridian.datasets.publish import (
@@ -58,7 +59,6 @@ __all__ = [
 EVALUATION = "evaluation"
 """Evaluation datasets live under ``<datasets root>/evaluation/``."""
 
-LABELS_FILE = "labels.jsonl"
 ARCHIVE_RECEPTIONS = "archive_receptions.jsonl"
 STATION_DAYS = "station_days.jsonl"
 PROPENSITIES = "propensities.jsonl"

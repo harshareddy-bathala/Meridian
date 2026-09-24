@@ -6,10 +6,12 @@ Two lines, both read from the source rather than from a running import:
   on the labelling path, and Stage 15's gate is that labelling reads a snapshot
   and nothing else (D-143). The gate tests prove that for the fixtures they
   run; this proves it for every line, including the ones no fixture reaches.
-* **Only the ``meridian snapshot`` command imports the package.** The
-  scheduler, the API and the jobs service run on live tables; a snapshot is
-  training and evaluation input, and a runtime path that read one would be
-  scheduling on the past without saying so.
+* **Only the ``meridian snapshot`` command, and prediction's fitting side,
+  import the package.** The scheduler, the API and the jobs service run on
+  live tables; a snapshot is training and evaluation input, and a runtime
+  path that read one would be scheduling on the past without saying so.
+  ``meridian.prediction`` fits on datasets (D-156), except ``score``, which
+  the scheduler will import and which reads a model file instead.
 
 Stage 16 adds two more:
 
@@ -56,6 +58,17 @@ REACHES_OUTSIDE = (
 that name a database. The labelling path needs none of them."""
 
 MAY_IMPORT_DATASETS = frozenset({PLATFORM / "cli_snapshot.py"})
+PREDICTION = PLATFORM / "prediction"
+SCORED_AT_RUNTIME = frozenset({"score.py"})
+"""The one prediction module the scheduler will import (D-155). It reads a
+model file, never a dataset, so it is held to the runtime rule."""
+
+
+def may_import_datasets(path: Path) -> bool:
+    """The snapshot command, and prediction's fitting side (D-156)."""
+    if path in MAY_IMPORT_DATASETS:
+        return True
+    return PREDICTION in path.parents and path.name not in SCORED_AT_RUNTIME
 
 
 def imported_modules(path: Path) -> Iterator[tuple[int, str]]:
@@ -110,7 +123,7 @@ def test_only_the_snapshot_command_imports_the_package() -> None:
     crossings = [
         f"{path.relative_to(REPO_ROOT)}:{line} imports {module}"
         for path in sorted(PLATFORM.rglob("*.py"))
-        if DATASETS not in path.parents and path not in MAY_IMPORT_DATASETS
+        if DATASETS not in path.parents and not may_import_datasets(path)
         for line, module in imported_modules(path)
         if module == "meridian.datasets" or module.startswith("meridian.datasets.")
     ]
