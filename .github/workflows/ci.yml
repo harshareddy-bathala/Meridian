@@ -394,6 +394,19 @@ jobs:
           docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint "" \
             api python -c "import meridian, meridian.cli, meridian_sim.station"
 
+      - name: The image carries no numerical stack
+        # D-155: numpy and scikit-learn are the `fit` extra, for fitting on a
+        # workstation. tests/unit/test_layout.py reads the Dockerfile; this asks
+        # the built image, which is what a Pi would actually run.
+        run: |
+          set -euo pipefail
+          docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint "" \
+            api python -c "
+          import importlib.util, sys
+          present = [m for m in ('numpy', 'sklearn', 'scipy') if importlib.util.find_spec(m)]
+          sys.exit(f'the image carries {present}' if present else 0)
+          "
+
       - name: /metrics publishes the platform's own series, and only with the token
         run: |
           set -euo pipefail

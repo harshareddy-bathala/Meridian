@@ -1,12 +1,15 @@
 """Guards on the repository layout itself.
 
-Three properties of the layout: that ``platform/`` never shadows the standard
+Four properties of the layout: that ``platform/`` never shadows the standard
 library's ``platform`` module, that the client distribution's dependency list
-cannot reach a database, and that every workspace member is either shipped in the
-runtime image or deliberately excluded from it. All three fail in ways that are
-expensive to diagnose and cheap to prevent — the first as an ``AttributeError``
-raised from inside pip, the second not at all until someone reads the file, and
-the third as an archive layer quietly installed on a station (D-138).
+cannot reach a database, that every workspace member is either shipped in the
+runtime image or deliberately excluded from it, and that the numerical stack
+fitting needs is an extra the image never installs. All four fail in ways that
+are expensive to diagnose and cheap to prevent — the first as an
+``AttributeError`` raised from inside pip, the second not at all until someone
+reads the file, the third as an archive layer quietly installed on a station
+(D-138), and the fourth as a hundred megabytes of scipy on a Pi that scores
+passes with a dot product (D-155).
 
 The two orbit assertions at the end of this file are about ``meridian.orbit``
 rather than about the layout, and would be easier to find beside the rest of the
@@ -88,6 +91,39 @@ def test_every_workspace_member_is_shipped_or_excluded_from_the_image() -> None:
             f"{member} ({name}): copy its source into the image or exclude it from"
             " every uv sync step — it is currently both or neither"
         )
+
+
+NUMERICAL_STACK = ("numpy", "scikit-learn", "scipy")
+
+
+def test_the_numerical_stack_is_an_extra_the_image_never_installs() -> None:
+    """D-155: fitting needs numpy and scikit-learn; the Pi's image carries neither.
+
+    They are the platform's ``fit`` extra, never a core dependency, and no
+    ``uv sync`` in ``deploy/Dockerfile`` asks for an extra. A core dependency
+    would put them in the image through ``--all-packages``; an ``--extra`` or
+    ``--all-extras`` flag would do it through the sync step.
+    """
+    project = tomllib.loads(
+        (REPO_ROOT / "platform" / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+    core = " ".join(project["dependencies"])
+    fit = " ".join(project["optional-dependencies"]["fit"])
+    dockerfile = (REPO_ROOT / "deploy" / "Dockerfile").read_text(encoding="utf-8")
+    syncs = [
+        line
+        for line in dockerfile.splitlines()
+        if "uv sync" in line and not line.lstrip().startswith("#")
+    ]
+
+    for name in NUMERICAL_STACK:
+        assert name not in core, f"{name} must not be a core platform dependency"
+    assert "numpy" in fit
+    assert "scikit-learn" in fit
+    assert syncs
+    for line in syncs:
+        assert "--extra" not in line
+        assert "--all-extras" not in line
 
 
 def test_require_utc_rejects_naive_and_offset_datetimes() -> None:

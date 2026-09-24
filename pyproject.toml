@@ -21,7 +21,10 @@ dev = [
     #
     # meridian-ingest is here and *not* in deploy/Dockerfile: the tests need it
     # importable, the runtime image must not carry it (D-138).
-    "meridian",
+    #
+    # meridian[fit] is here for the same reason: tests fit models, and the image
+    # installs no extra (D-155).
+    "meridian[fit]",
     "meridian-client",
     "meridian-sim",
     "meridian-ingest",

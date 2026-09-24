@@ -1,0 +1,110 @@
+"""``meridian.prediction`` — who may hold a numerical stack, and what it may reach.
+
+Two lines, read from the source rather than from a running import:
+
+* **Only ``meridian.prediction.fit`` imports numpy or scikit-learn**, in any
+  distribution. They are the ``meridian[fit]`` extra, which the platform image
+  does not install (D-155). A second module importing them would work in every
+  checkout, where the extra is installed for the tests, and fail on the Pi the
+  first time the jobs service scored a pass.
+* **The prediction module reaches no database, no network and no orbit.**
+  Features are a pure function of a snapshot (D-157), tracks were frozen at
+  export (D-158), and ``CLAUDE.md`` says prediction knows nothing about MSP.
+
+Each has a positive control, without which an empty list of crossings proves
+nothing.
+
+Reference: docs/DECISIONS.md D-155, D-157, D-158.
+"""
+
+from __future__ import annotations
+
+import ast
+from collections.abc import Iterator
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PREDICTION = REPO_ROOT / "platform" / "src" / "meridian" / "prediction"
+DISTRIBUTIONS = ("platform", "client", "simulator", "ingest")
+
+NUMERICAL = ("numpy", "sklearn", "scipy", "joblib", "pandas")
+"""The ``fit`` extra and what it brings with it."""
+
+MAY_FIT = frozenset({PREDICTION / "fit.py"})
+
+UNREACHABLE_FROM_PREDICTION = (
+    "psycopg",
+    "socket",
+    "urllib",
+    "http",
+    "httpx",
+    "fastapi",
+    "sgp4",
+    "skyfield",
+    "meridian.store",
+    "meridian.registry",
+    "meridian.api",
+    "meridian.config",
+    "meridian.orbit",
+)
+"""A driver, the network, the API, MSP's home, or a propagator."""
+
+
+def imported_modules(path: Path) -> Iterator[tuple[int, str]]:
+    """Each absolute import in ``path``, as its line and full dotted module."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node.lineno, alias.name
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            yield node.lineno, node.module
+
+
+def reaches(module: str, banned: tuple[str, ...]) -> bool:
+    return any(module == one or module.startswith(f"{one}.") for one in banned)
+
+
+def crossings(paths: list[Path], banned: tuple[str, ...]) -> list[str]:
+    return [
+        f"{path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else path}"
+        f":{line} imports {module}"
+        for path in paths
+        for line, module in imported_modules(path)
+        if reaches(module, banned)
+    ]
+
+
+def test_only_the_fitting_module_imports_a_numerical_stack() -> None:
+    paths = [
+        path
+        for distribution in DISTRIBUTIONS
+        for path in sorted((REPO_ROOT / distribution / "src").rglob("*.py"))
+        if path not in MAY_FIT
+    ]
+
+    assert paths
+    assert crossings(paths, NUMERICAL) == []
+
+
+def test_prediction_reaches_no_database_network_or_orbit() -> None:
+    paths = sorted(PREDICTION.rglob("*.py"))
+
+    assert paths
+    assert crossings(paths, UNREACHABLE_FROM_PREDICTION) == []
+
+
+def test_the_scans_would_notice_a_crossing(tmp_path: Path) -> None:
+    """The positive control: one offender for each list."""
+    offender = tmp_path / "offender.py"
+    offender.write_text(
+        "import numpy as np\n"
+        "from sklearn.linear_model import LogisticRegression\n"
+        "from meridian.store.pool import open_pool\n"
+        "from meridian.orbit import ElementSet\n"
+        "from meridian.orbital import nothing\n",
+        encoding="utf-8",
+    )
+
+    assert len(crossings([offender], NUMERICAL)) == 2
+    assert len(crossings([offender], UNREACHABLE_FROM_PREDICTION)) == 2
