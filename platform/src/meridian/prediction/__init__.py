@@ -9,7 +9,11 @@ decisions D-155 to D-163. In place so far:
 * ``geometry`` — angles on the circle, and where a pass went;
 * ``profiles`` — the learned environment: horizon, interference, timing error
   and element-set divergence (D-159);
-* ``features`` — every feature of each labelled pass, in its group.
+* ``features`` — every feature of each labelled pass, in its group;
+* ``model_config`` and ``configurations`` — A to D from one key, and the
+  cold-start route (D-160, D-161);
+* ``examples`` — one population's examples, simulated passes counted apart
+  (D-156).
 
 When complete, this module provides:
 

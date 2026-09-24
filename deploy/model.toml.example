@@ -1,0 +1,24 @@
+# Model settings for `meridian model fit --config <this file>`.
+#
+# Every key is optional; the values below are the defaults, taken from the
+# decisions that introduced them. An unknown key is refused rather than ignored,
+# so a misspelling cannot silently keep a default you believe you changed. The
+# model's hash covers these *values*, not this file's bytes.
+
+# Which configuration to fit (D-160). The inputs of each are fixed in code:
+#   A  elevation only                        — the naive baseline
+#   B  as A, with priority weighting the objective, never the model
+#                                             — what existing practice achieves
+#   C  our features only                      — do our signals carry information?
+#   D  every group                            — the shipped system
+configuration = "D"
+
+# Whose passes to fit on (D-156): "own" or "archive". Never both at once. An
+# archive pass carries its peak elevation and nothing else we compute features
+# from, so "archive" is refused with any configuration but A.
+population = "own"
+
+# Settled, usable outcomes a station needs before the configured model scores
+# it. Below this it is scored by the geometry-only model, and every prediction
+# says so (D-161). 0 .. 10000.
+min_station_history = 20

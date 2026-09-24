@@ -3364,6 +3364,8 @@ Stage 17 is where the roadmap allows numerical dependencies. Fitting a model nee
 
 **One fit, one population.** The configuration names `own` or `archive`, defaulting to `own`. The two are never pooled: they differ in what an outcome means (D-139) and in how they were selected (D-149). Every report carries that population's `EvaluationResult` (D-154), so a model's figures cannot be stated without the completeness of the data it was judged on.
 
+**An archive example is a matched reception with an outcome:** `decoded` positive, `no_data` negative, `unknown` out, as completeness counts them (D-153). An archive pass carries its peak elevation and nothing else we compute: no azimuths, no track, no element set, and no heartbeat or report of ours. So `population = "archive"` is refused with any configuration but A, rather than fitted on features that are all at their priors.
+
 **IPW sample weights are a configuration option, off by default.** Our own station's propensities are near 0 and 1 (D-152), so weighting today would mostly amplify noise; the option exists so the comparison can be made once randomised scheduling gives the weights support.
 
 ---
@@ -3434,7 +3436,7 @@ Four features are learned from a station's own settled history (D-157), and each
 
 **2026-09-24 · accepted** · *`meridian.prediction.score`, `EVALUATION.md` §2, Stage 17*
 
-**A station with fewer than `min_station_history` settled examples** (configuration) is scored by the geometry-only model, fitted alongside the configured one, and not by the configured model with its history features set to something. Every prediction carries `path` — `configured` or `geometry_fallback` — and the reason, so a report can count how many predictions came from each.
+**A station with fewer than `min_station_history` settled examples** (configuration) is scored by the geometry-only model, fitted alongside the configured one, and not by the configured model with its history features set to something. Every prediction carries `path` — `configured` or `geometry_fallback` — and the reason, so a report can count how many predictions came from each. The geometry-only model reads the `elevation` and `geometry` groups. A and B read no history, so they never take the route: they are geometry-only already.
 
 **An unseen satellite, or a station with no interference or health history,** takes each missing feature at its prior with a count of zero (D-159). It never raises and never yields NaN. The roadmap's four cases — new station, unseen satellite, missing interference, missing health — each have a test.
 
