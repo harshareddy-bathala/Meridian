@@ -6,7 +6,10 @@ decisions D-155 to D-163. In place so far:
 * ``feature_rows`` — the raw snapshot's geometry, tracks and bands, typed;
 * ``history`` — each station's settled outcomes, answering only for the past
   (D-157);
-* ``features`` — geometry and station-history features for each labelled pass.
+* ``geometry`` — angles on the circle, and where a pass went;
+* ``profiles`` — the learned environment: horizon, interference, timing error
+  and element-set divergence (D-159);
+* ``features`` — every feature of each labelled pass, in its group.
 
 When complete, this module provides:
 

@@ -16,24 +16,24 @@ never for a NaN to decide by accident.
 **Each feature belongs to a group**, which is how configurations choose inputs
 (D-160): ``elevation`` is configuration A's one input; ``geometry`` is the rest
 of what the orbit says; ``ours`` is what EVALUATION.md §2 marks as ours —
-element-set age and the station's own record. The learned environment of
-D-159 joins ``ours`` in :mod:`meridian.prediction.profiles`.
+element-set age, the station's own record, and the learned environment of
+D-159 from :mod:`meridian.prediction.profiles`.
 
 Reference: docs/DECISIONS.md D-148, D-157, D-159, D-160, D-161.
 """
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from itertools import pairwise
 
 from meridian.datasets.labels import LabelledPass
 from meridian.datasets.row_fields import MalformedSnapshotError
 from meridian.prediction.feature_rows import FeatureRows, PassGeometry
-from meridian.prediction.history import History, Rate
+from meridian.prediction.geometry import circle, peak_and_sweep
+from meridian.prediction.history import RECENT, History, Rate
+from meridian.prediction.profiles import ENVIRONMENT, Environment
 
 __all__ = [
     "FEATURES",
@@ -42,12 +42,6 @@ __all__ = [
     "FeatureVector",
     "compute_features",
 ]
-
-RECENT = 20
-"""How many of a station's latest outcomes its recent rates are taken over."""
-
-_FULL_TURN = 360.0
-_HALF_TURN = 180.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +73,7 @@ FEATURES: tuple[Feature, ...] = (
     Feature("band_decode_n", "ours", "how many that rate is over"),
     Feature("station_availability", "ours", f"last {RECENT} scheduled taken up"),
     Feature("station_availability_n", "ours", "how many that share is over"),
+    *(Feature(name, "ours", meaning) for name, meaning in ENVIRONMENT),
 )
 
 
@@ -103,6 +98,7 @@ def compute_features(
     labelled: Sequence[LabelledPass],
     rows: FeatureRows,
     history: History,
+    environment: Environment,
 ) -> tuple[FeatureVector, ...]:
     """The features of each pass, at its own ``aos``.
 
@@ -110,6 +106,7 @@ def compute_features(
         labelled: The passes to describe, as the evaluation dataset holds them.
         rows: The raw snapshot's geometry and bands.
         history: Every settled event, which answers only for the past.
+        environment: Every settled report placed on the sky, likewise.
 
     Returns:
         One vector per pass, in the order given.
@@ -119,10 +116,12 @@ def compute_features(
             the raw snapshot, so the labels and the snapshot do not belong
             together.
     """
-    return tuple(_vector(one, rows, history) for one in labelled)
+    return tuple(_vector(one, rows, history, environment) for one in labelled)
 
 
-def _vector(one: LabelledPass, rows: FeatureRows, history: History) -> FeatureVector:
+def _vector(
+    one: LabelledPass, rows: FeatureRows, history: History, environment: Environment
+) -> FeatureVector:
     geometry = rows.geometry.get(one.pass_id)
     if geometry is None:
         message = (
@@ -141,6 +140,7 @@ def _vector(one: LabelledPass, rows: FeatureRows, history: History) -> FeatureVe
         ),
         *_rate(history.decode_rate(("band", one.station_id, band), at)),
         *_rate(history.availability(one.station_id, at, recent=RECENT)),
+        *environment.values(one, geometry),
     )
     return FeatureVector(
         pass_id=one.pass_id,
@@ -152,46 +152,16 @@ def _vector(one: LabelledPass, rows: FeatureRows, history: History) -> FeatureVe
 
 
 def _geometry(one: LabelledPass, geometry: PassGeometry) -> tuple[float, ...]:
-    peak, sweep = _trajectory(geometry)
+    peak, sweep = peak_and_sweep(geometry)
     return (
         geometry.max_elevation_deg,
         (one.los - one.aos).total_seconds() / 60.0,
-        *_circle(geometry.aos_azimuth_deg),
-        *_circle(geometry.los_azimuth_deg),
-        *_circle(peak),
+        *circle(geometry.aos_azimuth_deg),
+        *circle(geometry.los_azimuth_deg),
+        *circle(peak),
         sweep,
         0.0 if geometry.track is None or not geometry.track.azimuth_deg else 1.0,
     )
-
-
-def _trajectory(geometry: PassGeometry) -> tuple[float, float]:
-    """The azimuth at the peak, and how far azimuth travels over the pass.
-
-    From the track where there is one. Without it, the peak is taken as the
-    circular midpoint of rise and set, and the sweep as the short way between
-    them — right for most passes, and ``track_known`` says it was a guess.
-    """
-    track = geometry.track
-    if track is None or not track.azimuth_deg:
-        rise, set_ = geometry.aos_azimuth_deg, geometry.los_azimuth_deg
-        turn = _turn(rise, set_)
-        return (rise + turn / 2.0) % _FULL_TURN, abs(turn)
-    elevations = track.elevation_deg
-    peak = track.azimuth_deg[elevations.index(max(elevations))]
-    azimuths = track.azimuth_deg
-    sweep = sum(abs(_turn(a, b)) for a, b in pairwise(azimuths))
-    return peak, sweep
-
-
-def _turn(start_deg: float, end_deg: float) -> float:
-    """The signed short way from one azimuth to another, in (-180, 180]."""
-    turn = (end_deg - start_deg) % _FULL_TURN
-    return turn - _FULL_TURN if turn > _HALF_TURN else turn
-
-
-def _circle(azimuth_deg: float) -> tuple[float, float]:
-    radians = math.radians(azimuth_deg)
-    return math.sin(radians), math.cos(radians)
 
 
 def _rate(rate: Rate) -> tuple[float, float]:

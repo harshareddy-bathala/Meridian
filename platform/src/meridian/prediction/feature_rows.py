@@ -7,9 +7,10 @@ by the same field helpers, so a malformed row is refused the same way.
 
 Every row is keyed by the prediction it describes. A labelled physical pass
 names its representative prediction (D-148), and its geometry is that
-prediction's.
+prediction's. Reports are keyed the same way, through their assignment, so a
+physical pass gathers them from every prediction of its rise.
 
-Reference: docs/DECISIONS.md D-148, D-157, D-158.
+Reference: docs/DECISIONS.md D-146, D-148, D-157, D-158, D-159.
 """
 
 from __future__ import annotations
@@ -20,10 +21,13 @@ from datetime import datetime
 
 from meridian.datasets.row_fields import (
     MalformedSnapshotError,
+    flag,
     instant,
     integer,
     jsonl_rows,
     number,
+    optional_instant,
+    optional_number,
     text,
 )
 
@@ -31,6 +35,7 @@ __all__ = [
     "FeatureRows",
     "PassGeometry",
     "PassTrack",
+    "Reading",
     "band_of",
     "read_feature_rows",
 ]
@@ -60,12 +65,28 @@ class PassTrack:
 class PassGeometry:
     """One prediction's geometry, all of it known before the pass."""
 
+    aos: datetime
+    computed_at: datetime
+    """When this prediction was made, so a feature can leave out one made after
+    the pass it describes (D-148)."""
+
     max_elevation_deg: float
     aos_azimuth_deg: float
     los_azimuth_deg: float
     element_set_epoch: datetime
     track: PassTrack | None
     """``None`` where the export could not compute one, and counted it."""
+
+
+@dataclass(frozen=True, slots=True)
+class Reading:
+    """What one assignment's latest report measured, beyond its outcome."""
+
+    assignment_id: str
+    outcome: str
+    first_detection_at: datetime | None
+    noise_floor_dbfs: float | None
+    simulated: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +98,12 @@ class FeatureRows:
 
     bands: Mapping[str, str]
     """Each satellite's band, from its lowest-numbered transmitter."""
+
+    longitudes: Mapping[str, float]
+    """Each station's longitude, for local solar hour."""
+
+    readings: Mapping[int, tuple[Reading, ...]]
+    """By prediction: each assignment's latest report, in assignment-id order."""
 
 
 def read_feature_rows(files: Mapping[str, bytes]) -> FeatureRows:
@@ -107,6 +134,8 @@ def read_feature_rows(files: Mapping[str, bytes]) -> FeatureRows:
             message = f"pass {pass_id} names element set {element_set_id}, not held"
             raise MalformedSnapshotError(message)
         geometry[pass_id] = PassGeometry(
+            aos=instant(one, "aos"),
+            computed_at=instant(one, "computed_at"),
             max_elevation_deg=number(one, "max_elevation_deg"),
             aos_azimuth_deg=number(one, "aos_azimuth_deg"),
             los_azimuth_deg=number(one, "los_azimuth_deg"),
@@ -121,7 +150,41 @@ def read_feature_rows(files: Mapping[str, bytes]) -> FeatureRows:
         bands.setdefault(
             text(one, "satellite_id"), band_of(number(one, "centre_freq_hz"))
         )
-    return FeatureRows(geometry=geometry, bands=bands)
+    return FeatureRows(
+        geometry=geometry,
+        bands=bands,
+        longitudes={
+            text(one, "station_id"): number(one, "lon_deg")
+            for one in _lines(files, "stations")
+        },
+        readings=_readings(files),
+    )
+
+
+def _readings(files: Mapping[str, bytes]) -> dict[int, tuple[Reading, ...]]:
+    """Each assignment's latest revision, gathered by the prediction it was for."""
+    latest: dict[str, Mapping[str, object]] = {}
+    for one in _lines(files, "observations"):
+        held = latest.get(text(one, "assignment_id"))
+        if held is None or integer(one, "revision") > integer(held, "revision"):
+            latest[text(one, "assignment_id")] = one
+    by_pass: dict[int, list[Reading]] = {}
+    for one in sorted(
+        _lines(files, "assignments"), key=lambda row: text(row, "assignment_id")
+    ):
+        report = latest.get(text(one, "assignment_id"))
+        if report is None:
+            continue
+        by_pass.setdefault(integer(one, "pass_id"), []).append(
+            Reading(
+                assignment_id=text(report, "assignment_id"),
+                outcome=text(report, "outcome"),
+                first_detection_at=optional_instant(report, "first_detection_at"),
+                noise_floor_dbfs=optional_number(report, "noise_floor_dbfs"),
+                simulated=flag(report, "simulated"),
+            )
+        )
+    return {pass_id: tuple(held) for pass_id, held in by_pass.items()}
 
 
 def band_of(frequency_hz: float) -> str:

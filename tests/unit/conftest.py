@@ -97,6 +97,8 @@ def _observation(
         "assignment_id": f"as_{pass_id}",
         "revision": 1,
         "outcome": outcome,
+        "first_detection_at": None,
+        "noise_floor_dbfs": None,
         "simulated": simulated,
     }
 

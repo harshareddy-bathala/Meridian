@@ -33,6 +33,7 @@ from meridian.datasets.completeness import USABLE_LABELS
 from meridian.datasets.labels import LabelledPass
 
 __all__ = [
+    "RECENT",
     "UNAVAILABLE_LABELS",
     "Event",
     "History",
@@ -46,6 +47,9 @@ UNAVAILABLE_LABELS = frozenset(
 """A scheduled pass the station did not take up (D-146 rules 3, 6, 7 and 8)."""
 
 _SUCCESS = "successful_reception"
+
+RECENT = 20
+"""How many of a station's latest outcomes its recent rates are taken over."""
 
 
 @dataclass(frozen=True, slots=True)

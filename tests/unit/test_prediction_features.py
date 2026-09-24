@@ -39,6 +39,7 @@ from meridian.prediction.feature_rows import (
 )
 from meridian.prediction.features import FEATURES, RECENT, compute_features
 from meridian.prediction.history import History, events_of
+from meridian.prediction.profiles import Environment
 
 DAY0 = datetime(2026, 9, 1, 6, 0, tzinfo=UTC)
 MARGIN_S = 24 * 3600
@@ -73,6 +74,8 @@ def labelled(
 
 def geometry(**fields: Any) -> PassGeometry:
     base = PassGeometry(
+        aos=DAY0,
+        computed_at=EPOCH,
         max_elevation_deg=40.0,
         aos_azimuth_deg=90.0,
         los_azimuth_deg=270.0,
@@ -86,14 +89,25 @@ def rows_for(passes: list[LabelledPass], **fields: Any) -> FeatureRows:
     return FeatureRows(
         geometry={one.pass_id: geometry(**fields) for one in passes},
         bands={SATELLITE: "vhf"},
+        longitudes={},
+        readings={},
+    )
+
+
+def compute(
+    targets: list[LabelledPass], rows: FeatureRows, known: list[LabelledPass]
+) -> tuple[Any, ...]:
+    """Features of ``targets``, against the history and environment of ``known``."""
+    return compute_features(
+        targets,
+        rows,
+        history_of(known),
+        Environment(known, rows, settle_margin_s=MARGIN_S),
     )
 
 
 def features(passes: list[LabelledPass]) -> list[dict[str, float]]:
-    history = History(
-        events_of(passes, bands={SATELLITE: "vhf"}, settle_margin_s=MARGIN_S)
-    )
-    return [one.named() for one in compute_features(passes, rows_for(passes), history)]
+    return [one.named() for one in compute(passes, rows_for(passes), passes)]
 
 
 def alternating(days: int) -> list[LabelledPass]:
@@ -240,7 +254,7 @@ def test_no_outcome_after_a_pass_began_reaches_its_features() -> None:
     passes = alternating(12)
     before = [
         canonical_line({"values": list(one.values)})
-        for one in compute_features(passes, rows_for(passes), history_of(passes))
+        for one in compute(passes, rows_for(passes), passes)
     ]
 
     for index, target in enumerate(passes):
@@ -250,7 +264,7 @@ def test_no_outcome_after_a_pass_began_reaches_its_features() -> None:
             else one
             for one in passes
         ]
-        (after,) = compute_features([target], rows_for(changed), history_of(changed))
+        (after,) = compute([target], rows_for(changed), changed)
         assert canonical_line({"values": list(after.values)}) == before[index]
 
 
@@ -260,8 +274,8 @@ def test_a_settled_outcome_does_reach_them() -> None:
     target = passes[-1]
     changed = [replace(passes[0], label=FLIP[str(passes[0].label)]), *passes[1:]]
 
-    (before,) = compute_features([target], rows_for(passes), history_of(passes))
-    (after,) = compute_features([target], rows_for(changed), history_of(changed))
+    (before,) = compute([target], rows_for(passes), passes)
+    (after,) = compute([target], rows_for(changed), changed)
 
     assert before.values != after.values
 
@@ -292,9 +306,11 @@ def test_without_a_track_the_peak_is_the_short_way_between_rise_and_set() -> Non
     rows = FeatureRows(
         geometry={1: geometry(aos_azimuth_deg=350.0, los_azimuth_deg=10.0)},
         bands={},
+        longitudes={},
+        readings={},
     )
 
-    (vector,) = compute_features([one], rows, History(()))
+    (vector,) = compute([one], rows, [])
     named = vector.named()
 
     assert named["peak_azimuth_cos"] == pytest.approx(1.0)
@@ -309,9 +325,11 @@ def test_with_a_track_the_peak_and_sweep_come_from_it() -> None:
         azimuth_deg=(350.0, 355.0, 5.0, 90.0),
         elevation_deg=(0.0, 20.0, 60.0, 10.0),
     )
-    rows = FeatureRows(geometry={1: geometry(track=track)}, bands={})
+    rows = FeatureRows(
+        geometry={1: geometry(track=track)}, bands={}, longitudes={}, readings={}
+    )
 
-    (vector,) = compute_features([labelled(1, 0)], rows, History(()))
+    (vector,) = compute([labelled(1, 0)], rows, [])
     named = vector.named()
 
     assert named["peak_azimuth_sin"] == pytest.approx(math.sin(math.radians(5.0)))
@@ -321,10 +339,8 @@ def test_with_a_track_the_peak_and_sweep_come_from_it() -> None:
 
 def test_a_new_station_s_features_are_all_finite() -> None:
     """D-161's precondition: no history is one half and a zero count, never NaN."""
-    (vector,) = compute_features(
-        [labelled(1, 0, station_id="st_new")],
-        rows_for([labelled(1, 0)]),
-        History(()),
+    (vector,) = compute(
+        [labelled(1, 0, station_id="st_new")], rows_for([labelled(1, 0)]), []
     )
 
     assert len(vector.values) == len(FEATURES)
@@ -335,7 +351,7 @@ def test_a_new_station_s_features_are_all_finite() -> None:
 
 def test_a_labelled_pass_missing_from_the_snapshot_is_refused() -> None:
     with pytest.raises(MalformedSnapshotError, match="not a pair"):
-        compute_features([labelled(9, 0)], rows_for([]), History(()))
+        compute([labelled(9, 0)], rows_for([]), [])
 
 
 def test_every_feature_is_in_a_known_group_and_named_once() -> None:
