@@ -3684,6 +3684,22 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-154 the gate is a type | `meridian/datasets/{result,selection,evaluation}.py`; the manifest's optional `summary` in `meridian/datasets/manifest.py`; `meridian/cli_snapshot.py` |
 | — the completion gate, and how to run it by hand | `tests/unit/test_completeness_gate.py`; `OPERATIONS.md` § Dataset snapshots |
 
+**Landed 2026-09-26**, building prediction, the learned profiles and Stage 17's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-155 fit with a library, score without one | `meridian/prediction/{fit,score}.py`; the `fit` extra in `platform/pyproject.toml`; `tests/unit/test_prediction_boundaries.py`; `tests/unit/test_layout.py`; the image check in `.github/workflows/ci.yml` |
+| D-156 the example is a labelled physical pass | `meridian/prediction/{examples,lineage}.py` |
+| D-157 features are point-in-time | `meridian/prediction/{history,features,feature_rows}.py`; `tests/unit/test_prediction_features.py` |
+| D-158 tracks frozen at export, propagation after the read | `meridian/datasets/{pass_tracks,export}.py`; `meridian/cli_snapshot.py`; `DATA-MODEL.md` |
+| D-159 the learned environment | `meridian/prediction/{profiles,geometry}.py` |
+| D-160 A to D by configuration only | `meridian/prediction/{configurations,model_config}.py`; `deploy/model.toml.example` |
+| D-161 cold start is a route | `meridian/prediction/score.py` (`route_for`, `predict`); the fallback in `meridian/prediction/fit.py` |
+| D-162 temporal splits on stated dates, folds inside them | `meridian/prediction/{splits,fit,evaluation}.py`; `deploy/model.toml.example` |
+| D-163 a model is a published directory | `meridian/prediction/model_files.py`; the `model` kind in `meridian/datasets/manifest.py`; `DATA-MODEL.md` |
+| D-164 the calibration report | `meridian/prediction/{calibration,calibration_report,evaluation}.py`; `meridian/cli_model.py` |
+| — the completion gate, and how to run it by hand | `tests/unit/test_prediction_gate.py`; `OPERATIONS.md` § Models |
+
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.

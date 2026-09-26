@@ -46,9 +46,49 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-09-23. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-09-26. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stage 16's software is built.** Its decisions are D-148 through D-154, and `docs/OPERATIONS.md` § Dataset snapshots, *Completeness and weights*, is its runbook. **Stage 17 is next.**
+**Stage 17's software is built.** Its decisions are D-155 through D-164, and `docs/OPERATIONS.md` § Models is its runbook. **Stage 18 is next.**
+- **The completion gate passes, and is demonstrable at a prompt:**
+  - **One interface.** Configurations A–D are one key in `model.toml`.
+  - **Temporal splits.** Splits are on dates the configuration states.
+  - **Cold start.** A station short of history is scored by a geometry-only model, and says so.
+  - **Reproducible.** `meridian model fit` run twice reports `already held, identically`.
+
+  `tests/unit/test_prediction_gate.py` asserts each clause through the commands, on a 21-day snapshot where a station joins inside the test span, and every claim has a positive control.
+- **There is no model of real data yet, and that is expected.** Every usable example is a measured pass of one of our stations, since simulated rows are never fitted on (D-078). Until one has reported for a few weeks, `fit` refuses with the counts. Every model so far has been fitted in tests on examples built for them.
+- **Fit with a library, score without one** (D-155):
+  - scikit-learn is the `meridian[fit]` extra, which the image does not carry. CI checks that the image's `meridian model` still loads, and that its `fit` asks for the extra.
+  - A model is `model.json`: an L2 logistic regression and a Platt map, every number rounded to 12 significant figures (D-163).
+  - `meridian.prediction.score` scores it with the standard library alone, matching scikit-learn within 1e-9. That is what the Stage 18 scheduler imports.
+- **Features are point-in-time** (D-157, D-159):
+  - geometry;
+  - element-set age and divergence;
+  - the station's decode rate and availability, by station, satellite and band;
+  - a learned horizon from first detections;
+  - interference by sky sector and hour;
+  - timing error.
+
+  Each reads only outcomes settled before the pass. A test reverses every later outcome and finds the features byte-identical, and the gate does the same through the raw snapshot.
+- **Tracks are frozen at export, and propagation left the transaction** (D-158). Export writes `pass_tracks.jsonl`, and both it and the archive denominator are computed after the `REPEATABLE READ` snapshot has closed. This settles the item Stage 16 left owed.
+- **The report is `EVALUATION.md` §7** (D-164). `meridian model evaluate` prints:
+  - the Brier score against the training base rate;
+  - a ten-bin reliability diagram that keeps its empty bins;
+  - calibration by station, band and element-set age, with n and Wilson intervals;
+  - counts by route;
+  - rolling-origin folds refitted inside the pre-test span (D-162);
+  - the dataset's completeness.
+- **Not built:**
+  - SC-1 (D − B), which is Stage 18's, measured on the schedule rather than the probability;
+  - a fitted propensity model; weights are still the counted cells of D-152;
+  - the public-conditions feature group, named and empty until Stage 31 (D-160);
+  - the reception verdict of D-102, which is a later stage.
+- **Known limits, each stated rather than hidden:**
+  - each pass reads its station's whole settled history, so building features grows with the square of a station's passes;
+  - heartbeats are exported only inside assignment windows, so station health is read as the share of scheduled passes taken up;
+  - the geometry-only model is fitted on every training example, not only those the fallback would score.
+
+**Stage 16's software is built.** Its decisions are D-148 through D-154, and `docs/OPERATIONS.md` § Dataset snapshots, *Completeness and weights*, is its runbook.
 - **The completion gate passes, and is demonstrable at a prompt.** Every evaluation dataset carries its selection: `station_days.jsonl`, `propensities.jsonl`, and a manifest `summary` holding each population's completeness and weight diagnostics. `meridian snapshot completeness <dataset>` prints them for any dataset, even one made from a snapshot with nothing in it. A result is an `EvaluationResult`, which cannot be built without its `CompletenessSummary` and carries either `IpwDiagnostics` or a `NotWeighted` reason (D-154).
 - **A physical pass is the unit, and fixing that came first** (D-148). Stage 15 labelled each prediction, so a rise predicted by two element sets and scheduled once was also counted as `not_scheduled`, roughly halving completeness. Predictions of one station and satellite whose windows overlap are now one pass, represented by the newest prediction made before it; labels are `labels-2`.
 - **Completeness is per UTC station-day, for two populations kept apart** (D-149, D-151). Eligible means measured, settled and not a silent satellite; attempted is the policy's choice, and whether the outcome is usable is counted beside it, never folded in. The threshold (0.8), the deciles, a histogram and the sensitivity table at 0.5–0.9 are all reported, and `--threshold` re-reads the days at any other value.
@@ -60,7 +100,7 @@ flowchart TD
 - **Not built:**
   - a fitted propensity model, which belongs with Stage 17's numerical dependencies;
   - randomised scheduling, which would give the weights something to work with;
-  - propagation of the archive denominator outside the export's transaction. It runs inside the `REPEATABLE READ` snapshot today, after every row is read. At one reference source that is seconds; with hundreds of archive stations it would hold the snapshot open for minutes, so it is owed before archive ingest grows (found in the Stage 16 review);
+  - *(settled by Stage 17, D-158)* propagation of the archive denominator outside the export's transaction. It runs inside the `REPEATABLE READ` snapshot today, after every row is read. At one reference source that is seconds; with hundreds of archive stations it would hold the snapshot open for minutes, so it is owed before archive ingest grows (found in the Stage 16 review);
   - archive stations' declared capability as a denominator filter. Archives publish none in our vocabulary, so the denominator is the satellites a station demonstrably received, which favours completeness, and D-150 says so.
 
 **Stage 15's software is built.** Its decisions are D-143 through D-147, and `docs/OPERATIONS.md` § Dataset snapshots is its runbook.

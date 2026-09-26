@@ -163,6 +163,7 @@ Key points that constrain implementation:
 - Four model configurations are evaluated and reported: **A** elevation only, **B** elevation + priority, **C** our features only, **D** all combined. The code must support running any configuration by config flag.
 - **Selection bias is the project's main methodological threat.** Archives only contain passes someone chose to observe. Any evaluation code must compute and report a completeness ratio, and must support inverse-propensity weighting.
 - Calibration matters more than accuracy. Every model output ships with a reliability diagram and a Brier score against a base-rate predictor.
+- **Fitting and scoring are split.** Only `meridian.prediction.fit` imports scikit-learn, which is the `meridian[fit]` extra and never in the image. `meridian.prediction.score` imports the standard library alone, and the scheduler scores from a `model.json` file. `tests/unit/test_prediction_boundaries.py` enforces both (D-155).
 
 ---
 
@@ -170,7 +171,7 @@ Key points that constrain implementation:
 
 **Phase 1 — Foundations — is done.** Its exit criterion, a virtual station visible on the public site from outside the college network, was met on 2026-09-14 (D-088).
 
-Work now follows the stage order in `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md`, whose "Where the build has got to" section says which stage is next. Do not scaffold a module ahead of the stage that builds it: prediction models, scheduler optimisation, the reliability layer and hardware stay empty stubs with documented interfaces until their stages arrive.
+Work now follows the stage order in `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md`, whose "Where the build has got to" section says which stage is next. Do not scaffold a module ahead of the stage that builds it: scheduler optimisation, the reliability layer and hardware stay empty stubs with documented interfaces until their stages arrive.
 
 ---
 

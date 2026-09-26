@@ -46,7 +46,7 @@ The sections below describe each module's responsibility in the finished system.
 |---|---|
 | `platform/orbit`, `registry`, `store`, `api` | Implemented, and still growing. The API serves all four MSP endpoints; the public read API is Stage 11. |
 | `platform/scheduler` | Value types, and the two baselines that exist to be beaten (Stage 7). The constrained optimiser and the retrospective oracle are Stage 18. |
-| `platform/prediction` | Its interface and nothing else — Stage 17. |
+| `platform/prediction` | The yield model (Stage 17): point-in-time features, configurations A–D, the cold-start route, temporal splits, a calibrated logistic regression fitted with the `fit` extra and scored in plain Python, and the calibration report. The reception verdict is a later stage. |
 | `platform/observations` | Ingest and the canonical body a revision is compared against (Stage 9). |
 | `platform/reliability` | Its interface and nothing else — Stage 20. |
 | `client`, `simulator` | A station that registers, holds work, executes it and delivers observations from a durable queue, and a deterministic fleet of virtual ones that drives it over real MSP (Stage 10). The receiver and decoder behind the client's execution seam are Stage 13. |

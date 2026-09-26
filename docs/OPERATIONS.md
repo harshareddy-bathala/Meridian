@@ -8,7 +8,7 @@ Every command runs from the repository root. `compose` below is shorthand for:
 docker compose -f deploy/docker-compose.yml
 ```
 
-Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, and D-143 to D-147 for dataset snapshots. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, D-143 to D-154 for dataset snapshots, and D-155 to D-164 for models. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
 
 ---
 
@@ -84,6 +84,8 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Freeze the database into a raw snapshot | `compose run --rm --no-deps … api meridian snapshot export --since <ISO-8601 Z>` — § Dataset snapshots |
 | Label a raw snapshot | `uv run meridian snapshot label <dir>` — needs no database; § Dataset snapshots |
 | Read a dataset's completeness and weights | `uv run meridian snapshot completeness <dataset dir>` — § Completeness and weights |
+| Fit a model on a dataset | `uv run meridian model fit <dataset dir> --config model.toml` — needs the `fit` extra; § Models |
+| Judge a model | `uv run meridian model evaluate <model dir>` — § Models |
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
 **Scheduling needs no command.** The `jobs` service generates passes and schedules them under configuration A every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
@@ -504,6 +506,116 @@ tar -C data -czf backups/datasets-$(date -u +%F).tar.gz datasets
 ```
 
 Evaluation datasets can always be regenerated from their raw snapshot and settings, so the raw snapshots are the part that matters.
+
+---
+
+## Models
+
+A model gives each candidate pass `P(decode | station, pass)`, the number the scheduler of Stage 18 will multiply by a pass's value. It is **fitted from an evaluation dataset**, never from the live tables, so it can be regenerated from a snapshot, a configuration file and a seed (rule 8). It is **scored from a file**, with plain Python and no numerical libraries, so the machine that schedules never needs them (D-155).
+
+Decisions this section puts into practice: D-155 to D-164.
+
+**Expect `fit` to refuse today.** A fit needs at least 20 training and 10 validation examples with both outcomes, and every usable example is a measured pass of one of our stations: simulated ones are never fitted on (D-078). Until a station has reported for a few weeks, `fit` says how many it found and exits 1. That refusal is the designed behaviour, not a fault.
+
+### It needs the `fit` extra, which the image does not have
+
+scikit-learn is the platform's `fit` extra, installed for fitting on a workstation and deliberately left out of the deployment image (D-155):
+
+```bash
+uv sync --extra fit
+```
+
+Without it, `meridian model fit` and `evaluate` say what to install and exit 1. `meridian model show`, and every other command, works without it. CI loads `meridian model` in the built image, and checks that `fit` there asks for the extra.
+
+### Where they go
+
+Models sit under the same datasets root as snapshots, named from their content in the same way:
+
+```text
+data/datasets/
+├── snapshots/<as_of>-<hash12>/    raw snapshots
+├── evaluation/<hash12>/           evaluation datasets
+└── models/<hash12>/               models: model.json, manifest.json
+```
+
+A model's manifest names the dataset it was fitted on, and that dataset's manifest names its raw snapshot. `fit` and `evaluate` follow those names under the root, check each hash, and refuse a directory that is not the one named. If you moved one, name it with `--dataset` or `--snapshot`.
+
+### Settings
+
+Copy `deploy/model.toml.example`. Its values are the defaults, and unknown keys are refused.
+
+- `configuration` — `A`, `B`, `C` or `D` (D-160). B's model is A's: priority weights the objective, not the model.
+- `population` — `own`, or `archive` under A only. The two are never pooled (D-156).
+- `train_until` and `validate_until` — **there are no defaults, and a fit without them is refused.** A pass rising before `train_until` trains the model, one before `validate_until` calibrates it, and the rest, up to the dataset's `as_of`, is the test span (D-162).
+- `min_station_history` — below this many settled outcomes, a station is scored by the geometry-only model (D-161).
+- `inverse_regularisation`, `weighting` (`none` or `ipw`), `seed` and `folds` — see the file.
+
+**Choose the dates before you look at any result, and do not move them to improve one.** Look at the dataset's span (`since … as_of`, which `label` prints). Leave the test span long enough to judge on, and keep training and validation in time order, as the scheduler will meet them. The settings are hashed into the model, so changed dates give a new model rather than an overwritten one, and the report prints the dates beside every figure.
+
+### The commands
+
+| Task | Command |
+|---|---|
+| Fit and publish a model | `uv run meridian model fit <dataset dir> --config model.toml` |
+| Print its calibration report | `uv run meridian model evaluate <model dir>` |
+| Print what it is | `uv run meridian model show <model dir>` |
+| Check a model against its manifest | `uv run meridian snapshot verify <model dir>` |
+
+- **`fit` prints** where the model landed, marked `(written)` or `already held, identically`. It also prints the model's hash, and the size and decodes of each span.
+- **`evaluate` takes no `--config`.** It reads the configuration the model was fitted under from the model's manifest, checks its hash, and rebuilds the examples from the dataset.
+- **`show` reads the file alone.** It prints the features, the standardisation, the coefficients and the calibration map of both models, and the library versions that fitted them.
+
+### Reading the report
+
+`meridian model evaluate` prints, top to bottom (D-164):
+
+- **Provenance:** the model's, dataset's and configuration's hashes, the three dates, the seed and the regularisation.
+- **The examples:** how many trained, calibrated and were judged, and how many simulated passes were left out.
+- **The Brier score against a base rate.** The base rate is the training span's decode rate, given to every test pass. The skill is 1 − Brier ÷ base-rate Brier: above 0 the model beats knowing only how often passes decode; at or below 0 it does not, and that is the finding to report.
+- **The routes.** How many test passes each model scored, `configured` or `geometry_fallback`, and how well.
+- **The reliability diagram.** Ten bins of predicted probability. Each shows its count, its mean prediction and the observed decode frequency with a Wilson 95% interval. Empty bins are printed as dashes, not left out.
+- **Calibration by segment.** By station, band and element-set age, each with n and an interval. With a handful of passes in a segment, the interval says more than the point.
+- **Rolling-origin folds.** Each is refitted inside the span before the test span, with its Brier score. Then comes the spread across folds, which is the variance of the figures above. A fold with too little data says why.
+- **The dataset's completeness**, as `meridian snapshot completeness` prints it (D-154).
+
+The figures are unweighted even after an `ipw` fit, and the report says so: weighting changes what the model learned, not what happened.
+
+### Exit codes
+
+| | Means |
+|---|---|
+| 0 | It ran and succeeded |
+| 1 | It ran and refused. Possible reasons:<br>• too few examples, or one outcome only;<br>• no split dates;<br>• a setting refused;<br>• the `fit` extra missing;<br>• a dataset, snapshot or model that is not the one named;<br>• an empty test span |
+| 2 | The command line was wrong |
+| **3** | **A dataset, snapshot or model no longer matches its manifest** |
+
+### The completion gate, at a prompt
+
+Stage 17's gate is that **configurations A–D run from one config interface, use temporal splits, handle cold start, and produce reproducible calibrated probabilities.** On a dataset with enough measured passes:
+
+```bash
+uv run meridian model fit <dataset> --config model.toml     # (written)
+uv run meridian model fit <dataset> --config model.toml     # already held, identically
+sed -i 's/^configuration = .*/configuration = "A"/' model.toml
+uv run meridian model fit <dataset> --config model.toml     # another model, one line changed
+uv run meridian model evaluate <model>                      # dates, Brier, bins, segments, routes
+```
+
+`tests/unit/test_prediction_gate.py` asserts each clause through these commands. It builds a 21-day snapshot in which a third station joins inside the test span, and gives every claim a positive control that must fail:
+- A to D are fitted from four files that differ in one line.
+- Every outcome after `train_until` is reversed in the raw snapshot, and the scaler and coefficients are unmoved.
+- No prediction module can shuffle.
+- The late station is scored by the geometry-only model until it has history, and says why.
+- Two fits under the network guard, and two in separate processes with different hash seeds, name one model.
+- Every probability is in [0, 1].
+
+### When `verify` exits 3
+
+The model's bytes are no longer the bytes that were fitted. Delete it (`chmod -R u+w` first) and fit again from its dataset and configuration. The manifest's `derived_from` and `parameters` say which. In one environment the refit names the same directory. With other numpy or scikit-learn versions the name may differ, though its predictions agree within 1e-9 (D-163).
+
+### Models are not in the database backup
+
+Models, like datasets, are regenerable from what they were made from, so the raw snapshots are what needs keeping (§ Snapshots are not in the database backup). To reproduce a model's exact bytes, also keep the library versions `show` prints.
 
 ---
 
