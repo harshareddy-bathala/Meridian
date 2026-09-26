@@ -79,6 +79,10 @@ def test_the_example_file_documents_the_defaults() -> None:
         ('configuration = "E"', "configuration must be one of"),
         ('population = "both"', "population must be one of"),
         ('population = "archive"', "configuration D cannot be fitted on the archive"),
+        (
+            'configuration = "B"\npopulation = "archive"',
+            "its model is A's and priority weights only the scheduler's objective",
+        ),
         ("min_station_history = true", "must be a whole number"),
         ("min_station_history = -1", "outside 0..10000"),
         ("configuration = ", "not TOML"),

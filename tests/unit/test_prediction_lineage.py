@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from meridian.datasets.canonical import canonical_line
 from meridian.datasets.evaluation import build_evaluation_dataset
 from meridian.datasets.label_config import LabelConfig
 from meridian.datasets.label_rows import read_labels
@@ -29,7 +30,7 @@ from meridian.prediction.examples import (
     own_examples,
     weighted,
 )
-from meridian.prediction.feature_rows import read_feature_rows
+from meridian.prediction.feature_rows import read_bands, read_feature_rows
 from meridian.prediction.fit import FittedModel
 from meridian.prediction.lineage import (
     LineageError,
@@ -203,3 +204,84 @@ def test_settings_that_do_not_hash_to_the_recorded_hash_are_refused(
 
     with pytest.raises(LineageError, match="do not hash to its config_sha256"):
         config_of(edited)
+
+
+def test_an_ipw_fit_on_a_dataset_without_weights_is_refused(
+    raw_snapshot: Any, world: Any, datasets_root: Path
+) -> None:
+    """A dataset labelled before Stage 16 has no weights to join."""
+    dataset, raw = labelled(raw_snapshot(world), datasets_root)
+    older = replace(
+        dataset,
+        files={k: v for k, v in dataset.files.items() if k != "propensities.jsonl"},
+    )
+
+    with pytest.raises(LineageError, match=r"holds no propensities\.jsonl"):
+        examples_of(older, raw, ModelConfig(weighting="ipw"))
+
+
+def test_archive_examples_need_no_pass_track(
+    raw_snapshot: Any, archive_world: Any, datasets_root: Path
+) -> None:
+    """A snapshot exported before Stage 17 has no tracks; archive passes never
+    read one, so an archive fit is not refused for the want of it."""
+    dataset, raw = labelled(raw_snapshot(archive_world), datasets_root)
+    before_tracks = replace(
+        raw, files={k: v for k, v in raw.files.items() if k != "pass_tracks.jsonl"}
+    )
+    config = ModelConfig(configuration="A", population="archive")
+
+    assert examples_of(dataset, before_tracks, config) == examples_of(
+        dataset, raw, config
+    )
+
+
+def transmitters(*rows: dict[str, object]) -> dict[str, bytes]:
+    return {"transmitters.jsonl": b"".join(canonical_line(row) for row in rows)}
+
+
+def transmitter(
+    number: int, hz: float, *, active: bool = True, deleted: bool = False
+) -> dict[str, object]:
+    return {
+        "id": number,
+        "satellite_id": "norad:57166",
+        "centre_freq_hz": hz,
+        "active": active,
+        "deleted_at": datetime(2026, 9, 1, tzinfo=UTC) if deleted else None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("retired", "band"),
+    [
+        (transmitter(1, 437e6, active=False), "vhf"),
+        (transmitter(1, 437e6, deleted=True), "vhf"),
+        (transmitter(1, 437e6), "uhf"),
+    ],
+)
+def test_a_satellites_band_is_its_live_downlinks(
+    retired: dict[str, object], band: str
+) -> None:
+    """A retired UHF transmitter numbered first does not decide the band."""
+    files = transmitters(retired, transmitter(2, 137.9e6))
+
+    assert read_bands(files) == {"norad:57166": band}
+
+
+def test_a_satellite_with_no_live_transmitter_keeps_its_first() -> None:
+    files = transmitters(
+        transmitter(2, 137.9e6, active=False), transmitter(1, 437e6, deleted=True)
+    )
+
+    assert read_bands(files) == {"norad:57166": "uhf"}
+
+
+def test_an_archive_model_names_the_sources_it_was_fitted_on(
+    raw_snapshot: Any, archive_world: Any, datasets_root: Path
+) -> None:
+    dataset, _ = labelled(raw_snapshot(archive_world), datasets_root)
+    model = published_model(dataset, datasets_root, ModelConfig(configuration="A"))
+
+    assert dataset.manifest.sources
+    assert model.manifest.sources == dataset.manifest.sources

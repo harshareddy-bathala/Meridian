@@ -287,7 +287,10 @@ def test_export_without_a_database_fails_cleanly(
 def test_export_ends_the_transaction_before_it_propagates(
     datasets_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """D-158: the database snapshot is closed before any pass is propagated.
+    """D-158: the snapshot, and the connection, close before any propagation.
+
+    Propagating can take minutes as archive ingest grows, and a connection
+    held idle meanwhile is a slot the Pi's database does not get back.
 
     Every collaborator of the command is replaced by one that writes down when
     it ran, so the order is the command's own, not a database's.
@@ -332,8 +335,8 @@ def test_export_ends_the_transaction_before_it_propagates(
         "begin",
         "read",
         "end",
-        "export what was read",
         "disconnect",
+        "export what was read",
     ]
 
 

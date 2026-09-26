@@ -37,6 +37,7 @@ __all__ = [
     "PassTrack",
     "Reading",
     "band_of",
+    "read_bands",
     "read_feature_rows",
 ]
 
@@ -142,17 +143,9 @@ def read_feature_rows(files: Mapping[str, bytes]) -> FeatureRows:
             element_set_epoch=epochs[element_set_id],
             track=tracks.get(pass_id),
         )
-    transmitters = sorted(
-        _lines(files, "transmitters"), key=lambda one: integer(one, "id")
-    )
-    bands: dict[str, str] = {}
-    for one in transmitters:
-        bands.setdefault(
-            text(one, "satellite_id"), band_of(number(one, "centre_freq_hz"))
-        )
     return FeatureRows(
         geometry=geometry,
-        bands=bands,
+        bands=read_bands(files),
         longitudes={
             text(one, "station_id"): number(one, "lon_deg")
             for one in _lines(files, "stations")
@@ -185,6 +178,29 @@ def _readings(files: Mapping[str, bytes]) -> dict[int, tuple[Reading, ...]]:
             )
         )
     return {pass_id: tuple(held) for pass_id, held in by_pass.items()}
+
+
+def read_bands(files: Mapping[str, bytes]) -> dict[str, str]:
+    """Each satellite's band, from the transmitters a raw snapshot holds.
+
+    A live transmitter — active and not deleted — decides, the lowest-numbered
+    first; only a satellite with no live transmitter falls back to its
+    lowest-numbered one of any kind, so a retired downlink never files a pass
+    under a band the satellite no longer uses.
+    """
+    transmitters = sorted(
+        _lines(files, "transmitters"),
+        key=lambda one: (
+            not flag(one, "active") or optional_instant(one, "deleted_at") is not None,
+            integer(one, "id"),
+        ),
+    )
+    bands: dict[str, str] = {}
+    for one in transmitters:
+        bands.setdefault(
+            text(one, "satellite_id"), band_of(number(one, "centre_freq_hz"))
+        )
+    return bands
 
 
 def band_of(frequency_hz: float) -> str:

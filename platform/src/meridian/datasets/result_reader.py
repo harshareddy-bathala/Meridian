@@ -78,7 +78,11 @@ def read_results(
     """
     manifest = dataset.manifest
     if manifest.kind != "evaluation_dataset":
-        message = f"{dataset.path} is a raw snapshot; label it first"
+        message = (
+            f"{dataset.path} is a raw snapshot; label it first"
+            if manifest.kind == "raw_snapshot"
+            else f"{dataset.path} is a {manifest.kind}, not an evaluation dataset"
+        )
         raise NoSelectionError(message)
     if not manifest.summary:
         message = (

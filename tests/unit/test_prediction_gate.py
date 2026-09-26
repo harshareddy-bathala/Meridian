@@ -121,7 +121,13 @@ def gate_world(flip: Flip = never) -> dict[str, Sequence[Mapping[str, object]]]:
         ],
         "stations": [{"station_id": station, "lon_deg": 77.6} for station in stations],
         "transmitters": [
-            {"id": 1, "satellite_id": SATELLITE, "centre_freq_hz": 137_900_000}
+            {
+                "id": 1,
+                "satellite_id": SATELLITE,
+                "centre_freq_hz": 137_900_000,
+                "active": True,
+                "deleted_at": None,
+            }
         ],
     }
 

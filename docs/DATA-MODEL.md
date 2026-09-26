@@ -363,7 +363,7 @@ Written by `meridian model fit` from an evaluation dataset, its raw snapshot and
   - `dataset_sha256` and `config_sha256`, so a copy of the file on its own still names its inputs.
 
   Every number is rounded to 12 significant figures, and the model was standardised and calibrated with the rounded values, so what is stored is what was used. It is scored by `meridian.prediction.score` with the standard library alone (D-155).
-- `manifest.json` — kind `model`; the dataset's hash as `derived_from`, `model-1` as the transformation version, the configuration's hash and resolved values as `parameters`; and counts: `examples.train`, `.validate` and `.test` with their `_decoded`, `examples.simulated` (usable passes left out, D-078) and `examples.without_weight` (left out of an `ipw` fit for want of a weight).
+- `manifest.json` — kind `model`; the dataset's hash as `derived_from`, `model-1` as the transformation version, the configuration's hash and resolved values as `parameters`; the archive `sources` the dataset carried, with their licences and terms, so a model fitted on archive receptions still names whose they were; and counts: `examples.train`, `.validate` and `.test` with their `_decoded`, `examples.simulated` (usable passes left out, D-078) and `examples.without_weight` (left out of an `ipw` fit for want of a weight).
 
 **A model holds no example.** Examples are rebuilt from the dataset and its raw snapshot whenever they are needed, since they are a pure function of both (D-157), and `meridian model evaluate` follows `derived_from` to find them, checking each hash.
 ---

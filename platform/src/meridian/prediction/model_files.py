@@ -6,9 +6,11 @@ hash of its manifest, so the same fit twice names the same directory and a
 changed byte is refused when it is read.
 
 **The manifest names what the model was made from:** the evaluation dataset's
-hash as ``derived_from``, the model configuration's hash, and every setting as
-``parameters``. ``model.json`` repeats both hashes, so a model file copied
-away from its directory still says which data and which settings made it.
+hash as ``derived_from``, the model configuration's hash, every setting as
+``parameters``, and the archive sources the dataset carried, with their
+licences, so a model fitted on somebody else's receptions still says whose.
+``model.json`` repeats both hashes, so a model file copied away from its
+directory still says which data and which settings made it.
 
 Deliberately apart from :mod:`meridian.prediction.fit`: reading a model back,
 as ``meridian model show`` and the scheduler do, must not import scikit-learn.
@@ -114,6 +116,7 @@ def publish_model(
         files=(file_entry(MODEL_FILE, data),),
         created_at=created_at,
         counts=dict(fitted.counts),
+        sources=dataset.manifest.sources,
         derived_from=dataset_sha256,
         transformation_version=MODEL_VERSION,
         config_sha256=config_sha256,

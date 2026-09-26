@@ -39,7 +39,7 @@ from meridian.prediction.examples import (
     own_examples,
     weighted,
 )
-from meridian.prediction.feature_rows import read_feature_rows
+from meridian.prediction.feature_rows import read_bands, read_feature_rows
 from meridian.prediction.model_config import (
     ModelConfig,
     config_from_parameters,
@@ -137,14 +137,17 @@ def examples_of(
         config: The model configuration.
 
     Returns:
-        The examples and the bands.
+        The examples and the bands. Archive examples read no pass track, so
+        they are built from a snapshot exported before Stage 17 too.
+
+    Raises:
+        LineageError: An ``ipw`` configuration and a dataset without weights.
     """
     parameters = dataset.manifest.parameters
-    rows = read_feature_rows(raw.files)
     if config.population == "own":
         found = own_examples(
             read_labels(dataset.files),
-            rows,
+            read_feature_rows(raw.files),
             settle_margin_s=whole(parameters.get("settle_margin_s"), "settle_margin_s"),
         )
     else:
@@ -155,8 +158,14 @@ def examples_of(
             parse_rows(raw.files), tolerance_s=tolerance, since=dataset.manifest.since
         )
     if config.weighting == "ipw":
+        if PROPENSITIES not in dataset.files:
+            message = (
+                f"{dataset.path} holds no {PROPENSITIES}, so an ipw fit has no"
+                " weights; label its raw snapshot again"
+            )
+            raise LineageError(message)
         found = weighted(found, dataset.files[PROPENSITIES])
-    return Inputs(examples=found, bands=rows.bands)
+    return Inputs(examples=found, bands=read_bands(raw.files))
 
 
 def _parent(

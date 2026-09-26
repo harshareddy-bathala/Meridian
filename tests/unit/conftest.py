@@ -126,7 +126,13 @@ WORLD: Mapping[str, Sequence[Mapping[str, object]]] = {
         {"station_id": "st_b", "received_at": AOS + timedelta(minutes=2)},
     ],
     "transmitters": [
-        {"id": 1, "satellite_id": "norad:57166", "centre_freq_hz": 137_900_000},
+        {
+            "id": 1,
+            "satellite_id": "norad:57166",
+            "centre_freq_hz": 137_900_000,
+            "active": True,
+            "deleted_at": None,
+        },
     ],
     "listening": [
         {"assignment_id": "as_1", "listening_confirmed": True},

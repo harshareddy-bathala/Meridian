@@ -94,12 +94,7 @@ class ModelConfig:
         _one_of("population", self.population, POPULATIONS)
         _one_of("weighting", self.weighting, WEIGHTINGS)
         if self.population == "archive" and self.configuration not in _ARCHIVE_ONLY:
-            message = (
-                f"configuration {self.configuration} cannot be fitted on the archive:"
-                " an archive pass carries its peak elevation and nothing else we"
-                " compute features from, so only configuration A can (D-156)"
-            )
-            raise ModelConfigError(message)
+            raise ModelConfigError(_archive_refusal(self.configuration))
         _whole("min_station_history", self.min_station_history, _MAX_HISTORY)
         _whole("seed", self.seed, _MAX_SEED)
         _whole("folds", self.folds, _MAX_FOLDS)
@@ -223,6 +218,20 @@ def load_model_config(path: Path | None) -> ModelConfig:
 def model_config_sha256(config: ModelConfig) -> bytes:
     """The configuration's hash, over its resolved values."""
     return hashlib.sha256(canonical_bytes(config.parameters())).digest()
+
+
+def _archive_refusal(configuration: str) -> str:
+    """Why a configuration other than A is not fitted on the archive."""
+    if configuration == "B":
+        return (
+            "configuration B is not fitted on the archive: its model is A's and"
+            " priority weights only the scheduler's objective (D-160), so fit A"
+        )
+    return (
+        f"configuration {configuration} cannot be fitted on the archive: an"
+        " archive pass carries its peak elevation and nothing else we compute"
+        " features from, so only configuration A can (D-156)"
+    )
 
 
 def _whole(name: str, value: object, largest: int) -> None:

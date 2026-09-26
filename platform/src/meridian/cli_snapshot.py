@@ -188,20 +188,20 @@ def _since(text: str) -> datetime:
 def _export_from_database(since: datetime, root: Path) -> PublishedDirectory:
     """One connection, one snapshot transaction, one registry over both.
 
-    The transaction ends before anything is propagated (D-158): what was read
-    is all the export needs afterwards.
+    The transaction ends, and the connection is closed, before anything is
+    propagated (D-158): what was read is all the export needs afterwards, and
+    a connection slot is not held idle while the orbit service works.
     """
     settings = load_settings()
-    with connect_once(settings) as conn:
-        with snapshot_transaction(conn):
-            registry = PsycopgRegistry(
-                conn,
-                pepper=settings.token_hash_pepper,
-                recovery_window_s=settings.registration_recovery_window_s,
-                now_utc=datetime.now(UTC),
-            )
-            read = read_snapshot(conn, registry, since=since)
-        return export_snapshot(read, root=root, created_at=datetime.now(UTC))
+    with connect_once(settings) as conn, snapshot_transaction(conn):
+        registry = PsycopgRegistry(
+            conn,
+            pepper=settings.token_hash_pepper,
+            recovery_window_s=settings.registration_recovery_window_s,
+            now_utc=datetime.now(UTC),
+        )
+        read = read_snapshot(conn, registry, since=since)
+    return export_snapshot(read, root=root, created_at=datetime.now(UTC))
 
 
 def _label(args: argparse.Namespace) -> int:
