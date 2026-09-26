@@ -324,7 +324,7 @@ What the ingested products say about a registered area over time. **Every point 
 
 ## Dataset snapshots *(files, not tables)*
 
-Stage 15's two artefacts are directories on disk, not rows. Each is content-addressed and sealed read-only, and each carries a `manifest.json` listing its files with their sha256 and row counts. The directory's hash is the sha256 of that manifest's canonical bytes, with `created_at` left out (D-144). Rows are canonical JSON Lines, one table per file, in primary-key order (D-070's rules).
+Stage 15's two artefacts, and Stage 17's models, are directories on disk, not rows. Each is content-addressed and sealed read-only, and each carries a `manifest.json` listing its files with their sha256 and row counts. The directory's hash is the sha256 of that manifest's canonical bytes, with `created_at` left out (D-144). Rows are canonical JSON Lines, one table per file, in primary-key order (D-070's rules).
 
 ### Raw snapshot — `data/datasets/snapshots/<as_of>-<hash prefix>/`
 
@@ -335,6 +335,7 @@ Written by `meridian snapshot export`, the only step that reads the database, in
 - the `element_sets` the passes were computed from, `satellites` with their `transmitters`, and `stations` with their `capabilities`, effective from `registered_at` until `deleted_at`;
 - `archive_stations`, `archive_observations` and `ingest_provenance`, kept in their own files and their own vocabulary;
 - `archive_passes` *(Stage 16)* — the passes our orbit service says each archive station could have received, for the satellites it was seen receiving, propagated at export so labelling never propagates (D-150). What could not be computed is counted in the manifest, not left out.
+- `pass_tracks` *(Stage 17)* — per measured pass, where it was in the sky: `pass_id`, `start` (its `aos`), `step_s` (30), and `azimuth_deg` and `elevation_deg` sampled every 30 s over `[aos, los)`, to a hundredth of a degree with azimuth folded into `[0, 360)`. Propagated at export from the pass's own element set over its own station, after the snapshot transaction has read everything and closed, so that no feature propagates and no hash rests on `sgp4` agreeing to the last bit (D-158). Simulated passes get no track, and a pass whose station or element set is not in the snapshot is counted under `pass_tracks.*` in the manifest, never dropped.
 
 Every row that has a `simulated` column keeps it. **A raw snapshot is outside the database backup and cannot be retaken**, since no later export can have the same `as_of`.
 
@@ -348,6 +349,23 @@ Written by `meridian snapshot label` from a raw snapshot and a labelling configu
 - `propensities.jsonl` *(Stage 16)* — per eligible pass: its population, station, satellite, `aos`, peak elevation and whether it was attempted; the model, the fallback level used, the cell and its available and attempted counts; the propensity; and the floored weight, null for a pass not attempted (D-152, D-153). A propensity of 0 is a pass with no support. **No outcome is written here.**
 - `manifest.json` — the raw snapshot's hash, the transformation version, the configuration's sha256 and values, and the measured and simulated counts reported apart. From Stage 16 it also counts station-days by population and status, and carries a **`summary`**: per population, the completeness summary (statuses, totals, deciles, histogram, sensitivity) and either the weight diagnostics or a stated reason there are none (D-154). `summary` is optional in the format, and written and hashed only when present, so a manifest from before Stage 16 keeps its bytes and its hash; `meridian snapshot completeness` refuses a dataset without one.
 
+
+### Model — `data/datasets/models/<hash prefix>/` *(Stage 17)*
+
+Written by `meridian model fit` from an evaluation dataset, its raw snapshot and a model configuration (`deploy/model.toml.example`). Published by the same rules and read by the same reader as a snapshot, so a changed byte is refused (D-163).
+
+- `model.json` — one canonical JSON object, with trailing newline:
+  - `model_format` (1) and `configuration` (`A` to `D`), `population` (`own` or `archive`), `weighted_by_priority`, `reads_history` and `min_station_history`;
+  - `configured` — the calibrated logistic regression: `features` in order, the training span's `mean` and `scale` per feature, `coefficients` on the standardised features, `intercept`, and `calibration` (`method` `platt`, `a`, `b`) so that p = sigmoid(a × logit + b);
+  - `fallback` — the geometry-only model in the same shape, present exactly when the configuration reads history (D-161), null otherwise;
+  - `train_until`, `validate_until` and `as_of` — the three spans (D-162); `inverse_regularisation`, `weighting` and `seed`;
+  - `libraries` — the numpy and scikit-learn versions that fitted it;
+  - `dataset_sha256` and `config_sha256`, so a copy of the file on its own still names its inputs.
+
+  Every number is rounded to 12 significant figures, and the model was standardised and calibrated with the rounded values, so what is stored is what was used. It is scored by `meridian.prediction.score` with the standard library alone (D-155).
+- `manifest.json` — kind `model`; the dataset's hash as `derived_from`, `model-1` as the transformation version, the configuration's hash and resolved values as `parameters`; the archive `sources` the dataset carried, with their licences and terms, so a model fitted on archive receptions still names whose they were; and counts: `examples.train`, `.validate` and `.test` with their `_decoded`, `examples.simulated` (usable passes left out, D-078) and `examples.without_weight` (left out of an `ipw` fit for want of a weight).
+
+**A model holds no example.** Examples are rebuilt from the dataset and its raw snapshot whenever they are needed, since they are a pure function of both (D-157), and `meridian model evaluate` follows `derived_from` to find them, checking each hash.
 ---
 
 ## Conventions

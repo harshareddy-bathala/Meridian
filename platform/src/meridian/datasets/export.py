@@ -15,17 +15,27 @@ does not have. So it is called here, once per closed assignment, and its answer
 is stored. The labeller reads the answer and nothing else, so the definition of
 a miss stays in one place (D-145).
 
-**An archive station's denominator is computed here too** (D-150). Our orbit
-service propagates each archive station's published location over the days it
-was active, and the passes it finds are frozen in ``archive_passes.jsonl`` —
-so labelling counts against a file, and never propagates.
+**Two steps: read inside the transaction, compute after it** (D-158).
+:func:`read_snapshot` holds the ``REPEATABLE READ`` snapshot only while it
+reads rows and asks the registry. :func:`export_snapshot` takes what was read —
+no connection, so it cannot reach the database — and propagates:
+
+* **each archive station's denominator** (D-150): its published location over
+  the days it was active, frozen in ``archive_passes.jsonl``;
+* **each measured pass's track** (D-158): azimuth and elevation every 30 s,
+  frozen in ``pass_tracks.jsonl``.
+
+So labelling and fitting count against files and never propagate, and however
+long propagation takes as archive ingest grows, the database snapshot is not
+held open for it. The rows are the same either way, because they were all read
+at one instant.
 
 **The registry is handed in.** This module depends on the ``Registry``
 protocol, not on how a registry is built; the command builds one over the same
 connection, so the listening answers are read inside the same snapshot as the
 rows they describe.
 
-Reference: docs/DECISIONS.md D-143, D-144, D-145, D-150.
+Reference: docs/DECISIONS.md D-143, D-144, D-145, D-150, D-158.
 """
 
 from __future__ import annotations
@@ -35,6 +45,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 
 from psycopg import IsolationLevel
 
@@ -46,6 +57,12 @@ from meridian.datasets.archive_passes import (
 )
 from meridian.datasets.canonical import canonical_line
 from meridian.datasets.manifest import Manifest, SourceEntry, content_sha256, file_entry
+from meridian.datasets.pass_tracks import (
+    PASS_TRACKS,
+    TrackFinder,
+    TrackRows,
+    compute_pass_tracks,
+)
 from meridian.datasets.publish import PublishedDirectory, publish_directory
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.registry import ListeningQuery, Registry
@@ -63,8 +80,11 @@ __all__ = [
     "LISTENING",
     "SIMULATED_SPLIT",
     "SNAPSHOTS",
+    "Propagator",
     "SchemaMissingError",
+    "SnapshotRead",
     "export_snapshot",
+    "read_snapshot",
     "snapshot_transaction",
 ]
 
@@ -83,14 +103,28 @@ class SchemaMissingError(RuntimeError):
     """The database records no migration, so no snapshot could say what it read."""
 
 
-@dataclass(frozen=True, slots=True)
-class _Rows:
-    """Every table's rows, read inside one transaction."""
+class Propagator(PassFinder, TrackFinder, Protocol):
+    """What the export propagates with: pass windows and look angles."""
 
+
+@dataclass(frozen=True, slots=True)
+class SnapshotRead:
+    """Everything read inside one transaction, and nothing computed from it."""
+
+    schema_revision: str
+    scope: SnapshotScope
     tables: Mapping[str, Sequence[Mapping[str, object]]]
     listening: Sequence[Mapping[str, object]]
+    sources: tuple[SourceEntry, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _Computed:
+    """What export propagates from the rows, after the transaction."""
+
     archive_passes: Sequence[Mapping[str, object]]
-    archive_counts: Mapping[str, int]
+    pass_tracks: Sequence[Mapping[str, object]]
+    counts: Mapping[str, int]
 
 
 @contextmanager
@@ -121,26 +155,20 @@ def snapshot_transaction(conn: Connection) -> Iterator[Connection]:
         conn.isolation_level, conn.read_only = previous
 
 
-def export_snapshot(
-    conn: Connection,
-    registry: Registry,
-    *,
-    root: Path,
-    since: datetime,
-    created_at: datetime,
-) -> PublishedDirectory:
-    """Read the database once and publish what it held as a raw snapshot.
+def read_snapshot(
+    conn: Connection, registry: Registry, *, since: datetime
+) -> SnapshotRead:
+    """Read every table and ask about every closed assignment, once.
 
     Args:
         conn: A connection inside :func:`snapshot_transaction` — or, in a
             test, inside any transaction.
         registry: Answers ``was_listening`` over the same connection.
-        root: The datasets root; the snapshot goes under ``root/snapshots``.
         since: Where the snapshot starts. It ends at the transaction's time.
-        created_at: When this run happened, recorded and never hashed.
 
     Returns:
-        Where the snapshot landed and its manifest.
+        The rows, the listening answers and the sources' terms. Nothing here
+        needs the connection afterwards, so the transaction can end.
 
     Raises:
         SchemaMissingError: The database has no migration recorded.
@@ -151,23 +179,17 @@ def export_snapshot(
         message = "the database records no migration; run `meridian db upgrade`"
         raise SchemaMissingError(message)
     scope = SnapshotScope(since=since, as_of=snapshot_instant(conn))
-    rows = _read(conn, registry, scope, SkyfieldOrbitService())
-    files = {
-        f"{name}.jsonl": _jsonl(table)
-        for name, table in (
-            *rows.tables.items(),
-            (LISTENING, rows.listening),
-            (ARCHIVE_PASSES, rows.archive_passes),
-        )
-    }
-    manifest = Manifest(
-        kind="raw_snapshot",
+    tables = {one.name: read_table(conn, one, scope) for one in SNAPSHOT_TABLES}
+    satellite_of = {one["id"]: one["satellite_id"] for one in tables["passes"]}
+    return SnapshotRead(
         schema_revision=schema,
-        since=scope.since,
-        as_of=scope.as_of,
-        files=tuple(file_entry(name, data) for name, data in sorted(files.items())),
-        created_at=created_at,
-        counts=_counts(rows),
+        scope=scope,
+        tables=tables,
+        listening=[
+            _listening(registry, one, satellite_of[one["pass_id"]])
+            for one in tables["assignments"]
+            if one["decision"] == "scheduled" and _closed(one, scope.as_of)
+        ],
         sources=tuple(
             SourceEntry(
                 source_id=one.source_id,
@@ -179,37 +201,82 @@ def export_snapshot(
             for one in read_source_terms(conn, scope)
         ),
     )
-    stamp = scope.as_of.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def export_snapshot(
+    read: SnapshotRead,
+    *,
+    root: Path,
+    created_at: datetime,
+    orbit: Propagator | None = None,
+) -> PublishedDirectory:
+    """Propagate what was read, and publish it all as a raw snapshot.
+
+    Takes no connection: whatever this does, and however long it takes, the
+    database snapshot it describes is already closed (D-158).
+
+    Args:
+        read: What :func:`read_snapshot` read.
+        root: The datasets root; the snapshot goes under ``root/snapshots``.
+        created_at: When this run happened, recorded and never hashed.
+        orbit: The orbit service to propagate with; ours unless a test hands
+            in another.
+
+    Returns:
+        Where the snapshot landed and its manifest.
+    """
+    computed = _compute(read, SkyfieldOrbitService() if orbit is None else orbit)
+    files = {
+        f"{name}.jsonl": _jsonl(table)
+        for name, table in (
+            *read.tables.items(),
+            (LISTENING, read.listening),
+            (ARCHIVE_PASSES, computed.archive_passes),
+            (PASS_TRACKS, computed.pass_tracks),
+        )
+    }
+    manifest = Manifest(
+        kind="raw_snapshot",
+        schema_revision=read.schema_revision,
+        since=read.scope.since,
+        as_of=read.scope.as_of,
+        files=tuple(file_entry(name, data) for name, data in sorted(files.items())),
+        created_at=created_at,
+        counts=_counts(read) | dict(computed.counts),
+        sources=read.sources,
+    )
+    stamp = read.scope.as_of.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
     name = f"{stamp}-{content_sha256(manifest).hex()[:12]}"
     return publish_directory(root / SNAPSHOTS, name, manifest, files)
 
 
-def _read(
-    conn: Connection, registry: Registry, scope: SnapshotScope, orbit: PassFinder
-) -> _Rows:
-    """Every table, the listening answers, and the archive stations' passes."""
-    tables = {one.name: read_table(conn, one, scope) for one in SNAPSHOT_TABLES}
-    satellite_of = {one["id"]: one["satellite_id"] for one in tables["passes"]}
-    listening = [
-        _listening(registry, one, satellite_of[one["pass_id"]])
-        for one in tables["assignments"]
-        if one["decision"] == "scheduled" and _closed(one, scope.as_of)
-    ]
+def _compute(read: SnapshotRead, orbit: Propagator) -> _Computed:
+    """The archive stations' passes and our passes' tracks."""
+    tables = read.tables
     archive = compute_archive_passes(
         ArchiveRows(
             stations=tables["archive_stations"],
             receptions=tables["archive_observations"],
             element_sets=tables["element_sets"],
         ),
-        since=scope.since,
-        as_of=scope.as_of,
+        since=read.scope.since,
+        as_of=read.scope.as_of,
         orbit=orbit,
     )
-    return _Rows(
-        tables=tables,
-        listening=listening,
+    tracks = compute_pass_tracks(
+        TrackRows(
+            passes=tables["passes"],
+            stations=tables["stations"],
+            element_sets=tables["element_sets"],
+        ),
+        orbit,
+    )
+    return _Computed(
         archive_passes=archive.rows,
-        archive_counts=archive.counts,
+        pass_tracks=tracks.rows,
+        counts={"archive_passes": len(archive.rows)}
+        | dict(archive.counts)
+        | dict(tracks.counts),
     )
 
 
@@ -242,19 +309,18 @@ def _listening(
     }
 
 
-def _counts(rows: _Rows) -> dict[str, int]:
+def _counts(read: SnapshotRead) -> dict[str, int]:
     """Measured and simulated apart for every table that can hold both."""
     counts: dict[str, int] = {}
     for name in SIMULATED_SPLIT:
-        table = rows.tables[name]
+        table = read.tables[name]
         simulated = sum(1 for one in table if one["simulated"] is True)
         counts[f"{name}.measured"] = len(table) - simulated
         counts[f"{name}.simulated"] = simulated
-    confirmed = sum(1 for one in rows.listening if one["listening_confirmed"])
+    confirmed = sum(1 for one in read.listening if one["listening_confirmed"])
     counts["listening.confirmed"] = confirmed
-    counts["listening.not_confirmed"] = len(rows.listening) - confirmed
-    counts["archive_passes"] = len(rows.archive_passes)
-    return counts | dict(rows.archive_counts)
+    counts["listening.not_confirmed"] = len(read.listening) - confirmed
+    return counts
 
 
 def _jsonl(rows: Sequence[Mapping[str, object]]) -> bytes:

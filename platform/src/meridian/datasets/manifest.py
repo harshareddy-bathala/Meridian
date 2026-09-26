@@ -59,11 +59,14 @@ __all__ = [
 MANIFEST_FORMAT = 1
 """Bumped when the stored shape changes. An unknown format is refused."""
 
-Kind = Literal["raw_snapshot", "evaluation_dataset"]
-KINDS: tuple[Kind, ...] = ("raw_snapshot", "evaluation_dataset")
+Kind = Literal["raw_snapshot", "evaluation_dataset", "model"]
+KINDS: tuple[Kind, ...] = ("raw_snapshot", "evaluation_dataset", "model")
+_DERIVED: tuple[Kind, ...] = ("evaluation_dataset", "model")
+"""Kinds made from another directory, which name it and how (D-163)."""
 
-_FILE_NAME = re.compile(r"^[a-z][a-z0-9_]*\.jsonl$")
-"""Ours, and plain: a file name is a table name, never a string from a row."""
+_FILE_NAME = re.compile(r"^([a-z][a-z0-9_]*\.jsonl|model\.json)$")
+"""Ours, and plain: a file name is a table name, or a model's one file (D-163),
+never a string from a row."""
 
 _COUNT_NAME = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
 
@@ -186,13 +189,13 @@ class Manifest:
         self._check_lineage()
 
     def _check_lineage(self) -> None:
-        """An evaluation dataset names its inputs; a raw snapshot has none."""
+        """A dataset or a model names its inputs; a raw snapshot has none."""
         lineage = (self.derived_from, self.transformation_version, self.config_sha256)
-        if self.kind == "evaluation_dataset":
+        if self.kind in _DERIVED:
             if any(one is None for one in lineage):
                 message = (
-                    "an evaluation dataset names the raw snapshot, transformation "
-                    "version and configuration it came from"
+                    f"a manifest of kind {self.kind} names the directory it was"
+                    " made from, its transformation version and its configuration"
                 )
                 raise MalformedManifestError(message)
             _check_digest("derived_from", self.derived_from)
@@ -333,7 +336,7 @@ def _from_json(stored: Mapping[str, object]) -> Manifest:
         raise MalformedManifestError(message)
     counts = mapping(stored["counts"], "counts")
     return Manifest(
-        kind="raw_snapshot" if kind == "raw_snapshot" else "evaluation_dataset",
+        kind=next(one for one in KINDS if one == kind),
         schema_revision=text(stored["schema_revision"], "schema_revision"),
         since=instant(stored["since"], "since"),
         as_of=instant(stored["as_of"], "as_of"),

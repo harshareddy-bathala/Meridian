@@ -46,6 +46,7 @@ __all__ = [
     "Scored",
     "weigh",
     "weight_of",
+    "wilson",
 ]
 
 Z_95 = 1.959963984540054
@@ -171,9 +172,9 @@ def weigh(scored: Sequence[Scored], *, model: str, floor: float) -> IpwDiagnosti
             and one.estimate.candidate.attempted
             and one.estimate.propensity < floor
         ),
-        unweighted=_wilson(successes / len(units), len(units)) if units else None,
+        unweighted=wilson(successes / len(units), len(units)) if units else None,
         weighted_rate=(
-            _wilson(fsum(w for w, success in units if success) / total, ess)
+            wilson(fsum(w for w, success in units if success) / total, ess)
             if units
             else None
         ),
@@ -185,7 +186,7 @@ def weigh(scored: Sequence[Scored], *, model: str, floor: float) -> IpwDiagnosti
     )
 
 
-def _wilson(p: float, n: float) -> Rate:
+def wilson(p: float, n: float) -> Rate:
     """The Wilson score interval, which stays inside 0..1 at small n."""
     z2 = Z_95 * Z_95
     denominator = 1 + z2 / n

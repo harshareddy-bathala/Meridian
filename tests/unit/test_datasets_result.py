@@ -124,6 +124,16 @@ def test_a_raw_snapshot_has_no_results(raw_snapshot: Any, world: Any) -> None:
         read_results(read_directory(raw_snapshot(world)))
 
 
+def test_a_directory_of_another_kind_is_named_for_what_it_is(
+    dataset: SnapshotDirectory,
+) -> None:
+    """A model is not a raw snapshot, and labelling it would not help."""
+    model = replace(dataset, manifest=replace(dataset.manifest, kind="model"))
+
+    with pytest.raises(NoSelectionError, match="is a model, not an evaluation"):
+        read_results(model)
+
+
 def test_a_dataset_labelled_before_stage_16_is_sent_back(
     dataset: SnapshotDirectory,
 ) -> None:

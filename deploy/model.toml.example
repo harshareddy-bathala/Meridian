@@ -1,0 +1,48 @@
+# Model settings for `meridian model fit --config <this file>`.
+#
+# Every key is optional; the values below are the defaults, taken from the
+# decisions that introduced them. An unknown key is refused rather than ignored,
+# so a misspelling cannot silently keep a default you believe you changed. The
+# model's hash covers these *values*, not this file's bytes.
+
+# Which configuration to fit (D-160). The inputs of each are fixed in code:
+#   A  elevation only                        — the naive baseline
+#   B  as A, with priority weighting the objective, never the model
+#                                             — what existing practice achieves
+#   C  our features only                      — do our signals carry information?
+#   D  every group                            — the shipped system
+configuration = "D"
+
+# Whose passes to fit on (D-156): "own" or "archive". Never both at once. An
+# archive pass carries its peak elevation and nothing else we compute features
+# from, so "archive" is refused with any configuration but A.
+population = "own"
+
+# Settled, usable outcomes a station needs before the configured model scores
+# it. Below this it is scored by the geometry-only model, and every prediction
+# says so (D-161). 0 .. 10000.
+min_station_history = 20
+
+# The split dates (D-162), as UTC date-times. A pass rising before train_until
+# trains; before validate_until, it calibrates; from there to the dataset's
+# as_of, it is test and is read only by `meridian model evaluate`. No default:
+# `meridian model fit` refuses a configuration that does not name both.
+# train_until = 2027-01-01T00:00:00Z
+# validate_until = 2027-02-01T00:00:00Z
+
+# scikit-learn's C for the L2 penalty (D-155): smaller is stronger. Stated,
+# never tuned, so no choice is made by looking at the test span.
+inverse_regularisation = 1.0
+
+# "none", or "ipw" to weight each example by its inverse propensity from the
+# dataset's propensities.jsonl (D-156). An example with no weight is left out
+# of a weighted fit and counted.
+weighting = "none"
+
+# Handed to the solver and recorded in the model. 0 .. 4294967295.
+seed = 0
+
+# Rolling-origin folds `meridian model evaluate` refits inside the span before
+# validate_until, each a whole train / validate / judge split, for the spread
+# of every figure (D-162). 0 .. 20; 0 runs none, and the report says so.
+folds = 4

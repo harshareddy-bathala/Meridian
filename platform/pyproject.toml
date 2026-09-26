@@ -21,6 +21,19 @@ dependencies = [
     "prometheus-client>=0.21",
 ]
 
+[project.optional-dependencies]
+# Fitting only (D-155). `meridian model fit` needs scikit-learn; scoring a pass
+# does not, and the jobs service that scores passes runs on the station's Pi.
+# So it is an extra the platform image never installs, and only
+# meridian.prediction.fit may import it (tests/unit/test_prediction_boundaries.py).
+# numpy is listed because fit imports it directly; it is in the image anyway,
+# through skyfield. scikit-learn 1.8 is where C=inf means "unpenalised", which
+# the Platt map relies on.
+fit = [
+    "numpy>=2.0",
+    "scikit-learn>=1.8",
+]
+
 [project.scripts]
 meridian = "meridian.cli:main"
 

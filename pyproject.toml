@@ -21,7 +21,10 @@ dev = [
     #
     # meridian-ingest is here and *not* in deploy/Dockerfile: the tests need it
     # importable, the runtime image must not carry it (D-138).
-    "meridian",
+    #
+    # meridian[fit] is here for the same reason: tests fit models, and the image
+    # installs no extra (D-155).
+    "meridian[fit]",
     "meridian-client",
     "meridian-sim",
     "meridian-ingest",
@@ -209,6 +212,13 @@ mypy_path = ["platform/src", "client/src", "simulator/src", "ingest/src"]
 # the library rather than about our code. Scoped to these two names, so a
 # dependency added later is type-checked by default rather than by omission.
 module = ["sgp4.*", "skyfield.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# scikit-learn ships no type information either. It is imported by one module,
+# meridian.prediction.fit (D-155), which turns everything it returns into
+# floats before the numbers leave it.
+module = ["sklearn.*"]
 ignore_missing_imports = true
 
 # There is deliberately no `tests.*` override. CI type-checks

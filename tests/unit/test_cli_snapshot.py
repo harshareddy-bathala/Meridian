@@ -8,12 +8,16 @@ The exit codes are asserted as values because they are what a script reads:
 **3** has to mean "this snapshot is not what its manifest says", and nothing
 else.
 
-Reference: docs/DECISIONS.md D-143, D-144.
+Reference: docs/DECISIONS.md D-143, D-144, D-158.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -235,7 +239,7 @@ def test_verify_accepts_an_intact_snapshot(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert run(datasets_root, "verify", str(raw_snapshot(world))) == 0
-    assert "is intact: a raw snapshot of 14 files" in capsys.readouterr().out
+    assert "is intact: a raw snapshot of 15 files" in capsys.readouterr().out
 
 
 def test_verify_exits_3_on_a_changed_byte(
@@ -278,6 +282,62 @@ def test_export_without_a_database_fails_cleanly(
     said = capsys.readouterr().err
     assert "cannot reach the database" in said
     assert "Traceback" not in said
+
+
+def test_export_ends_the_transaction_before_it_propagates(
+    datasets_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-158: the snapshot, and the connection, close before any propagation.
+
+    Propagating can take minutes as archive ingest grows, and a connection
+    held idle meanwhile is a slot the Pi's database does not get back.
+
+    Every collaborator of the command is replaced by one that writes down when
+    it ran, so the order is the command's own, not a database's.
+    """
+    from meridian import cli_snapshot
+
+    calls: list[str] = []
+
+    @contextmanager
+    def held(opened: str, closed: str) -> Iterator[object]:
+        calls.append(opened)
+        yield object()
+        calls.append(closed)
+
+    def read_snapshot(*_: object, **__: object) -> str:
+        calls.append("read")
+        return "what was read"
+
+    def export_snapshot(read: object, **_: object) -> str:
+        calls.append(f"export {read}")
+        return "published"
+
+    settings = SimpleNamespace(token_hash_pepper="p", registration_recovery_window_s=60)
+    monkeypatch.setattr(cli_snapshot, "load_settings", lambda: settings)
+    monkeypatch.setattr(
+        cli_snapshot, "connect_once", lambda _: held("connect", "disconnect")
+    )
+    monkeypatch.setattr(
+        cli_snapshot, "snapshot_transaction", lambda _: held("begin", "end")
+    )
+    monkeypatch.setattr(cli_snapshot, "PsycopgRegistry", lambda *_, **__: object())
+    monkeypatch.setattr(cli_snapshot, "read_snapshot", read_snapshot)
+    monkeypatch.setattr(cli_snapshot, "export_snapshot", export_snapshot)
+
+    published = cli_snapshot._export_from_database(
+        datetime(2026, 8, 1, tzinfo=UTC), datasets_root
+    )
+
+    assert published == "published"
+    assert calls == [
+        "connect",
+        "begin",
+        "read",
+        "end",
+        "disconnect",
+        "export what was read",
+    ]
 
 
 @pytest.mark.parametrize(

@@ -3336,6 +3336,161 @@ Stage 16's gate is that every archive-derived result *automatically* includes co
 
 ---
 
+## D-155 — Fit with a library, score without one
+
+**2026-09-24 · accepted** · *`meridian.prediction`, `platform/pyproject.toml`, `deploy/Dockerfile`, Stage 17*
+
+Stage 17 is where the roadmap allows numerical dependencies. Fitting a model needs them. Scoring a pass does not: the scheduler of Stage 18 runs in the `jobs` service on the station's Pi, and what it needs from a fitted logistic regression is a dot product and a sigmoid.
+
+**scikit-learn is an optional extra, `meridian[fit]`,** used by `meridian model fit` and nothing else, together with numpy, which the fitting module imports directly. The platform image does not install the extra, as it does not install `meridian-ingest` (D-138). `tests/unit/test_layout.py` checks the Dockerfile, and CI asks the built image that scikit-learn and scipy are absent. Only `meridian.prediction.fit` may import scikit-learn or scipy, in any distribution.
+
+**numpy is already in the image, and that is not this decision's doing.** skyfield depends on it, so it has been on the Pi since Stage 5. The first draft of this entry said the image carried no numerical stack; CI's image check found numpy there on the first run, and the claim is narrowed to scikit-learn and scipy, which are the heavy part.
+
+**Scoring is plain Python all the same,** in `meridian.prediction.score`, and no prediction module but `fit` imports numpy. `tests/unit/test_prediction_boundaries.py` checks both lines. The reason is not image size: a fitted model is a JSON file of coefficients (D-163), and a scorer that is a dot product and a sigmoid in the standard library gives the same probability from that file whichever numpy version is installed, or none. What the Pi reads is data, not a pickled object from a library it does not have.
+
+**The model is L2-regularised logistic regression.** The roadmap asks for a simple interpretable model first, and a coefficient per feature is something a viva can read. A more complex model is a later decision, taken if the ablation shows this one leaves signal on the table.
+
+*Rejected: scikit-learn as an ordinary dependency.* About 100 MB of scipy and scikit-learn in an image whose job is to receive, for a computation that is ten lines of Python. *Rejected: our own IRLS on numpy.* It would be an optimiser to write and test that a library already provides, which fails `CLAUDE.md`'s build-or-use test.
+
+---
+
+## D-156 — The training example is a labelled physical pass
+
+**2026-09-24 · accepted** · *`meridian.prediction`, Stage 17*
+
+**An example is one physical pass (D-148) from an evaluation dataset.** It is positive if labelled `successful_reception`, and negative if labelled `signal_no_decode` or `confirmed_miss` — the `USABLE_LABELS` of D-149. Every other label and every exclusion of D-146 stays out: a pass nobody listened for says nothing about whether it would have decoded, and a silent satellite says nothing about the station (`EVALUATION.md` §5).
+
+**Simulated passes are refused, not filtered quietly** (D-078). A dataset whose usable examples are all simulated fails with that reason, so a model fitted on the simulator's own rule cannot be produced by accident.
+
+**One fit, one population.** The configuration names `own` or `archive`, defaulting to `own`. The two are never pooled: they differ in what an outcome means (D-139) and in how they were selected (D-149). Every report carries that population's `EvaluationResult` (D-154), so a model's figures cannot be stated without the completeness of the data it was judged on.
+
+**An archive example is a matched reception with an outcome:** `decoded` positive, `no_data` negative, `unknown` out, as completeness counts them (D-153). An archive pass carries its peak elevation and nothing else we compute: no azimuths, no track, no element set, and no heartbeat or report of ours. So `population = "archive"` is refused with any configuration but A, rather than fitted on features that are all at their priors.
+
+**IPW sample weights are a configuration option, off by default.** Our own station's propensities are near 0 and 1 (D-152), so weighting today would mostly amplify noise; the option exists so the comparison can be made once randomised scheduling gives the weights support.
+
+---
+
+## D-157 — Features are point-in-time
+
+**2026-09-24 · accepted** · *`meridian.prediction.history`, `meridian.prediction.profiles`, Stage 17*
+
+A history feature computed with the pass's own outcome, or any later one, reads the future, and a model scored on it looks better than any deployed model can be.
+
+**A pass's features read only outcomes that had settled before it began:** an earlier pass contributes if its `los` plus the labelling `settle_margin_s` (D-146) is at or before this pass's `aos`. The same rule governs every station-history feature and every learned profile. Heartbeats are read up to `aos` only.
+
+**Features are a pure function of the raw snapshot and its labels.** They read no clock, no database and no network, so two runs over one dataset produce the same bytes. `tests/unit/test_prediction_features.py` changes every outcome after a pass's `aos` and finds that pass's features byte-identical; changing an earlier, settled outcome is the positive control that shows the test can fail.
+
+*Rejected: `submitted_at` before `aos` as the cut.* It is what the platform knew, but a label also depends on listening evidence and on the satellite judgement of D-147, which are settled later. The settle margin is the rule the labels are already made under.
+
+---
+
+## D-158 — Pass tracks are computed at export and frozen
+
+**2026-09-24 · accepted** · *`meridian.datasets.export`, `meridian.store.snapshot_reads`, Stage 17*
+
+The learned profiles of D-159 need to know where in the sky a satellite was during a pass, not just where it rose and set. `passes` stores aos and los azimuth and the maximum elevation, and no track.
+
+**Export computes each exported pass's track and writes `pass_tracks.jsonl`:** azimuth and elevation every 30 s from `aos` to `los`, from the pass's own element set. This follows D-150: labelling and fitting never propagate, so their hashes do not rest on bit-identical floating point from `sgp4` across machines, and a raw snapshot stays the whole of what they read.
+
+**Propagation moves out of the export's transaction.** Stage 16 computed the archive passes inside the `REPEATABLE READ` snapshot, which the Stage 16 review found would hold that snapshot open for minutes as archive ingest grows. Export now reads every table, commits, and then computes both the tracks and the archive passes from the rows it read. The rows are the same either way, because they come from one snapshot; only the time the snapshot is held changes.
+
+*Rejected: tracks computed in labelling.* It would make `label` depend on `meridian.orbit` and on float reproducibility, which D-150 kept out.
+
+---
+
+## D-159 — The learned environment
+
+**2026-09-24 · accepted** · *`meridian.prediction.profiles`, `EVALUATION.md` §2, Stage 17*
+
+Four features are learned from a station's own settled history (D-157), and each is inferred rather than declared. A declared horizon mask (D-031) is a capability; the learned profile is what the outcomes say, and the two are kept apart.
+
+- **Horizon profile.** Per station, per 10° azimuth sector: the elevation at which signal was first detected, found by matching `first_detection_at` against the pass's track. The sector's value is a low quantile of those elevations, shrunk towards a prior of 0° by the sector's count. A pass's feature is the share of its track above the learned horizon.
+- **Interference profile.** Per station, per sector and 4-hour band of local solar hour: the reported `noise_floor_dbfs`, relative to the station's median. A pass's feature is the mean over the sectors its track crosses.
+- **Timing error.** The station's median of `first_detection_at` minus `aos` in recent history.
+- **Element-set divergence.** The spread of `aos` across a physical pass's member predictions (D-148). It needs no history, and it is a direct reading of how much the orbit estimate moved.
+
+**A sparse cell falls back to its prior and exposes its count**, so the model can learn how far to trust it. No profile is ever missing; it is at its prior with a count of zero.
+
+---
+
+## D-160 — Configurations A–D are chosen by configuration only
+
+**2026-09-24 · accepted** · *`meridian.prediction.model_config`, `EVALUATION.md` §3, Stage 17*
+
+**The feature groups are fixed in code, and `configuration = "A" | "B" | "C" | "D"` chooses between them.** No configuration needs a code edit, and the four run through one function.
+
+| Configuration | Model inputs | Objective |
+|---|---|---|
+| A | maximum elevation | probability |
+| B | as A | probability × satellite priority |
+| C | our features: learned horizon, interference, element-set age and divergence, timing error, station health, per-satellite history | probability |
+| D | all groups | probability |
+
+**Priority is never a model input.** It is what an operator values, not a cause of reception, so B's probabilities are A's, and B differs from A in the value the scheduler maximises (D-066). SC-1 is measured as D − B by Stage 18 on that basis. Stage 17 reports calibration for A, C and D, and states that B's calibration is A's.
+
+**The public-conditions group of `EVALUATION.md` §3 is a named group with no features** until Stage 31 ingests them, so D∖conditions can be run without a code change when it has something in it.
+
+---
+
+## D-161 — Cold start is a path, not a default
+
+**2026-09-24 · accepted** · *`meridian.prediction.score`, `EVALUATION.md` §2, Stage 17*
+
+**A station with fewer than `min_station_history` settled examples** (configuration) is scored by the geometry-only model, fitted alongside the configured one on the same training span and calibrated on the same validation span, and not by the configured model with its history features set to something. Every prediction carries `path` — `configured` or `geometry_fallback` — and the reason, so a report can count how many predictions came from each. The geometry-only model reads the `elevation` and `geometry` groups. A and B read no history, so they never take the route: they are geometry-only already.
+
+**An unseen satellite, or a station with no interference or health history,** takes each missing feature at its prior with a count of zero (D-159). It never raises and never yields NaN. The roadmap's four cases — new station, unseen satellite, missing interference, missing health — each have a test.
+
+---
+
+## D-162 — Temporal splits, on dates the configuration states
+
+**2026-09-24 · accepted** · *`meridian.prediction.splits`, `EVALUATION.md` §8, Stage 17*
+
+**The configuration names `train_until` and `validate_until`.** A pass is assigned by its `aos`: before the first is training, before the second is validation, and from there to the dataset's `as_of` is test. The test span is not read until evaluation. Every result states both dates.
+
+**Everything learned is learned on training data only:** the feature scaling and the coefficients. Platt calibration is fitted on validation, with Platt's smoothed targets so that a validation span the logit separates still gives a finite map. The regularisation strength is stated in the configuration (`inverse_regularisation`) and not tuned, and the profiles' priors are constants in code, so no choice is made by looking at any span. A fit refuses a span with fewer than 20 training or 10 validation examples, or with one outcome only, and says how many it found.
+
+**Rolling-origin folds give the variance of the reported figures, and each is a whole split in miniature.** The span before `validate_until` is cut at evenly spaced origins, and fold *j* trains before `o_j`, calibrates on `[o_j, o_j+1)` and is judged on `[o_j+1, o_j+2)`, each fold's training span ending later than the one before. A fold is fitted by the same code as the model, so it refuses the same way, and a refused fold is reported with its reason rather than left out. No fold reads the test span. How many folds is the configuration's `folds` (default 4, 0 for none), so the spread is regenerable from the configuration like every other figure.
+
+**No function here accepts a shuffle,** and the split takes only dates. A test shows that no example after `train_until` reaches training, whatever order the examples arrive in.
+
+---
+
+## D-163 — A fitted model is a published directory
+
+**2026-09-24 · accepted** · *`meridian.prediction.fit`, `DATA-MODEL.md`, Stage 17*
+
+**A fit publishes a directory named by its content hash,** by the same rules as a snapshot (D-144): fsync and rename, sealed read-only. It holds `model.json`: the feature list, the scaler, the coefficients, the calibration map, the geometry-only fallback model, the evaluation dataset's sha256, the configuration's sha256, the seed, and the versions of numpy and scikit-learn that fitted it. The manifest is the snapshot manifest with a third kind, `model`, naming the dataset as `derived_from` and the configuration by hash, so a model is refused by the same reader, for the same reasons, as a dataset is. Models live under `<datasets root>/models/`.
+
+**Every stored number is rounded to 12 significant figures,** and the model is standardised and calibrated with the rounded values, so what is stored is exactly what was used. Refitting in the same environment reproduces the same hash. Across environments a solver may differ in its last bits, so the claim there is that predictions agree within 1e-9, not that the bytes match, and the gate states that limit instead of implying more.
+
+---
+
+## D-164 — The calibration report
+
+**2026-09-26 · accepted** · *`meridian.prediction.calibration`, `meridian model evaluate`, `EVALUATION.md` §7, Stage 17*
+
+**A model is judged on its test span, scored from the published file.** `meridian model evaluate` reads the model back and scores each test pass with `score.predict`, the function the scheduler calls, so the figures belong to the numbers that ship. An empty test span is refused, naming the dates.
+
+**The Brier score is set against a base rate learned from training.** The reference predictor gives every test pass the training span's decode rate, so nothing about the reference comes from the span it is judged on. The skill is `1 − Brier / base-rate Brier`: above 0 the model beats knowing only how often passes decode, and 0 is no better.
+
+**The reliability diagram has ten equal-width bins, and an empty bin is printed, not dropped.** Each bin shows its count, its mean prediction, and the observed decode frequency with a Wilson 95% interval. A diagram without its empty bins hides the probabilities a model never gives.
+
+**Calibration is broken down by station, band and element-set age.** The age buckets are under 24 hours, 24–72 hours, 72–168 hours, and 168 hours or more. An archive pass has no element-set age, so it falls in `unknown`. Every segment shows its n, its Brier score, its mean prediction and its observed frequency with a Wilson interval. Routes are counted the same way, `configured` and `geometry_fallback` apart (D-161).
+
+**The figures are unweighted.** Each is the observed frequency of what was measured. An inverse-propensity fit changes what a model learned, not what happened, and the report says which fit it was and how many examples had no weight.
+
+**The report states what regenerates it:**
+
+- the model's, the dataset's and the configuration's hashes;
+- both split dates and the seed;
+- the rolling-origin folds (D-162);
+- the dataset's completeness, from its `EvaluationResult` (D-154).
+
+B is reported as A: its probabilities are A's, and priority weights the objective (D-160).
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -3528,6 +3683,22 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-153 the floor, support, ESS and the `unreliable` flag | `meridian/datasets/weighting.py`; `deploy/snapshot.toml.example` |
 | D-154 the gate is a type | `meridian/datasets/{result,selection,evaluation}.py`; the manifest's optional `summary` in `meridian/datasets/manifest.py`; `meridian/cli_snapshot.py` |
 | — the completion gate, and how to run it by hand | `tests/unit/test_completeness_gate.py`; `OPERATIONS.md` § Dataset snapshots |
+
+**Landed 2026-09-26**, building prediction, the learned profiles and Stage 17's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-155 fit with a library, score without one | `meridian/prediction/{fit,score}.py`; the `fit` extra in `platform/pyproject.toml`; `tests/unit/test_prediction_boundaries.py`; `tests/unit/test_layout.py`; the image check in `.github/workflows/ci.yml` |
+| D-156 the example is a labelled physical pass | `meridian/prediction/{examples,lineage}.py` |
+| D-157 features are point-in-time | `meridian/prediction/{history,features,feature_rows}.py`; `tests/unit/test_prediction_features.py` |
+| D-158 tracks frozen at export, propagation after the read | `meridian/datasets/{pass_tracks,export}.py`; `meridian/cli_snapshot.py`; `DATA-MODEL.md` |
+| D-159 the learned environment | `meridian/prediction/{profiles,geometry}.py` |
+| D-160 A to D by configuration only | `meridian/prediction/{configurations,model_config}.py`; `deploy/model.toml.example` |
+| D-161 cold start is a route | `meridian/prediction/score.py` (`route_for`, `predict`); the fallback in `meridian/prediction/fit.py` |
+| D-162 temporal splits on stated dates, folds inside them | `meridian/prediction/{splits,fit,evaluation}.py`; `deploy/model.toml.example` |
+| D-163 a model is a published directory | `meridian/prediction/model_files.py`; the `model` kind in `meridian/datasets/manifest.py`; `DATA-MODEL.md` |
+| D-164 the calibration report | `meridian/prediction/{calibration,calibration_report,evaluation}.py`; `meridian/cli_model.py` |
+| — the completion gate, and how to run it by hand | `tests/unit/test_prediction_gate.py`; `OPERATIONS.md` § Models |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

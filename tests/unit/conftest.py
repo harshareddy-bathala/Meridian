@@ -42,9 +42,10 @@ RAW_TABLES = (
     "ingest_records",
     "listening",
     "archive_passes",
+    "pass_tracks",
 )
 """What an export writes: every snapshot table, the frozen listening answers,
-and the archive stations' computed passes."""
+the archive stations' computed passes and our passes' tracks."""
 
 SOURCE = SourceEntry(
     source_id="reference_archive",
@@ -65,6 +66,8 @@ def _pass(pass_id: int, station: str, *, simulated: bool = False) -> dict[str, o
         "aos": AOS,
         "los": AOS + timedelta(minutes=11),
         "max_elevation_deg": 40.0,
+        "aos_azimuth_deg": 350.0,
+        "los_azimuth_deg": 170.0,
         "element_set_id": 1,
         "computed_at": AOS - timedelta(hours=5),
         "simulated": simulated,
@@ -94,6 +97,8 @@ def _observation(
         "assignment_id": f"as_{pass_id}",
         "revision": 1,
         "outcome": outcome,
+        "first_detection_at": None,
+        "noise_floor_dbfs": None,
         "simulated": simulated,
     }
 
@@ -119,6 +124,15 @@ WORLD: Mapping[str, Sequence[Mapping[str, object]]] = {
     ],
     "heartbeats": [
         {"station_id": "st_b", "received_at": AOS + timedelta(minutes=2)},
+    ],
+    "transmitters": [
+        {
+            "id": 1,
+            "satellite_id": "norad:57166",
+            "centre_freq_hz": 137_900_000,
+            "active": True,
+            "deleted_at": None,
+        },
     ],
     "listening": [
         {"assignment_id": "as_1", "listening_confirmed": True},
