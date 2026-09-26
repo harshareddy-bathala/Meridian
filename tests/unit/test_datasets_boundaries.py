@@ -6,10 +6,11 @@ Two lines, both read from the source rather than from a running import:
   on the labelling path, and Stage 15's gate is that labelling reads a snapshot
   and nothing else (D-143). The gate tests prove that for the fixtures they
   run; this proves it for every line, including the ones no fixture reaches.
-* **Only the ``meridian snapshot`` command, and prediction's fitting side,
-  import the package.** The scheduler, the API and the jobs service run on
-  live tables; a snapshot is training and evaluation input, and a runtime
-  path that read one would be scheduling on the past without saying so.
+* **Only the ``meridian snapshot`` and ``meridian model`` commands, and
+  prediction's fitting side, import the package.** The scheduler, the API and
+  the jobs service run on live tables; a snapshot is training and evaluation
+  input, and a runtime path that read one would be scheduling on the past
+  without saying so.
   ``meridian.prediction`` fits on datasets (D-156), except ``score``, which
   the scheduler will import and which reads a model file instead.
 
@@ -57,7 +58,9 @@ REACHES_OUTSIDE = (
 """A driver, the network, the SQL layer, the registry over it, or the settings
 that name a database. The labelling path needs none of them."""
 
-MAY_IMPORT_DATASETS = frozenset({PLATFORM / "cli_snapshot.py"})
+MAY_IMPORT_DATASETS = frozenset(
+    {PLATFORM / "cli_snapshot.py", PLATFORM / "cli_model.py"}
+)
 PREDICTION = PLATFORM / "prediction"
 SCORED_AT_RUNTIME = frozenset({"score.py"})
 """The one prediction module the scheduler will import (D-155). It reads a
@@ -65,7 +68,7 @@ model file, never a dataset, so it is held to the runtime rule."""
 
 
 def may_import_datasets(path: Path) -> bool:
-    """The snapshot command, and prediction's fitting side (D-156)."""
+    """The snapshot and model commands, and prediction's fitting side (D-156)."""
     if path in MAY_IMPORT_DATASETS:
         return True
     return PREDICTION in path.parents and path.name not in SCORED_AT_RUNTIME
@@ -131,14 +134,13 @@ def test_only_the_snapshot_command_imports_the_package() -> None:
     assert crossings == []
 
 
-def test_the_command_is_seen_importing_it() -> None:
+def test_the_commands_are_seen_importing_it() -> None:
     """Positive control for the test above."""
-    (command,) = MAY_IMPORT_DATASETS
-
-    assert any(
-        module.startswith("meridian.datasets.")
-        for _, module in imported_modules(command)
-    )
+    for command in MAY_IMPORT_DATASETS:
+        assert any(
+            module.startswith("meridian.datasets.")
+            for _, module in imported_modules(command)
+        ), command
 
 
 MAY_PROPAGATE = frozenset({"export.py"})

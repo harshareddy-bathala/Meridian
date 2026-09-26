@@ -407,6 +407,15 @@ jobs:
           present = [m for m in ('sklearn', 'scipy') if importlib.util.find_spec(m)]
           sys.exit(f'the image carries {present}' if present else 0)
           "
+          # Without the extra, `meridian model` still loads (the fitter is
+          # imported only by fit and evaluate), and fit says what to install.
+          docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint "" \
+            api meridian model --help > /dev/null
+          if docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint "" \
+              api sh -c 'mkdir -p /tmp/d && meridian model fit /tmp/d' 2> /tmp/fit.txt; then
+            echo "meridian model fit ran without the fit extra"; exit 1
+          fi
+          grep -q 'needs the fit extra' /tmp/fit.txt
 
       - name: /metrics publishes the platform's own series, and only with the token
         run: |

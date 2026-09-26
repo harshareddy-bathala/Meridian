@@ -9,7 +9,8 @@ amortize.
 ``serve`` runs the API as the image runs it — log level, worker count and the
 metrics directory several workers need (``cli_serve``); ``jobs`` and ``db`` are
 the scheduled work and the migration check beside it; ``snapshot`` exports,
-labels and verifies Stage 15's datasets (``cli_snapshot``). A command whose stage
+labels and verifies Stage 15's datasets (``cli_snapshot``); ``model`` fits,
+evaluates and shows Stage 17's models (``cli_model``). A command whose stage
 has not arrived yet — ``report`` — reports which stage of
 docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md builds it and exits
 :data:`EXIT_NOT_IMPLEMENTED`, so a caller gets an answer rather than a
@@ -36,6 +37,7 @@ from meridian.cli_catalogue import run_catalogue
 from meridian.cli_db import add_db_parser, run_db
 from meridian.cli_invite import run_invite
 from meridian.cli_jobs import add_jobs_parser, run_jobs
+from meridian.cli_model import add_model_parser, run_model
 from meridian.cli_passes import run_passes
 from meridian.cli_schedule import configurations, run_scheduler
 from meridian.cli_serve import add_serve_parser, run_serve
@@ -316,13 +318,14 @@ def _build_parser() -> argparse.ArgumentParser:
     add_jobs_parser(subcommands)
     add_db_parser(subcommands)
     add_snapshot_parser(subcommands)
+    add_model_parser(subcommands)
     _add_pending_parsers(subcommands)
 
     return parser
 
 
 NEEDS_ACTION = frozenset(
-    {"catalogue", "db", "invite", "jobs", "passes", "snapshot", "station"}
+    {"catalogue", "db", "invite", "jobs", "model", "passes", "snapshot", "station"}
 )
 """Commands that are a noun and mean nothing without a verb after them.
 
@@ -337,6 +340,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "db": run_db,
     "invite": run_invite,
     "jobs": run_jobs,
+    "model": run_model,
     "passes": run_passes,
     "schedule": run_scheduler,
     "serve": run_serve,

@@ -22,6 +22,9 @@ another is an edit to this file, never to code.
   choice can reach the test span.
 * ``weighting`` — ``"none"`` or ``"ipw"`` (D-156). Default ``"none"``.
 * ``seed`` — recorded with the model and handed to the solver. Default 0.
+* ``folds`` — rolling-origin folds ``meridian model evaluate`` refits inside
+  the span before ``validate_until``, for the variance of its figures
+  (D-162). Default 4; 0 runs none, and the report says so.
 
 **Strict, as the labelling configuration is:** an unknown key, a wrong type or
 a value out of range is refused by name, and the hash is of the resolved
@@ -33,8 +36,10 @@ Reference: docs/DECISIONS.md D-144, D-155, D-156, D-160, D-161, D-162.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +52,7 @@ __all__ = [
     "WEIGHTINGS",
     "ModelConfig",
     "ModelConfigError",
+    "config_from_parameters",
     "load_model_config",
     "model_config_sha256",
     "parse_model_config",
@@ -60,6 +66,8 @@ _ARCHIVE_ONLY = ("A",)
 
 _MAX_HISTORY = 10_000
 _MAX_SEED = 2**32 - 1
+_MAX_FOLDS = 20
+_DATES = ("train_until", "validate_until")
 
 
 class ModelConfigError(ValueError):
@@ -78,6 +86,7 @@ class ModelConfig:
     inverse_regularisation: float = 1.0
     weighting: str = "none"
     seed: int = 0
+    folds: int = 4
 
     def __post_init__(self) -> None:
         """Refuse a name that is not one of the choices, or a value off the scale."""
@@ -93,6 +102,7 @@ class ModelConfig:
             raise ModelConfigError(message)
         _whole("min_station_history", self.min_station_history, _MAX_HISTORY)
         _whole("seed", self.seed, _MAX_SEED)
+        _whole("folds", self.folds, _MAX_FOLDS)
         strength = self.inverse_regularisation
         if (
             isinstance(strength, bool)
@@ -108,7 +118,7 @@ class ModelConfig:
 
     def _check_dates(self) -> None:
         """Each date aware, and training ending before validation does."""
-        for name in ("train_until", "validate_until"):
+        for name in _DATES:
             value = getattr(self, name)
             if value is not None and (
                 not isinstance(value, datetime) or value.tzinfo is None
@@ -137,6 +147,7 @@ class ModelConfig:
             "inverse_regularisation": float(self.inverse_regularisation),
             "weighting": self.weighting,
             "seed": self.seed,
+            "folds": self.folds,
         }
 
 
@@ -164,6 +175,33 @@ def parse_model_config(text: str) -> ModelConfig:
         message = f"unknown model settings {unknown}; known: {sorted(known)}"
         raise ModelConfigError(message)
     return ModelConfig(**stored)
+
+
+def config_from_parameters(parameters: Mapping[str, object]) -> ModelConfig:
+    """The configuration a model's manifest recorded, resolved again.
+
+    The manifest holds the dates as ISO-8601 text; everything else is as
+    :meth:`ModelConfig.parameters` wrote it.
+
+    Raises:
+        ModelConfigError: A key that is not a setting, or a value refused as
+            :func:`parse_model_config` would refuse it.
+    """
+    known = set(ModelConfig.__dataclass_fields__)
+    unknown = sorted(set(parameters) - known)
+    if unknown:
+        message = f"unknown model settings {unknown}; known: {sorted(known)}"
+        raise ModelConfigError(message)
+    values = json.loads(canonical_bytes(dict(parameters)))
+    for name in _DATES:
+        stored = values.get(name)
+        if isinstance(stored, str):
+            try:
+                values[name] = datetime.fromisoformat(stored)
+            except ValueError as exc:
+                message = f"{name} {stored!r} is not an ISO-8601 time"
+                raise ModelConfigError(message) from exc
+    return ModelConfig(**values)
 
 
 def load_model_config(path: Path | None) -> ModelConfig:

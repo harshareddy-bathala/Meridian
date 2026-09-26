@@ -18,6 +18,7 @@ Reference: docs/DECISIONS.md D-078, D-156, D-160, D-161.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -26,6 +27,7 @@ from typing import Any
 
 import pytest
 
+from meridian.datasets.canonical import canonical_bytes
 from meridian.datasets.evaluation import build_evaluation_dataset
 from meridian.datasets.label_config import LabelConfig
 from meridian.datasets.label_rows import read_labels
@@ -50,6 +52,7 @@ from meridian.prediction.features import FEATURES
 from meridian.prediction.model_config import (
     ModelConfig,
     ModelConfigError,
+    config_from_parameters,
     load_model_config,
     model_config_sha256,
     parse_model_config,
@@ -90,6 +93,10 @@ def test_the_example_file_documents_the_defaults() -> None:
         ('weighting = "propensity"', "weighting must be one of"),
         ("seed = -1", "seed = -1 is outside"),
         ("seed = 1.5", "seed must be a whole number"),
+        ("folds = -1", "folds = -1 is outside"),
+        ("folds = 21", "folds = 21 is outside"),
+        ("folds = 1.5", "folds must be a whole number"),
+        ("folds = true", "folds must be a whole number"),
     ],
 )
 def test_a_setting_that_cannot_be_obeyed_is_refused_by_name(
@@ -125,6 +132,34 @@ def test_the_split_dates_are_read_as_utc_instants() -> None:
     assert config.train_until == datetime(2027, 1, 1, tzinfo=UTC)
     assert config.validate_until == datetime(2027, 2, 1, tzinfo=UTC)
     assert model_config_sha256(config) != model_config_sha256(ModelConfig())
+
+
+def test_a_manifest_gives_back_the_configuration_it_recorded() -> None:
+    config = parse_model_config(
+        'configuration = "C"\nfolds = 0\nseed = 9\nweighting = "ipw"\n'
+        "train_until = 2027-01-01T00:00:00Z\nvalidate_until = 2027-02-01T00:00:00Z"
+    )
+    recorded = json.loads(canonical_bytes(config.parameters()))
+
+    again = config_from_parameters(recorded)
+
+    assert again == config
+    assert model_config_sha256(again) == model_config_sha256(config)
+
+
+@pytest.mark.parametrize(
+    ("parameters", "refusal"),
+    [
+        ({"learning_rate": 0.1}, "unknown model settings"),
+        ({"train_until": "last tuesday"}, "not an ISO-8601 time"),
+        ({"folds": 99}, "folds = 99 is outside"),
+    ],
+)
+def test_a_recorded_configuration_is_refused_as_a_file_would_be(
+    parameters: dict[str, object], refusal: str
+) -> None:
+    with pytest.raises(ModelConfigError, match=refusal):
+        config_from_parameters(parameters)
 
 
 def test_a_file_that_is_not_there_is_refused(tmp_path: Path) -> None:

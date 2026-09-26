@@ -41,3 +41,8 @@ weighting = "none"
 
 # Handed to the solver and recorded in the model. 0 .. 4294967295.
 seed = 0
+
+# Rolling-origin folds `meridian model evaluate` refits inside the span before
+# validate_until, each a whole train / validate / judge split, for the spread
+# of every figure (D-162). 0 .. 20; 0 runs none, and the report says so.
+folds = 4

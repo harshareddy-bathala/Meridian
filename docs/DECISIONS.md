@@ -3448,7 +3448,9 @@ Four features are learned from a station's own settled history (D-157), and each
 
 **The configuration names `train_until` and `validate_until`.** A pass is assigned by its `aos`: before the first is training, before the second is validation, and from there to the dataset's `as_of` is test. The test span is not read until evaluation. Every result states both dates.
 
-**Everything learned is learned on training data only:** the feature scaling and the coefficients. Platt calibration is fitted on validation, with Platt's smoothed targets so that a validation span the logit separates still gives a finite map. The regularisation strength is stated in the configuration (`inverse_regularisation`) and not tuned, and the profiles' priors are constants in code, so no choice is made by looking at any span. A fit refuses a span with fewer than 20 training or 10 validation examples, or with one outcome only, and says how many it found. **Rolling-origin folds** — each training span ending later than the one before — give the variance of the reported figures.
+**Everything learned is learned on training data only:** the feature scaling and the coefficients. Platt calibration is fitted on validation, with Platt's smoothed targets so that a validation span the logit separates still gives a finite map. The regularisation strength is stated in the configuration (`inverse_regularisation`) and not tuned, and the profiles' priors are constants in code, so no choice is made by looking at any span. A fit refuses a span with fewer than 20 training or 10 validation examples, or with one outcome only, and says how many it found.
+
+**Rolling-origin folds give the variance of the reported figures, and each is a whole split in miniature.** The span before `validate_until` is cut at evenly spaced origins, and fold *j* trains before `o_j`, calibrates on `[o_j, o_j+1)` and is judged on `[o_j+1, o_j+2)`, each fold's training span ending later than the one before. A fold is fitted by the same code as the model, so it refuses the same way, and a refused fold is reported with its reason rather than left out. No fold reads the test span. How many folds is the configuration's `folds` (default 4, 0 for none), so the spread is regenerable from the configuration like every other figure.
 
 **No function here accepts a shuffle,** and the split takes only dates. A test shows that no example after `train_until` reaches training, whatever order the examples arrive in.
 
@@ -3461,6 +3463,31 @@ Four features are learned from a station's own settled history (D-157), and each
 **A fit publishes a directory named by its content hash,** by the same rules as a snapshot (D-144): fsync and rename, sealed read-only. It holds `model.json`: the feature list, the scaler, the coefficients, the calibration map, the geometry-only fallback model, the evaluation dataset's sha256, the configuration's sha256, the seed, and the versions of numpy and scikit-learn that fitted it. The manifest is the snapshot manifest with a third kind, `model`, naming the dataset as `derived_from` and the configuration by hash, so a model is refused by the same reader, for the same reasons, as a dataset is. Models live under `<datasets root>/models/`.
 
 **Every stored number is rounded to 12 significant figures,** and the model is standardised and calibrated with the rounded values, so what is stored is exactly what was used. Refitting in the same environment reproduces the same hash. Across environments a solver may differ in its last bits, so the claim there is that predictions agree within 1e-9, not that the bytes match, and the gate states that limit instead of implying more.
+
+---
+
+## D-164 — The calibration report
+
+**2026-09-26 · accepted** · *`meridian.prediction.calibration`, `meridian model evaluate`, `EVALUATION.md` §7, Stage 17*
+
+**A model is judged on its test span, scored from the published file.** `meridian model evaluate` reads the model back and scores each test pass with `score.predict`, the function the scheduler calls, so the figures belong to the numbers that ship. An empty test span is refused, naming the dates.
+
+**The Brier score is set against a base rate learned from training.** The reference predictor gives every test pass the training span's decode rate, so nothing about the reference comes from the span it is judged on. The skill is `1 − Brier / base-rate Brier`: above 0 the model beats knowing only how often passes decode, and 0 is no better.
+
+**The reliability diagram has ten equal-width bins, and an empty bin is printed, not dropped.** Each bin shows its count, its mean prediction, and the observed decode frequency with a Wilson 95% interval. A diagram without its empty bins hides the probabilities a model never gives.
+
+**Calibration is broken down by station, band and element-set age.** The age buckets are under 24 hours, 24–72 hours, 72–168 hours, and 168 hours or more. An archive pass has no element-set age, so it falls in `unknown`. Every segment shows its n, its Brier score, its mean prediction and its observed frequency with a Wilson interval. Routes are counted the same way, `configured` and `geometry_fallback` apart (D-161).
+
+**The figures are unweighted.** Each is the observed frequency of what was measured. An inverse-propensity fit changes what a model learned, not what happened, and the report says which fit it was and how many examples had no weight.
+
+**The report states what regenerates it:**
+
+- the model's, the dataset's and the configuration's hashes;
+- both split dates and the seed;
+- the rolling-origin folds (D-162);
+- the dataset's completeness, from its `EvaluationResult` (D-154).
+
+B is reported as A: its probabilities are A's, and priority weights the objective (D-160).
 
 ---
 

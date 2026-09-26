@@ -25,6 +25,7 @@ import math
 import random
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -150,21 +151,46 @@ def test_an_example_after_as_of_is_refused() -> None:
         )
 
 
-def test_rolling_origin_folds_move_forward_and_stay_in_training() -> None:
+def test_rolling_origin_folds_are_whole_splits_moving_forward() -> None:
     found = example_set().examples
 
-    folds = rolling_origin(list(reversed(found)), train_until=TRAIN_UNTIL, folds=3)
+    folds = rolling_origin(list(reversed(found)), until=VALIDATE_UNTIL, folds=3)
 
     assert len(folds) == 3
-    assert [fold.origin for fold in folds] == sorted(fold.origin for fold in folds)
-    assert folds[-1].until == TRAIN_UNTIL
+    assert folds[-1].as_of == VALIDATE_UNTIL
+    for earlier, later in pairwise(folds):
+        assert earlier.train_until < later.train_until
+        assert earlier.validate_until == later.train_until
+        assert earlier.as_of == later.validate_until
+        assert len(earlier.train) < len(later.train)
     for fold in folds:
         assert fold.train
         assert fold.validate
-        assert all(ex.aos < fold.origin for ex in fold.train)
-        assert all(fold.origin <= ex.aos < fold.until for ex in fold.validate)
-    assert [len(fold.train) for fold in folds] == sorted(
-        len(fold.train) for fold in folds
+        assert fold.test
+        assert all(ex.aos < fold.train_until for ex in fold.train)
+        assert all(
+            fold.train_until <= ex.aos < fold.validate_until for ex in fold.validate
+        )
+        assert all(fold.validate_until <= ex.aos < fold.as_of for ex in fold.test)
+
+
+def test_no_fold_reads_the_test_span() -> None:
+    found = example_set().examples
+
+    folds = rolling_origin(found, until=VALIDATE_UNTIL, folds=4)
+    held = [ex for fold in folds for ex in (*fold.train, *fold.validate, *fold.test)]
+
+    assert held
+    assert all(ex.aos < VALIDATE_UNTIL for ex in held)
+
+
+def test_folds_do_not_depend_on_the_order_examples_arrive_in() -> None:
+    found = list(example_set().examples)
+    shuffled = list(found)
+    random.Random(3).shuffle(shuffled)
+
+    assert rolling_origin(found, until=VALIDATE_UNTIL, folds=3) == rolling_origin(
+        shuffled, until=VALIDATE_UNTIL, folds=3
     )
 
 
@@ -172,8 +198,21 @@ def test_rolling_origin_refuses_no_folds_and_has_none_for_one_instant() -> None:
     one = example(0, random.Random(0))
 
     with pytest.raises(SplitError, match="at least one fold"):
-        rolling_origin([one], train_until=TRAIN_UNTIL, folds=0)
-    assert rolling_origin([one], train_until=TRAIN_UNTIL, folds=2) == ()
+        rolling_origin([one], until=VALIDATE_UNTIL, folds=0)
+    assert rolling_origin([one], until=VALIDATE_UNTIL, folds=2) == ()
+
+
+def test_passes_after_until_do_not_make_a_span_to_fold() -> None:
+    """One instant before ``until`` is nothing to cut, however much follows."""
+    rng = random.Random(0)
+    later = [
+        replace(example(n, rng), aos=VALIDATE_UNTIL + timedelta(hours=n))
+        for n in range(10)
+    ]
+
+    assert (
+        rolling_origin([example(0, rng), *later], until=VALIDATE_UNTIL, folds=2) == ()
+    )
 
 
 # --- refusals, with the counts ------------------------------------------------------

@@ -12,10 +12,12 @@ position is read, only a date. There is no argument through which an example
 after ``train_until`` could be put into training, and the gate's test checks
 that rather than trusting it (``CLAUDE.md`` rule 6).
 
-**Rolling-origin folds** cut the training span at evenly spaced origins. Fold
-``k`` trains on everything before its origin and is judged on what follows,
-up to the next origin; each fold's training span ends later than the one
-before. The spread across folds is the variance a reported figure carries.
+**Rolling-origin folds are whole splits in miniature.** The span before
+``validate_until`` is cut at evenly spaced origins, and fold ``j`` trains
+before ``o_j``, calibrates on ``[o_j, o_j+1)`` and is judged on
+``[o_j+1, o_j+2)`` — the three spans of the main split, each fold's ending
+later than the one before. No fold reads the test span, and the spread of a
+figure across folds is the variance it carries (D-162).
 
 Reference: docs/DECISIONS.md D-162; docs/EVALUATION.md §8.
 """
@@ -25,11 +27,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from itertools import pairwise
 
 from meridian.prediction.examples import Example
 
-__all__ = ["Fold", "Split", "SplitError", "rolling_origin", "temporal_split"]
+__all__ = ["Split", "SplitError", "rolling_origin", "temporal_split"]
 
 
 class SplitError(ValueError):
@@ -46,16 +47,6 @@ class Split:
     train: tuple[Example, ...]
     validate: tuple[Example, ...]
     test: tuple[Example, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class Fold:
-    """One rolling-origin fold: train before ``origin``, judge up to ``until``."""
-
-    origin: datetime
-    until: datetime
-    train: tuple[Example, ...]
-    validate: tuple[Example, ...]
 
 
 def temporal_split(
@@ -108,19 +99,22 @@ def temporal_split(
 
 
 def rolling_origin(
-    examples: Sequence[Example], *, train_until: datetime, folds: int
-) -> tuple[Fold, ...]:
-    """Folds with evenly spaced origins across the training span.
+    examples: Sequence[Example], *, until: datetime, folds: int
+) -> tuple[Split, ...]:
+    """Splits with evenly spaced origins across the span before ``until``.
 
     Args:
         examples: One population's examples, in any order; those at or after
-            ``train_until`` are not read.
-        train_until: The end of the training span.
+            ``until`` are not read.
+        until: The end of the span folded — the configuration's
+            ``validate_until``, so the test span is never read.
         folds: How many folds, at least one.
 
     Returns:
-        The folds, earliest origin first. Empty when the span holds fewer than
-        two distinct instants, since there is nothing to cut.
+        The folds as splits, earliest first; fold ``j`` trains before
+        ``o_j``, calibrates up to ``o_j+1`` and is judged up to ``o_j+2``.
+        Empty when the span holds fewer than two distinct instants, since
+        there is nothing to cut.
 
     Raises:
         SplitError: ``folds`` is below one.
@@ -128,20 +122,21 @@ def rolling_origin(
     if folds < 1:
         message = f"rolling-origin needs at least one fold, not {folds}"
         raise SplitError(message)
-    training = [one for one in _in_order(examples) if one.aos < train_until]
-    if not training or training[0].aos == training[-1].aos:
+    before = [one for one in _in_order(examples) if one.aos < until]
+    if not before or before[0].aos == before[-1].aos:
         return ()
-    start = training[0].aos
-    step = (train_until - start) / (folds + 1)
-    origins = [start + step * k for k in range(1, folds + 2)]
+    start = before[0].aos
+    step = (until - start) / (folds + 2)
+    origins = [start + step * k for k in range(1, folds + 3)]
+    origins[-1] = until
     return tuple(
-        Fold(
-            origin=origin,
-            until=until,
-            train=tuple(one for one in training if one.aos < origin),
-            validate=tuple(one for one in training if origin <= one.aos < until),
+        temporal_split(
+            [one for one in before if one.aos < origins[j + 2]],
+            train_until=origins[j],
+            validate_until=origins[j + 1],
+            as_of=origins[j + 2],
         )
-        for origin, until in pairwise(origins)
+        for j in range(folds)
     )
 
 

@@ -53,6 +53,7 @@ __all__ = [
     "FittedModel",
     "ModelFitError",
     "fit_model",
+    "fit_split",
     "rounded",
 ]
 
@@ -121,6 +122,23 @@ def fit_model(
         validate_until=config.validate_until,
         as_of=as_of,
     )
+    return fit_split(found, split, config)
+
+
+def fit_split(found: ExampleSet, split: Split, config: ModelConfig) -> FittedModel:
+    """Fit on a split already made: the main one, or a rolling-origin fold.
+
+    Args:
+        found: The examples the split was made from, for their counts.
+        split: Training, validation and test spans, with their dates.
+        config: The model configuration; its own dates are not read here.
+
+    Returns:
+        The document, its counts and the split.
+
+    Raises:
+        ModelFitError: A span is too small or holds one outcome only.
+    """
     _check_enough(found, split)
     configuration = CONFIGURATIONS[config.configuration]
     document: dict[str, object] = {
@@ -136,9 +154,9 @@ def fit_model(
             if configuration.reads_history
             else None
         ),
-        "train_until": config.train_until,
-        "validate_until": config.validate_until,
-        "as_of": as_of,
+        "train_until": split.train_until,
+        "validate_until": split.validate_until,
+        "as_of": split.as_of,
         "inverse_regularisation": float(config.inverse_regularisation),
         "weighting": config.weighting,
         "seed": config.seed,

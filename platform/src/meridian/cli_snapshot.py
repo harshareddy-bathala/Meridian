@@ -59,6 +59,8 @@ __all__ = [
     "DEFAULT_DATASETS_ROOT",
     "EXIT_CORRUPT",
     "add_snapshot_parser",
+    "datasets_root",
+    "report_published",
     "run_snapshot",
 ]
 
@@ -143,10 +145,10 @@ def run_snapshot(args: argparse.Namespace) -> int:
     return actions[args.action](args)
 
 
-def _root(args: argparse.Namespace) -> Path:
+def datasets_root(root: Path | None) -> Path:
     """``--root``, else the environment, else the documented default."""
-    if args.root is not None:
-        return Path(args.root)
+    if root is not None:
+        return Path(root)
     return Path(os.environ.get(DATASETS_ROOT_ENV, str(DEFAULT_DATASETS_ROOT)))
 
 
@@ -154,7 +156,7 @@ def _export(args: argparse.Namespace) -> int:
     """``meridian snapshot export``."""
     try:
         since = _since(args.since)
-        published = _export_from_database(since, _root(args))
+        published = _export_from_database(since, datasets_root(args.root))
     except DamagedSnapshotError as exc:
         _refuse("export", str(exc))
         return EXIT_CORRUPT
@@ -166,7 +168,7 @@ def _export(args: argparse.Namespace) -> int:
         OSError,
     ) as exc:
         return _refuse("export", str(exc))
-    _report("raw snapshot", published)
+    report_published("raw snapshot", published)
     return 0
 
 
@@ -210,7 +212,7 @@ def _label(args: argparse.Namespace) -> int:
         config = load_label_config(args.config)
         raw = read_directory(args.snapshot)
         published = build_evaluation_dataset(
-            raw, config, root=_root(args), created_at=datetime.now(UTC)
+            raw, config, root=datasets_root(args.root), created_at=datetime.now(UTC)
         )
     except DamagedSnapshotError as exc:
         _refuse("label", str(exc))
@@ -222,7 +224,7 @@ def _label(args: argparse.Namespace) -> int:
         OSError,
     ) as exc:
         return _refuse("label", str(exc))
-    _report("evaluation dataset", published)
+    report_published("evaluation dataset", published)
     _say(f"  indeterminate      {_indeterminate(published.manifest)}")
     return 0
 
@@ -268,7 +270,7 @@ def _verify(args: argparse.Namespace) -> int:
     return 0
 
 
-def _report(what: str, published: PublishedDirectory) -> None:
+def report_published(what: str, published: PublishedDirectory) -> None:
     """Where it landed, its hash, and every count that is not zero.
 
     Counts are printed by name — ``passes.measured``, ``labels.confirmed_miss

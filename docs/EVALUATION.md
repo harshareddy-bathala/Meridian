@@ -204,6 +204,8 @@ Every model ships with:
 
 A fitted model is a published directory whose `model.json` a reader can open, and it is scored without the libraries that fitted it (D-155, D-163).
 
+All three are printed by `meridian model evaluate`. It scores the test span from the published file, takes the base rate from the training span, keeps empty bins, breaks calibration down by station, band and element-set-age bucket with n and a Wilson interval on every observed frequency, and states the hashes, dates and seed that regenerate it (D-164).
+
 ---
 
 ## 8. Data splits
@@ -214,7 +216,7 @@ Random splits leak future information: the same satellite, the same station and 
 
 Report the split boundary date with every result.
 
-The boundaries are dates the configuration states, and everything learned — scaling, regularisation, calibration — is learned inside them (D-162).
+The boundaries are dates the configuration states. Everything learned — scaling and coefficients on training, calibration on validation — is learned inside them, and the regularisation strength is stated in the configuration rather than tuned. The variance of each figure comes from rolling-origin folds inside the span before the test span (D-162).
 
 ---
 

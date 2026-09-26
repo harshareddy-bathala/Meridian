@@ -166,3 +166,55 @@ def test_the_standard_library_scan_would_notice_an_import(tmp_path: Path) -> Non
 
     assert outside_the_standard_library(offender) == ["meridian.prediction.fit"]
     assert len(crossings([offender], ("meridian.prediction.fit",))) == 1
+
+
+PLATFORM = REPO_ROOT / "platform" / "src" / "meridian"
+COMMANDS = (PLATFORM / "cli.py", PLATFORM / "cli_model.py")
+NEEDS_THE_EXTRA = (
+    "meridian.prediction.fit",
+    "meridian.prediction.evaluation",
+    "meridian.prediction.calibration_report",
+)
+"""The fitter, and the two modules that reach it: refitting folds, and the
+report over them."""
+
+
+def top_level_imports(path: Path) -> list[str]:
+    """What a module imports as it loads: its body, not its functions."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    found = []
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            found.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            found.append(node.module)
+    return found
+
+
+def test_the_command_imports_the_fitter_only_when_it_fits() -> None:
+    """``meridian`` must start in the image, where the extra is not (D-155).
+
+    ``fit`` and ``evaluate`` import the fitter inside themselves, so only they
+    need it — and they are seen doing so, or this would prove nothing.
+    """
+    at_load = [
+        f"{path.name} imports {module}"
+        for path in COMMANDS
+        for module in top_level_imports(path)
+        if reaches(module, NEEDS_THE_EXTRA)
+    ]
+
+    assert at_load == []
+    assert crossings([PLATFORM / "cli_model.py"], NEEDS_THE_EXTRA)
+
+
+def test_the_load_time_scan_would_notice_an_import(tmp_path: Path) -> None:
+    offender = tmp_path / "offender.py"
+    offender.write_text(
+        "from meridian.prediction.fit import fit_model\n"
+        "def later():\n"
+        "    from meridian.prediction.evaluation import evaluate_model\n",
+        encoding="utf-8",
+    )
+
+    assert top_level_imports(offender) == ["meridian.prediction.fit"]
