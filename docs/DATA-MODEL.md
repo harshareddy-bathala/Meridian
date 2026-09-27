@@ -82,6 +82,8 @@ Scheduler output. Links a pass to a station with a decision record.
 
 Skipped passes are recorded too. A scheduler that only logs what it chose cannot be evaluated.
 
+**A skip is a record, never an assignment** (D-165). Its `state` stays `issued` for good — `check (decision = 'scheduled' or state = 'issued')`, migration 0017 — and every query that delivers, moves or expires a row filters on `decision = 'scheduled'`. The state machine below is an assignment's, so it is a scheduled row's alone.
+
 **`state` tracks what the station did with it**, as distinct from `decision`, which is what the scheduler wanted:
 
 ```

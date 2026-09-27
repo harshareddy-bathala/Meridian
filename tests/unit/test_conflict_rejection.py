@@ -13,7 +13,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from meridian.scheduler import Candidate, ScoredCandidate
+from meridian.scheduler import Candidate, Commitment, ScoredCandidate
+from meridian.scheduler.assignment_records import (
+    PassFacts,
+    assignment_id_for,
+    to_assignment_rows,
+)
 from meridian.scheduler.conflict_rejection import (
     conflicts_with,
     select_without_conflict,
@@ -288,3 +293,113 @@ def test_a_negative_turnaround_is_refused() -> None:
     """It would let two genuinely overlapping passes be scheduled together."""
     with pytest.raises(ValueError, match="turnaround_s"):
         select_without_conflict(ranked(a_candidate(1, at_minute=0)), turnaround_s=-1.0)
+
+
+# --- commitments: what earlier runs already assigned (D-165) ------------------
+
+
+def committed(
+    pass_id: int, *, at_minute: float, station_id: str = STATION
+) -> Commitment:
+    """An assignment an earlier run made, under whatever configuration."""
+    return Commitment(
+        candidate=a_candidate(pass_id, at_minute=at_minute, station_id=station_id),
+        assignment_id=f"as_earlier_{pass_id}",
+    )
+
+
+def test_a_newcomer_cannot_displace_a_commitment_however_it_ranks() -> None:
+    """The overlapping-rounds defect, in miniature.
+
+    Pass 2 is new to this round and ranks first. Before D-165 the round saw
+    only its own candidates, took it, and left the earlier assignment standing
+    beside it: two overlapping assignments for one antenna.
+    """
+    outcome = select_without_conflict(
+        ranked(a_candidate(2, at_minute=5)),
+        turnaround_s=NO_TURNAROUND_S,
+        committed=[committed(1, at_minute=0)],
+    )
+
+    assert outcome.selected == []
+    assert [one.committed_assignment_id for one in outcome.rejected] == ["as_earlier_1"]
+    assert outcome.rejected[0].conflicts_with_pass_id == 1
+
+
+def test_a_commitment_is_never_part_of_the_outcome() -> None:
+    """It was decided earlier; deciding it again would write it twice."""
+    outcome = select_without_conflict(
+        ranked(a_candidate(2, at_minute=30)),
+        turnaround_s=NO_TURNAROUND_S,
+        committed=[committed(1, at_minute=0)],
+    )
+
+    assert [one.candidate.pass_id for one in outcome.selected] == [2]
+    assert outcome.rejected == []
+
+
+def test_a_commitment_binds_only_its_own_station() -> None:
+    outcome = select_without_conflict(
+        ranked(a_candidate(2, at_minute=5)),
+        turnaround_s=NO_TURNAROUND_S,
+        committed=[committed(1, at_minute=0, station_id=OTHER_STATION)],
+    )
+
+    assert [one.candidate.pass_id for one in outcome.selected] == [2]
+
+
+def test_a_commitment_honours_the_turnaround() -> None:
+    """Abutting a commitment is fine for a fixed antenna and not for a rotator."""
+    candidate = ranked(a_candidate(2, at_minute=PASS_MINUTES))
+    earlier = [committed(1, at_minute=0)]
+
+    fixed = select_without_conflict(
+        candidate, turnaround_s=NO_TURNAROUND_S, committed=earlier
+    )
+    rotator = select_without_conflict(
+        candidate, turnaround_s=ROTATOR_TURNAROUND_S, committed=earlier
+    )
+
+    assert len(fixed.selected) == 1
+    assert len(rotator.rejected) == 1
+
+
+def test_a_commitment_is_named_before_a_selection_of_this_run() -> None:
+    """Pass 3 collides with both; the assignment that already exists is named."""
+    outcome = select_without_conflict(
+        ranked(a_candidate(2, at_minute=12), a_candidate(3, at_minute=8)),
+        turnaround_s=NO_TURNAROUND_S,
+        committed=[committed(1, at_minute=0)],
+    )
+
+    assert [one.candidate.pass_id for one in outcome.selected] == [2]
+    assert [
+        (one.scored.candidate.pass_id, one.committed_assignment_id)
+        for one in outcome.rejected
+    ] == [(3, "as_earlier_1")]
+
+
+def test_a_skip_behind_a_commitment_names_that_assignment_in_its_row() -> None:
+    """Not an id minted from the pass: the commitment may be another
+    configuration's, and its id is the one that exists."""
+    outcome = select_without_conflict(
+        ranked(a_candidate(2, at_minute=5), a_candidate(3, at_minute=40)),
+        turnaround_s=NO_TURNAROUND_S,
+        committed=[committed(1, at_minute=0)],
+    )
+    facts = {
+        pass_id: PassFacts(
+            centre_freq_hz=137_100_000,
+            mode="lrpt",
+            aos=T0,
+            los=T0 + timedelta(minutes=PASS_MINUTES),
+            timing_uncertainty_s=0.5,
+        )
+        for pass_id in (2, 3)
+    }
+
+    rows = {row.pass_id: row for row in to_assignment_rows(outcome, facts, "B")}
+
+    assert rows[2].conflicts_with_assignment_id == "as_earlier_1"
+    assert rows[2].conflicts_with_assignment_id != assignment_id_for(1, "B")
+    assert rows[3].conflicts_with_assignment_id is None

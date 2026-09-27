@@ -53,16 +53,13 @@ D-066.
 
 def _print_schedule_report(report: ScheduleReport) -> None:
     """Write one run's outcome to stdout, in the order an operator reads it."""
-    already_held = report.scheduled + report.skipped - report.rows_written
-
     print(f"  configuration:       {report.model_config}")  # noqa: T201
     print(f"  stations considered: {report.stations_considered}")  # noqa: T201
     print(f"  passes considered:   {report.candidates_considered}")  # noqa: T201
     print(f"  scheduled:           {report.scheduled}")  # noqa: T201
     print(f"  skipped:             {report.skipped}")  # noqa: T201
-    print(  # noqa: T201
-        f"  rows written:        {report.rows_written} ({already_held} already held)"
-    )
+    print(f"  rows written:        {report.rows_written}")  # noqa: T201
+    print(f"  already decided:     {report.already_decided}")  # noqa: T201
 
     if report.passes_without_a_usable_transmitter:
         # Normally empty — pass generation applies the same capability test. It

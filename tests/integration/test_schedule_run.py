@@ -244,29 +244,33 @@ def test_running_one_configuration_twice_writes_nothing_the_second_time(
     second = run_schedule(rollback, SkyfieldOrbitService(), a_request())
 
     assert first.rows_written == 1
-    assert second.scheduled == 1
+    assert (second.candidates_considered, second.already_decided) == (0, 1)
     assert second.rows_written == 0
     assert len(_decisions(rollback)) == 1
 
 
-def test_two_configurations_coexist_over_one_horizon(
+def test_a_second_configuration_decides_around_the_first_ones_assignments(
     rollback: Any, network: dict[str, int]
 ) -> None:
-    """The ablation in EVALUATION.md section 3 needs both schedules at once.
+    """A station has one antenna, whichever configuration asked (D-165).
 
-    Keyed on the pass alone the second run would have written nothing and the
-    comparison would have had one side.
+    B still records its own decision about the pass — keyed on the pass alone
+    it would have written nothing — but it is a skip naming A's assignment,
+    not a second assignment for the same reception. Configurations are
+    compared by replay (D-172), not by delivering two schedules.
     """
     with rollback.cursor() as cur:
-        _insert_pass(
+        pass_id = _insert_pass(
             cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
         )
 
     run_schedule(rollback, SkyfieldOrbitService(), a_request("A"))
     run_schedule(rollback, SkyfieldOrbitService(), a_request("B"))
 
-    assert len(_decisions(rollback, "A")) == 1
-    assert len(_decisions(rollback, "B")) == 1
+    assert [row[1] for row in _decisions(rollback, "A")] == ["scheduled"]
+    b_rows = _decisions(rollback, "B")
+    assert [row[1] for row in b_rows] == ["skipped"]
+    assert b_rows[0][3] == assignment_id_for(pass_id, "A")
 
 
 def test_priority_changes_which_pass_b_takes_and_leaves_a_alone(
@@ -294,11 +298,18 @@ def test_priority_changes_which_pass_b_takes_and_leaves_a_alone(
             max_elevation_deg=30,
         )
 
-    run_schedule(rollback, SkyfieldOrbitService(), a_request("A"))
-    run_schedule(rollback, SkyfieldOrbitService(), a_request("B"))
-
-    taken_by_a = [row[0] for row in _decisions(rollback, "A") if row[1] == "scheduled"]
-    taken_by_b = [row[0] for row in _decisions(rollback, "B") if row[1] == "scheduled"]
+    taken = {}
+    for model_config in ("A", "B"):
+        # Each configuration on the network as it stood, not around the other's
+        # assignments, so the two differ in the ranking and nothing else.
+        with rollback.transaction(force_rollback=True):
+            run_schedule(rollback, SkyfieldOrbitService(), a_request(model_config))
+            taken[model_config] = [
+                row[0]
+                for row in _decisions(rollback, model_config)
+                if row[1] == "scheduled"
+            ]
+    taken_by_a, taken_by_b = taken["A"], taken["B"]
 
     assert taken_by_a == [higher]
     assert taken_by_b == [weighted]
@@ -316,11 +327,76 @@ def test_the_score_stored_is_the_one_the_decision_was_made_with(
             cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=45
         )
 
-    run_schedule(rollback, SkyfieldOrbitService(), a_request("A"))
-    run_schedule(rollback, SkyfieldOrbitService(), a_request("B"))
+    scores = {}
+    for model_config in ("A", "B"):
+        with rollback.transaction(force_rollback=True):
+            run_schedule(rollback, SkyfieldOrbitService(), a_request(model_config))
+            (row,) = _decisions(rollback, model_config)
+            scores[model_config] = (row[1], row[2])
 
-    assert _decisions(rollback, "A")[0][2] == 45.0
-    assert _decisions(rollback, "B")[0][2] == 90.0
+    assert scores == {"A": ("scheduled", 45.0), "B": ("scheduled", 90.0)}
+
+
+def _round(conn: Any, start_minute: float, length_minutes: float) -> Any:
+    """One jobs-service round over ``[start, start + length)``, in minutes."""
+    start = HORIZON_START + timedelta(minutes=start_minute)
+    return run_schedule(
+        conn,
+        SkyfieldOrbitService(),
+        ScheduleRequest(
+            start=start,
+            end=start + timedelta(minutes=length_minutes),
+            model_config="A",
+            turnaround_s=0.0,
+        ),
+    )
+
+
+def test_a_later_round_never_schedules_on_top_of_an_earlier_ones_assignment(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """D-110's rounds overlap, and the tail of each is new (D-165).
+
+    The first round, over the first hour, takes the pass rising at minute 50.
+    The second, five minutes later, sees a higher pass rising at minute 60 —
+    outside the first round's horizon, inside its own, and overlapping the
+    first pass by a minute. Before D-165 the second round ranked only its own
+    candidates, took the newcomer, and left two overlapping assignments. The
+    pass at minute 90 is the positive control: new, clear, and taken.
+    """
+    with rollback.cursor() as cur:
+        first = _insert_pass(
+            cur,
+            network[METEOR],
+            satellite_id=METEOR,
+            at_minute=50,
+            max_elevation_deg=30,
+        )
+    _round(rollback, 0, 60)
+
+    with rollback.cursor() as cur:
+        newcomer = _insert_pass(
+            cur,
+            network[CUBESAT],
+            satellite_id=CUBESAT,
+            at_minute=60,
+            max_elevation_deg=80,
+        )
+        clear = _insert_pass(
+            cur,
+            network[CUBESAT],
+            satellite_id=CUBESAT,
+            at_minute=90,
+            max_elevation_deg=20,
+        )
+    second = _round(rollback, 5, 120)
+
+    decisions = {row[0]: row for row in _decisions(rollback)}
+    assert second.already_decided == 1
+    assert decisions[first][1] == "scheduled"
+    assert decisions[newcomer][1] == "skipped"
+    assert decisions[newcomer][3] == assignment_id_for(first, "A")
+    assert decisions[clear][1] == "scheduled"
 
 
 def test_simulated_survives_from_the_station_through_to_the_assignment(

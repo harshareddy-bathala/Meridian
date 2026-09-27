@@ -11,6 +11,12 @@ callers choosing which of these functions to call, not by anything in this file.
 heartbeat: it reconciles what the station reported, applies the transitions
 :mod:`meridian.registry.heartbeat_reconciliation` derived, expires what the
 station has stopped naming, and reads back what is due.
+
+**Only a ``scheduled`` decision is an assignment.** A skip is a record of why a
+pass was not taken, and every query here that delivers, moves or expires a row
+says ``decision = 'scheduled'``. Without that, a skip was handed to its station
+on every heartbeat and expired afterwards as though the station had declined it
+(D-165); migration 0017 keeps a skip's state at ``issued`` for good.
 """
 
 from __future__ import annotations
@@ -80,7 +86,7 @@ def find_assignment_ids_by_state(
         cur.execute(
             """
             select assignment_id from assignments
-            where station_id = %s and state = any(%s)
+            where station_id = %s and decision = 'scheduled' and state = any(%s)
             """,
             (station_id, list(states)),
         )
@@ -103,7 +109,10 @@ def mark_assignments_held(
             """
             update assignments
             set state = 'held'
-            where station_id = %s and state = 'issued' and assignment_id = any(%s)
+            where station_id = %s
+              and decision = 'scheduled'
+              and state = 'issued'
+              and assignment_id = any(%s)
             """,
             (station_id, list(assignment_ids)),
         )
@@ -128,7 +137,10 @@ def mark_assignment_in_progress(
             """
             update assignments
             set state = 'in_progress'
-            where station_id = %s and assignment_id = %s and state = 'held'
+            where station_id = %s
+              and assignment_id = %s
+              and decision = 'scheduled'
+              and state = 'held'
             """,
             (station_id, assignment_id),
         )
@@ -166,6 +178,7 @@ def mark_assignment_reported(
             set state = 'reported'
             where station_id = %s
               and assignment_id = %s
+              and decision = 'scheduled'
               and state in ('issued', 'held', 'in_progress')
             """,
             (station_id, assignment_id),
@@ -206,6 +219,7 @@ def expire_overdue_assignments(
             update assignments
             set state = 'expired'
             where station_id = %s
+              and decision = 'scheduled'
               and state in ('issued', 'held')
               and end_at < now()
               and not (assignment_id = any(%s))
@@ -262,6 +276,7 @@ def find_due_assignments(
             join passes p on p.id = a.pass_id
             join element_sets es on es.id = p.element_set_id
             where a.station_id = %s
+              and a.decision = 'scheduled'
               and a.state in ('issued', 'held', 'in_progress')
               and a.end_at >= now()
               and a.start_at <= %s

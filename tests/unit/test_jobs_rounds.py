@@ -58,6 +58,7 @@ class _Work:
             skipped=2,
             rows_written=7,
             passes_without_a_usable_transmitter=(),
+            already_decided=0,
         )
 
 

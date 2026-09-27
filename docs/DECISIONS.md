@@ -1461,7 +1461,7 @@ The pass-generation job decides which station-and-satellite pairs are worth prop
 
 **Priority belongs to `satellites`, not to `assignments`.** `assignments.priority` records what a decision *used*, which is the right thing for it to record and useless as an input — reading it back would derive next week's weighting from last week's schedule, so the first run would have nothing and every run after it would be quoting itself. An operator has opinions about *objects*: "Meteor-M is the project, this cubesat is a bonus". Migration 0012 adds `satellites.priority`, defaulting to 1.0 to match `assignments.priority` and so preserve the reduction above.
 
-**A schedule has an identity, so a run can be repeated.** Re-running the scheduler inserted a second complete copy — the failure D-063 fixed for `passes`, in the table that consumes them, and worse here: two `scheduled` rows for one pass means a station told twice to receive the same thing, and MSP §4.2's reconciliation holds two ids for one reception. `unique (pass_id, model_config)` fixes it, and **both parts of the key matter**: keyed on the pass alone, configurations A and B would collide, and running both over one horizon is exactly what the ablation requires — the two schedules have to coexist to be compared.
+**A schedule has an identity, so a run can be repeated.** Re-running the scheduler inserted a second complete copy — the failure D-063 fixed for `passes`, in the table that consumes them, and worse here: two `scheduled` rows for one pass means a station told twice to receive the same thing, and MSP §4.2's reconciliation holds two ids for one reception. `unique (pass_id, model_config)` fixes it, and **both parts of the key matter**: keyed on the pass alone, configurations A and B would collide, and running both over one horizon is exactly what the ablation requires — the two schedules have to coexist to be compared. *Amended by D-165:* a station has one antenna, so a second configuration now decides around the first one's assignments, and configurations are compared by replay (D-172). The key is unchanged.
 
 **Assignment ids are derived, not random**: `as_` + the first twelve hex of `sha256(pass_id:model_config)`, following `observations.observation_id` (D-027). A repeat therefore mints the same ids and collapses onto that constraint, and a skip can name the assignment that displaced it without a round trip to discover what id the winner was given.
 
@@ -3488,6 +3488,34 @@ Four features are learned from a station's own settled history (D-157), and each
 - the dataset's completeness, from its `EvaluationResult` (D-154).
 
 B is reported as A: its probabilities are A's, and priority weights the objective (D-160).
+
+---
+
+## D-165 — A skip is a record, not an assignment, and a round schedules around what earlier rounds assigned
+
+**2026-09-27 · accepted** · *migration 0017; `meridian/store/{assignments,schedule_reads}.py`; `meridian/scheduler/{candidates,conflict_rejection,run}.py`, Stage 18*
+
+Two defects in how Stage 7's schedule reached a station, both found by reading the delivery path before building on it.
+
+**Skips were delivered.** `assignments` holds every decision, the passes skipped beside the passes taken (D-065), and a skip took the column default `state = 'issued'`. None of the queries on the delivery path looked at `decision`. So:
+
+- every heartbeat handed a station the passes the scheduler had rejected, as well as the ones it had chosen;
+- a station naming one in `held_assignments` moved it to `held`;
+- when its window closed, reconciliation expired it, as though the station had declined work it was never meant to have.
+
+**Every query that delivers, moves or expires a row now says `decision = 'scheduled'`,** and migration 0017 makes the rule the table's own: `check (decision = 'scheduled' or state = 'issued')`. A skip stays `issued` for good. Skips a deployment already delivered are put back to `issued` by the migration. The states they had described a delivery that should not have happened, not anything a station did with an assignment. An observation submitted against one stays where it is, as a record of a real reception.
+
+**Rounds scheduled on top of one another.** The jobs service schedules `[now, now + 6 h)` every five minutes (D-110), so consecutive rounds overlap by all but five minutes, and `run_schedule` never read what was already stored. A pass new to a round could be ranked against passes that were already assigned. It might be at the horizon's tail, or a newer element set's prediction of a pass already taken (D-063). If it won, it was inserted as `scheduled`, the earlier assignment stayed `scheduled` under `on conflict do nothing`, and the station held two overlapping assignments. `find_passes_in_horizon`'s note that adjacent horizons partition the passes was true of `meridian schedule` run by hand, and not of the rounds that replaced it.
+
+**A round now works around what is decided:**
+
+- A pass this configuration has already decided, taken or skipped, is not a candidate again. The skip recorded why; a later round has no new reason to reverse it. When there is one, it is D-171's.
+- The station's open assignments (`issued`, `held` or `in_progress`) are **commitments**. They are fixed, never displaced, and a candidate one of them blocks is skipped naming that assignment.
+- Commitments of **every** configuration bind. A station has one antenna whichever configuration asked for the pass. A second configuration run over the same horizon still records its own decision about each pass, but it records a skip naming the first one's assignment, not a second assignment for the same reception. Configurations are compared by replaying them over a snapshot (D-172), not by delivering two schedules to one station. This withdraws D-066's reason for keying decisions on the configuration, "the two schedules have to coexist to be compared", while keeping the key: each configuration's decision is still its own row.
+
+`ScheduleReport` gains `already_decided`, and `meridian schedule` prints it, so a repeat that writes nothing says why.
+
+*Rejected: re-deciding every pass in the horizon each round and replacing what changed.* It would move assignments a station may already hold, and turn a schedule into something that changes under the station every five minutes. Re-opening a decision is kept for a withdrawn reason (D-171), not for every round.
 
 ---
 

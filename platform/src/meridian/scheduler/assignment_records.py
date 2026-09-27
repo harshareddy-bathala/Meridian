@@ -214,7 +214,8 @@ def to_assignment_rows(
             rejection.scored,
             facts_by_pass_id[rejection.scored.candidate.pass_id],
             model_config,
-            assignment_id_for(rejection.conflicts_with_pass_id, model_config),
+            rejection.committed_assignment_id
+            or assignment_id_for(rejection.conflicts_with_pass_id, model_config),
         )
         for rejection in outcome.rejected
     )

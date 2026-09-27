@@ -33,6 +33,7 @@ from datetime import datetime
 
 __all__ = [
     "Candidate",
+    "Commitment",
     "Rejection",
     "ScheduleOutcome",
     "ScoredCandidate",
@@ -102,6 +103,23 @@ class ScoredCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class Commitment:
+    """A pass the station is already assigned, by an earlier run.
+
+    Fixed for this run: it is never displaced, and a candidate it blocks is
+    skipped naming it. Without it, rounds over overlapping horizons (D-110)
+    each decided their own passes as though the station were free, and a pass
+    new to a later round could be scheduled on top of one already taken
+    (D-165).
+    """
+
+    candidate: Candidate
+    """The pass the assignment was made for, seen as the scheduler sees one."""
+
+    assignment_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class Rejection:
     """A candidate that lost, and the candidate it lost to.
 
@@ -114,6 +132,12 @@ class Rejection:
 
     scored: ScoredCandidate
     conflicts_with_pass_id: int
+
+    committed_assignment_id: str | None = None
+    """Set when the blocker is a :class:`Commitment`, whose id already exists.
+
+    ``None`` when it is a selection of this run, whose id the run mints.
+    """
 
 
 @dataclass(frozen=True, slots=True)

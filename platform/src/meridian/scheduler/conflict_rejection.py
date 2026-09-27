@@ -26,6 +26,7 @@ from datetime import timedelta
 
 from meridian.scheduler import (
     Candidate,
+    Commitment,
     Rejection,
     ScheduleOutcome,
     ScoredCandidate,
@@ -83,8 +84,21 @@ def _first_conflict(
     return None
 
 
+def _first_commitment(
+    committed: Sequence[Commitment], candidate: Candidate, turnaround_s: float
+) -> Commitment | None:
+    """The earliest commitment blocking ``candidate``, or None if none does."""
+    for commitment in committed:
+        if conflicts_with(commitment.candidate, candidate, turnaround_s):
+            return commitment
+    return None
+
+
 def select_without_conflict(
-    ranked: Sequence[ScoredCandidate], *, turnaround_s: float
+    ranked: Sequence[ScoredCandidate],
+    *,
+    turnaround_s: float,
+    committed: Sequence[Commitment] = (),
 ) -> ScheduleOutcome:
     """Take ranked candidates in order, skipping any that no longer fit.
 
@@ -100,6 +114,10 @@ def select_without_conflict(
             property of the rotator and the antenna, ``stations`` has no column
             for it, and a fixed-antenna station's true value of zero is not
             something to guess at from ``station_capabilities.tracking``.
+        committed: Assignments earlier runs already made. They are never
+            displaced and never appear in the outcome; a candidate one of them
+            blocks is rejected naming it, before any selection of this run is
+            consulted (D-165).
 
     Returns:
         A :class:`~meridian.scheduler.ScheduleOutcome` holding the selections in
@@ -129,6 +147,16 @@ def select_without_conflict(
     rejected: list[Rejection] = []
 
     for scored in ranked:
+        commitment = _first_commitment(committed, scored.candidate, turnaround_s)
+        if commitment is not None:
+            rejected.append(
+                Rejection(
+                    scored=scored,
+                    conflicts_with_pass_id=commitment.candidate.pass_id,
+                    committed_assignment_id=commitment.assignment_id,
+                )
+            )
+            continue
         blocker = _first_conflict(selected, scored.candidate, turnaround_s)
         if blocker is None:
             selected.append(scored)
