@@ -59,6 +59,8 @@ class _Work:
             rows_written=7,
             passes_without_a_usable_transmitter=(),
             already_decided=0,
+            stations_unavailable=(),
+            passes_deferred=0,
         )
 
 
@@ -75,10 +77,11 @@ def test_a_round_covers_the_horizon_from_now_for_both_tasks() -> None:
 
     assert work.horizons == [GenerationHorizon(start=NOW, end=NOW + PLAN.horizon)]
     (request,) = work.requests
-    assert (request.start, request.end, request.model_config) == (
+    assert (request.start, request.end, request.model_config, request.now) == (
         NOW,
         NOW + PLAN.horizon,
         "A",
+        NOW,
     )
     assert outcome.generated is not None
     assert outcome.scheduled is not None

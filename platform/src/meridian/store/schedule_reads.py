@@ -38,7 +38,11 @@ class StoredCommitment:
     station_id: str
     aos: datetime
     los: datetime
-    """The *pass* boundaries: conflicts are judged on the pass (D-065)."""
+    """The pass boundaries."""
+
+    timing_uncertainty_s: float
+    """The margin its window was widened by; conflicts are judged on the
+    widened window (D-166)."""
 
     max_elevation_deg: float
     priority: float
@@ -67,13 +71,13 @@ def find_decided_pass_ids(
 def find_commitments(
     conn: Connection, station_id: str, start: datetime, end: datetime
 ) -> list[StoredCommitment]:
-    """The station's open scheduled assignments whose pass overlaps ``[start, end)``.
+    """The station's open scheduled assignments whose window meets ``[start, end)``.
 
     Args:
         conn: An open connection. Read-only.
         station_id: The station whose antenna is being allocated.
-        start: Inclusive lower bound on a pass's loss of signal.
-        end: Exclusive upper bound on its acquisition.
+        start: Inclusive lower bound on an assignment's ``end_at``.
+        end: Exclusive upper bound on its ``start_at``.
 
     Returns:
         In acquisition order, then assignment id.
@@ -92,14 +96,15 @@ def find_commitments(
         cur.execute(
             """
             select a.assignment_id, a.pass_id, a.station_id, p.aos, p.los,
-                   p.max_elevation_deg, a.priority, a.simulated
+                   a.timing_uncertainty_s, p.max_elevation_deg, a.priority,
+                   a.simulated
             from assignments a
             join passes p on p.id = a.pass_id
             where a.station_id = %s
               and a.decision = 'scheduled'
               and a.state in ('issued', 'held', 'in_progress')
-              and p.los >= %s
-              and p.aos < %s
+              and a.end_at >= %s
+              and a.start_at < %s
             order by p.aos asc, a.assignment_id asc
             """,
             (station_id, start, end),

@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import UTC, datetime
 
 from meridian.cli_passes import parse_horizon_bound
 from meridian.config import load_settings
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.scheduler.run import (
     RANKERS,
+    ScheduleInvalidError,
     ScheduleReport,
     ScheduleRequest,
     run_schedule,
@@ -60,6 +62,11 @@ def _print_schedule_report(report: ScheduleReport) -> None:
     print(f"  skipped:             {report.skipped}")  # noqa: T201
     print(f"  rows written:        {report.rows_written}")  # noqa: T201
     print(f"  already decided:     {report.already_decided}")  # noqa: T201
+    if report.stations_unavailable:
+        print(  # noqa: T201
+            f"  offline, left undecided: {', '.join(report.stations_unavailable)}"
+            f" ({report.passes_deferred} passes)"
+        )
 
     if report.passes_without_a_usable_transmitter:
         # Normally empty — pass generation applies the same capability test. It
@@ -97,6 +104,7 @@ def run_scheduler(args: argparse.Namespace) -> int:
         start=start,
         end=end,
         model_config=args.model_config,
+        now=datetime.now(UTC),
         turnaround_s=PHASE_1_TURNAROUND_S,
     )
 
@@ -109,8 +117,14 @@ def run_scheduler(args: argparse.Namespace) -> int:
         )
         return EXIT_FAILED
 
-    with conn:
-        report = run_schedule(conn, SkyfieldOrbitService(), request)
+    try:
+        with conn:
+            report = run_schedule(conn, SkyfieldOrbitService(), request)
+    except ScheduleInvalidError as exc:
+        # A defect, not an operator's mistake: the run refused to write a
+        # schedule that breaks its own constraints, and says which (D-166).
+        print(f"meridian schedule: {exc}", file=sys.stderr)  # noqa: T201
+        return EXIT_FAILED
 
     print(  # noqa: T201
         f"Scheduled [{start.isoformat()}, {end.isoformat()}) "

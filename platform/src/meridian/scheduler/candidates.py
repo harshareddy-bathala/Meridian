@@ -28,8 +28,10 @@ from meridian.registry.capability_match import (
     ReceiveCapability,
     covers_transmission,
 )
+from meridian.registry.liveness import derive_liveness
 from meridian.scheduler import Candidate, Commitment
 from meridian.scheduler.assignment_records import PassFacts
+from meridian.scheduler.constraints import DELIVERY_LEAD, window
 from meridian.scheduler.priority_baseline import NEUTRAL_PRIORITY
 from meridian.store.element_sets import find_element_set_by_id
 from meridian.store.passes import StoredPass, find_passes_in_horizon
@@ -45,12 +47,13 @@ from meridian.store.schedule_reads import (
     find_decided_pass_ids,
 )
 from meridian.store.station_capabilities import find_capabilities_for_station
-from meridian.store.stations import Connection
+from meridian.store.stations import Connection, find_station_heartbeat
 
 __all__ = [
     "Catalogue",
     "ScheduleRequest",
     "StationWork",
+    "is_available",
     "load_catalogue",
     "work_for_station",
 ]
@@ -67,6 +70,11 @@ class ScheduleRequest:
 
     model_config: str
     """``A`` or ``B``. Recorded on every row so a schedule can be attributed."""
+
+    now: datetime
+    """When the run is made, timezone-aware UTC: the instant each station's
+    liveness is judged at (D-166). Passed rather than read, as ``start`` is,
+    so a run can be stated exactly."""
 
     turnaround_s: float
     """Seconds a station needs between two receptions, for slew and settling.
@@ -169,6 +177,21 @@ def _element_set_for(conn: Connection, element_set_id: int) -> ElementSet:
     )
 
 
+def is_available(conn: Connection, station_id: str, now: datetime) -> bool:
+    """Whether a station may be given new work: not ``offline`` (D-166).
+
+    **A station never seen is available.** It has registered and not yet
+    reported, which is what every station is between registration and its
+    first heartbeat, and that heartbeat is what delivers its assignments. A
+    ``stale`` one has missed two heartbeats and is still inside SC-5's 90 s.
+    Only ``offline`` — the registry's judgement that it stopped — withholds
+    work.
+    """
+    heartbeat = find_station_heartbeat(conn, station_id)
+    last = None if heartbeat is None else heartbeat.last_heartbeat_at
+    return derive_liveness(last, now=now) != "offline"
+
+
 def load_catalogue(conn: Connection) -> Catalogue:
     """Read the live downlinks and the operator weightings."""
     transmitters_by_satellite: dict[str, list[StoredTransmitter]] = {}
@@ -182,7 +205,9 @@ def load_catalogue(conn: Connection) -> Catalogue:
     )
 
 
-def _candidate_from(stored: StoredPass, priority: float) -> Candidate:
+def _candidate_from(
+    stored: StoredPass, priority: float, timing_uncertainty_s: float
+) -> Candidate:
     """One stored pass as the scheduler sees it.
 
     ``simulated`` is carried from the pass, which carried it from the station
@@ -194,6 +219,7 @@ def _candidate_from(stored: StoredPass, priority: float) -> Candidate:
         station_id=stored.station_id,
         aos=stored.aos,
         los=stored.los,
+        margin_s=timing_uncertainty_s,
         max_elevation_deg=stored.max_elevation_deg,
         priority=priority,
         simulated=stored.simulated,
@@ -221,6 +247,7 @@ def _commitment_from(stored: StoredCommitment) -> Commitment:
             station_id=stored.station_id,
             aos=stored.aos,
             los=stored.los,
+            margin_s=stored.timing_uncertainty_s,
             max_elevation_deg=stored.max_elevation_deg,
             priority=stored.priority,
             simulated=stored.simulated,
@@ -234,20 +261,23 @@ def _commitments_near(
 ) -> list[Commitment]:
     """The open assignments any of ``candidates`` could collide with.
 
-    Bounded by the candidates' own span opened out by the turnaround, not by
-    the horizon: a pass rising just before the horizon may still be under way
-    when the first candidate rises.
+    Bounded by the candidates' own windows, opened out by the turnaround and
+    by how far ahead a heartbeat delivers, not by the horizon: a pass rising
+    just before the horizon may still be under way when the first candidate
+    rises, and one two hours before it still counts against the delivery cap
+    (D-166).
     """
     if not candidates:
         return []
     room = timedelta(seconds=turnaround_s)
+    windows = [window(one) for one in candidates]
     return [
         _commitment_from(stored)
         for stored in find_commitments(
             conn,
             candidates[0].station_id,
-            min(one.aos for one in candidates) - room,
-            max(one.los for one in candidates) + room,
+            min(start for start, _ in windows) - room - DELIVERY_LEAD,
+            max(end for _, end in windows) + room + DELIVERY_LEAD,
         )
     ]
 
@@ -283,15 +313,15 @@ def work_for_station(
             continue
 
         element_set = _element_set_for(conn, stored.element_set_id)
+        margin_s = _timing_uncertainty_s(orbit, stored, element_set)
         candidates.append(
             _candidate_from(
                 stored,
                 catalogue.priorities.get(stored.satellite_id, NEUTRAL_PRIORITY),
+                margin_s,
             )
         )
-        facts_by_pass_id[stored.id] = _facts_from(
-            stored, transmitter, _timing_uncertainty_s(orbit, stored, element_set)
-        )
+        facts_by_pass_id[stored.id] = _facts_from(stored, transmitter, margin_s)
 
     return StationWork(
         candidates=candidates,

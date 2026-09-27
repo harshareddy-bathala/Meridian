@@ -12,17 +12,19 @@ together. That gap is what the Stage 18 optimiser exists to close, and it can
 only be reported as a number because this simple rule is here to be measured
 against.
 
+The rules it keeps are those of :mod:`meridian.scheduler.constraints`, the ones
+the optimiser keeps too: one antenna, turnaround included, and the delivery cap (D-166).
+
 A leaf: no I/O, no clock, no database. It takes candidates and returns them, so
 a schedule can be checked against overlapping windows written out by hand.
 
 Reference: docs/ARCHITECTURE.md (non-overlap including slew and settling time);
-docs/GLOSSARY.md on slew; docs/DECISIONS.md D-065.
+docs/GLOSSARY.md on slew; docs/DECISIONS.md D-065, D-165, D-166.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import timedelta
 
 from meridian.scheduler import (
     Candidate,
@@ -31,42 +33,9 @@ from meridian.scheduler import (
     ScheduleOutcome,
     ScoredCandidate,
 )
+from meridian.scheduler.constraints import Rules, exceeds_cap, overlaps
 
-__all__ = ["conflicts_with", "select_without_conflict"]
-
-
-def conflicts_with(one: Candidate, other: Candidate, turnaround_s: float) -> bool:
-    """Whether one station could not physically receive both of these passes.
-
-    Args:
-        one: A candidate pass.
-        other: The candidate to test it against.
-        turnaround_s: Seconds the station needs between two receptions — slewing
-            the antenna to the new bearing and letting it settle. Zero means
-            passes may be taken back to back.
-
-    Returns:
-        True when the two windows, each opened out by ``turnaround_s``, overlap
-        for a station that is the same station.
-
-    Note:
-        **Two passes for different stations never conflict.** The constraint is
-        one antenna, not one network; the whole point of a network is that two
-        stations take two passes at once.
-
-        **Touching is not overlapping.** A pass ending at exactly the instant
-        another begins conflicts only when ``turnaround_s`` is positive, which
-        is the honest answer: with no slew to perform there is nothing in the
-        way, and with slew to perform there is. Using ``<`` rather than ``<=``
-        is what makes that boundary fall the right way, and it matters — passes
-        of one satellite from one station recur on a near-fixed period, so
-        near-abutting windows are common rather than exotic.
-    """
-    if one.station_id != other.station_id:
-        return False
-
-    room = timedelta(seconds=turnaround_s)
-    return one.aos < other.los + room and other.aos < one.los + room
+__all__ = ["select_without_conflict"]
 
 
 def _first_conflict(
@@ -79,7 +48,7 @@ def _first_conflict(
     one an operator asking "why not this pass?" is owed.
     """
     for taken in selected:
-        if conflicts_with(taken.candidate, candidate, turnaround_s):
+        if overlaps(taken.candidate, candidate, turnaround_s):
             return taken
     return None
 
@@ -89,15 +58,49 @@ def _first_commitment(
 ) -> Commitment | None:
     """The earliest commitment blocking ``candidate``, or None if none does."""
     for commitment in committed:
-        if conflicts_with(commitment.candidate, candidate, turnaround_s):
+        if overlaps(commitment.candidate, candidate, turnaround_s):
             return commitment
+    return None
+
+
+def _rejection(
+    scored: ScoredCandidate,
+    selected: Sequence[ScoredCandidate],
+    committed: Sequence[Commitment],
+    rules: Rules,
+) -> Rejection | None:
+    """Why ``scored`` cannot be taken now, or None if it can."""
+    candidate = scored.candidate
+    commitment = _first_commitment(committed, candidate, rules.turnaround_s)
+    if commitment is not None:
+        return Rejection(
+            scored=scored,
+            rule="overlap",
+            conflicts_with_pass_id=commitment.candidate.pass_id,
+            committed_assignment_id=commitment.assignment_id,
+        )
+    blocker = _first_conflict(selected, candidate, rules.turnaround_s)
+    if blocker is not None:
+        return Rejection(
+            scored=scored,
+            rule="overlap",
+            conflicts_with_pass_id=blocker.candidate.pass_id,
+        )
+    held = [
+        *(one.candidate for one in selected),
+        *(one.candidate for one in committed),
+    ]
+    if exceeds_cap(candidate, held, rules):
+        return Rejection(
+            scored=scored, rule="eligible_cap", conflicts_with_pass_id=None
+        )
     return None
 
 
 def select_without_conflict(
     ranked: Sequence[ScoredCandidate],
     *,
-    turnaround_s: float,
+    rules: Rules,
     committed: Sequence[Commitment] = (),
 ) -> ScheduleOutcome:
     """Take ranked candidates in order, skipping any that no longer fit.
@@ -109,11 +112,10 @@ def select_without_conflict(
             re-derived: this function has no opinion about what is better, which
             is what lets one non-overlap rule serve every configuration in
             docs/EVALUATION.md §3.
-        turnaround_s: Seconds a station needs between two receptions. One value
-            for the whole run rather than one per station: turnaround is a
-            property of the rotator and the antenna, ``stations`` has no column
-            for it, and a fixed-antenna station's true value of zero is not
-            something to guess at from ``station_capabilities.tracking``.
+        rules: The turnaround and the delivery cap (D-166). One turnaround for
+            the whole run rather than one per station: ``stations`` has no
+            column for it, and a fixed-antenna station's true value of zero is
+            not something to guess at from ``station_capabilities.tracking``.
         committed: Assignments earlier runs already made. They are never
             displaced and never appear in the outcome; a candidate one of them
             blocks is rejected naming it, before any selection of this run is
@@ -122,11 +124,8 @@ def select_without_conflict(
     Returns:
         A :class:`~meridian.scheduler.ScheduleOutcome` holding the selections in
         the order they were taken and one :class:`~meridian.scheduler.Rejection`
-        per displaced candidate, each naming the selection that displaced it.
-
-    Raises:
-        ValueError: ``turnaround_s`` is negative, which would let two genuinely
-            overlapping passes be scheduled together.
+        per displaced candidate, each naming the rule and, for an overlap, the
+        assignment that displaced it.
 
     Note:
         **Every input appears in exactly one of the two output lists.** A
@@ -140,32 +139,14 @@ def select_without_conflict(
         nothing here except a structure a reader has to learn before they can
         check the rule.
     """
-    if turnaround_s < 0:
-        raise ValueError(f"turnaround_s is negative: {turnaround_s}")
-
     selected: list[ScoredCandidate] = []
     rejected: list[Rejection] = []
 
     for scored in ranked:
-        commitment = _first_commitment(committed, scored.candidate, turnaround_s)
-        if commitment is not None:
-            rejected.append(
-                Rejection(
-                    scored=scored,
-                    conflicts_with_pass_id=commitment.candidate.pass_id,
-                    committed_assignment_id=commitment.assignment_id,
-                )
-            )
-            continue
-        blocker = _first_conflict(selected, scored.candidate, turnaround_s)
-        if blocker is None:
+        rejection = _rejection(scored, selected, committed, rules)
+        if rejection is None:
             selected.append(scored)
-            continue
-        rejected.append(
-            Rejection(
-                scored=scored,
-                conflicts_with_pass_id=blocker.candidate.pass_id,
-            )
-        )
+        else:
+            rejected.append(rejection)
 
     return ScheduleOutcome(selected=selected, rejected=rejected)

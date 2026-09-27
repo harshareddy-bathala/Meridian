@@ -168,6 +168,7 @@ def run_round(work: RoundWork, plan: RoundPlan, now: datetime) -> RoundOutcome:
         start=now,
         end=end,
         model_config=plan.model_config,
+        now=now,
         turnaround_s=plan.turnaround_s,
     )
     scheduled = _timed(SCHEDULE, lambda: work.schedule(request))

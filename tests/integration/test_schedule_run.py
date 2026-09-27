@@ -49,6 +49,7 @@ def a_request(model_config: str = "A") -> ScheduleRequest:
         start=HORIZON_START,
         end=HORIZON_END,
         model_config=model_config,
+        now=datetime.now(UTC),
         turnaround_s=0.0,
     )
 
@@ -347,6 +348,7 @@ def _round(conn: Any, start_minute: float, length_minutes: float) -> Any:
             start=start,
             end=start + timedelta(minutes=length_minutes),
             model_config="A",
+            now=datetime.now(UTC),
             turnaround_s=0.0,
         ),
     )
@@ -397,6 +399,98 @@ def test_a_later_round_never_schedules_on_top_of_an_earlier_ones_assignment(
     assert decisions[newcomer][1] == "skipped"
     assert decisions[newcomer][3] == assignment_id_for(first, "A")
     assert decisions[clear][1] == "scheduled"
+
+
+def test_passes_that_only_touch_conflict_once_widened(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """D-166: overlap is judged on the assignment windows the station records.
+
+    The second pass rises the instant the first sets. On the passes alone they
+    are compatible; each window is opened out by the element set's 0.533 s, so
+    the station would have to be recording both for a second.
+    """
+    with rollback.cursor() as cur:
+        first = _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=60
+        )
+        second = _insert_pass(
+            cur,
+            network[CUBESAT],
+            satellite_id=CUBESAT,
+            at_minute=11,
+            max_elevation_deg=30,
+        )
+
+    run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    decisions = {row[0]: row for row in _decisions(rollback)}
+    assert decisions[first][1] == "scheduled"
+    assert decisions[second][1] == "skipped"
+    assert decisions[second][3] == assignment_id_for(first, "A")
+
+
+def test_a_ninth_assignment_one_heartbeat_would_carry_is_skipped(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """D-035's cap, enforced where assignments are made (D-166).
+
+    Nine passes a quarter of an hour apart never overlap, and are all eligible
+    for delivery at once. The lowest is skipped, naming no assignment.
+    """
+    with rollback.cursor() as cur:
+        passes = [
+            _insert_pass(
+                cur,
+                network[METEOR],
+                satellite_id=METEOR,
+                at_minute=number * 12,
+                max_elevation_deg=80 - number,
+            )
+            for number in range(9)
+        ]
+
+    report = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    decisions = {row[0]: row for row in _decisions(rollback)}
+    assert (report.scheduled, report.skipped) == (8, 1)
+    assert decisions[passes[-1]][1] == "skipped"
+    assert decisions[passes[-1]][3] is None
+    assert "D-035" in decisions[passes[-1]][8]
+
+
+def test_an_offline_station_is_given_nothing_and_decided_when_back(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """D-166: offline withholds new work, and defers the decision rather than
+    skipping, so the passes are still open when the station returns."""
+    with rollback.cursor() as cur:
+        pass_id = _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
+        )
+        cur.execute(
+            "update stations set last_heartbeat_at = now() - interval '10 minutes'"
+            " where station_id = %s",
+            (STATION,),
+        )
+
+    away = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    assert away.stations_unavailable == (STATION,)
+    assert (away.passes_deferred, away.rows_written) == (1, 0)
+    assert _decisions(rollback) == []
+
+    with rollback.cursor() as cur:
+        cur.execute(
+            "update stations set last_heartbeat_at = now() where station_id = %s",
+            (STATION,),
+        )
+    back = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    assert back.stations_unavailable == ()
+    assert [(row[0], row[1]) for row in _decisions(rollback)] == [
+        (pass_id, "scheduled")
+    ]
 
 
 def test_simulated_survives_from_the_station_through_to_the_assignment(
@@ -453,6 +547,7 @@ def test_a_naive_horizon_is_refused(rollback: Any, network: dict[str, int]) -> N
         start=HORIZON_START.replace(tzinfo=None),
         end=HORIZON_END,
         model_config="A",
+        now=datetime.now(UTC),
         turnaround_s=0.0,
     )
     with pytest.raises(ValueError, match="naive"):

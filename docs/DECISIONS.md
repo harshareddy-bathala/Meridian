@@ -1441,7 +1441,7 @@ The pass-generation job decides which station-and-satellite pairs are worth prop
 
 **Turnaround between two receptions is an input, not a constant, and its value is not decided here.** `ARCHITECTURE.md` requires non-overlap *including slew and settling time*, so the rule takes a `turnaround_s` and honours it; two passes that abut exactly are compatible for a fixed antenna and are not for a rotator, and both answers are correct for the station they describe. What the *platform* should pass is genuinely undecided: nobody has measured station 001's rotator, `stations` has no column for it, and `station_capabilities.tracking` is a boolean that does not imply a duration. **Recorded as owed by the scheduler run** (Stage 7 Session D), which is the first code that must supply a number.
 
-*Consequence, stated rather than discovered later:* whatever value that run picks, the baselines and the Stage 18 optimiser must use the same one, or `EVALUATION.md`'s SC-1 measurement of **D − B** compares two schedulers working to different physical constraints and attributes the difference to the model.
+*Consequence, stated rather than discovered later:* whatever value that run picks, the baselines and the Stage 18 optimiser must use the same one, or `EVALUATION.md`'s SC-1 measurement of **D − B** compares two schedulers working to different physical constraints and attributes the difference to the model. *Amended by D-166:* overlap is now judged on the assignment windows, and the rule, the delivery cap and the check of every schedule are written once for every scheduler.
 
 ---
 
@@ -3518,6 +3518,43 @@ Two defects in how Stage 7's schedule reached a station, both found by reading t
 **The public API publishes a skip's `state` as null**, and the dashboard shows a dash. A skip was never delivered, so it has no state to report. Publishing `issued` would claim the platform had handed it to a station.
 
 *Rejected: re-deciding every pass in the horizon each round and replacing what changed.* It would move assignments a station may already hold, and turn a schedule into something that changes under the station every five minutes. Re-opening a decision is kept for a withdrawn reason (D-171), not for every round.
+
+---
+
+## D-166 — One set of constraints for every scheduler, checked before anything is written
+
+**2026-09-27 · accepted** · *`meridian/scheduler/{constraints,conflict_rejection,candidates,run}.py`, Stage 18*
+
+The roadmap lists the constraints a schedule obeys. D-065 records why every scheduler must obey the same ones: otherwise D − B compares two schedulers under different physics and credits the difference to the model. So they are written once, in `meridian.scheduler.constraints`, and the Stage 7 baselines, the optimiser and the oracle all keep them.
+
+**One antenna, judged on the assignment window.** A station's assignments never overlap. The window judged is the one the station records: the pass opened out by its timing uncertainty (D-021, D-060), plus the station's turnaround after it. This changes Stage 7's rule, stated on `Candidate`, that conflicts are judged on the pass. A station recording one pass to its widened end cannot start the next at its widened start, and two passes that only touch on paper overlap by the sum of their margins on the air. Every scheduler judges the same way, so schedules stay comparable. Turnaround is still one value for the run, zero for the fixed antennas that exist (D-066).
+
+**The delivery cap.** At no instant may a station hold more than 8 assignments that one heartbeat would deliver together. Eligible at instant `t` means `start ≤ t + 2 h` and `end ≥ t` (D-035), so an assignment is eligible over `[start − 2 h, end]`, and the cap bounds how many of those intervals share an instant. D-035 made more than 8 a broken invariant rather than a queue, and left enforcing it to whoever creates assignments. The two numbers are `MAX_ASSIGNMENTS_PER_RESPONSE` and the heartbeat's `ASSIGNMENT_HORIZON`, and a unit test holds them equal to the scheduler's. At 137 MHz a station sees a few passes in two hours, so the cap rarely binds; it is enforced because a denser catalogue would otherwise starve delivery silently.
+
+**Availability: an `offline` station is given nothing new.**
+- Liveness is the registry's own judgement (`derive_liveness`), taken at the run's `now`. That instant is passed in, not read, so a run can be stated exactly.
+- A station **never seen** is available. It has registered and not yet reported, which every station is until its first heartbeat, and that heartbeat is what delivers its work.
+- A **stale** station is still inside SC-5's 90 s, and is available too.
+- An offline station's passes are **left undecided, not skipped**. A skip is final (D-165), so skipping would give up six hours of passes for a ten-minute outage. The report names the station and counts its deferred passes, and the first round after it returns decides them.
+- Pass generation is unchanged. An offline station's passes stay in the completeness denominator, as `find_receiving_stations` requires.
+
+**A live, receivable downlink.** A pass becomes a candidate only if its satellite has an active transmitter the station declared it can receive (D-064). The candidate set is therefore the set that satisfies the rule, and no candidate can lose to it.
+
+**Commitments are fixed** (D-165).
+
+**Every schedule is checked, however it was found.** `violations(problem, outcome)` takes the candidates, the commitments, the unavailable stations and the rules, and reports every rule broken, by name and with the passes that break it:
+- an overlap;
+- a breach of the cap;
+- an assignment to an offline station;
+- a candidate undecided or decided twice;
+- a pass decided that was never a candidate;
+- a commitment selected again.
+
+It does not ask how the outcome was reached. The scheduler run checks each station's outcome before keeping it, and raises `ScheduleInvalidError`, writing nothing, if anything is found. For the greedy baselines this is a guard against a defect. For the optimiser, a solver's answer is a claim, and this is how it is checked (D-167).
+
+**A skip says which rule it lost to.** `Rejection.rule` is `overlap` or `eligible_cap`. An overlap names the assignment that took the slot. A cap rejection names none, since no single assignment took it, and its reason cites D-035.
+
+*Rejected: re-using the 8-per-response cap as a queue, by delivering the earliest eight and holding the rest back until a slot frees.* D-035 already rejected it: redelivery means the ninth is never delivered while the eight ahead of it are held.
 
 ---
 

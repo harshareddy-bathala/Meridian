@@ -24,7 +24,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from meridian.scheduler import ScheduleOutcome, ScoredCandidate
+from meridian.scheduler import Rejection, ScheduleOutcome, ScoredCandidate
 from meridian.store.assignments import NewAssignment
 
 __all__ = [
@@ -147,12 +147,46 @@ def _selection_row(
     )
 
 
+def _blocker_id(rejection: Rejection, model_config: str) -> str | None:
+    """The assignment that displaced this candidate, or None if none did alone.
+
+    A commitment's id already exists and may be another configuration's; a
+    selection of this run has the id this run mints for it.
+    """
+    if rejection.committed_assignment_id is not None:
+        return rejection.committed_assignment_id
+    if rejection.conflicts_with_pass_id is None:
+        return None
+    return assignment_id_for(rejection.conflicts_with_pass_id, model_config)
+
+
+def _rejection_reason(
+    rejection: Rejection, model_config: str, winner_id: str | None
+) -> str:
+    """The sentence a dashboard shows for a skip, by the rule that caused it."""
+    opening = (
+        f"skipped under configuration {model_config}; score "
+        f"{rejection.scored.score:.1f}, and "
+    )
+    if winner_id is None:
+        # Only the delivery cap rejects without a single assignment to name.
+        return opening + (
+            "the station already holds as many assignments as one heartbeat "
+            "delivers over this window (D-035)"
+        )
+    return opening + (
+        f"the station is already committed to {winner_id} over this window"
+    )
+
+
 def _rejection_row(
-    scored: ScoredCandidate, facts: PassFacts, model_config: str, winner_id: str
+    rejection: Rejection, facts: PassFacts, model_config: str
 ) -> NewAssignment:
     """One displaced pass, as a row naming what displaced it."""
     start_at, end_at = widened_window(facts)
+    scored = rejection.scored
     candidate = scored.candidate
+    winner_id = _blocker_id(rejection, model_config)
     return NewAssignment(
         assignment_id=assignment_id_for(candidate.pass_id, model_config),
         pass_id=candidate.pass_id,
@@ -163,11 +197,7 @@ def _rejection_row(
         mode=facts.mode,
         timing_uncertainty_s=facts.timing_uncertainty_s,
         decision="skipped",
-        reason=(
-            f"skipped under configuration {model_config}; score "
-            f"{scored.score:.1f}, and the station is already committed to "
-            f"{winner_id} over this window"
-        ),
+        reason=_rejection_reason(rejection, model_config, winner_id),
         model_config=model_config,
         score=scored.score,
         conflicts_with_assignment_id=winner_id,
@@ -211,11 +241,9 @@ def to_assignment_rows(
 
     rows.extend(
         _rejection_row(
-            rejection.scored,
+            rejection,
             facts_by_pass_id[rejection.scored.candidate.pass_id],
             model_config,
-            rejection.committed_assignment_id
-            or assignment_id_for(rejection.conflicts_with_pass_id, model_config),
         )
         for rejection in outcome.rejected
     )

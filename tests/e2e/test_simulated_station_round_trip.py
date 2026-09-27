@@ -186,6 +186,7 @@ def seed_the_platform(rollback: Any, station_id: str) -> tuple[int, int]:
             start=now,
             end=now + GENERATION_HORIZON,
             model_config="A",
+            now=now,
             turnaround_s=0.0,
         ),
     )

@@ -19,10 +19,8 @@ from meridian.scheduler.assignment_records import (
     assignment_id_for,
     to_assignment_rows,
 )
-from meridian.scheduler.conflict_rejection import (
-    conflicts_with,
-    select_without_conflict,
-)
+from meridian.scheduler.conflict_rejection import select_without_conflict
+from meridian.scheduler.constraints import Rules, overlaps
 
 T0 = datetime(2026, 8, 14, tzinfo=UTC)
 """An arbitrary anchor. Every window below is written in minutes from here."""
@@ -58,6 +56,7 @@ def a_candidate(
         station_id=station_id,
         aos=aos,
         los=aos + timedelta(minutes=length_minutes),
+        margin_s=0.0,
         max_elevation_deg=45.0,
         priority=1.0,
         simulated=False,
@@ -83,14 +82,14 @@ def test_two_overlapping_passes_for_one_station_conflict() -> None:
     """Overlapping by ten of their eleven minutes."""
     first = a_candidate(1, at_minute=0)
     second = a_candidate(2, at_minute=1)
-    assert conflicts_with(first, second, NO_TURNAROUND_S) is True
+    assert overlaps(first, second, NO_TURNAROUND_S) is True
 
 
 def test_an_overlap_of_one_second_is_still_a_conflict() -> None:
     """One antenna cannot be in two places, however brief the collision."""
     first = a_candidate(1, at_minute=0)
     second = a_candidate(2, at_minute=PASS_MINUTES - 1.0 / 60.0)
-    assert conflicts_with(first, second, NO_TURNAROUND_S) is True
+    assert overlaps(first, second, NO_TURNAROUND_S) is True
 
 
 def test_passes_touching_at_a_boundary_do_not_conflict() -> None:
@@ -102,7 +101,7 @@ def test_passes_touching_at_a_boundary_do_not_conflict() -> None:
     """
     first = a_candidate(1, at_minute=0)
     second = a_candidate(2, at_minute=PASS_MINUTES)
-    assert conflicts_with(first, second, NO_TURNAROUND_S) is False
+    assert overlaps(first, second, NO_TURNAROUND_S) is False
 
 
 def test_the_conflict_test_does_not_depend_on_argument_order() -> None:
@@ -110,8 +109,8 @@ def test_the_conflict_test_does_not_depend_on_argument_order() -> None:
     first = a_candidate(1, at_minute=0)
     second = a_candidate(2, at_minute=5)
 
-    assert conflicts_with(first, second, NO_TURNAROUND_S) is True
-    assert conflicts_with(second, first, NO_TURNAROUND_S) is True
+    assert overlaps(first, second, NO_TURNAROUND_S) is True
+    assert overlaps(second, first, NO_TURNAROUND_S) is True
 
 
 def test_two_stations_never_conflict_however_much_they_overlap() -> None:
@@ -122,7 +121,7 @@ def test_two_stations_never_conflict_however_much_they_overlap() -> None:
     """
     here = a_candidate(1, at_minute=0)
     elsewhere = a_candidate(2, at_minute=0, station_id=OTHER_STATION)
-    assert conflicts_with(here, elsewhere, NO_TURNAROUND_S) is False
+    assert overlaps(here, elsewhere, NO_TURNAROUND_S) is False
 
 
 def test_turnaround_makes_abutting_passes_conflict() -> None:
@@ -134,7 +133,7 @@ def test_turnaround_makes_abutting_passes_conflict() -> None:
     first = a_candidate(1, at_minute=0)
     second = a_candidate(2, at_minute=PASS_MINUTES)
 
-    assert conflicts_with(first, second, ROTATOR_TURNAROUND_S) is True
+    assert overlaps(first, second, ROTATOR_TURNAROUND_S) is True
 
 
 def test_a_gap_wider_than_the_turnaround_is_still_free() -> None:
@@ -142,7 +141,7 @@ def test_a_gap_wider_than_the_turnaround_is_still_free() -> None:
     first = a_candidate(1, at_minute=0)
     second = a_candidate(2, at_minute=PASS_MINUTES + 2.0)
 
-    assert conflicts_with(first, second, ROTATOR_TURNAROUND_S) is False
+    assert overlaps(first, second, ROTATOR_TURNAROUND_S) is False
 
 
 # --- the greedy walk ----------------------------------------------------------
@@ -152,7 +151,7 @@ def test_the_best_ranked_candidate_is_always_taken() -> None:
     """Nothing is selected before it, so nothing can block it."""
     outcome = select_without_conflict(
         ranked(a_candidate(1, at_minute=0), a_candidate(2, at_minute=1)),
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
     )
 
     assert [one.candidate.pass_id for one in outcome.selected] == [1]
@@ -163,7 +162,7 @@ def test_a_rejection_names_the_selection_that_displaced_it() -> None:
     """PROJECT.md §13's screen needs the winner, not just the fact of a loss."""
     outcome = select_without_conflict(
         ranked(a_candidate(7, at_minute=0), a_candidate(8, at_minute=3)),
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
     )
 
     assert outcome.rejected[0].conflicts_with_pass_id == 7
@@ -182,7 +181,7 @@ def test_a_rejection_is_blamed_on_the_best_ranked_blocker() -> None:
             a_candidate(2, at_minute=20),
             a_candidate(3, at_minute=5, length_minutes=20),
         ),
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
     )
 
     assert [one.candidate.pass_id for one in outcome.selected] == [1, 2]
@@ -202,7 +201,7 @@ def test_a_pass_freed_by_a_rejection_is_still_taken() -> None:
             a_candidate(2, at_minute=8),
             a_candidate(3, at_minute=13),
         ),
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
     )
 
     assert [one.candidate.pass_id for one in outcome.selected] == [1, 3]
@@ -216,7 +215,7 @@ def test_two_stations_are_scheduled_independently() -> None:
             a_candidate(1, at_minute=0),
             a_candidate(2, at_minute=0, station_id=OTHER_STATION),
         ),
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
     )
 
     assert [one.candidate.pass_id for one in outcome.selected] == [1, 2]
@@ -238,7 +237,7 @@ def test_the_ranking_order_is_obeyed_and_never_re_derived() -> None:
             ScoredCandidate(candidate=worse_geometry, score=1.0),
             ScoredCandidate(candidate=better_geometry, score=99.0),
         ],
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
     )
 
     assert [one.candidate.pass_id for one in outcome.selected] == [1]
@@ -253,7 +252,9 @@ def test_every_candidate_appears_in_exactly_one_output_list() -> None:
     """
     candidates = [a_candidate(number, at_minute=number * 4) for number in range(1, 9)]
 
-    outcome = select_without_conflict(ranked(*candidates), turnaround_s=60.0)
+    outcome = select_without_conflict(
+        ranked(*candidates), rules=Rules(turnaround_s=60.0)
+    )
 
     accounted = [one.candidate.pass_id for one in outcome.selected]
     accounted += [one.scored.candidate.pass_id for one in outcome.rejected]
@@ -272,18 +273,18 @@ def test_no_two_selections_conflict_with_each_other() -> None:
     ]
 
     outcome = select_without_conflict(
-        ranked(*candidates), turnaround_s=ROTATOR_TURNAROUND_S
+        ranked(*candidates), rules=Rules(turnaround_s=ROTATOR_TURNAROUND_S)
     )
 
     taken = [one.candidate for one in outcome.selected]
     assert len(taken) > 1
     for index, one in enumerate(taken):
         for other in taken[index + 1 :]:
-            assert conflicts_with(one, other, ROTATOR_TURNAROUND_S) is False
+            assert overlaps(one, other, ROTATOR_TURNAROUND_S) is False
 
 
 def test_an_empty_candidate_list_schedules_nothing() -> None:
-    outcome = select_without_conflict([], turnaround_s=NO_TURNAROUND_S)
+    outcome = select_without_conflict([], rules=Rules(turnaround_s=NO_TURNAROUND_S))
 
     assert outcome.selected == []
     assert outcome.rejected == []
@@ -292,7 +293,7 @@ def test_an_empty_candidate_list_schedules_nothing() -> None:
 def test_a_negative_turnaround_is_refused() -> None:
     """It would let two genuinely overlapping passes be scheduled together."""
     with pytest.raises(ValueError, match="turnaround_s"):
-        select_without_conflict(ranked(a_candidate(1, at_minute=0)), turnaround_s=-1.0)
+        Rules(turnaround_s=-1.0)
 
 
 # --- commitments: what earlier runs already assigned (D-165) ------------------
@@ -317,7 +318,7 @@ def test_a_newcomer_cannot_displace_a_commitment_however_it_ranks() -> None:
     """
     outcome = select_without_conflict(
         ranked(a_candidate(2, at_minute=5)),
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
         committed=[committed(1, at_minute=0)],
     )
 
@@ -330,7 +331,7 @@ def test_a_commitment_is_never_part_of_the_outcome() -> None:
     """It was decided earlier; deciding it again would write it twice."""
     outcome = select_without_conflict(
         ranked(a_candidate(2, at_minute=30)),
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
         committed=[committed(1, at_minute=0)],
     )
 
@@ -341,7 +342,7 @@ def test_a_commitment_is_never_part_of_the_outcome() -> None:
 def test_a_commitment_binds_only_its_own_station() -> None:
     outcome = select_without_conflict(
         ranked(a_candidate(2, at_minute=5)),
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
         committed=[committed(1, at_minute=0, station_id=OTHER_STATION)],
     )
 
@@ -354,10 +355,10 @@ def test_a_commitment_honours_the_turnaround() -> None:
     earlier = [committed(1, at_minute=0)]
 
     fixed = select_without_conflict(
-        candidate, turnaround_s=NO_TURNAROUND_S, committed=earlier
+        candidate, rules=Rules(turnaround_s=NO_TURNAROUND_S), committed=earlier
     )
     rotator = select_without_conflict(
-        candidate, turnaround_s=ROTATOR_TURNAROUND_S, committed=earlier
+        candidate, rules=Rules(turnaround_s=ROTATOR_TURNAROUND_S), committed=earlier
     )
 
     assert len(fixed.selected) == 1
@@ -368,7 +369,7 @@ def test_a_commitment_is_named_before_a_selection_of_this_run() -> None:
     """Pass 3 collides with both; the assignment that already exists is named."""
     outcome = select_without_conflict(
         ranked(a_candidate(2, at_minute=12), a_candidate(3, at_minute=8)),
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
         committed=[committed(1, at_minute=0)],
     )
 
@@ -384,7 +385,7 @@ def test_a_skip_behind_a_commitment_names_that_assignment_in_its_row() -> None:
     configuration's, and its id is the one that exists."""
     outcome = select_without_conflict(
         ranked(a_candidate(2, at_minute=5), a_candidate(3, at_minute=40)),
-        turnaround_s=NO_TURNAROUND_S,
+        rules=Rules(turnaround_s=NO_TURNAROUND_S),
         committed=[committed(1, at_minute=0)],
     )
     facts = {

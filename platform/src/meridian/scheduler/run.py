@@ -27,7 +27,7 @@ Reference: docs/EVALUATION.md §3; docs/DECISIONS.md D-021, D-065, D-066, D-165.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from meridian.orbit.service import OrbitService
 from meridian.orbit.types import require_utc
@@ -35,18 +35,22 @@ from meridian.scheduler import Candidate, ScoredCandidate
 from meridian.scheduler.assignment_records import to_assignment_rows
 from meridian.scheduler.candidates import (
     ScheduleRequest,
+    StationWork,
+    is_available,
     load_catalogue,
     work_for_station,
 )
 from meridian.scheduler.conflict_rejection import select_without_conflict
+from meridian.scheduler.constraints import Problem, Rules, Violation, violations
 from meridian.scheduler.elevation_baseline import rank_by_elevation
 from meridian.scheduler.priority_baseline import rank_by_priority_weighted_elevation
-from meridian.store.assignments import insert_assignments
+from meridian.store.assignments import NewAssignment, insert_assignments
 from meridian.store.receiving_stations import find_receiving_stations
 from meridian.store.stations import Connection
 
 __all__ = [
     "RANKERS",
+    "ScheduleInvalidError",
     "ScheduleReport",
     "ScheduleRequest",
     "run_schedule",
@@ -96,6 +100,60 @@ class ScheduleReport:
     a satellite that simply never rose.
     """
 
+    stations_unavailable: tuple[str, ...]
+    """Stations ``offline`` at ``request.now``, given nothing new (D-166)."""
+
+    passes_deferred: int
+    """Their undecided passes, left undecided rather than skipped, so a round
+    after the station returns decides them."""
+
+
+class ScheduleInvalidError(RuntimeError):
+    """A schedule broke a constraint, so none of the run was written (D-166)."""
+
+    def __init__(self, found: Sequence[Violation]) -> None:
+        """Name every broken rule and the passes that broke it."""
+        self.violations = tuple(found)
+        named = "; ".join(f"{one.rule} {list(one.pass_ids)}" for one in found)
+        super().__init__(f"the schedule breaks its constraints: {named}")
+
+
+@dataclass(slots=True)
+class _Tally:
+    """What the run has decided so far, across stations."""
+
+    rows: list[NewAssignment] = field(default_factory=list)
+    considered: int = 0
+    scheduled: int = 0
+    already_decided: int = 0
+    unusable: list[int] = field(default_factory=list)
+    unavailable: list[str] = field(default_factory=list)
+    deferred: int = 0
+
+
+def _schedule_station(
+    work: StationWork, ranker: Ranker, request: ScheduleRequest, tally: _Tally
+) -> None:
+    """Decide one available station's candidates, checked before they are kept."""
+    rules = Rules(turnaround_s=request.turnaround_s)
+    outcome = select_without_conflict(
+        ranker(work.candidates), rules=rules, committed=work.commitments
+    )
+    problem = Problem(
+        candidates=tuple(work.candidates),
+        commitments=tuple(work.commitments),
+        unavailable=frozenset(),
+        rules=rules,
+    )
+    found = violations(problem, outcome)
+    if found:
+        raise ScheduleInvalidError(found)
+    tally.considered += len(work.candidates)
+    tally.scheduled += len(outcome.selected)
+    tally.rows.extend(
+        to_assignment_rows(outcome, work.facts_by_pass_id, request.model_config)
+    )
+
 
 def run_schedule(
     conn: Connection, orbit: OrbitService, request: ScheduleRequest
@@ -121,6 +179,10 @@ def run_schedule(
             fails loudly rather than silently falling back to A, which would
             publish a number under a label it did not earn.
         LookupError: A stored pass references an element set that is gone.
+        ScheduleInvalidError: The schedule broke a constraint. Nothing is
+            written: every schedule is checked by
+            :func:`~meridian.scheduler.constraints.violations` before it is
+            kept, however it was found (D-166).
 
     Note:
         **Re-running over one horizon writes nothing.** A pass this
@@ -133,6 +195,7 @@ def run_schedule(
     """
     require_utc(request.start, "request.start")
     require_utc(request.end, "request.end")
+    require_utc(request.now, "request.now")
 
     ranker = RANKERS.get(request.model_config)
     if ranker is None:
@@ -143,36 +206,27 @@ def run_schedule(
 
     catalogue = load_catalogue(conn)
     stations = find_receiving_stations(conn)
-
-    rows = []
-    considered = 0
-    scheduled = 0
-    already_decided = 0
-    unusable: list[int] = []
+    tally = _Tally()
 
     for station in stations:
         work = work_for_station(conn, orbit, station, catalogue, request)
-        unusable.extend(work.passes_without_a_usable_transmitter)
-        already_decided += work.already_decided
-        considered += len(work.candidates)
-
-        outcome = select_without_conflict(
-            ranker(work.candidates),
-            turnaround_s=request.turnaround_s,
-            committed=work.commitments,
-        )
-        scheduled += len(outcome.selected)
-        rows.extend(
-            to_assignment_rows(outcome, work.facts_by_pass_id, request.model_config)
-        )
+        tally.unusable.extend(work.passes_without_a_usable_transmitter)
+        tally.already_decided += work.already_decided
+        if is_available(conn, station.station_id, request.now):
+            _schedule_station(work, ranker, request, tally)
+        else:
+            tally.unavailable.append(station.station_id)
+            tally.deferred += len(work.candidates)
 
     return ScheduleReport(
         model_config=request.model_config,
         stations_considered=len(stations),
-        candidates_considered=considered,
-        scheduled=scheduled,
-        skipped=considered - scheduled,
-        rows_written=insert_assignments(conn, rows),
-        passes_without_a_usable_transmitter=tuple(unusable),
-        already_decided=already_decided,
+        candidates_considered=tally.considered,
+        scheduled=tally.scheduled,
+        skipped=tally.considered - tally.scheduled,
+        rows_written=insert_assignments(conn, tally.rows),
+        passes_without_a_usable_transmitter=tuple(tally.unusable),
+        already_decided=tally.already_decided,
+        stations_unavailable=tuple(tally.unavailable),
+        passes_deferred=tally.deferred,
     )
