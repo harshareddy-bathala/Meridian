@@ -23,7 +23,7 @@ const skipped = {
   decision: "skipped",
   reason: "overlaps a higher-scoring pass",
   conflicts_with_assignment_id: "as_2",
-  state: "expired",
+  state: null,
   simulated: true,
 };
 
@@ -38,6 +38,7 @@ describe("fetchUpcomingAssignments", () => {
       decision: "skipped",
       reason: "overlaps a higher-scoring pass",
       conflictsWith: "as_2",
+      state: null,
     });
   });
 

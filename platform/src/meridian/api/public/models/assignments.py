@@ -6,7 +6,8 @@ record, published as written, because the reason and the score are the point.
 
 ``decision`` and ``state`` are two different facts and both are published:
 ``decision`` is what the scheduler wanted, ``state`` is what the station did with
-it (D-008). A pass can be ``scheduled`` and ``expired``.
+it (D-008). A pass can be ``scheduled`` and ``expired``. A ``skipped`` pass
+has no state: it was never delivered, so ``state`` is null (D-165).
 
 Reference: docs/DATA-MODEL.md ``assignments``; docs/DECISIONS.md D-008, D-093.
 """
@@ -64,7 +65,9 @@ class PublicAssignment(BaseModel):
     Published as ``model_config``, the column's name in ``DATA-MODEL.md``; held
     under another name here only because Pydantic reserves that one."""
 
-    state: AssignmentState
+    state: AssignmentState | None
+    """What the station did with the assignment; null for a skip, which a
+    station is never given (D-165)."""
     simulated: bool
 
     @classmethod
@@ -89,7 +92,7 @@ class PublicAssignment(BaseModel):
             priority=row.priority,
             predicted_yield=row.predicted_yield,
             prediction_config=row.model_config,
-            state=_state(row.state),
+            state=None if row.decision == "skipped" else _state(row.state),
             simulated=row.simulated,
         )
 

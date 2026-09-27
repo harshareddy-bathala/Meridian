@@ -26,7 +26,8 @@ export interface Assignment {
   decision: Decision;
   reason: string;
   conflictsWith: string | null;
-  state: string;
+  /** Null for a skip: a station is never given one, so it has no state (D-165). */
+  state: string | null;
   simulated: boolean;
 }
 
@@ -56,7 +57,7 @@ export function decodeAssignment(value: unknown, path: string): Assignment {
     decision: asOneOf(fields, "decision", DECISIONS, path),
     reason: asString(fields, "reason", path),
     conflictsWith: asNullableString(fields, "conflicts_with_assignment_id", path),
-    state: asString(fields, "state", path),
+    state: asNullableString(fields, "state", path),
     simulated: asBoolean(fields, "simulated", path),
   };
 }

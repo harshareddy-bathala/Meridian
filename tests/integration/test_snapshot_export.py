@@ -78,9 +78,7 @@ def seeded(rollback: Any, schedule_rows: Any) -> dict[str, Any]:
         station, as_of - timedelta(minutes=1), element_set_id=element_set
     )
     schedule_rows.assignment("as_done", closed)
-    schedule_rows.assignment(
-        "as_skipped", closed, decision="skipped", model_config="B", state="expired"
-    )
+    schedule_rows.assignment("as_skipped", closed, decision="skipped", model_config="B")
     schedule_rows.assignment("as_open", future)
     schedule_rows.observation("as_done", outcome="no_signal")
     return {"station": station}

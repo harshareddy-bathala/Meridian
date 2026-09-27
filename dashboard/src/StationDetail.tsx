@@ -42,7 +42,7 @@ function AssignmentRow({ assignment, showStation }: { assignment: Assignment; sh
           <div className="dim mono">lost to {assignment.conflictsWith}</div>
         )}
       </td>
-      <td>{assignment.state.replace("_", " ")}</td>
+      <td>{assignment.state === null ? "—" : assignment.state.replace("_", " ")}</td>
     </tr>
   );
 }

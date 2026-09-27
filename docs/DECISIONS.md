@@ -3515,6 +3515,8 @@ Two defects in how Stage 7's schedule reached a station, both found by reading t
 
 `ScheduleReport` gains `already_decided`, and `meridian schedule` prints it, so a repeat that writes nothing says why.
 
+**The public API publishes a skip's `state` as null**, and the dashboard shows a dash. A skip was never delivered, so it has no state to report. Publishing `issued` would claim the platform had handed it to a station.
+
 *Rejected: re-deciding every pass in the horizon each round and replacing what changed.* It would move assignments a station may already hold, and turn a schedule into something that changes under the station every five minutes. Re-opening a decision is kept for a withdrawn reason (D-171), not for every round.
 
 ---

@@ -59,7 +59,6 @@ def decisions(schedule_rows: Any) -> None:
         reason="overlaps a higher-scoring pass",
         conflicts_with_assignment_id="as_e_2",
         score=0.2,
-        state="expired",
     )
 
 
@@ -71,7 +70,8 @@ def test_a_skipped_pass_is_published_with_its_reason(client: TestClient) -> None
     assert item["decision"] == "skipped"
     assert item["reason"] == "overlaps a higher-scoring pass"
     assert item["conflicts_with_assignment_id"] == "as_e_2"
-    assert item["state"] == "expired"
+    # A skip is never delivered, so it has no state to publish (D-165).
+    assert item["state"] is None
     assert item["simulated"] is True
     assert item["predicted_yield"] is None
     # DATA-MODEL.md's column name, not the attribute Pydantic forced on the model.
