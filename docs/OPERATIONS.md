@@ -82,6 +82,13 @@ compose exec api python -c "import urllib.request; print(urllib.request.urlopen(
 
 `compose` in the commands elsewhere on this page then means all three files.
 
+### Database roles
+
+The API, the jobs process and the CLI inside them connect as `meridian_api`, which may read and write rows and cannot change the schema; `meridian_reader` may only read; only `migrate` uses the owner (D-207). `migrate` runs `meridian db roles` after every migration, so the roles, their grants and their passwords are put right by every `up`.
+
+- **A query by hand, read-only:** `compose exec db psql -U meridian_reader -d meridian`. Inside the database container the local socket needs no password; from another container, use `READER_DATABASE_PASSWORD`.
+- **"permission denied" from the API after a manual schema change:** a table created other than by `migrate` has no grants yet. `compose run --rm migrate` grants it.
+
 ### Container hardening
 
 Every service drops all Linux capabilities, runs with `no-new-privileges`, and has a read-only root filesystem (D-206). What each writes is a named volume or a tmpfs listed beside it in the compose file. The database runs as its own user, uid 70, from the start.
@@ -732,6 +739,18 @@ compose exec api meridian invite revoke --label "environment bootstrap"
 
 Rotate it in the Cloudflare dashboard (*Zero Trust* → *Networks* → *Tunnels* → the tunnel → *Refresh token*), which ends the old token's connections. Store the new value with `python deploy/tools/rotate_secret.py set tunnel_token < token.txt`, then run the command it prints, which recreates the tunnel with the public file. The dashboard is unreachable from outside between the two steps; stations queue their reports and send them when it returns.
 
+### Database passwords
+
+`API_DATABASE_PASSWORD` and `READER_DATABASE_PASSWORD` in `deploy/.env` are set on the roles by `migrate` (D-207). Change one, then:
+
+```bash
+compose up -d
+```
+
+`migrate` runs again and sets the new password, and compose recreates every service whose `DATABASE_URL` changed. Connections open with the old password stay open until those services restart, which the same command does.
+
+The owner's `POSTGRES_PASSWORD` is set once, when the database volume is created. To change it: `compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "alter role meridian password '<new>'"`, then put the same value in `deploy/.env` and `compose up -d migrate`.
+
 ### Station tokens
 
 A station's own token is rotated through a bound invite, and withdrawn with `meridian station revoke` (§ Everyday commands, D-034).
@@ -796,7 +815,7 @@ It then:
 1. stops `api` and `jobs`;
 2. recreates the database;
 3. runs TimescaleDB's pre-restore step, `pg_restore`, then the post-restore step;
-4. runs `migrate`, so a dump from an older release reaches this code's head;
+4. runs `migrate`, so a dump from an older release reaches this code's head and the roles' grants, which `pg_restore --no-acl` left out, are applied again (D-207);
 5. starts whichever of `api` and `jobs` was running, and waits for `/healthz`.
 
 If a step after the database is dropped fails, `api` and `jobs` stay stopped on purpose. Fix the cause and run the restore again.

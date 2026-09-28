@@ -106,11 +106,22 @@ services:
       db:
         condition: service_healthy
     environment:
-      # The same value the api service gets. meridian.config adds the +psycopg
-      # driver suffix SQLAlchemy needs and strips it for psycopg, so one variable
-      # serves both — see docs/DECISIONS.md D-033.
+      # The owner's URL: the only one that may change the schema (D-207).
+      # meridian.config adds the +psycopg driver suffix SQLAlchemy needs and
+      # strips it for psycopg, so one variable serves both (D-033).
       DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
-    command: ["alembic", "-c", "deploy/alembic.ini", "upgrade", "head"]
+      # The passwords `meridian db roles` gives the two login roles. The api,
+      # jobs and sim-seed services connect as meridian_api with the first.
+      API_DATABASE_PASSWORD: ${API_DATABASE_PASSWORD:-change-me}
+      READER_DATABASE_PASSWORD: ${READER_DATABASE_PASSWORD:-change-me}
+      MERIDIAN_PUBLIC: ${CLOUDFLARE_TUNNEL_TOKEN:+1}
+    # Migrate, then grant (D-207). Every run re-applies the grants, so a new
+    # table, a restore without grants and a changed password are all put right
+    # by the same `up`.
+    command:
+      - sh
+      - -c
+      - alembic -c deploy/alembic.ini upgrade head && meridian db roles
     restart: "no"
 
   api:
@@ -122,7 +133,8 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+      # meridian_api may read and write rows and nothing else (D-207).
+      DATABASE_URL: postgresql://meridian_api:${API_DATABASE_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
       API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
       # Two by default, the shape D-051 expects on the Pi. More than one needs the
       # multiprocess directory below, or every scrape reports whichever worker
@@ -189,7 +201,8 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+      # meridian_api may read and write rows and nothing else (D-207).
+      DATABASE_URL: postgresql://meridian_api:${API_DATABASE_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
       API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
       SCHEDULE_INTERVAL_S: ${SCHEDULE_INTERVAL_S:-300}
       SCHEDULE_HORIZON_S: ${SCHEDULE_HORIZON_S:-21600}
@@ -321,7 +334,8 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+      # meridian_api may read and write rows and nothing else (D-207).
+      DATABASE_URL: postgresql://meridian_api:${API_DATABASE_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
       SIMULATOR_STATION_COUNT: ${SIMULATOR_STATION_COUNT:-1}
     volumes:
       - sim-state:/var/lib/meridian-sim

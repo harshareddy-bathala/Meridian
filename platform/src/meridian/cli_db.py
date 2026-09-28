@@ -1,4 +1,8 @@
-"""``meridian db status`` — whether the database is at the migration the code expects.
+"""``meridian db status`` and ``meridian db roles``.
+
+``status`` says whether the database is at the migration the code expects.
+``roles`` creates the least-privilege roles and grants of D-207; compose's
+``migrate`` service runs it after every migration.
 
 Compose refuses to start the API until ``migrate`` has succeeded, so the two only
 disagree after something outside that path: a restore from an older backup, a
@@ -12,7 +16,7 @@ Three verdicts, not two. A database *behind* the code is fixed by running
 newer image, and running ``migrate`` from this one cannot help — the remedy is the
 newer image, so saying "behind" would send the operator the wrong way.
 
-Reference: docs/DECISIONS.md D-019, D-109, D-111.
+Reference: docs/DECISIONS.md D-019, D-109, D-111, D-207.
 """
 
 from __future__ import annotations
@@ -24,6 +28,15 @@ from dataclasses import dataclass
 import psycopg
 
 from meridian.config import load_settings
+from meridian.config_checks import DATABASE_PASSWORD
+from meridian.log_redaction import remember_secrets
+from meridian.secret_files import PLACEHOLDER, InsecureConfigurationError, read_secret
+from meridian.store.database_roles import (
+    API_LOGIN,
+    READER_LOGIN,
+    LoginPasswords,
+    ensure_database_roles,
+)
 from meridian.store.pool import DatabaseUnreachableError, connect_once
 from meridian.store.schema_revision import (
     find_current_revision,
@@ -31,13 +44,16 @@ from meridian.store.schema_revision import (
     find_known_revisions,
 )
 
-__all__ = ["SchemaVerdict", "add_db_parser", "judge_schema", "run_db"]
+__all__ = ["SchemaVerdict", "add_db_parser", "judge_schema", "run_db", "run_db_roles"]
 
 EXIT_FAILED = 1
 """Matches ``meridian.cli.EXIT_FAILED``; a database that is not at head is a
 failure a script should stop on, the same as one it cannot reach."""
 
 UPGRADE_HINT = "docker compose -f deploy/docker-compose.yml run --rm migrate"
+
+API_PASSWORD_VARIABLE = "API_DATABASE_PASSWORD"
+READER_PASSWORD_VARIABLE = "READER_DATABASE_PASSWORD"
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,10 +113,59 @@ def add_db_parser(
     db_actions.add_parser(
         "status", help="compare the database's migration with the code's"
     )
+    db_actions.add_parser(
+        "roles",
+        help=(
+            f"create or update the {API_LOGIN} and {READER_LOGIN} roles and their "
+            "grants; run as the owner, after migrating (D-207)"
+        ),
+    )
 
 
-def run_db(_args: argparse.Namespace) -> int:
-    """Run ``meridian db status``, the subcommand's only action."""
+def run_db(args: argparse.Namespace) -> int:
+    """Run ``meridian db status`` or ``meridian db roles``."""
+    if args.action == "roles":
+        return run_db_roles()
+    return _run_status()
+
+
+def run_db_roles() -> int:
+    """Create or update the least-privilege roles, as the owner (D-207).
+
+    Answers only for the owner's password and the two it sets: it is given no
+    other secret (D-206).
+    """
+    try:
+        passwords = LoginPasswords(
+            api=read_secret(API_PASSWORD_VARIABLE, PLACEHOLDER),
+            reader=read_secret(READER_PASSWORD_VARIABLE, PLACEHOLDER),
+        )
+        remember_secrets([passwords.api, passwords.reader])
+        settings = load_settings(secrets_held=frozenset({DATABASE_PASSWORD}))
+    except InsecureConfigurationError as exc:
+        return _fail("roles", str(exc))
+    if settings.is_public and PLACEHOLDER in (passwords.api, passwords.reader):
+        return _fail(
+            "roles",
+            f"{API_PASSWORD_VARIABLE} or {READER_PASSWORD_VARIABLE} is still "
+            f"{PLACEHOLDER!r} while the platform is publicly reachable",
+        )
+    try:
+        with connect_once(settings) as conn:
+            ensure_database_roles(conn, passwords)
+    except (DatabaseUnreachableError, psycopg.Error, OSError) as exc:
+        return _fail("roles", f"could not set the roles: {exc}")
+    print(f"roles: {API_LOGIN} and {READER_LOGIN} granted and passworded")  # noqa: T201
+    return 0
+
+
+def _fail(action: str, reason: str) -> int:
+    print(f"meridian db {action}: {reason}", file=sys.stderr)  # noqa: T201
+    return EXIT_FAILED
+
+
+def _run_status() -> int:
+    """``meridian db status``."""
     head = find_head_revision()
     if head is None:
         print(  # noqa: T201 — this is a CLI; stderr is the interface

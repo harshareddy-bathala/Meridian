@@ -3684,6 +3684,40 @@ None of the three can be had without the others. The tunnel reads its token from
 
 ---
 
+## D-207 — The API connects as a role that can change rows and nothing else
+
+**2026-09-28 · accepted** · *`meridian.store.database_roles`, `meridian db roles`, `deploy/docker-compose.yml`, `deploy/tools/restore.py`, Stage 23*
+
+The API, the jobs process and the operator CLI all connected as `POSTGRES_USER`, the superuser the database image creates, which owns every table. A compromised API process could drop the observation store.
+
+**Three kinds of connection, each with only what it needs:**
+
+| Role | Used by | May |
+|---|---|---|
+| the owner, `POSTGRES_USER` | `migrate`, backup and restore | everything; it is a superuser, because TimescaleDB's extension needs one to be created or updated |
+| `meridian_api`, a member of `meridian_readwrite` | `api`, `jobs`, `sim-seed`, and the CLI run inside them | select, insert, update and delete rows, and use sequences |
+| `meridian_reader`, a member of `meridian_readonly` | ad-hoc queries, snapshot exports | select |
+
+Neither login role can create, alter, drop or truncate anything, create a temporary table, or grant. Privileges sit on the two group roles and passwords on the two login roles, so a login can be replaced without regranting. The owner stays a superuser: that is a limit on how far migration can be narrowed, stated rather than hidden, and the owner's password reaches only `migrate`.
+
+**An idempotent step after every migration, not a migration.** `meridian db roles` creates the roles if the cluster lacks them, sets both passwords, and grants on every table, sequence and view in `public`, with default privileges for tables the owner creates later. Compose's `migrate` service runs it after `alembic upgrade head`, on every `up`. A migration was considered and rejected for three reasons:
+
+- a password cannot be in a migration, which is committed to a public repository;
+- roles belong to the whole server, not to one database, so a downgrade cannot drop a role that another database on the same server still uses, which the migration lifecycle tests' scratch databases would do;
+- grants have to be put back after a restore, which runs no migration when the dump is already at head.
+
+So no migration is added by this stage. **Grants survive a restore by being re-applied, not restored:** `restore.py` now runs `pg_restore --no-acl`, because a dump's grants name roles a fresh server does not have and `--exit-on-error` stopped on the first of them. The `migrate` step it already runs afterwards grants them again.
+
+**The password never crosses the connection in plain text.** libpq's `PQencryptPasswordConn`, through psycopg, turns it into the SCRAM verifier the server stores, and `ALTER ROLE` sends that. A server logging statements would record the verifier. Both passwords are refused as `change-me` on a public deployment, like every other secret, and are registered for log redaction (D-204).
+
+**`tests/integration/test_database_roles.py` logs in as each role.** `meridian_api` is refused nine kinds of DDL, from `create table` to `create temporary table`, and each refusal is paired with the owner running the same statement, so no refusal can be a statement that fails for everybody. It reads and writes rows, reads every hypertable and the views over them, and can use a table the owner creates afterwards without running the step again. The reader can read and cannot write. Running the step again changes a password and nothing else.
+
+**Checked on a local stack:** from a fresh volume `migrate` set the roles, `pg_stat_activity` showed the API and the jobs process connected as `meridian_api`, a simulated station registered and was counted online, and a backup restored with `--no-acl` came back with the same rows and a working API.
+
+**Not done: database passwords from files.** The API's `DATABASE_URL` carries its password inline, as it always has, so these two passwords are variables in `deploy/.env`, like `POSTGRES_PASSWORD`. Reading a URL's password from a file is a change to `meridian.config` that this stage leaves for a deployment that needs it.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

@@ -36,6 +36,11 @@ services:
     environment:
       MERIDIAN_PUBLIC: "1"
 
+  migrate:
+    # So the owner's password and the two it sets are refused as placeholders.
+    environment:
+      MERIDIAN_PUBLIC: "1"
+
   tunnel:
     # Outbound-only over 443: no static IP, no inbound port, and no firewall
     # exception to request from college IT — which is the actual constraint SC-6
