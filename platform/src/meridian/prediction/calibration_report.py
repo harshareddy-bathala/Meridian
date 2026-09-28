@@ -82,7 +82,7 @@ def _header(
         f"  seed               {config.seed}",
         f"  regularisation     C = {config.inverse_regularisation:g}, stated",
     ]
-    if configuration.weighted_by_priority:
+    if configuration.name == "B":
         lines.append(
             "  B's probabilities are A's; priority weights the objective (D-160)"
         )

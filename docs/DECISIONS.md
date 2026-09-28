@@ -3430,6 +3430,8 @@ Four features are learned from a station's own settled history (D-157), and each
 
 **The public-conditions group of `EVALUATION.md` §3 is a named group with no features** until Stage 31 ingests them, so D∖conditions can be run without a code change when it has something in it.
 
+*Amended by D-168.* D weights its objective by priority as B does, so D − B isolates the model. The table's D row now reads "probability × priority".
+
 ---
 
 ## D-161 — Cold start is a path, not a default
@@ -3603,6 +3605,62 @@ It is a runtime dependency of the platform, not an extra. Unlike scikit-learn (D
 - Every rejection therefore has a reason: the best-scoring selection it overlaps, or the delivery cap.
 
 **Tested against brute force, not against the solver's word.** On sixty seeded instances small enough to enumerate every subset, the optimiser's total equals the best subset every rule allows. On two hundred larger ones it is valid, and never below greedy. On the textbook case, one high pass overlapping two that are worth more together, greedy takes the one and the optimiser the two.
+
+---
+
+## D-168 — What a pass is worth: yield × frames × priority, each term kept
+
+**2026-09-28 · accepted** · *`meridian/scheduler/{objective,schedule_config}.py`; `deploy/schedule.toml.example`; `meridian/prediction/configurations.py`, Stage 18*
+
+The roadmap asks for an objective whose terms are visible and configurable. A candidate's value is the product of three terms, and each is kept beside its score, so a decision can say why one pass was worth more than another:
+
+- **yield**: the probability the pass decodes.
+  - It is a published model's probability for the configuration, with the route it took (D-161). B scores with A's model (D-160).
+  - With no model configured, it is the **elevation proxy**: peak elevation over 90°, clamped to [0, 1] and labelled `elevation_proxy`. This is allowed for A and B only. C and D are learned configurations, and a schedule labelled D that no model made would be a claim no data backs. Both the configuration and the objective refuse it.
+- **frames**: how long the satellite is above the horizon, `los − aos` in seconds. A decoded pass returns frames for as long as it is received. The term uses the pass, not the assignment window: the margin either side is recording time spent waiting for a pass whose timing is uncertain, not signal. `frames = "none"` counts every pass as one instead.
+- **priority**: the operator's weight for the satellite, under B and D only.
+
+**D weights by priority as B does. This amends D-160**, where D maximised the probability alone. A and C maximise expected yield, and B and D maximise it weighted as an operator would. So D − B, which is SC-1, differs only in the model, and C − A only in our features. Measured the old way, D − B would have mixed a better model with a different objective, and credited the model with whatever dropping priority did. `prediction.configurations` changes D to match, and a unit test holds its table equal to the scheduler's. A D model's `model.json` now records `weighted_by_priority: true`. The calibration report's note that B's probabilities are A's is now keyed on B by name, since D's are its own.
+
+A priority that is zero, negative or not finite is refused, as B's baseline refuses it (D-066): it would make a pass worth nothing, or worth avoiding, without anybody saying so.
+
+**Fairness and coverage terms are optional in the roadmap and not built.** One station's schedule has nobody to be fair to. Coverage of a satellite an operator cares about is what the priority term already expresses.
+
+**`schedule.toml` chooses all of it.** It is strict, as `model.toml` is: an unknown key or a value off its scale is refused by name, and the hash is of the resolved values. The keys are:
+- `configuration` (default A);
+- `model`, a published model directory under the datasets root or an absolute path. It must be its configuration's: A's for A or B, C's for C, D's for D;
+- `frames` (default `duration`);
+- `time_limit_s` (default 10, at most 3600);
+- `turnaround_s` (default 0);
+- `seed`.
+
+With no file, the run is A on the elevation proxy.
+
+---
+
+## D-169 — A live pass is scored by the same code its training example was
+
+**2026-09-28 · accepted** · *`meridian/prediction/live.py`; `meridian/prediction/profiles.py`; `tests/unit/test_scheduler_boundaries.py`, Stage 18*
+
+The scheduler consumes predictions and never reads the observation store (`ARCHITECTURE.md`). A model that reads a station's own record (C, D) therefore needs that record from somewhere, as data.
+
+**The past is the newest labelled dataset under the datasets root.**
+- It is chosen by the latest `as_of`, then the one labelled latest, then the directory name, so the choice never rests on the order a file system lists them in.
+- It is verified, as is the raw snapshot it was labelled from, through `lineage`.
+- A newest dataset that is damaged is refused, not passed over for an older one. A history quietly older than the operator believes is worse than a refusal.
+- Every scorer states the dataset's hash and `as_of`, so each decision can say how old its history was. Refreshing it (export, then label) is an operator step.
+
+A model that reads no history (A, B) is given no dataset.
+
+**No serving skew.** A pass to score becomes a `LabelledPass` with no label, and goes through `compute_features` with the History and Environment built from the dataset, exactly as a training example does. Nothing is recomputed differently for the live path. A unit test scores every example of a labelled world live, and each gets exactly its training features, route and probability. Because `History` answers only for events settled before a pass's `aos`, a pass scored live cannot see what happened after it. A second test reverses every outcome from the pass's rise on and finds its score unmoved, and its positive control reverses earlier outcomes and finds it moved.
+
+**The geometry is handed in.** Prediction reaches no orbit and no database (D-157, D-158), so the scheduler reads each prediction and the other predictions of its rise from `passes`, computes the track, and hands them over. `Environment.with_predictions` reads a rise's element-set divergence from them without placing the settled reports again.
+
+**What the scheduler may import is enforced.** `test_scheduler_boundaries.py` checks two things:
+- The scheduler's source imports nothing of the observation store, and nothing of prediction but `score` and `live`.
+- A fresh interpreter that loads every scheduler module and the live path holds no scikit-learn, scipy or fitter.
+
+Each has a positive control.
 
 ---
 

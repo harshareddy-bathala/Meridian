@@ -544,7 +544,7 @@ A model's manifest names the dataset it was fitted on, and that dataset's manife
 
 Copy `deploy/model.toml.example`. Its values are the defaults, and unknown keys are refused.
 
-- `configuration` — `A`, `B`, `C` or `D` (D-160). B's model is A's: priority weights the objective, not the model.
+- `configuration` — `A`, `B`, `C` or `D` (D-160). B's model is A's: priority weights the objective, not the model. D's objective is weighted by priority too (D-168).
 - `population` — `own`, or `archive` under A only. The two are never pooled (D-156).
 - `train_until` and `validate_until` — **there are no defaults, and a fit without them is refused.** A pass rising before `train_until` trains the model, one before `validate_until` calibrates it, and the rest, up to the dataset's `as_of`, is the test span (D-162).
 - `min_station_history` — below this many settled outcomes, a station is scored by the geometry-only model (D-161).

@@ -74,7 +74,7 @@ A combined model cannot show what our contribution added. The model layer **must
 
 C matters independently: if our features carry no signal on their own, that is a finding worth reporting, and it changes what we claim.
 
-The four are chosen by one configuration key, and B differs from A in the objective rather than the model: priority weights the value of a pass and is never a model input (D-160). What counts as a training example is D-156.
+The four are chosen by one configuration key, and B differs from A in the objective rather than the model: priority weights the value of a pass and is never a model input (D-160). D, all combined, is weighted by priority as B is, so D − B differs in the model alone and C − A in our features alone (D-168). What counts as a training example is D-156.
 
 ### Isolating the public conditions
 

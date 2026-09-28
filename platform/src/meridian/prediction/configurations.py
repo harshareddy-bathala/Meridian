@@ -8,12 +8,16 @@ Name      Model inputs                      Objective
 A         ``elevation``                     the probability
 B         as A                              the probability × priority
 C         ``ours``                          the probability
-D         every group                       the probability
+D         every group                       the probability × priority
 ========= ================================= =================================
 
 **Priority is never a model input.** It is what an operator values, not a cause
 of reception, so B's probabilities are A's; B differs in what the scheduler
 maximises (D-066). :func:`objective` is that difference, and it is all of it.
+D weights by priority as B does, so D − B isolates the model and C − A our
+features (D-168, amending D-160). The scheduler's own objective, with its
+other terms, is :mod:`meridian.scheduler.objective`; a test holds the two
+tables equal.
 
 **``conditions`` is a group with no features** until Stage 31 ingests the
 public geomagnetic and weather series (``EVALUATION.md`` §3). It is named here
@@ -78,7 +82,7 @@ CONFIGURATIONS: dict[str, Configuration] = {
     "C": Configuration(
         "C", ("ours",), False, "do our signals carry independent information?"
     ),
-    "D": Configuration("D", GROUPS, False, "the shipped system"),
+    "D": Configuration("D", GROUPS, True, "the shipped system"),
 }
 
 FALLBACK = Configuration(
@@ -108,7 +112,7 @@ def objective(
 ) -> float:
     """What the scheduler maximises for a pass under this configuration.
 
-    The probability, except under B, where it is weighted by the satellite's
-    priority (D-066, D-160).
+    The probability, except under B and D, where it is weighted by the
+    satellite's priority (D-066, D-168).
     """
     return probability * priority if configuration.weighted_by_priority else probability
