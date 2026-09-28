@@ -863,6 +863,33 @@ CI also performs the full round trip, back up, restore and compare row counts, o
 
 ---
 
+## Failure recovery
+
+What happens by itself when each part fails, what to do, and the test that proves the recovery works (D-211). A station's own state lives in its state directory: `credentials.json`, `registration_key`, `held.json`, `outbox/` and `captures/`.
+
+| Failure | What happens by itself | What to do | Proven by |
+|---|---|---|---|
+| **The database is lost or damaged** | The API answers 503 on `/healthz`; `DatabaseUnavailable` fires. Stations keep executing what they hold and queue their reports. | Restore the newest dump that passed the drill, below. | CI's backup-and-restore round trip; `test_restore_drill.py`; `test_backup_tools.py` |
+| **A station lost `credentials.json`**, and kept `registration_key` | It stops and says so; it does not re-register on its own (D-024). | Within an hour of registering and before its first heartbeat, run it with the same invite again. Otherwise `meridian invite create --for-station <id>` and give it that invite: same `station_id`, new token (D-034). | `test_psycopg_registry.py` recovery rows; `test_client_registration.py`; `test_a_revoked_station_is_readmitted_by_a_bound_invite` |
+| **A station lost `registration_key` too** | Nothing can prove it is the same station. | `meridian station revoke --station-id <old>`, then register it with a fresh invite. Its history stays under the old id. | — by design; nothing may mint a token for a station without its key |
+| **A damaged file in a station's state** | A damaged `credentials.json` or `held.json` stops the client rather than being read as empty; a damaged queued observation is moved to `outbox/failed/` and the rest still send (D-073). | Look at the file the log names. A damaged observation in `outbox/failed/` is lost; it is kept for inspection. | `test_credentials.py`, `test_held_assignments.py`, `test_observation_queue.py`, `test_capture_folder.py` |
+| **An observation upload interrupted** | The report stays queued until acknowledged and is sent again. The platform keys it on the assignment, so a second copy of the same report is answered as the first was and stored once (D-015, D-071). | Nothing. | `test_a_lost_acknowledgement_does_not_produce_a_second_observation`; `test_an_identical_resubmission_returns_the_identical_acknowledgement` |
+| **A migration fails** | The upgrade is one transaction, so the database stays at the revision it had; `migrate` exits non-zero and `api` and `jobs` do not start. | `compose logs migrate`. Run the previous image (`MERIDIAN_IMAGE=…:sha-<previous>`) while the migration is fixed, then `compose up -d`. | `test_failure_recovery.py`, with a revision that fails half way |
+| **The jobs process dies mid-round** | Compose restarts it. Each task commits only when it finishes, so nothing half-written survives, and the next round schedules what the lost one would have. Assignments already delivered stand. | Nothing, unless `ScheduledTaskStalled` fires; then § Alerts. | `test_failure_recovery.py`, dying after the scheduler wrote; `test_jobs_rounds.py` |
+| **The platform restarts during a pass** | The station keeps executing what it holds, records, queues the result, and sends it when the platform is back. Its heartbeats fail meanwhile, so it may read `stale` for a minute; a missing heartbeat is not a miss (rule 7). | Nothing. | `test_reception_continues_while_the_platform_is_unreachable`; `test_a_station_receives_holds_executes_and_survives_an_outage`; `test_a_station_restarted_before_delivery_still_delivers` |
+
+### After a restore
+
+A restore returns the database to the moment of the dump. What happened after it is gone, and the network notices in three ways:
+
+- **A station registered since the dump** is unknown. Its token is refused with 401 and it stops. Issue it a fresh invite; a bound invite cannot name a station the database does not have.
+- **A station whose token was rotated since the dump** holds a token the restored database has never seen. It gets 401 and stops. Issue a bound invite, and it recovers onto the same `station_id` with its `registration_key`.
+- **Reports for assignments issued since the dump** are refused as `unknown_assignment` and set aside in the station's `outbox/failed/`. The observations are lost to the record; the files remain.
+
+Run the restore drill first if there is time, so you restore a dump that is known to restore.
+
+---
+
 ## Monitoring
 
 ### Where to look

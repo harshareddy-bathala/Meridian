@@ -127,7 +127,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | D-2 | A compromised API process rewriting the schema or dropping tables | The API, the jobs process and the CLI connect as `meridian_api`, which may change rows and nothing else; only `migrate` holds the owner's password | D-207; `meridian.store.database_roles`; `tests/integration/test_database_roles.py` | partial — the owner is a superuser, which TimescaleDB requires |
 | D-3 | SQL injection | Every statement is parameterised through psycopg; no SQL is built from request text | `meridian.store` | mitigated |
 | D-4 | Losing the database | Nightly checksummed backups kept by a daily, weekly and monthly policy; a weekly drill restores the newest into a scratch database and checks it; an off-host copy is the operator's step | D-115, D-209; `deploy/tools/scheduled_backup.py`, `restore_drill.py`; `tests/integration/test_restore_drill.py` | partial — the off-host copy is not automated |
-| D-5 | A migration failing half-way | An upgrade runs in one transaction, so a failure leaves the revision it started from; the API does not start until `migrate` succeeds | D-019; `deploy/migrations/env.py`; `deploy/docker-compose.yml` | partial — recovery undocumented; Stage 23 part 10 |
+| D-5 | A migration failing half-way | An upgrade runs in one transaction, so a failure leaves the revision it started from; the API does not start until `migrate` succeeds; the recovery is in the runbook | D-019, D-211; `deploy/migrations/env.py`; `tests/integration/test_failure_recovery.py` | mitigated |
 
 ### B6 — supply chain
 

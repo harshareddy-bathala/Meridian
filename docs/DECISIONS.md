@@ -3793,6 +3793,25 @@ Each public endpoint was reviewed for disclosure when it was built (D-082, D-086
 
 ---
 
+## D-211 — Every failure the roadmap names has a recovery, a runbook row and a test
+
+**2026-09-28 · accepted** · *`docs/OPERATIONS.md` § Failure recovery, `tests/integration/test_failure_recovery.py`, Stage 23*
+
+The roadmap lists seven failures to document and test: database restore, lost client credentials, migration failure, a corrupted client queue, an interrupted observation upload, a scheduler crash, and a platform restart during a pass. Most of them were designed for long before this stage, one decision at a time, and tested where each was built. What did not exist was one place an operator could look during the failure.
+
+**`OPERATIONS.md` § Failure recovery is that place.** One row per failure: what happens by itself, what the operator does, and the test that proves the recovery. Where nothing needs doing, the row says so, because "nothing" is an answer an operator at 2 a.m. needs as much as a command.
+
+**Five of the seven were already tested; two were not, and now are,** in `tests/integration/test_failure_recovery.py`:
+
+- **A migration that fails part way.** The migrations are copied, a revision is added that creates a table and then fails, and a scratch database is upgraded through it. The database stays at the revision it started from, with no trace of the half-applied one, and the unbroken code then migrates it cleanly. This is what `env.py`'s single transaction promises (D-019), now shown.
+- **The jobs process dying mid-schedule.** A round is run whose connection raises after the scheduler has written its rows but before the commit, standing in for a process killed at that moment. Nothing it wrote survives, the next round schedules what the lost one would have, and a third writes nothing. Both conditions are asserted non-vacuously: the dead round generated passes, and the recovering one scheduled some.
+
+**Two outcomes are recorded as limits rather than recoveries.** A station that has lost its `registration_key` as well as its token cannot be recovered onto its old `station_id`: nothing may mint a token for a station without its key, which is the property D-023 exists for, so it registers afresh and its history stays under the old id. And a restore returns the database to the moment of its dump, so stations registered or rotated since then are refused and must be re-admitted, and reports for assignments issued since then are set aside as `unknown_assignment`. The runbook says what each looks like and what to do.
+
+*Rejected: a disaster-recovery test in CI that kills containers.* The CI workflow belongs to another stage's work in flight, and each recovery above is a property of code that a test can reach without killing anything: a transaction, an idempotent key, a queue on disk.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
