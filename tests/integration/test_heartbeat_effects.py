@@ -160,6 +160,12 @@ class Issued:
     """``None`` puts the window around now; a number puts it wholly in the past,
     which is what makes the row eligible for expiry."""
 
+    starts_in_minutes: float | None = None
+    """A number puts the window wholly ahead, which is what makes a dropped
+    held row a decline to revoke (D-171)."""
+
+    revoked_reason: str | None = None
+
 
 def issue_assignment(rollback: Any, station_id: str, one: Issued) -> None:
     """Give ``station_id`` one assignment.
@@ -174,14 +180,17 @@ def issue_assignment(rollback: Any, station_id: str, one: Issued) -> None:
         if one.ended_hours_ago is None
         else now - timedelta(hours=one.ended_hours_ago)
     )
+    if one.starts_in_minutes is not None:
+        end_at = now + timedelta(minutes=one.starts_in_minutes + 10)
     with rollback.cursor() as cur:
         cur.execute("select id from passes where station_id = %s", (station_id,))
         existing = cur.fetchone()
         pass_id = existing[0] if existing else _build_pass(cur, station_id, now)
         cur.execute(
             "insert into assignments (assignment_id, pass_id, station_id, start_at,"
-            " end_at, centre_freq_hz, mode, timing_uncertainty_s, reason, state)"
-            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            " end_at, centre_freq_hz, mode, timing_uncertainty_s, reason, state,"
+            " revoked_reason, revoked_at)"
+            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 one.assignment_id,
                 pass_id,
@@ -193,6 +202,8 @@ def issue_assignment(rollback: Any, station_id: str, one: Issued) -> None:
                 4.2,
                 "reconciliation fixture",
                 one.state,
+                one.revoked_reason,
+                None if one.revoked_reason is None else now,
             ),
         )
 
@@ -327,10 +338,10 @@ def test_an_assignment_the_station_names_becomes_held(
 def test_an_assignment_the_station_omits_stays_issued(
     client: TestClient, rollback: Any
 ) -> None:
-    """MSP §4.2 row 2 under D-022: a decline while the window is open changes nothing.
+    """MSP §4.2 row 2: an issued assignment never held may not have arrived.
 
-    The station is offered it again on the next heartbeat. There is no state
-    meaning "taken back", so a transition here would misreport the decline.
+    The station is offered it again on the next heartbeat (D-026); only a held
+    one the station drops is a decline (D-171).
     """
     station = register(client, rollback, simulated=False)
     issue_assignment(rollback, station["station_id"], Issued("as_declined"))
@@ -338,6 +349,135 @@ def test_an_assignment_the_station_omits_stays_issued(
     send_heartbeat(client, station, holding=[])
 
     assert state_of(rollback, "as_declined") == "issued"
+
+
+def test_a_held_assignment_dropped_before_its_window_is_revoked_as_declined(
+    client: TestClient, rollback: Any
+) -> None:
+    """D-171: the station let it go, so its time can be given to another pass,
+    and it is not delivered again."""
+    station = register(client, rollback, simulated=False)
+    issue_assignment(
+        rollback,
+        station["station_id"],
+        Issued("as_dropped", state="held", starts_in_minutes=30),
+    )
+
+    body = send_heartbeat(client, station, holding=[])
+
+    assert state_of(rollback, "as_dropped") == "revoked"
+    assert reason_of(rollback, "as_dropped") == "declined"
+    assert body["assignments"] == []
+
+
+def test_an_assignment_never_held_is_not_revoked_for_being_absent(
+    client: TestClient, rollback: Any
+) -> None:
+    """Ahead of its window and never named: it may not have arrived (D-026)."""
+    station = register(client, rollback, simulated=False)
+    issue_assignment(
+        rollback, station["station_id"], Issued("as_unseen", starts_in_minutes=30)
+    )
+
+    body = send_heartbeat(client, station, holding=[])
+
+    assert state_of(rollback, "as_unseen") == "issued"
+    assert [one["assignment_id"] for one in body["assignments"]] == ["as_unseen"]
+
+
+def test_an_offline_revocation_decided_again_is_not_reinstated(
+    client: TestClient, rollback: Any
+) -> None:
+    """A station naming work since decided again is stale; the newer stands."""
+    station = register(client, rollback, simulated=False)
+    for name in ("as_old", "as_newer"):
+        issue_assignment(
+            rollback,
+            station["station_id"],
+            Issued(
+                name, state="revoked", starts_in_minutes=30, revoked_reason="offline"
+            ),
+        )
+    with rollback.cursor() as cur:
+        cur.execute(
+            "update assignments set model_config = 'A',"
+            " revision = case assignment_id when 'as_newer' then 1 else 0 end"
+            " where assignment_id in ('as_old', 'as_newer')"
+        )
+
+    send_heartbeat(client, station, holding=["as_old"])
+
+    assert state_of(rollback, "as_old") == "revoked"
+
+
+def test_a_held_assignment_dropped_once_under_way_is_not_revoked(
+    client: TestClient, rollback: Any
+) -> None:
+    """Its window has begun: there is no time left to give anyone, and expiry
+    after the window says what happened."""
+    station = register(client, rollback, simulated=False)
+    issue_assignment(rollback, station["station_id"], Issued("as_begun", state="held"))
+
+    send_heartbeat(client, station, holding=[])
+
+    assert state_of(rollback, "as_begun") == "held"
+
+
+def test_an_offline_revocation_the_returning_station_names_is_reinstated(
+    client: TestClient, rollback: Any
+) -> None:
+    """MSP cannot take work back: a station naming it will execute it."""
+    station = register(client, rollback, simulated=False)
+    for name in ("as_kept", "as_forgotten"):
+        issue_assignment(
+            rollback,
+            station["station_id"],
+            Issued(
+                name, state="revoked", starts_in_minutes=30, revoked_reason="offline"
+            ),
+        )
+
+    body = send_heartbeat(client, station, holding=["as_kept"])
+
+    assert (state_of(rollback, "as_kept"), reason_of(rollback, "as_kept")) == (
+        "held",
+        None,
+    )
+    assert state_of(rollback, "as_forgotten") == "revoked"
+    assert [one["assignment_id"] for one in body["assignments"]] == ["as_kept"]
+
+
+def test_a_declined_assignment_named_again_stays_revoked(
+    client: TestClient, rollback: Any
+) -> None:
+    """The station let it go; naming it later does not take the slot back."""
+    station = register(client, rollback, simulated=False)
+    issue_assignment(
+        rollback,
+        station["station_id"],
+        Issued(
+            "as_let_go",
+            state="revoked",
+            starts_in_minutes=30,
+            revoked_reason="declined",
+        ),
+    )
+
+    body = send_heartbeat(client, station, holding=["as_let_go"])
+
+    assert state_of(rollback, "as_let_go") == "revoked"
+    assert body["assignments"] == []
+
+
+def reason_of(rollback: Any, assignment_id: str) -> str | None:
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select revoked_reason from assignments where assignment_id = %s",
+            (assignment_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    return None if row[0] is None else str(row[0])
 
 
 def test_a_listening_block_starts_the_assignment_and_it_is_still_delivered(

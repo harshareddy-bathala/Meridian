@@ -8,15 +8,19 @@ first of these that holds:
 1. its window closed less than ``settle_margin_s`` ago → excluded,
    ``report_window_open`` — a report may still be in a station's queue;
 2. nothing scheduled it → excluded, ``not_scheduled``;
-3. every scheduled assignment expired unreported → ``assignment_declined``;
-4. the report is ``decoded`` → ``successful_reception``;
-5. the report is ``signal_no_decode`` → ``signal_no_decode``;
-6. the report is ``aborted`` or ``not_attempted`` → ``station_unavailable``;
-7. no signal or no report, and no heartbeat at all in the window →
+3. unreported, and every assignment was revoked before its window (D-171) →
+   ``assignment_declined`` if the station declined one, else
+   ``station_unavailable``: it was offline, and the work was taken back. A
+   revoked assignment is never the station's work, so never a miss;
+4. every scheduled assignment expired unreported → ``assignment_declined``;
+5. the report is ``decoded`` → ``successful_reception``;
+6. the report is ``signal_no_decode`` → ``signal_no_decode``;
+7. the report is ``aborted`` or ``not_attempted`` → ``station_unavailable``;
+8. no signal or no report, and no heartbeat at all in the window →
    ``station_unavailable``;
-8. no signal or no report, and listening not confirmed →
+9. no signal or no report, and listening not confirmed →
    ``station_not_confirmed_listening``;
-9. no signal or no report, listening confirmed → ``confirmed_miss``,
+10. no signal or no report, listening confirmed → ``confirmed_miss``,
    ``satellite_silent`` or ``satellite_state_indeterminate``, by D-147.
 
 **Several assignments can share a pass** — configurations A and B are
@@ -30,7 +34,7 @@ listening answers were frozen by the registry at export (D-145). The same rows
 and the same configuration always give the same labels, which is Stage 15's
 gate.
 
-Reference: docs/DECISIONS.md D-145, D-146, D-147, D-148.
+Reference: docs/DECISIONS.md D-145, D-146, D-147, D-148, D-171.
 """
 
 from __future__ import annotations
@@ -207,25 +211,31 @@ def label_counts(labelled: Iterable[LabelledPass]) -> dict[str, int]:
 def _label(
     physical: PhysicalPass, evidence: PooledEvidence, context: _Context
 ) -> LabelledPass:
-    """Rules 1 and 2 exclude the pass; otherwise rules 3 to 9 label it."""
+    """Rules 1 and 2 exclude the pass; otherwise rules 3 to 10 label it."""
     target = physical.representative
-    ends = [physical.last_los, *(one.end_at for one in evidence.scheduled)]
+    chosen = (*evidence.scheduled, *evidence.revoked)
+    ends = [physical.last_los, *(one.end_at for one in chosen)]
     if max(ends) > context.settled_by:
         return _row(physical, evidence, None, "report_window_open")
-    if not evidence.scheduled:
+    if not chosen:
         return _row(physical, evidence, None, "not_scheduled")
     label = _outcome_label(target, evidence, context)
     return _row(physical, evidence, label, _exclusion(label, evidence.simulated))
 
 
 def _outcome_label(target: PassRow, evidence: PooledEvidence, context: _Context) -> str:
-    """Rules 3 to 9: what the report, the heartbeats and the registry say.
+    """Rules 3 to 10: what the report, the heartbeats and the registry say.
 
-    Rules 3 to 8 are a first-match table, read top to bottom as D-146 writes
-    them; each condition is evaluated only if every one above it failed.
+    Rules 3 to 9 are a first-match table, read top to bottom as D-146 and
+    D-171 write them; each condition is evaluated only if every one above it
+    failed.
     """
     outcome = None if evidence.report is None else evidence.report.outcome
+    taken_back = outcome is None and not evidence.scheduled
+    declined = any(one.revoked_reason == "declined" for one in evidence.revoked)
     rules: tuple[tuple[Callable[[], bool], str], ...] = (
+        (lambda: taken_back and declined, "assignment_declined"),
+        (lambda: taken_back, "station_unavailable"),
         (
             lambda: (
                 outcome is None
@@ -273,7 +283,7 @@ def _row(
     excluded: str | None,
 ) -> LabelledPass:
     target = physical.representative
-    configs = {one.model_config for one in evidence.scheduled}
+    configs = {one.model_config for one in (*evidence.scheduled, *evidence.revoked)}
     return LabelledPass(
         pass_id=target.pass_id,
         pass_ids=physical.pass_ids,

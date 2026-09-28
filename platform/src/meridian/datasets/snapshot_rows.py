@@ -78,6 +78,9 @@ class AssignmentRow:
     state: str
     model_config: str | None
     simulated: bool
+    revoked_reason: str | None = None
+    """``declined`` or ``offline`` for a ``revoked`` assignment (D-171); absent
+    from a snapshot exported before migration 0019, which holds none."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,7 +257,16 @@ def _assignment(row: Mapping[str, object]) -> AssignmentRow:
         state=_text(row, "state"),
         model_config=config,
         simulated=_bool(row, "simulated"),
+        revoked_reason=_optional_text(row, "revoked_reason"),
     )
+
+
+def _optional_text(row: Mapping[str, object], name: str) -> str | None:
+    value = row.get(name)
+    if value is not None and not isinstance(value, str):
+        message = f"{name} is {value!r}, not text or null"
+        raise MalformedSnapshotError(message)
+    return value
 
 
 def _lines(files: Mapping[str, bytes], name: str) -> list[Mapping[str, object]]:

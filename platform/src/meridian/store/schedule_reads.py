@@ -3,8 +3,8 @@
 Reads ``assignments`` joined to ``passes``. Two questions, each asked once per
 station per run:
 
-* which of this horizon's passes this configuration has already decided, so a
-  round re-running over an overlapping horizon does not decide them again; and
+* what this configuration last decided about each of this horizon's passes,
+  so a round decides again only what is open (D-165, D-171); and
 * which scheduled assignments the station is already committed to, so a pass
   new to this round — the horizon's tail, or a newer element set's prediction of
   a pass already taken (D-063) — cannot be scheduled on top of one.
@@ -13,7 +13,7 @@ Before D-165 neither was asked. The jobs service's rounds overlap (D-110), and a
 newcomer that outranked a stored selection was inserted beside it: two
 overlapping assignments for one antenna.
 
-Reference: docs/DECISIONS.md D-066, D-110, D-165.
+Reference: docs/DECISIONS.md D-066, D-110, D-165, D-171.
 """
 
 from __future__ import annotations
@@ -22,11 +22,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from psycopg.rows import class_row, scalar_row
+from psycopg.rows import class_row
 
 from meridian.store.stations import Connection
 
-__all__ = ["StoredCommitment", "find_commitments", "find_decided_pass_ids"]
+__all__ = [
+    "LatestDecision",
+    "StoredCommitment",
+    "find_commitments",
+    "find_latest_decisions",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,23 +54,39 @@ class StoredCommitment:
     simulated: bool
 
 
-def find_decided_pass_ids(
-    conn: Connection, pass_ids: Sequence[int], model_config: str
-) -> set[int]:
-    """The passes among ``pass_ids`` this configuration has a decision about.
+@dataclass(frozen=True, slots=True)
+class LatestDecision:
+    """A configuration's current decision about one pass: its highest revision."""
 
-    A skip counts as a decision: the round that made it recorded why, and the
-    next round has no new reason to reverse it.
+    pass_id: int
+    revision: int
+    decision: str
+    state: str
+    revoked_reason: str | None
+    conflicts_with_assignment_id: str | None
+
+
+def find_latest_decisions(
+    conn: Connection, pass_ids: Sequence[int], model_config: str
+) -> dict[int, LatestDecision]:
+    """This configuration's current decision about each of ``pass_ids`` it has decided.
+
+    Which of them a round decides again is the caller's rule (D-171); this
+    only says what each one's latest decision is.
     """
-    with conn.cursor(row_factory=scalar_row) as cur:
+    with conn.cursor(row_factory=class_row(LatestDecision)) as cur:
         cur.execute(
             """
-            select pass_id from assignments
+            select distinct on (pass_id)
+                   pass_id, revision, decision, state, revoked_reason,
+                   conflicts_with_assignment_id
+            from assignments
             where model_config = %s and pass_id = any(%s)
+            order by pass_id, revision desc
             """,
             (model_config, list(pass_ids)),
         )
-        return set(cur.fetchall())
+        return {one.pass_id: one for one in cur.fetchall()}
 
 
 def find_commitments(

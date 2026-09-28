@@ -2,11 +2,11 @@
 
 For each station the run needs three things from the database:
 
-* the passes rising in the horizon that this configuration has not yet
-  decided, as candidates, each with the downlink and the timing uncertainty its
-  row will carry;
-* how many it has already decided, so a report can say why a repeat wrote
-  nothing; and
+* the passes rising in the horizon that are open under this configuration —
+  never decided, skipped, or revoked while their station was offline (D-171)
+  — as candidates, each with the downlink and the timing uncertainty its row
+  will carry, and the revision its decision will be written as;
+* how many are closed, so a report can say why a repeat wrote nothing; and
 * the assignments the station is already committed to near those passes, which
   no decision of this run may overlap (D-165).
 
@@ -33,6 +33,7 @@ from meridian.scheduler import Candidate, Commitment
 from meridian.scheduler.assignment_records import PassFacts
 from meridian.scheduler.constraints import DELIVERY_LEAD, window
 from meridian.scheduler.priority_baseline import NEUTRAL_PRIORITY
+from meridian.scheduler.reissue import next_revision, reopens
 from meridian.scheduler.schedule_config import ScheduleConfig
 from meridian.store.element_sets import find_element_set_by_id
 from meridian.store.passes import StoredPass, find_passes_in_horizon
@@ -43,9 +44,10 @@ from meridian.store.satellites import (
     find_satellite_priorities,
 )
 from meridian.store.schedule_reads import (
+    LatestDecision,
     StoredCommitment,
     find_commitments,
-    find_decided_pass_ids,
+    find_latest_decisions,
 )
 from meridian.store.station_capabilities import find_capabilities_for_station
 from meridian.store.stations import Connection, find_station_heartbeat
@@ -117,7 +119,15 @@ class StationWork:
     facts_by_pass_id: dict[int, PassFacts]
     passes_without_a_usable_transmitter: list[int]
     already_decided: int
-    """Passes in the horizon this configuration decided in an earlier run."""
+    """Passes in the horizon this configuration has closed: held, done or
+    declined (D-171)."""
+
+    revisions: dict[int, int]
+    """By candidate, the revision its decision will be written as."""
+
+    previous: dict[int, LatestDecision]
+    """By candidate decided before, that decision, so one saying nothing new is
+    not written again (D-171)."""
 
     commitments: list[Commitment]
     """Open assignments near the candidates, of any configuration."""
@@ -304,20 +314,21 @@ def work_for_station(
     catalogue: Catalogue,
     request: ScheduleRequest,
 ) -> StationWork:
-    """Gather one station's undecided candidates over the horizon, with their ties."""
+    """Gather one station's open candidates over the horizon, with their ties."""
     capabilities = _load_capabilities(conn, station.station_id)
     stored_passes = find_passes_in_horizon(
         conn, station.station_id, request.start, request.end
     )
-    decided = find_decided_pass_ids(
+    latest = find_latest_decisions(
         conn, [stored.id for stored in stored_passes], request.model_config
     )
+    closed = {pass_id for pass_id, held in latest.items() if not reopens(held)}
     candidates: list[Candidate] = []
     facts_by_pass_id: dict[int, PassFacts] = {}
     unusable: list[int] = []
 
     for stored in stored_passes:
-        if stored.id in decided:
+        if stored.id in closed:
             continue
         transmitter = _first_receivable_transmitter(
             catalogue.transmitters_by_satellite.get(stored.satellite_id, ()),
@@ -342,7 +353,15 @@ def work_for_station(
         candidates=candidates,
         facts_by_pass_id=facts_by_pass_id,
         passes_without_a_usable_transmitter=unusable,
-        already_decided=len(decided),
+        already_decided=len(closed),
+        revisions={
+            one.pass_id: next_revision(latest.get(one.pass_id)) for one in candidates
+        },
+        previous={
+            one.pass_id: latest[one.pass_id]
+            for one in candidates
+            if one.pass_id in latest
+        },
         commitments=_commitments_near(conn, candidates, request.turnaround_s),
         stored={stored.id: stored for stored in stored_passes},
     )

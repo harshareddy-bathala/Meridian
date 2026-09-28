@@ -64,6 +64,10 @@ def print_schedule_report(report: ScheduleReport) -> None:
     _say(f"  skipped:             {report.skipped}")
     _say(f"  rows written:        {report.rows_written}")
     _say(f"  already decided:     {report.already_decided}")
+    if report.unchanged:
+        _say(f"  skipped as before:   {report.unchanged} (not written again)")
+    if report.revoked:
+        _say(f"  revoked, offline:    {report.revoked}")
     if report.solver is not None:
         solver = report.solver
         bound = "none" if solver.bound is None else f"{solver.bound:.1f}"

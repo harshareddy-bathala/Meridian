@@ -84,6 +84,9 @@ class NewAssignment:
     """Why this decision (D-170). ``None`` only for decisions made by no
     recorded run."""
 
+    revision: int = 0
+    """Which decision about the pass under this configuration (D-171)."""
+
 
 @dataclass(frozen=True, slots=True)
 class NewScheduleRun:
@@ -145,9 +148,9 @@ def insert_assignments(conn: Connection, decisions: Sequence[NewAssignment]) -> 
                  centre_freq_hz, mode, timing_uncertainty_s, decision, reason,
                  model_config, score, conflicts_with_assignment_id, priority,
                  simulated, predicted_yield, schedule_run_id, model_sha256,
-                 explanation)
+                 explanation, revision)
             values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s)
             on conflict on constraint assignment_decision_unique do nothing
             """,
             [
@@ -171,6 +174,7 @@ def insert_assignments(conn: Connection, decisions: Sequence[NewAssignment]) -> 
                     one.schedule_run_id,
                     one.model_sha256,
                     None if one.explanation is None else Jsonb(one.explanation),
+                    one.revision,
                 )
                 for one in decisions
             ],

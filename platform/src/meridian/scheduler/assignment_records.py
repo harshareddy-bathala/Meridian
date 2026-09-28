@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from meridian.scheduler import Rejection, ScheduleOutcome, ScoredCandidate
@@ -81,14 +81,20 @@ class Stamp:
     """By pass id, a model's probability; empty under the elevation proxy,
     which is not a prediction and is never written as one."""
 
+    revisions: Mapping[int, int] = field(default_factory=dict)
+    """By pass id, the revision its decision is written as; 0 when absent,
+    the first decision about a pass (D-171)."""
 
-def assignment_id_for(pass_id: int, model_config: str) -> str:
+
+def assignment_id_for(pass_id: int, model_config: str, revision: int = 0) -> str:
     """The id for the decision this configuration makes about this pass.
 
     Args:
         pass_id: The prediction being decided about.
-        model_config: Which configuration is deciding — ``A``, ``B``, and later
-            ``C`` and ``D``.
+        model_config: Which configuration is deciding — ``A`` to ``D``.
+        revision: Which decision about the pass this is (D-171). Revision 0
+            is digested as it always was, so no id minted before revisions
+            existed changes.
 
     Returns:
         ``as_`` followed by twelve hex characters.
@@ -106,7 +112,10 @@ def assignment_id_for(pass_id: int, model_config: str) -> str:
         requires. Keyed on the pass alone, A and B would collide and the second
         run would silently write nothing.
     """
-    digest = hashlib.sha256(f"{pass_id}:{model_config}".encode()).hexdigest()
+    key = f"{pass_id}:{model_config}"
+    if revision:
+        key = f"{key}:{revision}"
+    digest = hashlib.sha256(key.encode()).hexdigest()
     return f"{ASSIGNMENT_ID_PREFIX}{digest[:ASSIGNMENT_ID_HEX_LENGTH]}"
 
 
@@ -137,13 +146,13 @@ def widened_window(facts: PassFacts) -> tuple[datetime, datetime]:
 
 
 def _selection_row(
-    scored: ScoredCandidate, facts: PassFacts, model_config: str
+    scored: ScoredCandidate, facts: PassFacts, model_config: str, ids: Mapping[int, str]
 ) -> NewAssignment:
     """One taken pass, as a row."""
     start_at, end_at = widened_window(facts)
     candidate = scored.candidate
     return NewAssignment(
-        assignment_id=assignment_id_for(candidate.pass_id, model_config),
+        assignment_id=ids[candidate.pass_id],
         pass_id=candidate.pass_id,
         station_id=candidate.station_id,
         start_at=start_at,
@@ -165,7 +174,7 @@ def _selection_row(
     )
 
 
-def _blocker_id(rejection: Rejection, model_config: str) -> str | None:
+def _blocker_id(rejection: Rejection, ids: Mapping[int, str]) -> str | None:
     """The assignment that displaced this candidate, or None if none did alone.
 
     A commitment's id already exists and may be another configuration's; a
@@ -175,7 +184,7 @@ def _blocker_id(rejection: Rejection, model_config: str) -> str | None:
         return rejection.committed_assignment_id
     if rejection.conflicts_with_pass_id is None:
         return None
-    return assignment_id_for(rejection.conflicts_with_pass_id, model_config)
+    return ids[rejection.conflicts_with_pass_id]
 
 
 def _rejection_reason(
@@ -198,15 +207,15 @@ def _rejection_reason(
 
 
 def _rejection_row(
-    rejection: Rejection, facts: PassFacts, model_config: str
+    rejection: Rejection, facts: PassFacts, model_config: str, ids: Mapping[int, str]
 ) -> NewAssignment:
     """One displaced pass, as a row naming what displaced it."""
     start_at, end_at = widened_window(facts)
     scored = rejection.scored
     candidate = scored.candidate
-    winner_id = _blocker_id(rejection, model_config)
+    winner_id = _blocker_id(rejection, ids)
     return NewAssignment(
-        assignment_id=assignment_id_for(candidate.pass_id, model_config),
+        assignment_id=ids[candidate.pass_id],
         pass_id=candidate.pass_id,
         station_id=candidate.station_id,
         start_at=start_at,
@@ -256,8 +265,18 @@ def to_assignment_rows(
         that wrote rejections first would fail on a row referencing an
         assignment that does not exist yet.
     """
+    revisions = {} if stamp is None else stamp.revisions
+    decided = [one.candidate.pass_id for one in outcome.selected] + [
+        one.scored.candidate.pass_id for one in outcome.rejected
+    ]
+    ids = {
+        pass_id: assignment_id_for(pass_id, model_config, revisions.get(pass_id, 0))
+        for pass_id in decided
+    }
     rows = [
-        _selection_row(scored, facts_by_pass_id[scored.candidate.pass_id], model_config)
+        _selection_row(
+            scored, facts_by_pass_id[scored.candidate.pass_id], model_config, ids
+        )
         for scored in outcome.selected
     ]
 
@@ -266,6 +285,7 @@ def to_assignment_rows(
             rejection,
             facts_by_pass_id[rejection.scored.candidate.pass_id],
             model_config,
+            ids,
         )
         for rejection in outcome.rejected
     )
@@ -274,6 +294,7 @@ def to_assignment_rows(
     return [
         replace(
             row,
+            revision=revisions.get(row.pass_id, 0),
             predicted_yield=stamp.predicted_yields.get(row.pass_id),
             schedule_run_id=stamp.run_id,
             model_sha256=stamp.model_sha256,

@@ -38,6 +38,8 @@ from meridian.scheduler.schedule_config import (  # noqa: E402
     ScheduleConfig,
     schedule_config_sha256,
 )
+from meridian.store.assignment_log import find_assignments  # noqa: E402
+from meridian.store.revocations import revoke_declined  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -56,12 +58,14 @@ LINE1 = "1 57166U 23091A   26220.09250000  .00000098  00000-0  61234-4 0  9995"
 LINE2 = "2 57166  98.7123 201.3345 0002145  85.1234 275.0123 14.22150000123456"
 
 
-def a_request(model_config: str = "A", model: str | None = None) -> ScheduleRequest:
+def a_request(
+    model_config: str = "A", model: str | None = None, *, now: datetime | None = None
+) -> ScheduleRequest:
     """One run over the whole horizon, for a station that does not slew."""
     return ScheduleRequest(
         start=HORIZON_START,
         end=HORIZON_END,
-        now=datetime.now(UTC),
+        now=datetime.now(UTC) if now is None else now,
         config=ScheduleConfig(configuration=model_config, model=model),
     )
 
@@ -777,3 +781,136 @@ def test_a_schedule_that_breaks_a_constraint_is_never_written(
     with pytest.raises(ScheduleInvalidError, match="overlap"):
         run_schedule(rollback, SkyfieldOrbitService(), a_request())
     assert _decisions(rollback) == []
+
+
+# --- reissue (D-171) ------------------------------------------------------------
+
+BEFORE = HORIZON_START - timedelta(hours=1)
+"""A round's instant an hour before the horizon, so every window is ahead."""
+
+
+def _rows_for(conn: Any, pass_id: int) -> list[tuple[Any, ...]]:
+    """Every revision of this pass's decisions under A, oldest first."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "select revision, assignment_id, decision, state, revoked_reason,"
+            " conflicts_with_assignment_id from assignments"
+            " where pass_id = %s and model_config = 'A' order by revision",
+            (pass_id,),
+        )
+        return cur.fetchall()
+
+
+def _heard(conn: Any, at: datetime) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "update stations set last_heartbeat_at = %s where station_id = %s",
+            (at, STATION),
+        )
+
+
+def test_a_skip_decided_again_for_the_same_reason_writes_nothing(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """The skip is open, and asked again; its answer has not changed."""
+    with rollback.cursor() as cur:
+        _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=70
+        )
+        loser = _insert_pass(
+            cur,
+            network[CUBESAT],
+            satellite_id=CUBESAT,
+            at_minute=5,
+            max_elevation_deg=20,
+        )
+        cur.execute("select count(*) from schedule_runs")
+        (runs,) = cur.fetchone()
+
+    run_schedule(rollback, SkyfieldOrbitService(), a_request())
+    again = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    assert (again.candidates_considered, again.already_decided) == (1, 1)
+    assert (again.unchanged, again.rows_written, again.run_id) == (1, 0, None)
+    assert len(_rows_for(rollback, loser)) == 1
+    with rollback.cursor() as cur:
+        cur.execute("select count(*) from schedule_runs")
+        assert cur.fetchone() == (runs + 1,)
+
+
+def test_a_declined_pass_frees_its_slot_for_the_pass_it_displaced(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """Decline, then reissue to the freed slot (D-171).
+
+    The declined pass is not offered again — the station just let it go — and
+    the skip that lost to it is decided again, taken, as revision 1.
+    """
+    with rollback.cursor() as cur:
+        winner = _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=70
+        )
+        loser = _insert_pass(
+            cur,
+            network[CUBESAT],
+            satellite_id=CUBESAT,
+            at_minute=5,
+            max_elevation_deg=20,
+        )
+    run_schedule(rollback, SkyfieldOrbitService(), a_request(now=BEFORE))
+    with rollback.cursor() as cur:
+        cur.execute(
+            "update assignments set state = 'held' where assignment_id = %s",
+            (assignment_id_for(winner, "A"),),
+        )
+    assert revoke_declined(rollback, STATION, still_held=[], now=BEFORE) == 1
+
+    again = run_schedule(rollback, SkyfieldOrbitService(), a_request(now=BEFORE))
+
+    assert [row[2:5] for row in _rows_for(rollback, winner)] == [
+        ("scheduled", "revoked", "declined")
+    ]
+    revisions = _rows_for(rollback, loser)
+    assert [(row[0], row[2], row[3]) for row in revisions] == [
+        (0, "skipped", "issued"),
+        (1, "scheduled", "issued"),
+    ]
+    assert revisions[1][1] == assignment_id_for(loser, "A", 1)
+    assert (again.scheduled, again.rows_written) == (1, 1)
+
+
+def test_an_offline_station_s_work_is_revoked_and_decided_again_on_return(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """Offline, revoked; back without naming it, decided again as revision 1."""
+    with rollback.cursor() as cur:
+        pass_id = _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
+        )
+    _heard(rollback, BEFORE)
+    run_schedule(rollback, SkyfieldOrbitService(), a_request(now=BEFORE))
+
+    _heard(rollback, BEFORE - timedelta(minutes=10))
+    away = run_schedule(rollback, SkyfieldOrbitService(), a_request(now=BEFORE))
+
+    assert away.revoked == 1
+    assert _rows_for(rollback, pass_id)[0][3:5] == ("revoked", "offline")
+
+    _heard(rollback, BEFORE)
+    back = run_schedule(rollback, SkyfieldOrbitService(), a_request(now=BEFORE))
+
+    rows = _rows_for(rollback, pass_id)
+    assert [(row[0], row[2], row[3]) for row in rows] == [
+        (0, "scheduled", "revoked"),
+        (1, "scheduled", "issued"),
+    ]
+    assert back.rows_written == 1
+    listed = find_assignments(
+        rollback,
+        not_before=HORIZON_START - timedelta(days=1),
+        station_id=STATION,
+        decision=None,
+        after_assignment_id=None,
+        limit=10,
+    )
+    assert [(one.pass_id, one.revision) for one in listed] == [(pass_id, 1)]

@@ -74,7 +74,7 @@ Note `element_set_id`: which element set produced this prediction, so timing err
 ### `assignments`
 Scheduler output. Links a pass to a station with a decision record.
 
-`(assignment_id, pass_id, station_id, issued_at, start_at, end_at, centre_freq_hz, mode, timing_uncertainty_s, predicted_yield, priority, decision, reason, model_config, score, conflicts_with_assignment_id, state, simulated, schedule_run_id, model_sha256, explanation)`
+`(assignment_id, pass_id, station_id, issued_at, start_at, end_at, centre_freq_hz, mode, timing_uncertainty_s, predicted_yield, priority, decision, reason, model_config, score, conflicts_with_assignment_id, state, simulated, schedule_run_id, model_sha256, explanation, revision, revoked_reason, revoked_at)`
 
 `reason` is human-readable and shown on the dashboard. `model_config` records which ablation configuration produced the prediction — required for the evaluation to be reproducible.
 
@@ -87,6 +87,8 @@ Scheduler output. Links a pass to a station with a decision record.
 
 Rows from before migration 0018 keep nulls: no recorded run made them.
 
+**A pass can be decided again** (D-171, migration 0019). `revision` numbers a configuration's decisions about one pass, the highest current, and `(pass_id, model_config, revision)` is unique. A round decides again a pass whose current decision is a skip, or an assignment revoked while its station was offline; a skip decided again for the same reason is not written. Revision 0's id is the one minted before revisions existed. `revoked_reason` and `revoked_at` are set together, exactly when `state = 'revoked'`. An offline revocation the returning station names in `held_assignments` goes back to `held`: MSP cannot take work back, and a station holding it will execute it.
+
 **`start_at` and `end_at` are the assignment's window, not the pass's `aos`/`los`.** They are widened from the pass by `timing_uncertainty_s`, because a station recording at exactly the predicted acquisition time starts after a pass whose element set was stale has already begun. These five columns are what let this table produce the MSP §4.3 assignment message; without them it could not. See D-021.
 
 Skipped passes are recorded too. A scheduler that only logs what it chose cannot be evaluated.
@@ -97,8 +99,8 @@ Skipped passes are recorded too. A scheduler that only logs what it chose cannot
 
 ```
 issued  →  held  →  in_progress  →  reported
-        ↘
-          expired
+        ↘       ↘
+          expired  revoked   (held → revoked, or issued → revoked, before the window)
 ```
 
 | State | Meaning | Set when |
@@ -108,6 +110,7 @@ issued  →  held  →  in_progress  →  reported
 | `in_progress` | Station is executing | Heartbeat `listening` block references it |
 | `reported` | An observation has been received | Observation ingested |
 | `expired` | Never reported, window has passed | Reconciliation, once `now > end_at` |
+| `revoked` | Taken back before its window began; never delivered again | A held assignment the station drops (`revoked_reason = 'declined'`), or a round finding its station offline (`'offline'`) — D-171 |
 
 **Delivery is repeated, not once-only** (D-026). Every heartbeat returns each of this station's assignments whose `start_at` falls in the next two hours and which is not yet `reported`, capped at 8 and sorted by `start_at` — including ones the station already listed in `held_assignments`. That is what makes a lost heartbeat response harmless, and it is why no delivery-receipt column exists on this table: there is nothing to receipt.
 

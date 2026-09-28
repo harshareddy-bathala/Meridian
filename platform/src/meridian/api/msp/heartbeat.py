@@ -41,6 +41,7 @@ from meridian.store.assignments import (
     mark_assignments_held,
 )
 from meridian.store.heartbeats import insert_heartbeat, touch_last_heartbeat
+from meridian.store.revocations import reinstate_named, revoke_declined
 from meridian.store.stations import Connection, find_station_provenance
 
 __all__ = ["router"]
@@ -82,7 +83,7 @@ restating who it believes it is. Naming the disagreement rather than echoing
 either value keeps a token holder from probing which station ids exist.
 """
 
-LIVE_STATES = ("issued", "held", "in_progress", "reported", "expired")
+LIVE_STATES = ("issued", "held", "in_progress", "reported", "expired", "revoked")
 """Every state an assignment this station was issued can be in.
 
 Read whole rather than filtered to the two states that transition, because
@@ -136,7 +137,7 @@ def _reported_holdings(body: HeartbeatRequestBody) -> HeldReport:
 
 
 def _apply_reconciliation(
-    conn: Connection, station_id: str, body: HeartbeatRequestBody
+    conn: Connection, station_id: str, body: HeartbeatRequestBody, now: datetime
 ) -> None:
     """Move this station's assignments to match what it just reported.
 
@@ -144,6 +145,8 @@ def _apply_reconciliation(
         conn: Open connection, with a transaction already open.
         station_id: The authenticated station.
         body: The validated §4.2 payload.
+        now: The platform's clock for this heartbeat, which each window is
+            judged against.
 
     Note:
         ``to_hold`` is applied before ``to_start`` because a station may confirm
@@ -152,7 +155,16 @@ def _apply_reconciliation(
 
         Expiry runs last and is told what the station still names, so an
         assignment held past its window survives to be reported (D-067).
+
+        **Revocation brackets the rest** (D-171). First, an assignment revoked
+        while the station was offline and named by it now is reinstated: it
+        holds the work and will execute it. Then, after holding and starting,
+        a held assignment the station no longer names, whose window has not
+        begun, is revoked as declined, so the next round can give its time to
+        another pass.
     """
+    named = sorted(body.held_assignments)
+    reinstate_named(conn, station_id, named=named, now=now)
     by_state = {
         state: find_assignment_ids_by_state(conn, station_id, [state])
         for state in LIVE_STATES
@@ -181,9 +193,8 @@ def _apply_reconciliation(
         mark_assignment_in_progress(
             conn, station_id=station_id, assignment_id=outcome.to_start
         )
-    expire_overdue_assignments(
-        conn, station_id, still_held=sorted(body.held_assignments)
-    )
+    revoke_declined(conn, station_id, still_held=named, now=now)
+    expire_overdue_assignments(conn, station_id, still_held=named)
 
 
 def _assignments_due_now(
@@ -265,7 +276,7 @@ def heartbeat(
     now = platform_clock.utc_now()
     with conn.transaction():
         simulated = _record_heartbeat(conn, body, station_id)
-        _apply_reconciliation(conn, station_id, body)
+        _apply_reconciliation(conn, station_id, body, now)
         due = _assignments_due_now(conn, station_id, now)
 
     _count_heartbeat(body.sent_at, now, simulated=simulated)

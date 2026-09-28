@@ -381,6 +381,8 @@ MSP §4.2's reconciliation table says that when an assignment was issued, is abs
 
 This is the smaller change and Phase 1 has one station, so there is nowhere to reissue *to*. Recording it because the gap is real and a reader comparing MSP §4.2 against D-008 will otherwise find the contradiction and assume it was missed.
 
+*Amended by D-171.* `revoked` exists. A held assignment the station drops before its window is revoked as declined, and its time can be given to another of the station's passes; an offline station's work not yet begun is revoked, and reinstated if the station still names it on return.
+
 ---
 
 ## D-023 — Registration recovery: a client-generated registration key
@@ -458,6 +460,8 @@ MSP §4.2 defined the reconciliation table but not the delivery policy behind it
 | When does an assignment expire? | `now > end_at` and state is `issued` or `held` |
 | When is it eligible for reissue? | Never in Phase 1 (D-022) |
 | Does Phase 2 add `revoked`? | Yes, with the scheduler — not now |
+
+*Amended by D-171.* The last two rows are answered: a held assignment dropped before its window is revoked and its time reissued, and `revoked` exists. An expired assignment is still never reissued.
 
 *Amended by D-035.* The horizon above is stated as a bound on `start_at` alone, which excludes an assignment already under way and so contradicts the redelivery rule two rows above it. D-035 restates the eligibility predicate and resolves the cap.
 
@@ -3709,6 +3713,44 @@ A fallback that keeps happening, or a history left to age, is visible without re
 **The live track is export's track.** A model that reads the sky needs each pass's track (D-158), and prediction reaches no orbit. So the scheduler computes it with the rules export freezes it by: the step, the rounding, the folding, and no track for a simulated pass. A unit test propagates one pass both ways and requires them to be equal. A candidate's rise is the stored predictions of one satellite whose windows overlap, transitively (D-148).
 
 *Rejected: a `/api/v1/schedule-runs` endpoint.* Nothing on the dashboard reads a run apart from its decisions, and what a decision's reader needs from its run is in its explanation. `schedule_runs` is the record for operators and for replay.
+
+---
+
+## D-171 — Reissue: a declined or offline assignment is revoked, and its pass decided again
+
+**2026-09-28 · accepted** · *migration 0019; `meridian/store/{revocations,schedule_reads}.py`; `meridian/scheduler/{reissue,candidates,run,assignment_records}.py`; `meridian/api/msp/heartbeat.py`; `meridian/datasets/{labels,pooled_evidence}.py`, Stage 18*
+
+D-022 deferred reissue to the scheduler, with `revoked` as "the obvious candidate", and D-026 said Phase 2 adds it. This is that.
+
+**`revoked` is an assignment the platform took back before its window began.** It is never delivered again, never expires, and is never a miss. `revoked_reason` says why, and is set with `revoked_at` exactly when the state is `revoked`:
+
+- **`declined`**: a `held` assignment the station stops naming before its window begins (D-003). The station let the work go, so its antenna's time is free. Revoking it is what lets the next round give that time to the pass skipped for it.
+- **`offline`**: a round finds the station `offline` (D-166) and takes back its `issued` and `held` work that has not begun.
+
+**An issued assignment never held keeps Phase 1's rule.** When the station omits it, it stays `issued` and is offered again. It may simply not have arrived, and redelivery is how it does (D-026). Only a *held* assignment dropped is a decline.
+
+**MSP cannot take work back from a station, and this shaped the rest.** There is no revoke message, and a station that still holds an assignment will execute it. So:
+
+- An offline revocation that the returning station names on its first heartbeat goes back to `held`. The reconciliation that does this runs in the same transaction that makes the station live again, so no round can re-decide the pass first. It happens only while no later decision about the pass exists.
+- A declined assignment the station names again stays `revoked`. The station let it go, and its time may already be someone else's.
+- Nothing is reissued "to another station". A pass here belongs to one station, and each station's antenna is its own constraint set (D-166). The time a decline frees is that station's, and it goes to another of that station's passes. Another station's pass of the same rise is its own candidate, decided on its own merits already, and the objective has no cross-station coverage term (D-168) that would change it.
+
+**A pass can be decided again, as a new revision.** `(pass_id, model_config, revision)` is unique. Revision 0's id is digested as before (`pass_id:model_config`), so no stored id changes; later revisions add `:revision`. A round considers every pass in its horizon that is **open**:
+- never decided;
+- skipped;
+- revoked while its station was offline, now that the station is back and did not name it.
+
+Work held or done, and a declined assignment, are **closed**. Offering a station the pass it just let go would ask it to decline again.
+
+A skip decided again for the same blocking assignment is **not written**. Without that rule, every round would copy every skip in its horizon every five minutes. Anything else is a new row: a skip now taken, a skip now blocked by something else, or a revoked pass decided at all. A run that writes no row records no run. The public list shows each pass's current decision only, and earlier revisions stay reachable by their id.
+
+**Labelling never reads a revoked assignment as a miss** (`CLAUDE.md` rule 7, D-146). Pooled evidence keeps revoked assignments apart from the station's work. A pass whose assignments were all revoked, with no report, is labelled:
+- `assignment_declined` if one was declined;
+- `station_unavailable` otherwise.
+
+Neither is a yield label (D-149), so neither reaches a model as a negative. A report on a revoked assignment is still a reception, and still counts. A live reissue decides its own label, and a revoked sibling does not make it look declined. Snapshots export `revision` and `revoked_reason`. A snapshot from before migration 0019 has neither and holds no revoked row, so its labels are unchanged, and the labelling version is not bumped.
+
+This amends D-022, D-026 and MSP §4.2's reconciliation table. The wire protocol is unchanged: no message is added, and a station that never declines sees no difference.
 
 ---
 

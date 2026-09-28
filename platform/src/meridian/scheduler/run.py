@@ -11,13 +11,15 @@ a station *did* reaches a schedule only as a model's probability, which reads a
 labelled dataset (D-169, ``docs/ARCHITECTURE.md``).
 
 Running it twice over one horizon writes nothing the second time: a pass this
-configuration has already decided is not a candidate again (D-165), and each
-decision's id is derived from its pass and its configuration, so a race between
+configuration has closed is not a candidate again, a skip decided again for the
+same reason is not written again (D-165, D-171), and each decision's id is
+derived from its pass, its configuration and its revision, so a race between
 two runs still collapses onto ``assignment_decision_unique`` (D-066). A pass new
 to a later run is decided around the assignments already made, never on top of
-one.
+one. An offline station's work not yet begun is revoked, and decided again
+when it returns (D-171).
 
-Reference: docs/DECISIONS.md D-065, D-066, D-165 to D-170.
+Reference: docs/DECISIONS.md D-065, D-066, D-165 to D-171.
 """
 
 from __future__ import annotations
@@ -49,9 +51,12 @@ from meridian.scheduler.optimiser import (
     SolverSettings,
     optimise,
 )
+from meridian.scheduler.reissue import unchanged
 from meridian.scheduler.schedule_config import check_model, schedule_config_sha256
 from meridian.scheduler.scoring import yields_of
 from meridian.store.receiving_stations import find_receiving_stations
+from meridian.store.revocations import revoke_offline
+from meridian.store.schedule_reads import LatestDecision
 from meridian.store.schedule_writes import NewScheduleRun, insert_schedule
 from meridian.store.stations import Connection
 
@@ -97,14 +102,20 @@ class ScheduleReport:
     """Stations ``offline`` at ``request.now``, given nothing new (D-166)."""
 
     passes_deferred: int
-    """Their undecided passes, left undecided rather than skipped, so a round
-    after the station returns decides them."""
+    """Their open passes, left undecided rather than skipped, so a round after
+    the station returns decides them."""
 
     yield_source: str
     """``model`` or ``elevation_proxy`` (D-168)."""
 
+    revoked: int = 0
+    """Their assignments not yet begun, taken back (D-171)."""
+
+    unchanged: int = 0
+    """Skips decided again for the same reason, and so not written (D-171)."""
+
     run_id: str | None = None
-    """The recorded run; ``None`` when there was nothing to decide."""
+    """The recorded run; ``None`` when it wrote no decision."""
 
     solver: SolverRun | None = None
     history_as_of: datetime | None = None
@@ -134,6 +145,9 @@ class _Gathered:
     unusable: list[int] = field(default_factory=list)
     unavailable: list[str] = field(default_factory=list)
     deferred: int = 0
+    revoked: int = 0
+    revisions: dict[int, int] = field(default_factory=dict)
+    previous: dict[int, LatestDecision] = field(default_factory=dict)
 
 
 def _gather(
@@ -160,10 +174,15 @@ def _gather(
         if not is_available(conn, station.station_id, request.now):
             gathered.unavailable.append(station.station_id)
             gathered.deferred += len(work.candidates)
+            gathered.revoked += revoke_offline(
+                conn, station.station_id, now=request.now
+            )
             continue
         gathered.candidates.extend(work.candidates)
         gathered.commitments.extend(work.commitments)
         gathered.facts.update(work.facts_by_pass_id)
+        gathered.revisions.update(work.revisions)
+        gathered.previous.update(work.previous)
         if scorer is not None and work.candidates:
             passes, geometry = live_inputs(
                 orbit,
@@ -230,6 +249,7 @@ def run_schedule(
         already_decided=gathered.already_decided,
         stations_unavailable=tuple(gathered.unavailable),
         passes_deferred=gathered.deferred,
+        revoked=gathered.revoked,
         yield_source=ELEVATION_PROXY if scorer is None else MODEL,
         history_as_of=None
         if scorer is None or scorer.past is None
@@ -239,12 +259,22 @@ def run_schedule(
         return report
     optimised, stamp = _decide(request, gathered, scorer)
     outcome = optimised.outcome
-    rows = to_assignment_rows(outcome, gathered.facts, config.configuration, stamp)
-    run = _run_row(request, report, optimised, scorer, stamp.run_id)
-    return replace(
+    decided = to_assignment_rows(outcome, gathered.facts, config.configuration, stamp)
+    rows = [
+        row for row in decided if not unchanged(gathered.previous.get(row.pass_id), row)
+    ]
+    report = replace(
         report,
         scheduled=len(outcome.selected),
         skipped=len(outcome.rejected),
+        unchanged=len(decided) - len(rows),
+    )
+    if not rows:
+        # Everything decided again said what it said before: no run to record.
+        return report
+    run = _run_row(request, report, optimised, scorer, stamp.run_id)
+    return replace(
+        report,
         rows_written=insert_schedule(conn, run, rows),
         run_id=stamp.run_id,
         solver=optimised.run,
@@ -292,6 +322,7 @@ def _decide(
         predicted_yields={
             pass_id: one.probability for pass_id, one in gathered.yields.items()
         },
+        revisions=gathered.revisions,
     )
     return optimised, stamp
 

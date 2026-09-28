@@ -39,7 +39,9 @@ __all__ = [
 ]
 
 AssignmentDecision = Literal["scheduled", "skipped"]
-AssignmentState = Literal["issued", "held", "in_progress", "reported", "expired"]
+AssignmentState = Literal[
+    "issued", "held", "in_progress", "reported", "expired", "revoked"
+]
 
 
 class ExplanationTerms(BaseModel):
@@ -139,6 +141,11 @@ class PublicAssignment(BaseModel):
     model_sha256: str | None
     """The model that gave ``predicted_yield``, as hex; null without one."""
     explanation: Explanation | None
+    revision: int
+    """Which decision about the pass this is; the list shows the current one
+    (D-171)."""
+    revoked_reason: Literal["declined", "offline"] | None
+    """Why a ``revoked`` assignment was taken back; null otherwise."""
 
     @classmethod
     def from_row(cls, row: LoggedAssignment) -> Self:
@@ -169,6 +176,8 @@ class PublicAssignment(BaseModel):
             explanation=None
             if row.explanation is None
             else Explanation.model_validate(row.explanation),
+            revision=row.revision,
+            revoked_reason=_revoked_reason(row.revoked_reason),
         )
 
 
@@ -182,7 +191,17 @@ def _decision(value: str) -> AssignmentDecision:
 
 def _state(value: str) -> AssignmentState:
     """Narrow the column's text to the vocabulary its CHECK constraint allows."""
-    for state in ("issued", "held", "in_progress", "reported", "expired"):
+    for state in ("issued", "held", "in_progress", "reported", "expired", "revoked"):
         if value == state:
             return state
     raise ValueError(f"assignments.state holds {value!r}, outside its CHECK")
+
+
+def _revoked_reason(value: str | None) -> Literal["declined", "offline"] | None:
+    """Narrow the column's text to the vocabulary its CHECK constraint allows."""
+    if value is None:
+        return None
+    for reason in ("declined", "offline"):
+        if value == reason:
+            return reason
+    raise ValueError(f"assignments.revoked_reason holds {value!r}, outside its CHECK")
