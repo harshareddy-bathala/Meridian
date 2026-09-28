@@ -3143,6 +3143,8 @@ Rule 7 makes `Registry.was_listening()` the only authority on whether a station 
 | 8 | No signal or no observation, heartbeats exist, and listening is not confirmed | `station_not_confirmed_listening` |
 | 9 | No signal or no observation, and listening is confirmed | `confirmed_miss`, `satellite_silent` or `satellite_state_indeterminate`, by D-147 |
 
+*Amended by D-181:* rule 7 is now read before rule 3, so an expired, unreported pass with no heartbeat in its window is `station_unavailable`, not `assignment_declined`. The rules 3 to 9 now live in `meridian.reliability.classification` (D-180).
+
 `satellite_silent` and `satellite_state_indeterminate` are also excluded from yield scoring, with the reason `satellite_silent` or `satellite_state_indeterminate`, and counted apart (`EVALUATION.md` §5).
 
 **The settle margin is 24 hours by default** and is set in the labelling configuration, which the manifest hashes. A station holds unsent observations in a durable queue across an outage; without a margin, a report still on its way would be labelled as absence.
@@ -3491,6 +3493,62 @@ B is reported as A: its probabilities are A's, and priority weights the objectiv
 
 ---
 
+## D-180 — A miss is defined once, in `meridian.reliability`, and the labeller calls it
+
+**2026-09-28 · accepted** · *`meridian/reliability/{classification,satellite_silence}.py`; `meridian/datasets/{labels,evidence}.py`, Stage 20*
+
+The roadmap asks for miss classification to be centralised in `meridian.reliability`, and `ARCHITECTURE.md` rule 3 already says only that module decides a miss. Until now it was decided in `meridian.datasets.labels`, as a table of lambdas inside the snapshot labeller. Stage 20 needs the same decision on live rows from the database, which the labeller may never read (D-143). A second copy of the table would be the thing rule 3 exists to prevent: two definitions of a miss, disagreeing the first time either one is edited.
+
+**The rules move and the evidence stays.** What is decided and what it is decided from are separated:
+- `classification.classify(PassEvidence, satellite_state)` holds D-146's rules 3 to 9 as a first-match table. `PassEvidence` is four plain fields: the report's outcome, the scheduled assignments' states, whether the station was heard in the window, and the registry's listening answer.
+- `satellite_silence.judge_satellite(signals, silences, min_silent_attempts)` holds D-147's conclusion. Which receptions count, and how they are found, stays with each caller.
+- The labeller gathers its evidence from a snapshot, as it always did, and calls both. The live accounting will gather from the database and call the same two functions.
+
+**The satellite's state is asked for lazily.** `classify` takes a function rather than a value, and calls it only when the station was confirmed listening and heard nothing. Gathering that evidence reads other passes, and most passes never reach that rule.
+
+**Both modules import the standard library and nothing else.** The labelling path may not reach a database. `tests/unit/test_datasets_boundaries.py` checks that one datasets file at a time, so it would not notice a datasets file importing a reliability module that imported the store. `tests/unit/test_reliability_boundaries.py` closes that gap from the other side:
+- the two shared modules import only the standard library;
+- `meridian/reliability/__init__.py` imports nothing, because it runs whenever either module is imported;
+- nothing in the package imports `meridian.datasets`.
+
+Each has a positive control.
+
+**The labels are unchanged by the move.** The labels change only through D-181, and only in the one case it names. Every unit test of the labeller, the completeness gate and the prediction gate passes, and none of them was edited except the decline case D-181 changes.
+
+*Rejected: leaving the table in `datasets` and having the live path import it.* The datasets boundary allows only the snapshot and model commands, and prediction's fitting side, to import the package, so a runtime path cannot read a snapshot and present it as the present (D-143). Moving the rules keeps that line where it is.
+
+---
+
+## D-181 — A heartbeat is looked for before a decline is read, and labels become `labels-3`
+
+**2026-09-28 · accepted** · *`meridian/reliability/classification.py`; `TRANSFORMATION_VERSION` in `meridian/datasets/labels.py`, Stage 20. Amends D-146.*
+
+D-146 read an assignment that expired unreported as a decline, before looking at anything else. `expired` means the station never took the work (D-008), and the only thing that expires an assignment today is the station's own heartbeat. It sweeps rows it no longer names, even when they are overdue (D-067). So a station that is off during a window and comes back afterwards has that window's assignment expired by its first heartbeat, and the pass is labelled `assignment_declined`. What actually happened is `station_unavailable`: the station was not there to refuse anything.
+
+The periodic sweep D-067 owes to this stage makes the case common rather than occasional. A station that never comes back would have every issued assignment expired on a timer, and every one of them read as a decline.
+
+**The rule order is now:**
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | The report is `decoded` | `successful_reception` |
+| 2 | The report is `signal_no_decode` | `signal_no_decode` |
+| 3 | The report is `aborted` or `not_attempted` | `station_unavailable` |
+| 4 | No heartbeat at all overlaps any scheduled window | `station_unavailable` |
+| 5 | No report, and every scheduled assignment is `expired` | `assignment_declined` |
+| 6 | Listening is not confirmed | `station_not_confirmed_listening` |
+| 7 | Listening is confirmed | `confirmed_miss`, `satellite_silent` or `satellite_state_indeterminate`, by D-147 |
+
+D-146's two exclusions still come first, unchanged. Moving the heartbeat rule changes exactly one case: an expired, unreported pass with no heartbeat in its window. That goes from `assignment_declined` to `station_unavailable`. Every other pass gets the label it had, because rules 1 to 3 and the old rule 3 never matched the same pass.
+
+**A station heard during the window that did not take the work still declined it.** Its heartbeats named its held assignments and left this one out, and that is a refusal.
+
+**`TRANSFORMATION_VERSION` becomes `labels-3`.** D-144 requires a changed rule to change the hash, so a dataset labelled before this entry can never be mistaken for one labelled after it.
+
+*Rejected: leaving the order alone and making the sweep mark what it expired.* A column saying who expired a row would separate the sweep's expiries from the heartbeat's. It would still leave the station that came back mislabelled, and that case exists without any sweep.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -3699,6 +3757,8 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-163 a model is a published directory | `meridian/prediction/model_files.py`; the `model` kind in `meridian/datasets/manifest.py`; `DATA-MODEL.md` |
 | D-164 the calibration report | `meridian/prediction/{calibration,calibration_report,evaluation}.py`; `meridian/cli_model.py` |
 | — the completion gate, and how to run it by hand | `tests/unit/test_prediction_gate.py`; `OPERATIONS.md` § Models |
+| D-180 a miss is defined once, in reliability | `meridian/reliability/{classification,satellite_silence}.py`; `meridian/datasets/{labels,evidence}.py`; `tests/unit/test_reliability_boundaries.py` |
+| D-181 a heartbeat before a decline, `labels-3` | `meridian/reliability/classification.py`; `meridian/datasets/labels.py` |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

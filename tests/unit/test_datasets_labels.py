@@ -194,10 +194,25 @@ def test_an_assignment_that_expired_unreported_was_declined() -> None:
     target = a_pass()
 
     labelled = label(
-        rows(passes=(target,), assignments=(assigned(target, state="expired"),))
+        rows(
+            passes=(target,),
+            assignments=(assigned(target, state="expired"),),
+            heartbeats=(heard(target),),
+        )
     )
 
     assert labelled.label == "assignment_declined"
+
+
+def test_an_expiry_nobody_was_heard_during_is_a_station_that_was_not_there() -> None:
+    """D-181: an assignment expires untaken whether it was refused or never seen."""
+    target = a_pass()
+
+    labelled = label(
+        rows(passes=(target,), assignments=(assigned(target, state="expired"),))
+    )
+
+    assert labelled.label == "station_unavailable"
 
 
 @pytest.mark.parametrize(

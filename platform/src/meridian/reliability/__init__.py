@@ -1,7 +1,15 @@
 """SLI computation, SLO evaluation, irrecoverable-loss budget, failure injection.
 
-**Phase 3. Not implemented** — this module is its interface and nothing else,
-built by Stage 20 of docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md.
+Built by Stage 20 of docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md:
+
+* :mod:`~meridian.reliability.classification` — what happened to a scheduled
+  pass, and the one definition of a miss;
+* :mod:`~meridian.reliability.satellite_silence` — D-147's verdict on whether
+  the satellite was transmitting.
+
+Both import the standard library only, because the snapshot labeller calls
+them and may reach no database (D-143, D-180). This package's ``__init__``
+therefore re-exports nothing: importing it must not drag in a module that does.
 
 One rule governs this module, and it is the reason the module exists:
 

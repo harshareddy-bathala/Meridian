@@ -2,22 +2,18 @@
 
 The unit is a physical pass: every prediction of one rise over one station,
 grouped by :mod:`meridian.datasets.physical_passes` (D-148), and the
-denominator of Stage 16's completeness ratio. Its label is decided by the
-first of these that holds:
+denominator of Stage 16's completeness ratio. It is excluded if either of
+these holds:
 
 1. its window closed less than ``settle_margin_s`` ago → excluded,
    ``report_window_open`` — a report may still be in a station's queue;
-2. nothing scheduled it → excluded, ``not_scheduled``;
-3. every scheduled assignment expired unreported → ``assignment_declined``;
-4. the report is ``decoded`` → ``successful_reception``;
-5. the report is ``signal_no_decode`` → ``signal_no_decode``;
-6. the report is ``aborted`` or ``not_attempted`` → ``station_unavailable``;
-7. no signal or no report, and no heartbeat at all in the window →
-   ``station_unavailable``;
-8. no signal or no report, and listening not confirmed →
-   ``station_not_confirmed_listening``;
-9. no signal or no report, listening confirmed → ``confirmed_miss``,
-   ``satellite_silent`` or ``satellite_state_indeterminate``, by D-147.
+2. nothing scheduled it → excluded, ``not_scheduled``.
+
+Otherwise its label is :func:`meridian.reliability.classification.classify`'s,
+the same classification the reliability layer counts misses by (D-180). That
+module states the rules; this one gathers their evidence from a snapshot. A
+heartbeat is looked for before a decline is read (D-181), which is what
+``labels-3`` changed.
 
 **Several assignments can share a pass** — configurations A and B are
 scheduled over one horizon to be compared, and a later run may schedule a
@@ -30,13 +26,13 @@ listening answers were frozen by the registry at export (D-145). The same rows
 and the same configuration always give the same labels, which is Stage 15's
 gate.
 
-Reference: docs/DECISIONS.md D-145, D-146, D-147, D-148.
+Reference: docs/DECISIONS.md D-145, D-146, D-147, D-148, D-180, D-181.
 """
 
 from __future__ import annotations
 
 from bisect import bisect_left
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -49,6 +45,7 @@ from meridian.datasets.pooled_evidence import (
     pool_evidence,
 )
 from meridian.datasets.snapshot_rows import AssignmentRow, PassRow, SnapshotRows
+from meridian.reliability.classification import PASS_CLASSES, PassEvidence, classify
 
 __all__ = [
     "EXCLUSIONS",
@@ -60,21 +57,13 @@ __all__ = [
     "label_passes",
 ]
 
-TRANSFORMATION_VERSION = "labels-2"
-"""Bumped whenever a rule here changes, so two datasets made under different
-rules can never share a hash (D-144). ``labels-2`` labels physical passes
-rather than predictions (D-148)."""
+TRANSFORMATION_VERSION = "labels-3"
+"""Bumped whenever a rule here or in the classification changes, so two
+datasets made under different rules can never share a hash (D-144).
+``labels-2`` labelled physical passes rather than predictions (D-148);
+``labels-3`` looks for a heartbeat before reading a decline (D-181)."""
 
-LABELS = (
-    "successful_reception",
-    "signal_no_decode",
-    "confirmed_miss",
-    "satellite_silent",
-    "satellite_state_indeterminate",
-    "station_unavailable",
-    "station_not_confirmed_listening",
-    "assignment_declined",
-)
+LABELS: tuple[str, ...] = PASS_CLASSES
 
 EXCLUSIONS = (
     "report_window_open",
@@ -86,13 +75,6 @@ EXCLUSIONS = (
 """Why a row is kept out of training and yield scoring, first reason first.
 The two satellite labels are excluded from yield scoring and counted apart
 (``EVALUATION.md`` §5); a simulated row is excluded whatever its label (D-078)."""
-
-_UNAVAILABLE = frozenset(("aborted", "not_attempted"))
-_SATELLITE_LABELS = {
-    "transmitting": "confirmed_miss",
-    "silent": "satellite_silent",
-    "indeterminate": "satellite_state_indeterminate",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,7 +189,7 @@ def label_counts(labelled: Iterable[LabelledPass]) -> dict[str, int]:
 def _label(
     physical: PhysicalPass, evidence: PooledEvidence, context: _Context
 ) -> LabelledPass:
-    """Rules 1 and 2 exclude the pass; otherwise rules 3 to 9 label it."""
+    """Rules 1 and 2 exclude the pass; otherwise the classification labels it."""
     target = physical.representative
     ends = [physical.last_los, *(one.end_at for one in evidence.scheduled)]
     if max(ends) > context.settled_by:
@@ -219,42 +201,24 @@ def _label(
 
 
 def _outcome_label(target: PassRow, evidence: PooledEvidence, context: _Context) -> str:
-    """Rules 3 to 9: what the report, the heartbeats and the registry say.
-
-    Rules 3 to 8 are a first-match table, read top to bottom as D-146 writes
-    them; each condition is evaluated only if every one above it failed.
-    """
-    outcome = None if evidence.report is None else evidence.report.outcome
-    rules: tuple[tuple[Callable[[], bool], str], ...] = (
-        (
-            lambda: (
-                outcome is None
-                and all(one.state == "expired" for one in evidence.scheduled)
+    """The classification of a settled, scheduled pass, from the snapshot's rows."""
+    return classify(
+        PassEvidence(
+            outcome=None if evidence.report is None else evidence.report.outcome,
+            assignment_states=tuple(one.state for one in evidence.scheduled),
+            heard_during_window=_heard_during(
+                target.station_id, evidence.scheduled, context.heard
             ),
-            "assignment_declined",
+            listening_confirmed=evidence.listening,
         ),
-        (lambda: outcome == "decoded", "successful_reception"),
-        (lambda: outcome == "signal_no_decode", "signal_no_decode"),
-        (lambda: outcome in _UNAVAILABLE, "station_unavailable"),
-        (
-            lambda: (
-                not _heard_during(target.station_id, evidence.scheduled, context.heard)
-            ),
-            "station_unavailable",
+        lambda: satellite_state(
+            target,
+            context.index,
+            simulated=evidence.simulated,
+            window_s=context.config.silent_window_s,
+            min_silent_attempts=context.config.silent_min_attempts,
         ),
-        (lambda: not evidence.listening, "station_not_confirmed_listening"),
     )
-    for holds, label in rules:
-        if holds():
-            return label
-    state = satellite_state(
-        target,
-        context.index,
-        simulated=evidence.simulated,
-        window_s=context.config.silent_window_s,
-        min_silent_attempts=context.config.silent_min_attempts,
-    )
-    return _SATELLITE_LABELS[state]
 
 
 def _exclusion(label: str, simulated: bool) -> str | None:
