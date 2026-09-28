@@ -86,9 +86,10 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Read a dataset's completeness and weights | `uv run meridian snapshot completeness <dataset dir>` — § Completeness and weights |
 | Fit a model on a dataset | `uv run meridian model fit <dataset dir> --config model.toml` — needs the `fit` extra; § Models |
 | Judge a model | `uv run meridian model evaluate <model dir>` — § Models |
+| Compare the schedulers and the oracle | `uv run meridian schedule evaluate <dataset dir> --config schedule-evaluation.toml` — needs no database; prints frames per station-hour and SC-1 (D-172); see `deploy/schedule-evaluation.toml.example` |
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
-**Scheduling needs no command.** The `jobs` service generates passes and schedules them under configuration A every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
+**Scheduling needs no command.** The `jobs` service generates passes and schedules them under `SCHEDULE_CONFIG` (configuration A on the elevation proxy when it is unset, D-170) every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
 
 ---
 

@@ -91,6 +91,10 @@ class ObservationRow:
     revision: int
     outcome: str
     simulated: bool
+    frames_decoded: int | None = None
+    """What the station decoded, or ``None`` where it did not say: a client
+    before MSP 0.3 reports no count. No label reads it; the retrospective
+    comparison counts frames with it (D-172)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +173,7 @@ def parse_rows(files: Mapping[str, bytes]) -> SnapshotRows:
                 revision=_int(one, "revision"),
                 outcome=_text(one, "outcome"),
                 simulated=_bool(one, "simulated"),
+                frames_decoded=_optional_int(one, "frames_decoded"),
             )
             for one in _lines(files, "observations")
         ),
@@ -259,6 +264,11 @@ def _assignment(row: Mapping[str, object]) -> AssignmentRow:
         simulated=_bool(row, "simulated"),
         revoked_reason=_optional_text(row, "revoked_reason"),
     )
+
+
+def _optional_int(row: Mapping[str, object], name: str) -> int | None:
+    """A whole-number field that may be null or, in an older export, absent."""
+    return None if row.get(name) is None else _int(row, name)
 
 
 def _optional_text(row: Mapping[str, object], name: str) -> str | None:

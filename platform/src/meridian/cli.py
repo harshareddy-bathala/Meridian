@@ -31,7 +31,6 @@ import argparse
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 from meridian import __version__
 from meridian.cli_catalogue import run_catalogue
@@ -40,11 +39,9 @@ from meridian.cli_invite import run_invite
 from meridian.cli_jobs import add_jobs_parser, run_jobs
 from meridian.cli_model import add_model_parser, run_model
 from meridian.cli_passes import run_passes
-from meridian.cli_schedule import run_scheduler
+from meridian.cli_schedule import add_schedule_parser, run_scheduler
 from meridian.cli_serve import add_serve_parser, run_serve
 from meridian.cli_snapshot import (
-    DATASETS_ROOT_ENV,
-    DEFAULT_DATASETS_ROOT,
     add_snapshot_parser,
     run_snapshot,
 )
@@ -267,39 +264,6 @@ def _add_passes_parser(
     generate.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
 
 
-def _add_schedule_parser(
-    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> None:
-    """Wire ``meridian schedule``, which takes a verb's arguments and no verb."""
-    schedule = subcommands.add_parser(
-        "schedule",
-        help="assign passes to stations over a horizon",
-        description=(
-            "Values the generated passes under one of EVALUATION.md's "
-            "configurations, takes the best schedule each antenna allows, and "
-            "writes down why every pass was taken or skipped. Re-running one "
-            "configuration over one horizon writes nothing (D-066)."
-        ),
-    )
-    schedule.add_argument("--from", dest="start", required=True, help="ISO-8601 UTC")
-    schedule.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
-    schedule.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="schedule settings; see deploy/schedule.toml.example (default: A)",
-    )
-    schedule.add_argument(
-        "--root",
-        type=Path,
-        default=None,
-        help=(
-            f"datasets root, where the model and its history are (default: "
-            f"${DATASETS_ROOT_ENV}, else {DEFAULT_DATASETS_ROOT})"
-        ),
-    )
-
-
 def _add_pending_parsers(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -327,7 +291,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_catalogue_parser(subcommands)
     _add_station_parser(subcommands)
     _add_passes_parser(subcommands)
-    _add_schedule_parser(subcommands)
+    add_schedule_parser(subcommands)
     add_serve_parser(subcommands)
     add_jobs_parser(subcommands)
     add_db_parser(subcommands)
@@ -345,7 +309,7 @@ NEEDS_ACTION = frozenset(
 
 ``meridian schedule`` is a verb already and carries its arguments directly, so
 it is absent: sending it to its own help text would make the command
-unrunnable.
+unrunnable. Its one verb, ``evaluate``, is optional.
 """
 
 

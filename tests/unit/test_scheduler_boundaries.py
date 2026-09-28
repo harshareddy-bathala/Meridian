@@ -3,16 +3,19 @@
 * **It consumes predictions, never the observation store** (``ARCHITECTURE.md``).
   What a station did reaches a schedule only as a model's probability, which
   reads a labelled dataset; never as a query on ``observations``.
-* **From prediction it imports the scorer and the live path only** (D-169):
-  never the fitter, the evaluation or the report over them, which need the
-  ``meridian[fit]`` extra the image does not install (D-155).
+* **From prediction it imports the scorer, the live path and the replay
+  only** (D-169, D-172): never the fitter, the evaluation or the report over
+  them, which need the ``meridian[fit]`` extra the image does not install
+  (D-155). The replay is how the retrospective comparison reads a dataset's
+  outcomes — from a frozen snapshot, for the oracle and the tally — so no
+  scheduler module reads a dataset, or an observation, itself.
 * **Loading every scheduler module, and the live path it scores with, leaves
   scikit-learn, scipy and the fitter unimported.** The source scan sees direct
   imports; a fresh interpreter sees what they drag in.
 
 Each has a positive control.
 
-Reference: docs/DECISIONS.md D-155, D-169; docs/ARCHITECTURE.md.
+Reference: docs/DECISIONS.md D-155, D-169, D-172; docs/ARCHITECTURE.md.
 """
 
 from __future__ import annotations
@@ -36,7 +39,11 @@ OBSERVATION_STORE = (
 )
 """What stations reported, and the archive's receptions."""
 
-PREDICTION_ALLOWED = ("meridian.prediction.score", "meridian.prediction.live")
+PREDICTION_ALLOWED = (
+    "meridian.prediction.score",
+    "meridian.prediction.live",
+    "meridian.prediction.replay",
+)
 
 FIT_EXTRA = ("sklearn", "scipy", "joblib", "pandas", "meridian.prediction.fit")
 
@@ -99,6 +106,7 @@ import meridian.scheduler as scheduler
 for one in pkgutil.iter_modules(scheduler.__path__):
     importlib.import_module(f"meridian.scheduler.{one.name}")
 importlib.import_module("meridian.prediction.live")
+importlib.import_module("meridian.prediction.replay")
 banned = sys.argv[1:]
 print(" ".join(sorted(
     name for name in sys.modules

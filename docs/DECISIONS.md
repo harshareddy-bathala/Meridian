@@ -3754,6 +3754,50 @@ This amends D-022, D-026 and MSP §4.2's reconciliation table. The wire protocol
 
 ---
 
+## D-172 — The retrospective comparison, and the oracle
+
+**2026-09-28 · accepted** · *`meridian/prediction/{replay,replay_models}.py`; `meridian/scheduler/{replay,oracle,comparison,comparison_config,comparison_report}.py`; `meridian schedule evaluate`; `deploy/schedule-evaluation.toml.example`, Stage 18*
+
+The roadmap asks for every scheduler to be compared against baselines and an oracle, each given the same candidates, constraints, horizon, station state and runtime limit. SC-1 is measured as D − B (`EVALUATION.md` §3). `meridian schedule evaluate <dataset> --config <file>` does this. It opens no database, and the same dataset, file and seed print the same bytes.
+
+**What is replayed.**
+- **The span** is the models' test span: from the shared `validate_until` to the dataset's `as_of`. A's, C's and D's models are named in the file. Each must be the configuration it is named as, fitted on the dataset being compared, and all three must share one population (`own`) and one pair of split dates, or the command refuses. B names no model, since its model is A's (D-160).
+- **The problems** are the station-days of that span whose completeness reaches the threshold (D-151): the dataset's own threshold, or the file's `threshold`. Each such day is one problem. Its candidates are the day's eligible physical passes (D-148, D-149): the completeness denominator itself, so a day's completeness is the share of its candidates the historical policy attempted. Simulated passes are never candidates (D-078), and are counted.
+- **The same problem for every scheduler.** Each gets the day's candidates and D-166's rules at the configured turnaround. Timing margins come from each prediction's element-set age, as a live run computes them (D-060). There are no commitments, and every station is available, since a retained day is one the station was attempting passes on. Each gets the same per-day time limit. Every schedule passes through `violations`, and a broken one stops the comparison rather than being scored.
+- **A pass belongs to the day it rises on.** Two passes either side of midnight are therefore in two problems, and both may be taken. This relaxation is the same for every scheduler, the oracle included.
+
+**Seven schedulers:**
+- greedy A and greedy B, Stage 7's baselines and existing practice;
+- the optimiser under A, B, C and D, each valued by D-168's objective with its configuration's model;
+- the oracle.
+
+**The oracle is the optimiser valued by what each pass decoded.** It is non-deployable, since the values exist only after the passes have flown. It is held to the same constraints, solver and time limit. A pass that decoded nothing, or was confirmed silent, is worth 0. A pass nobody attempted is also worth 0 and is counted, because the oracle cannot know what it would have returned any more than a scheduler can. Solved to optimality, it takes at least the frames of every other schedule on every day. Where it is not solved to optimality, the report says so.
+
+**Frames come from the raw snapshot.** The pooled report of each physical pass (D-146) gives `observations.frames_decoded`, which the snapshot rows now carry and no label reads:
+- `signal_no_decode` and `confirmed_miss` count as 0 frames;
+- a decode whose client reported no count is *unknown*, not 0;
+- anything unattempted is unknown.
+
+**The metric is decoded frames per station-hour.** A station-hour is an hour of a replayed day inside the test span, and the hours are the same for every scheduler. Unknown outcomes add no frames. Each scheduler's unknown count and share is printed beside its rate, because a scheduler that leaves the historical policy's passes for unattempted ones is judged low by exactly that share. That share is the selection bias of `EVALUATION.md` §4 made visible rather than corrected, and the completeness threshold is what keeps it small.
+
+**SC-1 is the optimised D minus the optimised B.** Both use the same solver and an objective of the same form, so the difference is the model alone (D-168). This is the conservative reading: it takes no credit for the optimiser, since B has the optimiser too. D minus greedy B, the shipped system against Stage 7's existing practice, is printed on the next line and is not SC-1. Each gain is printed per station-hour and relative to the second scheduler, with a 95% paired-bootstrap interval:
+- station-days are drawn with replacement, and both schedulers are read on the same draw;
+- the draws come from the configuration's seed;
+- bounds are taken by nearest rank.
+
+Where some resample gives the second scheduler no frames, the relative interval is printed as absent rather than infinite.
+
+**Nothing that varies between runs is printed.** Solver runtimes are left out. A day cut short by the time limit is counted in its scheduler's `solved` column, since only then could a figure depend on the machine.
+
+**The scheduler reads datasets only through `meridian.prediction.replay`.** That module joins `score` and `live` as the third prediction module the scheduler may import (`test_scheduler_boundaries.py`). The outcomes are a mapping of their own, which only the oracle and the tally read. A test reverses every outcome and finds all six other schedules unmoved.
+
+*Rejected:*
+- **One problem per station over the whole span.** Midnight would cost nothing, but the oracle would bound only each station's total, not each day. The day is also the unit completeness and the bootstrap are both counted in.
+- **Imputing unattempted passes from the model.** Every number would then rest on the model it is meant to judge.
+- **Priority-weighted frames as the metric.** SC-1 is stated in frames, and B and D are judged on frames like the rest.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
