@@ -3545,6 +3545,57 @@ So the platform now holds two peppers during a rotation. `TOKEN_HASH_PEPPER_PREV
 
 ---
 
+## D-202 — Rate limits in the process: by station token for MSP, by client for everything
+
+**2026-09-28 · accepted** · *`meridian.api.rate_limits`, `meridian.api.token_bucket`, `meridian.config`, `deploy/tools/verify_public_surface.py`, Stage 23* · *revisits D-051 and D-088*
+
+D-051 deferred an in-process limiter for three reasons, and D-088 put one rule at the Cloudflare edge instead. That rule matches `/api/` only, because the free plan allows one rule, so **MSP had no rate limit at all**: `/msp/v0/register` is unauthenticated and does a database lookup per request, and a heartbeat with an unknown token does one too. Stage 23 asks for per-endpoint limits in the process. Each of D-051's objections is answered rather than ignored:
+
+- *"The client IP is not the peer address."* **MSP's tight limits are keyed on the station's bearer token, not on any address.** A token names one station wherever its requests come from, so a busy network is never mistaken for one client. Addresses are used only for the loose per-client limits below.
+- *"`CF-Connecting-IP` is forgeable on the port compose also publishes."* **The header is trusted only when `CLIENT_ADDRESS_HEADER` names it**, and the deployment that sets it is the one that stops publishing the API port, so the only way in is through the edge that writes the header (the compose hardening later in Stage 23 wires this). Without the setting the peer address is used, which is the right key on a laptop or for the simulator inside the compose network.
+- *"In-process state is the wrong lifetime."* **Accepted and stated.** Buckets start full on a restart, and each API worker keeps its own, so with `API_WORKERS=2` a caller can get up to twice the figures below. The purpose is bounding the work one process does for one caller, which is exactly per-worker; a network-wide limit stays the edge's job.
+
+**Four token buckets:**
+
+| Bucket | Key | Burst | Refill | Sized for |
+|---|---|---|---|---|
+| `heartbeat` | the bearer token | 6 | 1 per 10 s | MSP §4.2's 30 s heartbeat is 2 a minute; 6 leaves room for the client's retries |
+| `observations` | the bearer token | 20 | 1 per 6 s | a station flushing a queue after an outage; what is refused stays queued (D-073) |
+| `msp` | the client | 300 | 10 per s | a 50-station simulated fleet on one host registering at once, then heartbeating from one address |
+| `public` | the client | 50 | 5 per s | the edge rule's own figures, 50 per 10 s (D-088) |
+
+Heartbeats and observations have separate buckets so that a queue flush can never starve the heartbeat, which would make a healthy station read `stale` — a limiter that manufactured liveness failures would corrupt exactly what rule 7 protects. A request is refused if any bucket it draws on is empty, and it takes a token from each only when all have one. `/`, `/assets/`, `/healthz` and `/metrics` are not limited: the healthcheck and the tunnel poll `/healthz`, and `/metrics` answers 404 without its token (D-087).
+
+**A refused request gets MSP §6's `rate_limited` at 429 on an MSP path**, or the public API's own `rate_limited` at 429 on `/api/v1` (added to its table, D-084), each with a `Retry-After` header in whole seconds. The body is the fixed two-field shape; the header is ordinary HTTP and needs no change to MSP. The reference client already retries 429 with backoff and keeps an unsent observation queued (`meridian_client.transport.RETRIABLE_STATUSES`), so nothing in the client changes.
+
+**Token hashes, not tokens, are the keys.** The limiter holds `sha256(token)` and never the token, so a heap dump of the API process holds no credential it did not already have. It does no database lookup: an unknown token is limited exactly like a valid one, and the lookup it spares is the point. The store is bounded at 10,000 keys per bucket, least recently used first, so an attacker rotating tokens or addresses costs memory that is capped. A key evicted and seen again starts with a full bucket, which is why the per-client bucket exists beside the per-token ones: rotating tokens from one address is still limited by the address.
+
+**`RATE_LIMITS=off` turns the limiter off, and is refused on a public deployment.** Accelerated simulations drive hundreds of heartbeats a second through one process on purpose, and a limit sized for real time would refuse them. On a public address the refusal is the same kind as the placeholder refusal: a start-up error naming the variable.
+
+**D-088's verifier had to learn the difference.** `verify_public_surface.py --burst` passed on any 429, so once the platform answers 429 itself the check would pass with no edge rule at all. It now counts the platform's refusals, recognised by their two-field body, apart from the edge's, and passes only on the edge's.
+
+*Rejected: keying MSP on the client address only.* It works only once the header is trusted, and even then it lumps every station behind one NAT together.
+
+*Rejected: a shared store such as Redis.* It would give exact network-wide figures, at the cost of a service on the Pi that must be up for the platform to answer at all. The edge already gives the network-wide figure for the public API.
+
+---
+
+## D-203 — The public API takes no body, and its query string is capped
+
+**2026-09-28 · accepted** · *`meridian.api.request_limits`, `meridian.cli_serve`, Stage 23* · *extends D-028 and D-050*
+
+MSP §6's caps apply to MSP bodies. `/api/v1` is read-only, every route is a `GET`, and nothing bounded what a request to it could carry.
+
+**A request to `/api/v1` that declares a body is refused before routing:** a `Content-Length` other than `0`, or any `Transfer-Encoding`. The public API has no operation that reads one, so a body there is either a mistake or someone measuring what the platform will buffer.
+
+**The query string is capped at 2 KiB.** The longest legitimate query is a keyset cursor (D-085) and a handful of filters, a few hundred bytes. The cap is checked from the request line, before any parameter is parsed.
+
+**Both refusals are `invalid_query` at 400, in the public vocabulary.** Before this, a `POST` to an `/api/v1` path without a length was refused as MSP's `malformed`, a code the public surface does not use (D-084). Refusals on public paths are now answered in public words, and MSP paths keep §6's.
+
+**The request head is bounded by the server, and that needed a change.** `uvicorn[standard]` installs httptools and uses it by default. Measured here, it refused a request line past 64 KiB but accepted a **1 MB header**, so nothing bounded the headers of a request before the application saw them. `meridian serve` now runs uvicorn with `http="h11"`, which refuses a request head once it has buffered more than 16 KiB of it without completing; the same measurement against h11 refused the 1 MB header with 400. h11 is pure Python and slower, which a network of a few requests a second does not notice.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

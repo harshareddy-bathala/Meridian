@@ -58,6 +58,15 @@ Under Docker Compose's ten-second stop grace period, so uvicorn ends the process
 itself rather than being killed by the engine with a response half written.
 """
 
+HTTP_PROTOCOL = "h11"
+"""uvicorn's pure-Python HTTP parser, chosen over httptools for its bound (D-203).
+
+``uvicorn[standard]`` installs httptools and uses it by default, and measured on
+this platform it accepted a 1 MB request header. h11 refuses a request head it
+has buffered more than 16 KiB of without completing, before the application
+runs. Its speed is ample for a station network's few requests a second.
+"""
+
 LOG_LEVELS = ("critical", "error", "warning", "info", "debug", "trace")
 """The levels uvicorn accepts, in its own spelling."""
 
@@ -190,5 +199,6 @@ def run_serve(args: argparse.Namespace) -> int:
         log_config=configuration,
         log_level=options.log_level,
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_TIMEOUT_S,
+        http=HTTP_PROTOCOL,
     )
     return 0

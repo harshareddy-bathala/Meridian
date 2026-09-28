@@ -107,6 +107,9 @@ services:
       HEARTBEAT_INTERVAL_S: ${HEARTBEAT_INTERVAL_S:-30}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
       TUNNEL_HOSTNAME: ${TUNNEL_HOSTNAME:-}
+      # In-process rate limits (D-202). `off` is for accelerated simulations on
+      # loopback, and is refused on a public deployment.
+      RATE_LIMITS: ${RATE_LIMITS:-on}
       # Passed to the api service although Grafana is a different service, so
       # that meridian.config's placeholder refusal can see it. Grafana is
       # published on host :3001 and the refusal is the only thing standing

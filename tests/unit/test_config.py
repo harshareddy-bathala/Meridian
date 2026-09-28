@@ -52,6 +52,8 @@ MANAGED = (
     "TOKEN_HASH_PEPPER_PREVIOUS_FILE",
     "REGISTRATION_INVITE_TOKEN_FILE",
     "API_WORKERS",
+    "RATE_LIMITS",
+    "CLIENT_ADDRESS_HEADER",
 )
 
 
@@ -430,3 +432,36 @@ def test_a_previous_pepper_equal_to_the_current_one_refuses_to_start(
             TOKEN_HASH_PEPPER=REAL_PEPPER,
             TOKEN_HASH_PEPPER_PREVIOUS=REAL_PEPPER,
         )
+
+
+def test_rate_limits_are_on_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _load(monkeypatch)
+    assert settings.rate_limits is True
+    assert settings.client_address_header == ""
+
+
+def test_rate_limits_off_is_refused_on_a_public_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-202: `off` is for simulations on loopback, where it is accepted."""
+    assert _load(monkeypatch, RATE_LIMITS="off").rate_limits is False
+    with pytest.raises(InsecureConfigurationError, match="RATE_LIMITS"):
+        _load(
+            monkeypatch,
+            **_secure(RATE_LIMITS="off", PUBLIC_BASE_URL="https://meridian.example"),
+        )
+
+
+def test_the_client_address_header_is_lower_cased(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ASGI presents header names lower-cased, so the setting is compared so."""
+    settings = _load(monkeypatch, CLIENT_ADDRESS_HEADER="CF-Connecting-IP")
+    assert settings.client_address_header == "cf-connecting-ip"
+
+
+def test_a_client_address_header_that_is_not_a_name_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(InsecureConfigurationError, match="CLIENT_ADDRESS_HEADER"):
+        _load(monkeypatch, CLIENT_ADDRESS_HEADER="X-Real-IP: 1.2.3.4")

@@ -627,6 +627,27 @@ Models, like datasets, are regenerable from what they were made from, so the raw
 
 ---
 
+## Rate limits
+
+The API limits request rates itself (D-202), beside the edge rule on the tunnel hostname (D-088). A refused request gets `429` with `rate_limited` and a `Retry-After` header.
+
+| Bucket | Keyed by | Burst | Refill |
+|---|---|---|---|
+| MSP heartbeat | the station's bearer token | 6 | 1 per 10 s |
+| MSP observations | the station's bearer token | 20 | 1 per 6 s |
+| every MSP request | the caller's address | 300 | 10 per s |
+| `/api/v1` | the caller's address | 50 | 5 per s |
+
+- **Per worker.** Each API worker keeps its own buckets, and a restart refills them, so with `API_WORKERS=2` a caller can get up to twice these figures.
+- **A limited station loses nothing.** The reference client retries a 429 with backoff and keeps an unsent observation queued.
+- **Many stations behind one address** share only the per-address bucket, which a 50-station simulated fleet on one host does not reach.
+- **Seeing it:** the MSP error panel counts `rate_limited`, and the API panels count 4xx by route.
+- **Turning it off:** `RATE_LIMITS=off` in `deploy/.env`, for accelerated simulations on a laptop. The platform refuses to start with it on a public deployment.
+
+The public API also takes no request body and caps its query string at 2 KiB (D-203).
+
+---
+
 ## Rotating secrets
 
 Each platform secret is read once, when its process starts (D-201). Rotating one means writing a new file and recreating the services that read it. `deploy/tools/rotate_secret.py` does the first and prints the second. With the secrets override, `compose` in this section means:

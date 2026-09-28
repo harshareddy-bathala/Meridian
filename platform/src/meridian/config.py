@@ -7,6 +7,7 @@ compose file — ``deploy/.env.example`` documents every value here.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -77,6 +78,15 @@ class Settings:
     public_base_url: str
     tunnel_hostname: str
     public_mode: bool
+
+    rate_limits: bool
+    """Whether the API limits request rates in the process (D-202)."""
+    client_address_header: str
+    """The header naming the caller's address, or empty for the peer (D-202).
+
+    Trusted only because the deployment that sets it publishes no port the edge
+    does not front; set anywhere else, it lets a caller choose its own address.
+    """
 
     grafana_admin_password: str
 
@@ -201,6 +211,17 @@ def _int_env(name: str, default: int) -> int:
         ) from exc
 
 
+_HEADER_NAME = re.compile(r"[A-Za-z0-9-]*")
+
+
+def _header_name_env(name: str) -> str:
+    """Read an HTTP header name, lower-cased as ASGI presents headers."""
+    raw = os.environ.get(name, "").strip()
+    if not _HEADER_NAME.fullmatch(raw):
+        raise InsecureConfigurationError(f"{name} is not a header name: {raw!r}")
+    return raw.lower()
+
+
 def _database_url() -> str:
     """``DATABASE_URL`` if set, else one assembled from the ``POSTGRES_*`` parts."""
     url = os.environ.get("DATABASE_URL", "").strip()
@@ -266,6 +287,8 @@ def load_settings() -> Settings:
         public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"),
         tunnel_hostname=os.environ.get("TUNNEL_HOSTNAME", "").strip(),
         public_mode=_bool_env("MERIDIAN_PUBLIC", False),
+        rate_limits=_bool_env("RATE_LIMITS", True),
+        client_address_header=_header_name_env("CLIENT_ADDRESS_HEADER"),
         grafana_admin_password=os.environ.get("GRAFANA_ADMIN_PASSWORD", PLACEHOLDER),
         simulator_seed=_int_env("SIMULATOR_SEED", 4471),
         simulator_station_count=_int_env("SIMULATOR_STATION_COUNT", 1),
@@ -276,6 +299,7 @@ def load_settings() -> Settings:
 
     if settings.is_public:
         _refuse_placeholder_secrets(settings)
+        _refuse_unlimited_public_start(settings)
 
     return settings
 
@@ -311,6 +335,16 @@ def _refuse_a_rotation_that_did_not_happen(settings: Settings) -> None:
         "Refusing to start: TOKEN_HASH_PEPPER_PREVIOUS is the same as "
         "TOKEN_HASH_PEPPER, so the rotation has not happened. Write the new "
         "pepper first; docs/OPERATIONS.md § Rotating secrets."
+    )
+
+
+def _refuse_unlimited_public_start(settings: Settings) -> None:
+    """Raise if rate limits are off on a publicly reachable deployment (D-202)."""
+    if settings.rate_limits:
+        return
+    raise InsecureConfigurationError(
+        "Refusing to start: RATE_LIMITS is off while the platform is publicly "
+        "reachable (D-202). It exists for accelerated simulations on loopback."
     )
 
 
