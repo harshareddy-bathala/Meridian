@@ -3596,6 +3596,33 @@ MSP §6's caps apply to MSP bodies. `/api/v1` is read-only, every route is a `GE
 
 ---
 
+## D-204 — Logs are redacted on the handler, by pattern and by value
+
+**2026-09-28 · accepted** · *`meridian.log_redaction`, `meridian.cli_serve`, `meridian.config_checks`, Stage 23*
+
+D-004 keeps secrets out of error bodies by never deriving a body from an exception, and sends the detail to the log instead. Nothing kept secrets out of the log. `tests/integration/test_log_redaction.py` shows the gap with an ordinary request: a `register` body missing one field is logged at info with the whole body as the validation error's input, invite token and registration key included.
+
+**A filter on the handler, not on a logger.** `meridian serve` and `meridian jobs run` install one logging configuration (D-114), and its only handler now carries `RedactingFilter`. A filter on a logger sees only records logged through that logger; one on the handler sees every record written, including uvicorn's, httpx's, psycopg's and any module added later. The filter formats the message, redacts it, and stores it back with its arguments cleared, and does the same to the traceback text, so no formatter downstream can reintroduce what was removed.
+
+**What it removes:**
+
+- anything after `Bearer`;
+- the value of any field whose name ends in `token`, `registration_key`, `password`, `passwd`, `pepper` or `secret`, in the `name=value`, `name: value` and `'name': 'value'` spellings logs and Python reprs use;
+- the password in a URL's `user:password@`;
+- **every secret value the process loaded**, wherever it appears. `load_settings` registers the pepper, the previous pepper, the bootstrap invite, the metrics token, the Grafana password and the database password before running any check, so every process that reads a secret redacts it, however the value reached the line.
+
+Values shorter than 16 characters are left to the patterns. The real secrets are 64 hex characters, and the development database password is `meridian`, which would otherwise redact the project's own name from every line. The placeholder `change-me` is never registered, since it is public and is the word the placeholder refusal names.
+
+**The detail stays in the log.** A malformed station is diagnosed from the line saying which field failed and why, so the line is kept and its secrets removed, rather than the line being made generic.
+
+**The test searches what was actually written.** The platform is started with the production configuration writing to a buffer at `debug`, and driven through a registration, a malformed one, a refused recovery, heartbeats good, forged and malformed, a wrong and a right scrape, the public API, and a pepper rotation's re-hash. The buffer is then searched for every secret involved. Its positive control is the same flow without the filter, which must leak the invite and the registration key. A third test runs the reference client through registration and heartbeats and finds none of its credentials in any record; the client has no filter, so it must simply never log one.
+
+*Rejected: logging a generic message for a validation failure.* It removes the one leak found, not the class, and leaves an operator unable to see why a station's requests are refused.
+
+*Rejected: structured logging with a deny-list of keys.* It needs every call site rewritten to pass fields, and a secret interpolated into a message string would still pass straight through.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

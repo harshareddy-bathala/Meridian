@@ -80,7 +80,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | M-9 | Request floods against MSP, from one station or from anyone | Token buckets in the process: heartbeats and observations by the station's bearer token, every MSP request by the caller's address; `rate_limited` at 429 with `Retry-After` | D-202; `meridian.api.rate_limits`; `tests/msp_conformance/test_rate_limits.py` | partial — the address is the tunnel's until the public deployment trusts the edge's header; Stage 23 part 6 |
 | M-10 | A leaked database learning tokens or registration keys | Stored as `sha256(pepper ‖ secret)`; the pepper can be rotated without stranding a station | D-017, D-201 | mitigated |
 | M-11 | Error bodies leaking SQL, connection strings or submitted tokens | One fixed two-field body; an unhandled exception answers `Internal error.` and the detail goes to the log | D-004; `meridian.api.errors` | mitigated |
-| M-12 | Error *logs* leaking a token or a secret | Nothing removes a secret from a log line | — | open — Stage 23 part 4 |
+| M-12 | Error *logs* leaking a token or a secret | A redacting filter on the log handler of `meridian serve` and `meridian jobs run`: bearer tokens, any field named as a secret, URL passwords, and every secret value the process loaded; the reference client logs none it holds | D-204; `meridian.log_redaction`; `tests/integration/test_log_redaction.py` | mitigated |
 | M-13 | A write acknowledged before it is committed | The request's transaction commits before the response is sent | `meridian.api.dependencies.get_connection`; D-088's public run | mitigated |
 
 ### B2 — public API and dashboard

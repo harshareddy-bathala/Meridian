@@ -111,6 +111,9 @@ def add_serve_parser(
 def logging_configuration(level: str) -> dict[str, object]:
     """One line format for uvicorn's loggers and the platform's, at ``level``.
 
+    Every line passes the redacting filter first (D-204). ``meridian jobs run``
+    uses the same document, so both processes redact alike.
+
     Args:
         level: One of :data:`LOG_LEVELS`.
 
@@ -122,10 +125,14 @@ def logging_configuration(level: str) -> dict[str, object]:
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {"line": {"format": _LINE_FORMAT}},
+        # On the handler, not a logger, so every record is redacted whichever
+        # logger wrote it: uvicorn's, a library's or ours (D-204).
+        "filters": {"redact": {"()": "meridian.log_redaction.RedactingFilter"}},
         "handlers": {
             "stderr": {
                 "class": "logging.StreamHandler",
                 "formatter": "line",
+                "filters": ["redact"],
                 "stream": "ext://sys.stderr",
             }
         },

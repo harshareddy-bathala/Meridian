@@ -14,7 +14,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-__all__ = ["InsecureConfigurationError", "read_previous_secret", "read_secret"]
+__all__ = [
+    "PLACEHOLDER",
+    "InsecureConfigurationError",
+    "read_previous_secret",
+    "read_secret",
+]
+
+PLACEHOLDER = "change-me"
+"""The development value every secret defaults to, refused on a public address."""
 
 
 class InsecureConfigurationError(RuntimeError):

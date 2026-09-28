@@ -773,10 +773,12 @@ A backup schedule, retention and a restore drill on the real deployment are Stag
 | Firing alerts | the table at the bottom of that dashboard |
 | Alertmanager's view, silences | `compose exec alertmanager amtool alert query --alertmanager.url=http://127.0.0.1:9093` |
 | Prometheus targets | `compose exec prometheus wget -qO- http://127.0.0.1:9090/api/v1/targets` |
-| Logs | `compose logs --since 30m <service>` — each service keeps three 10 MB files (D-114) |
+| Logs | `compose logs --since 30m <service>` — each service keeps three 10 MB files (D-114), and the platform's lines are redacted before they are written (D-204) |
 | Raw metrics | `curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8000/metrics` |
 
 Prometheus and Alertmanager are not published on the host. Grafana is, so its admin password must not be `change-me` on a network you share.
+
+**`[redacted]` in a log line** is the platform removing a secret before writing it (D-204): a bearer token, a value whose field names it as a token, key, password, pepper or secret, a password inside a URL, or any secret it loaded at start-up. A malformed request's log line still names the field that failed and why.
 
 **Reading the numbers:**
 - **`simulated`:** every station series carries it. Measured and simulated stations are never summed into one figure.

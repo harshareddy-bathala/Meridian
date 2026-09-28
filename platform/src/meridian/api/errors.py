@@ -298,7 +298,9 @@ def _install_fallback_handlers(app: FastAPI) -> None:
         #
         # The message is generic rather than derived from `exc`, because the
         # validation detail echoes the submitted value — and on `register` the
-        # submitted value includes the invite token.
+        # submitted value includes the invite token. The log line keeps the
+        # detail, which is what makes a malformed station diagnosable, and the
+        # handler's redacting filter removes the secrets from it (D-204).
         _log.info("rejected a malformed request: %s", exc)
         if is_public_surface(request.url.path):
             # A read endpoint has no body to be malformed about; what a caller
