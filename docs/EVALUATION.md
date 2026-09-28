@@ -76,6 +76,25 @@ C matters independently: if our features carry no signal on their own, that is a
 
 The four are chosen by one configuration key, and B differs from A in the objective rather than the model: priority weights the value of a pass and is never a model input (D-160). D, all combined, is weighted by priority as B is, so D − B differs in the model alone and C − A in our features alone (D-168). What counts as a training example is D-156.
 
+### How SC-1 is measured
+
+SC-1 is measured on schedules, not on probabilities. `meridian schedule evaluate` replays the models' test span (D-172).
+
+**Every scheduler gets the same problem.** Each station-day at or above the completeness threshold (§4.1) is one problem, and seven schedulers solve it:
+- **greedy A and greedy B**, existing practice;
+- **the optimiser under A, B, C and D**, each valuing a pass by its configuration's yield × frames × priority;
+- **the oracle.**
+
+All seven get the same candidates, constraints, solver and time limit. The candidates are the day's eligible physical passes, which is the completeness denominator.
+
+**The oracle is the upper bound.** It is the same optimiser valuing each pass by the frames it actually decoded. Schedule efficiency is a scheduler's frames over the oracle's.
+
+**The metric is decoded frames per station-hour**, from each pass's report.
+
+**An unattempted pass has no outcome, and none is imputed.** It adds no frames to any schedule, the oracle's included, and each schedule's share of such passes is reported beside its rate. This is §4's selection bias made visible rather than corrected. The completeness threshold keeps it small, and the share says how small.
+
+**SC-1 is optimised D minus optimised B.** Both run the same optimiser on an objective of the same form, so the difference is the model's, and no credit is taken for the optimiser. D minus greedy B, the shipped system against existing practice, is reported beside it. Each gain carries a 95% paired-bootstrap interval over station-days, drawn from the configuration's seed, and is reported per station-hour and relative to B. The ≥ 20% target is read against the relative gain.
+
 ### Isolating the public conditions
 
 The public features of §2 join configurations **C** and **D** as one named group, and their own contribution is isolated by **leaving that group out of the shipped model**: a fifth run, D without the group, reported beside the four configurations as **D − D∖conditions**. A fifth *configuration* is not added, because the four answer questions about what we contribute and this asks a question about one feature group inside it.

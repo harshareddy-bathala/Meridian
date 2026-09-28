@@ -4007,6 +4007,21 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-164 the calibration report | `meridian/prediction/{calibration,calibration_report,evaluation}.py`; `meridian/cli_model.py` |
 | — the completion gate, and how to run it by hand | `tests/unit/test_prediction_gate.py`; `OPERATIONS.md` § Models |
 
+**Landed 2026-09-28**, building the constrained scheduler and Stage 18's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-165 a skip is a record, and rounds schedule around commitments | `deploy/migrations/sql/0017_skip_is_a_record.sql`; `meridian/store/assignments.py`; `meridian/scheduler/{candidates,conflict_rejection}.py` |
+| D-166 one constraint set, checked before anything is written | `meridian/scheduler/{constraints,conflict_rejection,run}.py`; `meridian/registry/liveness.py` read at round time |
+| D-167 HiGHS, deterministic, its answer checked | `meridian/scheduler/{optimiser,programme}.py`; `highspy` in `platform/pyproject.toml`; the image check in `.github/workflows/ci.yml` |
+| D-168 yield × frames × priority, each term kept | `meridian/scheduler/{objective,schedule_config}.py`; `meridian/prediction/configurations.py`; `deploy/schedule.toml.example` |
+| D-169 live scoring through the training features | `meridian/prediction/{live,profiles}.py`; `meridian/scheduler/{live_inputs,scoring}.py`; `tests/unit/test_scheduler_boundaries.py` |
+| D-170 runs, explanations and the live switch | `deploy/migrations/sql/0018_schedule_runs.sql`; `meridian/store/schedule_writes.py`; `meridian/scheduler/{explanations,run}.py`; `meridian/jobs/{rounds,job_metrics}.py`; `meridian/cli_{schedule,jobs}.py`; the public `Explanation`; the dashboard's decision panel; `deploy/grafana/dashboards/meridian-platform.json`; `DATA-MODEL.md` |
+| D-171 reissue: `revoked`, revisions, reinstatement | `deploy/migrations/sql/0019_reissue.sql`; `meridian/store/{revocations,schedule_reads,assignment_log}.py`; `meridian/scheduler/reissue.py`; `meridian/api/msp/heartbeat.py`; `meridian/datasets/{labels,pooled_evidence}.py`; `MSP-SPEC.md` §4.2, §4.3; `DATA-MODEL.md` |
+| D-172 the retrospective comparison and the oracle | `meridian/prediction/{replay,replay_models}.py`; `meridian/scheduler/{replay,oracle,comparison,comparison_config,comparison_report}.py`; `meridian schedule evaluate`; `deploy/schedule-evaluation.toml.example`; `EVALUATION.md` §3 |
+| — the amended entries | D-022, D-026, D-065, D-066, D-110 and D-160, each with a note naming its amendment |
+| — the completion gate, and how to run it by hand | `tests/unit/test_scheduler_gate.py`; `tests/integration/test_scheduler_gate.py`; `OPERATIONS.md` § Scheduling |
+
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
