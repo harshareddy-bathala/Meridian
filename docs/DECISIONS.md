@@ -3507,6 +3507,44 @@ Stage 23 asks for a documented threat model. The security decisions already exis
 
 ---
 
+## D-201 — Platform secrets rotate through files, and the pepper overlaps
+
+**2026-09-28 · accepted** · *`meridian.registry.pepper_rotation`, `meridian.secret_files`, `deploy/docker-compose.secrets.yml`, `deploy/tools/rotate_secret.py`, Stage 23* · *extends D-114*
+
+D-114 let each platform secret be read from a file named by `*_FILE` and left rotation to this stage. Rotation is two problems: getting a new value to the processes that read it, and not breaking whatever depended on the old one.
+
+**Files, one per secret, written by a tool.** `deploy/secrets/` holds `token_hash_pepper`, `token_hash_pepper_previous`, `metrics_token` and `registration_invite_token`. `deploy/docker-compose.secrets.yml` bind-mounts each file separately into the services that read it and sets the `*_FILE` variables. `deploy/tools/rotate_secret.py` writes them: `init` creates what is missing, `rotate` replaces one, `retire` ends a pepper rotation.
+
+- **Modes.** The directory is `0700` and each file `0444`. The file has to be readable by the container's own uid, which is not the operator's, and the directory is what keeps other users on the host out. A single-file bind mount does not need the container to traverse the host directory, so the two do not conflict.
+- **Atomic replacement, then recreate.** A file is written beside its target and renamed into place. A bind mount holds the old inode, so the change reaches a container only when it is recreated; the tool prints the `up -d --force-recreate` command naming the services that read that secret. Settings are read once at start-up, so there is nothing to reload in place.
+- **`init` carries values over.** A secret already set in `deploy/.env` is copied, not regenerated. Moving the pepper to a file is not a reason to change it, and a new one would strand every station.
+- **Prometheus reads the metrics token from the same file** as the API and the jobs process. D-087's failure mode, where the two copies disagree and the target reads as down, cannot happen with one file.
+
+**The pepper overlaps; nothing else needs to.** Replacing `TOKEN_HASH_PEPPER` outright stops every bearer token matching. `.env.example` said recovery was then per station through a bound invite (D-034). **That was wrong:** the registration key a bound invite checks is peppered too (D-023), so it stopped matching as well, and the only way back was re-registering under a new `station_id`, which splits the station's history. `tests/integration/test_pepper_rotation.py` keeps that failure as its control.
+
+So the platform now holds two peppers during a rotation. `TOKEN_HASH_PEPPER_PREVIOUS` (or its `_FILE`) is tried after the current pepper, and only to verify:
+
+- a bearer token it verifies is re-hashed under the current pepper in the same request, guarded on the old hash, so a revocation or rotation in between is not overwritten. Every live station has moved after one heartbeat interval, with no 401 and nothing for the station to do;
+- a registration key it verifies is re-hashed when it is presented, after every other check has passed;
+- nothing new is ever hashed with it;
+- an empty previous pepper means no rotation. This is the one secret whose file may be empty (D-114 refuses empty files), because an empty previous pepper accepts fewer credentials, not more;
+- a previous pepper equal to the current one is refused at start-up, because it means the step that writes the new one was skipped;
+- `rotate` refuses to start a second pepper rotation until the first is retired, since that would drop the pepper some stations still use.
+
+**Retiring has a stated cost.** A registration key moves only when it is presented, and a healthy station never presents it. Emptying the previous pepper therefore leaves every station that has not recovered since the rotation unrecoverable through a bound invite, though still able to heartbeat. The runbook says to retire the previous pepper only when that is acceptable, and it usually need not be hurried: both secrets are 256-bit random values whose hashes cannot be inverted with or without the pepper (`THREAT-MODEL.md` §6), so a leaked old pepper kept for verification exposes nothing a new one protects.
+
+**The metrics token and the bootstrap invite do not overlap.** `meridian.metrics.access` and the jobs listener each accept exactly one token. With one shared file and one recreate, the gap is the few seconds the API takes to restart, well inside `ApiUnavailable`'s one minute. `REGISTRATION_INVITE_TOKEN` seeds an invite only into an empty `invite_tokens` table (D-020), so changing it on a running deployment changes nothing; a leaked bootstrap invite is withdrawn with `meridian invite revoke --label "environment bootstrap"`.
+
+**The tunnel token is not in this file.** Using it from a file means the tunnel starts without `CLOUDFLARE_TUNNEL_TOKEN` in `.env`, and that variable is what tells the API it is public. It moves to a file together with the compose change that makes the public deployment its own file.
+
+**Found on the way: every locally built image carried `deploy/.env`.** `.dockerignore` listed `.env` and `*.env`, which Docker matches at the root of the build context only, and the Dockerfile copies `deploy/` whole. So `up --build` on the laptop that served the public run baked that deployment's `.env` and `deploy/prometheus/metrics_token` into a layer, readable by anyone who could pull or inspect the image. The images CI publishes were clean, because CI builds from a fresh checkout. The patterns are now `**/.env` and friends, with `deploy/secrets/`, the Alertmanager secret files and dumps beside them, and `tests/unit/test_layout.py` checks every secret path the repository uses against the list, with a path that must still reach the image as its control. A rebuilt image was inspected and holds neither file.
+
+*Rejected: re-reading secrets on a signal.* Every process would need a reload path, and a secret half-applied across two API workers is harder to reason about than a restart that takes seconds.
+
+*Rejected: a pepper version column.* It would say which pepper hashed each row, and so when retiring is safe. It needs a migration and a second secret store for old peppers, for a guarantee the entropy of the secrets already gives.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

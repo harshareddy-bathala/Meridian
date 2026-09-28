@@ -78,7 +78,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | M-7 | A station rewriting its own history | Observations are append-only; a resubmission supersedes and the earlier report stays | D-015, D-070, D-071 | mitigated |
 | M-8 | Oversized bodies, unbounded `health`, sample arrays | MSP §6's caps, checked from `Content-Length` before the body is read; a body of undeclared length is refused; `health`, Doppler and SNR arrays capped | D-028, D-032, D-050, D-055, D-117; `meridian.api.request_limits` | mitigated |
 | M-9 | Request floods against MSP, from one station or from anyone | The edge rule covers `/api/` only (D-088), so MSP has no limit at all | — | open — Stage 23 part 3 |
-| M-10 | A leaked database learning tokens or registration keys | Stored as `sha256(pepper ‖ secret)` | D-017 | mitigated |
+| M-10 | A leaked database learning tokens or registration keys | Stored as `sha256(pepper ‖ secret)`; the pepper can be rotated without stranding a station | D-017, D-201 | mitigated |
 | M-11 | Error bodies leaking SQL, connection strings or submitted tokens | One fixed two-field body; an unhandled exception answers `Internal error.` and the detail goes to the log | D-004; `meridian.api.errors` | mitigated |
 | M-12 | Error *logs* leaking a token or a secret | Nothing removes a secret from a log line | — | open — Stage 23 part 4 |
 | M-13 | A write acknowledged before it is committed | The request's transaction commits before the response is sent | `meridian.api.dependencies.get_connection`; D-088's public run | mitigated |
@@ -103,7 +103,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 
 | ID | Threat | Mitigation | Where | Status |
 |---|---|---|---|---|
-| T-1 | Serving the public hostname with a stolen tunnel token | The token is outside the repository and off the command line | D-114 | partial — no rotation procedure; Stage 23 part 2 |
+| T-1 | Serving the public hostname with a stolen tunnel token | The token is outside the repository and off the command line; it is rotated from the Cloudflare dashboard (`OPERATIONS.md` § Rotating secrets) | D-114, D-201 | partial — read from `.env`, not a file; Stage 23 part 6 |
 | T-2 | Bypassing the edge by reaching the API port on the host | The API is published on the host in every profile, so a request that never crossed Cloudflare can set `CF-Connecting-IP` to anything | D-051 | open — Stage 23 part 6 |
 | T-3 | Public exposure with development secrets | The platform refuses to start in public mode while any secret is `change-me` | `meridian.config._refuse_placeholder_secrets` | mitigated |
 | T-4 | Cloudflare reads traffic in the clear | Accepted: TLS terminates at the edge by design, and MSP carries no secret but the bearer token, which a revocation withdraws | MSP §3 | accepted |
@@ -113,10 +113,11 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | ID | Threat | Mitigation | Where | Status |
 |---|---|---|---|---|
 | O-1 | Secrets visible in `ps` or `docker inspect` | The tunnel token is in the environment, not argv; the platform's secrets can be read from files | D-114 | mitigated |
-| O-2 | A leaked platform secret cannot be replaced safely | Rotating the pepper invalidates every station, and no runbook exists for any secret | D-114 | open — Stage 23 part 2 |
+| O-2 | A leaked platform secret cannot be replaced safely | Each secret is a file written by a tool and read at start; the pepper overlaps with its predecessor, which verifies and re-hashes but never hashes anything new; a runbook per secret | D-201; `meridian.registry.pepper_rotation`; `deploy/tools/rotate_secret.py`; `tests/integration/test_pepper_rotation.py` | mitigated |
 | O-3 | Secrets committed to the repository | `.env`, `metrics_token` and the Alertmanager secret files are gitignored; `.env.example` holds only `change-me` | `.gitignore`; GIT-WORKFLOW rule 4 | mitigated |
 | O-4 | A compromised process escalating inside its container | The platform image runs as uid 10001; nothing else is dropped | `deploy/Dockerfile` | partial — Stage 23 part 6 |
 | O-5 | A backup file read by someone who should not | `backups/` and `*.dump` are gitignored; the runbook calls a dump a secret | `OPERATIONS.md` § Backup and restore | partial — no schedule or retention; Stage 23 part 9 |
+| O-6 | Secrets baked into an image layer by a local build | `.dockerignore` excludes every secret path at any depth, checked by a test against each path the repository uses | D-201; `.dockerignore`; `tests/unit/test_layout.py` | mitigated |
 
 ### B5 — database
 

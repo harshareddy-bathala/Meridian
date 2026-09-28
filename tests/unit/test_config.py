@@ -48,6 +48,8 @@ MANAGED = (
     "METRICS_TOKEN",
     "METRICS_TOKEN_FILE",
     "TOKEN_HASH_PEPPER_FILE",
+    "TOKEN_HASH_PEPPER_PREVIOUS",
+    "TOKEN_HASH_PEPPER_PREVIOUS_FILE",
     "REGISTRATION_INVITE_TOKEN_FILE",
     "API_WORKERS",
 )
@@ -368,3 +370,63 @@ def test_the_worker_count_defaults_to_one(monkeypatch: pytest.MonkeyPatch) -> No
     """One worker needs no multiprocess directory, so it is the safe default."""
     assert _load(monkeypatch).api_workers == 1
     assert _load(monkeypatch, API_WORKERS="3").api_workers == 3
+
+
+def test_there_is_no_previous_pepper_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _load(monkeypatch).token_hash_pepper_previous == ""
+
+
+def test_the_previous_pepper_is_read_from_its_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """D-201: the old pepper is kept for verification while stations move."""
+    previous = tmp_path / "token_hash_pepper_previous"
+    previous.write_text("an-old-pepper\n", encoding="utf-8")
+
+    settings = _load(monkeypatch, TOKEN_HASH_PEPPER_PREVIOUS_FILE=str(previous))
+
+    assert settings.token_hash_pepper_previous == "an-old-pepper"
+
+
+def test_an_empty_previous_pepper_file_means_no_rotation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The one empty secret file that starts: it accepts less, not more (D-201).
+
+    An empty *current* pepper file is still refused, which shows the previous
+    one is the exception rather than the rule.
+    """
+    previous = tmp_path / "token_hash_pepper_previous"
+    previous.write_text("", encoding="utf-8")
+
+    settings = _load(monkeypatch, TOKEN_HASH_PEPPER_PREVIOUS_FILE=str(previous))
+
+    assert settings.token_hash_pepper_previous == ""
+    empty_current = tmp_path / "token_hash_pepper"
+    empty_current.write_text("", encoding="utf-8")
+    with pytest.raises(InsecureConfigurationError, match="empty file"):
+        _load(monkeypatch, TOKEN_HASH_PEPPER_FILE=str(empty_current))
+
+
+def test_a_missing_previous_pepper_file_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with pytest.raises(InsecureConfigurationError, match="PREVIOUS_FILE"):
+        _load(
+            monkeypatch,
+            TOKEN_HASH_PEPPER_PREVIOUS_FILE=str(tmp_path / "not-there"),
+        )
+
+
+def test_a_previous_pepper_equal_to_the_current_one_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The step that writes the new pepper was skipped (D-201)."""
+    with pytest.raises(InsecureConfigurationError, match="rotation has not happened"):
+        _load(
+            monkeypatch,
+            TOKEN_HASH_PEPPER=REAL_PEPPER,
+            TOKEN_HASH_PEPPER_PREVIOUS=REAL_PEPPER,
+        )

@@ -8,7 +8,7 @@ Every command runs from the repository root. `compose` below is shorthand for:
 docker compose -f deploy/docker-compose.yml
 ```
 
-Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, D-143 to D-154 for dataset snapshots, and D-155 to D-164 for models. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, D-143 to D-154 for dataset snapshots, D-155 to D-164 for models, and D-200 onwards for Stage 23's hardening. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
 
 ---
 
@@ -29,7 +29,14 @@ cp deploy/prometheus/metrics_token.example deploy/prometheus/metrics_token
 
 The platform refuses to start in public mode while any of them is still `change-me`. Setting `CLOUDFLARE_TUNNEL_TOKEN` or `TUNNEL_HOSTNAME`, or a non-loopback `PUBLIC_BASE_URL`, puts it in public mode.
 
-`TOKEN_HASH_PEPPER`, `REGISTRATION_INVITE_TOKEN` and `METRICS_TOKEN` can instead be read from files with `*_FILE` variables. The file must be mounted into the containers by an override file.
+**On a real deployment, keep the secrets in files instead** (D-201). `deploy/tools/rotate_secret.py init` writes them into `deploy/secrets/`, carrying over any value already set in `deploy/.env`, and `deploy/docker-compose.secrets.yml` mounts them. Add that file to every command:
+
+```bash
+python deploy/tools/rotate_secret.py init
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml up -d
+```
+
+§ Rotating secrets below is how each one is replaced.
 
 ### Pull or build
 
@@ -72,6 +79,7 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | List invites | `compose exec api meridian invite list` |
 | Recover a station that got 401 | `compose exec api meridian invite create --label <who> --for-station <station_id>` (D-034) |
 | Shut a station out | `compose exec api meridian station revoke --station-id <station_id>` |
+| Rotate a platform secret | `python deploy/tools/rotate_secret.py rotate <name>` — § Rotating secrets |
 | Load satellites | `compose exec api meridian catalogue load --file deploy/catalogue/development.json` |
 | Migration status | `compose exec api meridian db status` — exit 0 only when at head |
 | Apply migrations | `compose run --rm migrate` |
@@ -616,6 +624,71 @@ The model's bytes are no longer the bytes that were fitted. Delete it (`chmod -R
 ### Models are not in the database backup
 
 Models, like datasets, are regenerable from what they were made from, so the raw snapshots are what needs keeping (§ Snapshots are not in the database backup). To reproduce a model's exact bytes, also keep the library versions `show` prints.
+
+---
+
+## Rotating secrets
+
+Each platform secret is read once, when its process starts (D-201). Rotating one means writing a new file and recreating the services that read it. `deploy/tools/rotate_secret.py` does the first and prints the second. With the secrets override, `compose` in this section means:
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml
+```
+
+**Why the tool and not an editor.** It writes each file `0444` inside a `0700` directory, which is the combination a container's uid can read and another user on the host cannot. It replaces a file by renaming a new one into place, which a bind mount does not follow, so the change reaches a container only when that container is recreated. That is why every step below ends with `--force-recreate`.
+
+### The pepper
+
+**Never replace `TOKEN_HASH_PEPPER` outright.** Every bearer token and every registration key stops matching, so every station gets 401 and none can be recovered through a bound invite, which needs its registration key. Rotate it instead:
+
+```bash
+python deploy/tools/rotate_secret.py rotate token_hash_pepper
+compose up -d --force-recreate api
+```
+
+The old pepper moves to `token_hash_pepper_previous`. The platform accepts it for verification only, and re-hashes each credential under the new pepper as it is used:
+- **bearer tokens** move on the station's next heartbeat, so every online station has moved within 30 s. Each move is logged once: `bearer token re-hashed under the new pepper`;
+- **registration keys** move only when a station next recovers.
+
+**When to retire the old pepper.** Once every station you expect back has heartbeated since the restart (the dashboard shows each station's last heartbeat), tokens are done:
+
+```bash
+python deploy/tools/rotate_secret.py retire token_hash_pepper
+compose up -d --force-recreate api
+```
+
+Retiring also ends recovery through a bound invite for every station that has not recovered since the rotation, because its registration key is still under the old pepper. There is no hurry to retire: both secrets are 256-bit random values, so keeping an old pepper for verification exposes nothing (`THREAT-MODEL.md` §6). A second pepper rotation is refused until the first is retired.
+
+**Checked on a local stack, 2026-09-28**, with one simulated station: after `rotate` and the recreate, the station's stored token hash changed on its next heartbeat and it stayed online; after `retire` and another recreate it kept heartbeating, and its log held no 401.
+
+### The metrics token
+
+```bash
+python deploy/tools/rotate_secret.py rotate metrics_token
+compose --profile metrics up -d --force-recreate api jobs prometheus
+```
+
+The API, the jobs process and Prometheus read the same file, so they cannot disagree. Scrapes fail for the seconds the API takes to restart; `ApiUnavailable` waits a minute before firing.
+
+Without the secrets override, set the same new value in `METRICS_TOKEN` in `deploy/.env` and in `deploy/prometheus/metrics_token`, then run the same `up` command.
+
+### The bootstrap invite
+
+`REGISTRATION_INVITE_TOKEN` seeds one invite into an empty database and does nothing afterwards (D-020). If it leaked before a station used it, withdraw it:
+
+```bash
+compose exec api meridian invite revoke --label "environment bootstrap"
+```
+
+`rotate registration_invite_token` changes the file for the next empty database, such as a fresh deployment. It has no effect on this one.
+
+### The tunnel token
+
+Rotate it in the Cloudflare dashboard (*Zero Trust* → *Networks* → *Tunnels* → the tunnel → *Refresh token*), which ends the old token's connections. Put the new value in `CLOUDFLARE_TUNNEL_TOKEN` in `deploy/.env`, then `compose --profile public up -d --force-recreate tunnel`. The dashboard is unreachable from outside between the two steps; stations queue their reports and send them when it returns.
+
+### Station tokens
+
+A station's own token is rotated through a bound invite, and withdrawn with `meridian station revoke` (§ Everyday commands, D-034).
 
 ---
 

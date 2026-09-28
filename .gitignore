@@ -22,6 +22,10 @@ htmlcov/
 # a file; the .example beside it is tracked and carries the placeholder.
 deploy/prometheus/metrics_token
 
+# The platform's secret files, written by deploy/tools/rotate_secret.py and
+# mounted by deploy/docker-compose.secrets.yml (D-201).
+deploy/secrets/
+
 # A deployment's own Alertmanager configuration and the secrets it reads
 # (D-112). Only the null-receiver default and the example are tracked.
 deploy/alertmanager/*.local.yml

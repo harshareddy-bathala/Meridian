@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
 from urllib.parse import urlparse
 
 from meridian.registry.liveness import (
     MAX_HEARTBEAT_INTERVAL_S,
     is_heartbeat_interval_consistent,
+)
+from meridian.secret_files import (
+    InsecureConfigurationError,
+    read_previous_secret,
+    read_secret,
 )
 
 __all__ = [
@@ -30,10 +34,6 @@ _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
 
 _DRIVER = "+psycopg"
 _SCHEMES = ("postgresql", "postgres")
-
-
-class InsecureConfigurationError(RuntimeError):
-    """Raised when a placeholder secret would be exposed publicly."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +54,13 @@ class Settings:
     """Where the scheduled jobs serve their metrics, inside the network (D-109)."""
 
     token_hash_pepper: str
+    token_hash_pepper_previous: str
+    """The pepper being rotated away from, or empty (D-201).
+
+    Accepted when verifying a bearer token or a registration key, never used to
+    hash anything new. A credential it verifies is re-hashed under
+    ``token_hash_pepper`` on the spot, so the overlap drains as stations call.
+    """
     registration_invite_token: str
     registration_recovery_window_s: int
     heartbeat_interval_s: int
@@ -194,39 +201,6 @@ def _int_env(name: str, default: int) -> int:
         ) from exc
 
 
-_FILE_SUFFIX = "_FILE"
-
-
-def _secret_env(name: str, default: str) -> str:
-    """Read a secret from ``<name>_FILE`` when that is set, else from ``<name>``.
-
-    The file form keeps a secret out of the process environment, where
-    ``docker inspect`` and ``/proc/<pid>/environ`` show it to anyone on the host
-    (D-114). The file wins when both are set, so mounting one is enough to
-    override a value left behind in ``.env``.
-
-    Surrounding whitespace is removed, because ``openssl rand -hex 32 > file``
-    ends the file with a newline that is not part of the secret.
-
-    Raises:
-        InsecureConfigurationError: The named file cannot be read, or is empty.
-            Falling back to the variable would start the platform on a secret
-            the operator believes they replaced.
-    """
-    path = os.environ.get(name + _FILE_SUFFIX, "").strip()
-    if not path:
-        return os.environ.get(name, default)
-    try:
-        value = Path(path).read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise InsecureConfigurationError(
-            f"{name}{_FILE_SUFFIX} names {path!r}, which cannot be read: {exc.strerror}"
-        ) from exc
-    if not value:
-        raise InsecureConfigurationError(f"{name}{_FILE_SUFFIX} names an empty file")
-    return value
-
-
 def _database_url() -> str:
     """``DATABASE_URL`` if set, else one assembled from the ``POSTGRES_*`` parts."""
     url = os.environ.get("DATABASE_URL", "").strip()
@@ -278,8 +252,9 @@ def load_settings() -> Settings:
         # Never published outside the compose network, so nothing depends on
         # the number itself beyond Prometheus's scrape configuration agreeing.
         jobs_metrics_port=_int_env("JOBS_METRICS_PORT", 9464),
-        token_hash_pepper=_secret_env("TOKEN_HASH_PEPPER", PLACEHOLDER),
-        registration_invite_token=_secret_env("REGISTRATION_INVITE_TOKEN", PLACEHOLDER),
+        token_hash_pepper=read_secret("TOKEN_HASH_PEPPER", PLACEHOLDER),
+        token_hash_pepper_previous=read_previous_secret("TOKEN_HASH_PEPPER_PREVIOUS"),
+        registration_invite_token=read_secret("REGISTRATION_INVITE_TOKEN", PLACEHOLDER),
         # D-023: how long after registering a station may still recover a lost
         # bearer token by re-presenting its invite and registration key. One hour
         # by default, AND only while no heartbeat has arrived — both conditions.
@@ -287,7 +262,7 @@ def load_settings() -> Settings:
         # this window does not govern (D-034).
         registration_recovery_window_s=_int_env("REGISTRATION_RECOVERY_WINDOW_S", 3600),
         heartbeat_interval_s=_int_env("HEARTBEAT_INTERVAL_S", 30),
-        metrics_token=_secret_env("METRICS_TOKEN", PLACEHOLDER),
+        metrics_token=read_secret("METRICS_TOKEN", PLACEHOLDER),
         public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"),
         tunnel_hostname=os.environ.get("TUNNEL_HOSTNAME", "").strip(),
         public_mode=_bool_env("MERIDIAN_PUBLIC", False),
@@ -297,6 +272,7 @@ def load_settings() -> Settings:
     )
 
     _refuse_an_interval_liveness_cannot_describe(settings.heartbeat_interval_s)
+    _refuse_a_rotation_that_did_not_happen(settings)
 
     if settings.is_public:
         _refuse_placeholder_secrets(settings)
@@ -320,6 +296,21 @@ def _refuse_an_interval_liveness_cannot_describe(heartbeat_interval_s: int) -> N
         f"{MAX_HEARTBEAT_INTERVAL_S} s a station heartbeating exactly on time "
         "spends part of every cycle reading 'stale'. Use 30, which is what "
         "D-030 fixes for all of MSP 0.x."
+    )
+
+
+def _refuse_a_rotation_that_did_not_happen(settings: Settings) -> None:
+    """Raise if the previous pepper is the current one (D-201).
+
+    Harmless to run, and always a mistake: the step that writes the new pepper
+    was skipped, and the operator believes a leaked pepper has been replaced.
+    """
+    if settings.token_hash_pepper_previous != settings.token_hash_pepper:
+        return
+    raise InsecureConfigurationError(
+        "Refusing to start: TOKEN_HASH_PEPPER_PREVIOUS is the same as "
+        "TOKEN_HASH_PEPPER, so the rotation has not happened. Write the new "
+        "pepper first; docs/OPERATIONS.md § Rotating secrets."
     )
 
 

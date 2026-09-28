@@ -99,6 +99,9 @@ services:
       API_WORKERS: ${API_WORKERS:-2}
       PROMETHEUS_MULTIPROC_DIR: /run/meridian/metrics
       TOKEN_HASH_PEPPER: ${TOKEN_HASH_PEPPER:-change-me}
+      # Set only while a rotation is in progress, and accepted only to verify a
+      # credential, which is then re-hashed under the new pepper (D-201).
+      TOKEN_HASH_PEPPER_PREVIOUS: ${TOKEN_HASH_PEPPER_PREVIOUS:-}
       REGISTRATION_INVITE_TOKEN: ${REGISTRATION_INVITE_TOKEN:-change-me}
       REGISTRATION_RECOVERY_WINDOW_S: ${REGISTRATION_RECOVERY_WINDOW_S:-3600}
       HEARTBEAT_INTERVAL_S: ${HEARTBEAT_INTERVAL_S:-30}

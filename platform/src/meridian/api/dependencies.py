@@ -109,6 +109,7 @@ def get_authenticated_station_id(
     registry = PsycopgRegistry(
         conn,
         pepper=settings.token_hash_pepper,
+        previous_pepper=settings.token_hash_pepper_previous,
         # authenticate() reads neither of these, but PsycopgRegistry is one
         # class with one constructor; passing the real values costs nothing
         # and keeps this call site correct if authentication ever grows a
