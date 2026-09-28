@@ -164,6 +164,16 @@ Partitioned on `received_at`, the platform's clock, not the station's `sent_at` 
 
 Retention: full resolution 90 days, then downsampled. **The retention policy is not created in Phase 1** — dropping chunks before the continuous aggregate that downsamples them exists is just data loss on a timer. It lands in Phase 3 with the aggregate.
 
+### `pass_classifications`
+What happened to each settled, scheduled pass, and the evidence it was decided from. Every reliability figure is counted from these rows (Stage 20).
+
+`(classification_id, assignment_id, assignment_ids, pass_id, station_id, satellite_id, window_start, window_end, classification, evidence, method, config_sha256, classified_at, simulated)`
+
+- **One row per physical pass per station**, once its window has closed plus the settle margin. `assignment_ids` lists every scheduled assignment pooled into the pass, and `assignment_id` is the first of them.
+- **`classification`** is one of the eight classes of `meridian.reliability.classification` (D-180, D-181). Whether a class counts as captured, or spends the loss budget, is decided in code from the class, and deliberately not stored as a second column that could disagree with it.
+- **`evidence`** is everything the classification read: each assignment and its state, the report and its revision, whether the station was heard, the registry's listening answer for each assignment, and the receptions D-147 judged the satellite by.
+- **Append-only.** Unique on `(assignment_id, method, config_sha256)`, so a changed rule or parameter writes new rows beside the old, and a re-run writes nothing. See D-182.
+
 ### `products`
 Artifacts from an observation — waterfalls, images, decoded frames. Content-addressed by hash, referenced here.
 
@@ -405,6 +415,7 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `heartbeats.state` (reported) | `idle`, `slewing`, `listening`, `processing`, `degraded`, `maintenance` — MSP §4.2 |
 | `assignments.state` | `issued`, `held`, `in_progress`, `reported`, `expired` — D-008 |
 | `assignments.decision` | `scheduled`, `skipped` |
+| `pass_classifications.classification` | `successful_reception`, `signal_no_decode`, `confirmed_miss`, `satellite_silent`, `satellite_state_indeterminate`, `station_unavailable`, `station_not_confirmed_listening`, `assignment_declined` — D-180 |
 | `observations.outcome` | the five values of MSP §4.4 — D-010 |
 | `observations.provenance` | `station`, `archive`, `manual` |
 | `element_sets.source` | `celestrak`, `spacetrack`, `manual`, `simulator` |

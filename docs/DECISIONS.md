@@ -1483,6 +1483,8 @@ Wiring MSP §4.2's reconciliation into the heartbeat endpoint surfaced two defec
 
 *The cost, stated plainly:* a station that stops heartbeating altogether never has its overdue rows swept, because the only sweep is the one its own heartbeat triggers. D-026 accepted per-heartbeat reconciliation and Phase 1 has no periodic job; the alternative is a background sweeper, which is a scheduled process to maintain and a second writer on the hot table, to correct rows nothing reads until the reliability layer exists. **A periodic sweep is owed by the reliability stage**, which is also the first consumer that would notice the difference. Recording it because a station stuck at `held` forever is a real state a reader will find.
 
+*Settled by D-183:* a timed sweep now expires `issued` work nobody took. A station stuck at `held` stays there, deliberately, because only its own heartbeat can say it let the work go.
+
 **An assignment in `in_progress` must still be delivered.** The delivery predicate was `state in ('issued', 'held')`, which was correct until reconciliation could produce a third state. The moment a station reports a `listening` block, its row leaves `held` — and the assignment disappears from its own heartbeat response, mid-pass. A station that reboots while receiving is then told it has nothing to do.
 
 This is precisely the failure D-035 fixed by moving the lower bound from `start_at` to `end_at`, arriving a second time through a different column. MSP §4.2's prose is the arbiter and was already right: a station sees an assignment *"on every heartbeat until it is reported or its `end_at` has passed"* — and executing it is neither. The literal predicate printed two paragraphs later was the thing that was wrong.
@@ -3549,6 +3551,60 @@ D-146's two exclusions still come first, unchanged. Moving the heartbeat rule ch
 
 ---
 
+## D-182 — Every settled pass is classified once, and the row keeps its evidence
+
+**2026-09-28 · accepted** · *migration 0017; `meridian/reliability/{accounting,config}.py`; `meridian/store/{pass_classifications,reliability_evidence}.py`, Stage 20*
+
+The roadmap's Stage 20 gate is that every reliability number can be traced back to assignments, observations and heartbeat evidence. The Stage 15 labeller already classifies passes, but only from a snapshot and only when someone exports one. A live figure needs a live record, and the record is what makes the trace possible.
+
+**`pass_classifications` holds one row per settled physical pass per station.**
+- A pass is **settled** once its window has closed plus the settle margin: 24 hours by default, the labeller's own (D-146). A station queues reports through an outage, and without a margin a report still on its way would be read as absence.
+- The unit is the **physical pass**, as D-148 made it for the labeller. Scheduled assignments of one station and satellite whose windows overlap are pooled into one row: their reports ranked by `OUTCOME_ORDER`, and listening confirmed if any was. `assignment_ids` lists them and the lowest is the key. From D-165 on a rise has one scheduled assignment per station, so pooling matters only for older history.
+- Only `scheduled` decisions are read, because a skip was never delivered (D-165).
+
+**The row stores what was read, not only what was decided.** `evidence` holds:
+- each assignment, with its state, its window and the registry's listening answer for it;
+- the report and its revision;
+- whether any heartbeat arrived in the window;
+- when the satellite had to be judged, the ids of the receptions counted as signals and as confirmed silences.
+
+A figure counted from these rows can be followed back to each assignment and observation behind it without re-running anything.
+
+**Listening is asked of `Registry.was_listening` for every pooled assignment,** including the other stations' silences D-147 counts. The accounting never reads a heartbeat's listening block itself, so the registry stays the only definition of "was listening" (rule 7).
+
+**The satellite is judged on our own receptions only.** The labeller also counts archive receptions for measured passes (D-147). The live accounting does not, because an archive is training input and never a runtime dependency (CLAUDE.md's independence test, D-102). The two can therefore differ on one question: whether a measured pass confirmed silent was a `confirmed_miss` or `satellite_state_indeterminate`, when only an archive heard the satellite. The labeller has more evidence, and the live record uses only what Meridian holds.
+
+**Append-only, versioned twice.**
+- `method` names the rules: `classification-1`, from `meridian.reliability.classification.METHOD`, bumped when a rule changes.
+- `config_sha256` names the parameters: the settle margin and D-147's window and count, hashed from `ClassificationConfig`.
+
+The unique key `(assignment_id, method, config_sha256)` means a re-run writes nothing, and a changed rule or parameter writes new rows beside the old, never over them. A figure published under one configuration therefore stays reproducible from the rows it was counted from.
+
+**Whether a class counts as captured, or spends the loss budget, is not a column.** It is a rule, read from the class in one place in code. A stored boolean would be a second copy of the rule, and could disagree with it.
+
+*Rejected: computing classifications at query time, with no table.* Each pass's evidence needs several queries and a registry call per assignment. At scrape time every fifteen seconds, over a 30-day window, that is the wrong cost. It would also make each figure depend on when it was read: an assignment expired by D-183's sweep would change its pass's evidence after the fact, while the stored row keeps what was true when the pass settled.
+
+---
+
+## D-183 — A timed sweep expires work nobody took, and only that
+
+**2026-09-28 · accepted** · *`meridian/store/assignment_expiry.py`, Stage 20. Settles what D-067 owed.*
+
+D-067 left an assignment of a station that stops heartbeating unswept, because the only sweep ran inside that station's own heartbeat. It recorded a periodic sweep as owed by the reliability stage, "the first consumer that would notice the difference".
+
+**`expire_untaken_assignments(now)` moves `issued → expired` for every `scheduled` assignment whose window has closed.** It is narrower than the heartbeat's sweep, deliberately:
+- **It never touches `held` or `in_progress`.** Those are work a station took. Its report may still be in the station's queue, and only its own heartbeat can say it let one go (D-067). Such a row stays overdue, counted by `meridian_assignments_overdue`, and is classified from whatever report arrives.
+- **It never touches a skip.** Nothing was delivered, so nothing was declined (D-165).
+- **`now` is passed in**, so a sweep can be stated exactly and tested without a clock.
+
+**Expiring late loses nothing.** An observation that arrives for an `expired` assignment is still stored, and only the state stays where it is (D-071). Classification reads the report before it reads the state (D-181). So a sweep that runs before a slow report arrives changes no pass's class.
+
+**An expiry is not a decline by itself.** The sweep expires the assignments of a station that was off. D-181 is what stops those reading as refusals: a pass is declined only if the station was heard during its window.
+
+The sweep runs as a task of the jobs service. That wiring, and its failure alert, arrive with the other job task in Stage 20's surfaces.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -3759,6 +3815,8 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the completion gate, and how to run it by hand | `tests/unit/test_prediction_gate.py`; `OPERATIONS.md` § Models |
 | D-180 a miss is defined once, in reliability | `meridian/reliability/{classification,satellite_silence}.py`; `meridian/datasets/{labels,evidence}.py`; `tests/unit/test_reliability_boundaries.py` |
 | D-181 a heartbeat before a decline, `labels-3` | `meridian/reliability/classification.py`; `meridian/datasets/labels.py` |
+| D-182 every settled pass classified once, with its evidence | migration 0017; `meridian/reliability/{accounting,config}.py`; `meridian/store/{pass_classifications,reliability_evidence}.py`; `DATA-MODEL.md` |
+| D-183 a timed sweep expires only untaken work | `meridian/store/assignment_expiry.py` |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

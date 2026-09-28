@@ -1,0 +1,80 @@
+"""The ``pass_classifications`` table: what happened to each settled pass.
+
+Written by ``meridian.reliability.accounting`` and read by every reliability
+figure. Append-only: a row is never updated, and re-running under the same
+method and configuration writes nothing, because the table's unique key says
+so rather than a check made here (D-182).
+
+Reference: docs/DECISIONS.md D-180, D-182; migration 0017.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+
+from psycopg.types.json import Jsonb
+
+from meridian.store.stations import Connection
+
+__all__ = ["NewClassification", "insert_classification"]
+
+
+@dataclass(frozen=True, slots=True)
+class NewClassification:
+    """One physical pass's classification, and the evidence it was decided from."""
+
+    assignment_ids: Sequence[str]
+    """Every scheduled assignment pooled into the pass, sorted; the first is its
+    representative and the row's key."""
+
+    pass_id: int
+    station_id: str
+    satellite_id: str
+    window_start: datetime
+    window_end: datetime
+    classification: str
+    evidence: Mapping[str, object]
+    method: str
+    config_sha256: bytes
+    simulated: bool
+
+
+def insert_classification(conn: Connection, row: NewClassification) -> bool:
+    """Store one classification, unless this method and configuration hold it.
+
+    Args:
+        conn: An open connection. This function owns its transaction.
+        row: The classification.
+
+    Returns:
+        True if a row was written; False if one was already held for the
+        representative assignment under this method and configuration.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into pass_classifications (
+                assignment_id, assignment_ids, pass_id, station_id, satellite_id,
+                window_start, window_end, classification, evidence, method,
+                config_sha256, simulated
+            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            on conflict on constraint pass_classification_once do nothing
+            """,
+            (
+                row.assignment_ids[0],
+                list(row.assignment_ids),
+                row.pass_id,
+                row.station_id,
+                row.satellite_id,
+                row.window_start,
+                row.window_end,
+                row.classification,
+                Jsonb(dict(row.evidence)),
+                row.method,
+                row.config_sha256,
+                row.simulated,
+            ),
+        )
+        return cur.rowcount > 0

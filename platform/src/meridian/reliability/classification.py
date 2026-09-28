@@ -42,13 +42,24 @@ from meridian.reliability.satellite_silence import SatelliteState
 
 __all__ = [
     "CAPTURED",
+    "METHOD",
     "MISS",
+    "OUTCOME_ORDER",
     "PASS_CLASSES",
     "SATELLITE_CLASSES",
     "PassClass",
     "PassEvidence",
     "classify",
 ]
+
+METHOD = "classification-1"
+"""Recorded with every classification the live accounting stores. Bumped
+whenever a rule here or in :mod:`~meridian.reliability.satellite_silence`
+changes, so a stored row always names the rules that produced it (D-182)."""
+
+OUTCOME_ORDER = ("decoded", "signal_no_decode", "no_signal", "aborted", "not_attempted")
+"""Most informative first. Where several assignments of one physical pass
+reported, the report whose outcome comes first here is the pass's (D-146)."""
 
 PassClass = Literal[
     "successful_reception",
