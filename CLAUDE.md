@@ -97,6 +97,7 @@ meridian/
 │   ├── DECISIONS.md      decisions taken during implementation
 │   ├── GIT-WORKFLOW.md   branching, commits, migration rules
 │   ├── OPERATIONS.md     the runbook: bring-up, commands, backups, alerts
+│   ├── THREAT-MODEL.md   assets, trust boundaries, threats and their mitigations
 │   ├── GLOSSARY.md
 │   ├── PROJECT.md        the full project document
 │   └── SOFTWARE-IMPLEMENTATION-ROADMAP.md   the staged build order

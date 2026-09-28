@@ -3491,6 +3491,22 @@ B is reported as A: its probabilities are A's, and priority weights the objectiv
 
 ---
 
+## D-200 — The threat model is a document mapped to code, and a gap stays a row until it closes
+
+**2026-09-28 · accepted** · *`docs/THREAT-MODEL.md`, Stage 23*
+
+Stage 23 asks for a documented threat model. The security decisions already exist — D-006, D-017, D-023, D-034, D-046, D-050, D-082, D-087, D-088, D-114, D-115 among them — but they are scattered through 3,500 lines of this file, and no page says which threat each one answers or which threats nothing answers.
+
+**`docs/THREAT-MODEL.md` lists assets, actors and five trust boundaries, then one row per threat.** Each row names its mitigation and where the mitigation lives: a module, a file in `deploy/`, or a `D-` entry. The boundaries are the ones the roadmap names: station ↔ MSP, the public API, the tunnel, the operator CLI and the database, plus the supply chain, because a threat model that stops at our own code misses where most of the image comes from.
+
+**A row with nothing behind it is marked `open`, not left out.** The first version lists every gap Stage 23 closes as an open row naming the part that closes it, and each later commit that moves a mitigation edits its row in the same commit. So the document is true at every commit, and the history shows which gaps closed when.
+
+**The status vocabulary is four words: mitigated, partial, accepted, open.** `mitigated` requires a test or a CI step that exercises the control. `accepted` requires a stated reason. Residual risks that no control can close — a compromised station reporting plausible lies about its own passes, Cloudflare reading traffic it terminates — are listed as such rather than dressed up as mitigated.
+
+*Rejected: a STRIDE table per component.* It produces many empty cells for a system this size, and the empty cells read as analysis. One row per real threat, grouped by the boundary it crosses, is shorter and says more.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

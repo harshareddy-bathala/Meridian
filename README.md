@@ -56,6 +56,7 @@ Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](http
 | `docs/DATA-MODEL.md` | Schema |
 | `docs/EVALUATION.md` | Methodology. Read before writing any model code. |
 | `docs/DECISIONS.md` | Decisions taken during implementation, and why |
+| `docs/THREAT-MODEL.md` | What is protected, from whom, and which code or decision answers each threat |
 | `docs/OPERATIONS.md` | Running a deployment: bring-up, operator commands, backup and restore, and what to do when each alert fires |
 | `docs/GLOSSARY.md` | Domain terms |
 | `docs/PROJECT.md` | The full project document — problem, method, phases, budget |
