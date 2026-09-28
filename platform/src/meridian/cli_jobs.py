@@ -38,6 +38,7 @@ import psycopg
 from meridian.cli_schedule import PHASE_1_TURNAROUND_S
 from meridian.cli_serve import LOG_LEVELS, logging_configuration
 from meridian.config import Settings, load_settings
+from meridian.config_checks import DATABASE_PASSWORD, METRICS_TOKEN
 from meridian.metrics.exposition import MULTIPROCESS_DIRECTORY_VARIABLE
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.store.pool import CONNECT_TIMEOUT_S
@@ -46,6 +47,9 @@ if TYPE_CHECKING:
     from meridian.jobs.rounds import DatabaseRoundWork
 
 __all__ = ["JOBS_MODEL_CONFIG", "add_jobs_parser", "run_jobs"]
+
+JOBS_SECRETS = frozenset({DATABASE_PASSWORD, METRICS_TOKEN})
+"""The secrets compose gives the jobs process, and so the only ones it answers for."""
 
 JOBS_MODEL_CONFIG = "A"
 """The configuration every round schedules under, until Stage 18.
@@ -130,7 +134,9 @@ def run_jobs(args: argparse.Namespace) -> int:
         run_until_stopped,
     )
 
-    settings = load_settings()
+    # The jobs process is given the database and the metrics token and nothing
+    # else, so only those are refused as placeholders (D-206).
+    settings = load_settings(secrets_held=JOBS_SECRETS)
     refusal = _refusal(settings)
     if refusal is not None:
         print(f"meridian jobs run: {refusal}", file=sys.stderr)  # noqa: T201

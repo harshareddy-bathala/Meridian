@@ -83,7 +83,7 @@ The env file goes in `deploy/`, beside the compose file: compose reads it from t
 
 The default profile runs the database, migrations, the API on `:8000` and the jobs process that generates passes and schedules them every five minutes. The database is deliberately not published — nothing outside the compose network needs it.
 
-Optional profiles: `--profile metrics` for Prometheus, Alertmanager and Grafana on `:3001` (copy `deploy/prometheus/metrics_token.example` to `metrics_token` first), `--profile sim` for a simulated station, `--profile public` for the tunnel.
+Optional profiles: `--profile metrics` for Prometheus, Alertmanager and Grafana on `:3001` (copy `deploy/prometheus/metrics_token.example` to `metrics_token` first) and `--profile sim` for a simulated station. The tunnel is an override file, `-f deploy/docker-compose.public.yml`, which also takes the API's port off the host; `docs/OPERATIONS.md` § Going public is the runbook.
 
 Bringing the whole platform up on a clean machine in under ten minutes is a hard requirement, not an aspiration. If it takes longer, that is a bug. Measured: about five minutes cold on a laptop including image pulls and the image build, twenty seconds warm. On a Pi, pull a prebuilt image rather than building on the device.
 

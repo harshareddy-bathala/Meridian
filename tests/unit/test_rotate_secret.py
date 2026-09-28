@@ -123,3 +123,29 @@ def test_env_values_ignores_comments_and_quotes(
     env = tmp_path / ".env"
     env.write_text('# TOKEN_HASH_PEPPER=nope\nTOKEN_HASH_PEPPER="yes"\n\nX\n')
     assert tool.env_values(env) == {"TOKEN_HASH_PEPPER": "yes"}
+
+
+def test_the_tunnel_token_is_set_from_what_cloudflare_issued(
+    tool: ModuleType, tmp_path: Path
+) -> None:
+    """Cloudflare issues it, so it is stored rather than generated (D-206)."""
+    tool.set_secret(tmp_path / "secrets", "tunnel_token", "eyJhIjoi...\n")
+
+    stored = tmp_path / "secrets" / "tunnel_token"
+    assert stored.read_text().strip() == "eyJhIjoi..."
+    assert _mode(stored) == 0o444
+    command = tool.recreate_command("tunnel_token")
+    assert "-f deploy/docker-compose.public.yml" in command
+    assert command.endswith("--force-recreate tunnel")
+
+
+def test_only_the_tunnel_token_is_set_by_hand(tool: ModuleType, tmp_path: Path) -> None:
+    with pytest.raises(tool.ToolError, match="rotate the others"):
+        tool.set_secret(tmp_path, "token_hash_pepper", "chosen-by-a-person")
+    with pytest.raises(tool.ToolError, match="nothing was given"):
+        tool.set_secret(tmp_path, "tunnel_token", "  \n")
+
+
+def test_the_public_file_mounts_the_file_set_writes() -> None:
+    public = (TOOL.parents[1] / "docker-compose.public.yml").read_text()
+    assert "source: ./secrets/tunnel_token" in public

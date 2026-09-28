@@ -465,3 +465,28 @@ def test_a_client_address_header_that_is_not_a_name_is_refused(
 ) -> None:
     with pytest.raises(InsecureConfigurationError, match="CLIENT_ADDRESS_HEADER"):
         _load(monkeypatch, CLIENT_ADDRESS_HEADER="X-Real-IP: 1.2.3.4")
+
+
+def test_a_process_answers_only_for_the_secrets_it_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-206: the jobs process is given no pepper, invite or Grafana password.
+
+    Checking them there refused every public start of it; the API still refuses
+    all five, which is the control.
+    """
+    held_by_jobs = frozenset({"DATABASE_URL password", "METRICS_TOKEN"})
+    jobs_env = {
+        "DATABASE_URL": f"postgresql://meridian:{REAL_PASSWORD}@db:5432/meridian",
+        "METRICS_TOKEN": REAL_METRICS_TOKEN,
+        "MERIDIAN_PUBLIC": "1",
+    }
+    for key, value in {**BASE_ENV, **jobs_env}.items():
+        monkeypatch.setenv(key, value)
+
+    assert load_settings(secrets_held=held_by_jobs).is_public
+    with pytest.raises(InsecureConfigurationError, match="TOKEN_HASH_PEPPER"):
+        load_settings()
+    monkeypatch.setenv("METRICS_TOKEN", "change-me")
+    with pytest.raises(InsecureConfigurationError, match="METRICS_TOKEN"):
+        load_settings(secrets_held=held_by_jobs)

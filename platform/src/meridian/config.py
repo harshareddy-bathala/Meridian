@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from meridian.config_checks import check_settings
+from meridian.config_checks import EVERY_SECRET, check_settings
 from meridian.secret_files import (
     PLACEHOLDER,
     InsecureConfigurationError,
@@ -231,12 +231,16 @@ def _database_url() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
-def load_settings() -> Settings:
+def load_settings(*, secrets_held: frozenset[str] = EVERY_SECRET) -> Settings:
     """Read settings from the environment and refuse an unsafe combination.
 
     Reads ``os.environ`` directly and takes no override mapping, so a test sets
     a variable the same way a deployment does — ``monkeypatch.setenv``, which
     unsets it again afterwards. See ``tests/unit/test_config.py``.
+
+    ``secrets_held`` names the secrets this process is given, by the names in the
+    placeholder refusal. Only those are refused as placeholders; every other
+    check applies whatever the process holds (D-206).
 
     **The platform will not start with placeholder secrets on a public address.**
     D-006 argues that shipping an unauthenticated write endpoint to a public
@@ -290,5 +294,5 @@ def load_settings() -> Settings:
         simulator_station_count=_int_env("SIMULATOR_STATION_COUNT", 1),
     )
 
-    check_settings(settings)
+    check_settings(settings, secrets_held)
     return settings

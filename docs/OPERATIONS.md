@@ -27,7 +27,7 @@ cp deploy/prometheus/metrics_token.example deploy/prometheus/metrics_token
 - `POSTGRES_PASSWORD`, `TOKEN_HASH_PEPPER`, `REGISTRATION_INVITE_TOKEN`, `METRICS_TOKEN` and `GRAFANA_ADMIN_PASSWORD` in `deploy/.env`;
 - the same `METRICS_TOKEN` value in `deploy/prometheus/metrics_token`.
 
-The platform refuses to start in public mode while any of them is still `change-me`. Setting `CLOUDFLARE_TUNNEL_TOKEN` or `TUNNEL_HOSTNAME`, or a non-loopback `PUBLIC_BASE_URL`, puts it in public mode.
+The platform refuses to start in public mode while any of them is still `change-me`. Running with `deploy/docker-compose.public.yml`, setting `TUNNEL_HOSTNAME`, or a non-loopback `PUBLIC_BASE_URL` puts it in public mode.
 
 **On a real deployment, keep the secrets in files instead** (D-201). `deploy/tools/rotate_secret.py init` writes them into `deploy/secrets/`, carrying over any value already set in `deploy/.env`, and `deploy/docker-compose.secrets.yml` mounts them. Add that file to every command:
 
@@ -55,14 +55,39 @@ The platform image is `ghcr.io/harshareddy-bathala/meridian:main`, published for
 |---|---|---|
 | *(default)* | `db`, `migrate`, `api` on `:8000`, `jobs` | `deploy/.env` |
 | `metrics` | Prometheus, Alertmanager, Grafana on `:3001` | `deploy/prometheus/metrics_token` |
-| `public` | the Cloudflare tunnel | `CLOUDFLARE_TUNNEL_TOKEN` and real secrets |
 | `sim` | catalogue and invite seeding, a simulated fleet | nothing more |
 
 ```bash
-compose --profile metrics --profile public up -d
+compose --profile metrics up -d
 compose ps                      # every service with a healthcheck says (healthy)
 curl http://localhost:8000/healthz
 ```
+
+### Going public
+
+The public deployment is an override file, `deploy/docker-compose.public.yml`, not a profile (D-206). It adds the Cloudflare tunnel, tells the API to trust the edge's `CF-Connecting-IP` for rate limits, and **removes the API's port from the host**, because a profile can add a service but cannot take a port away. It needs Docker Compose 2.24.4 or later.
+
+```bash
+python deploy/tools/rotate_secret.py init                    # once, § Rotating secrets
+python deploy/tools/rotate_secret.py set tunnel_token < token.txt
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml \
+  -f deploy/docker-compose.public.yml --profile metrics up -d
+```
+
+With it, `curl http://localhost:8000` on the host is refused, as intended. Reach the API through the hostname, or inside the network:
+
+```bash
+compose exec api python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/healthz').read())"
+```
+
+`compose` in the commands elsewhere on this page then means all three files.
+
+### Container hardening
+
+Every service drops all Linux capabilities, runs with `no-new-privileges`, and has a read-only root filesystem (D-206). What each writes is a named volume or a tmpfs listed beside it in the compose file. The database runs as its own user, uid 70, from the start.
+
+- **A service that fails with "Read-only file system"** is writing somewhere new. Give it a tmpfs, or a volume if the data must survive a restart, in the compose file, and say why beside it.
+- **`compose run` for a command that writes files,** such as `meridian snapshot export`, needs a volume for its output, which § Dataset snapshots already mounts.
 
 Bringing the whole stack up on a clean machine takes under ten minutes. CI measures it on every pull request, for the default and `metrics` profiles together.
 
@@ -705,7 +730,7 @@ compose exec api meridian invite revoke --label "environment bootstrap"
 
 ### The tunnel token
 
-Rotate it in the Cloudflare dashboard (*Zero Trust* → *Networks* → *Tunnels* → the tunnel → *Refresh token*), which ends the old token's connections. Put the new value in `CLOUDFLARE_TUNNEL_TOKEN` in `deploy/.env`, then `compose --profile public up -d --force-recreate tunnel`. The dashboard is unreachable from outside between the two steps; stations queue their reports and send them when it returns.
+Rotate it in the Cloudflare dashboard (*Zero Trust* → *Networks* → *Tunnels* → the tunnel → *Refresh token*), which ends the old token's connections. Store the new value with `python deploy/tools/rotate_secret.py set tunnel_token < token.txt`, then run the command it prints, which recreates the tunnel with the public file. The dashboard is unreachable from outside between the two steps; stations queue their reports and send them when it returns.
 
 ### Station tokens
 

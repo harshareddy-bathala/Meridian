@@ -3,6 +3,7 @@
     python deploy/tools/rotate_secret.py init
     python deploy/tools/rotate_secret.py rotate token_hash_pepper
     python deploy/tools/rotate_secret.py retire token_hash_pepper
+    python deploy/tools/rotate_secret.py set tunnel_token < token.txt
 
 The files live in `deploy/secrets/`, one secret per file, and
 `deploy/docker-compose.secrets.yml` mounts each one into the containers that read
@@ -19,6 +20,9 @@ A renamed file is a new inode, and a bind mount keeps the old one, so every
 change ends with the containers that read it being recreated. The tool prints
 that command rather than running it: which services to restart is the step an
 operator should see.
+
+**The tunnel token is issued by Cloudflare, not generated here.** `set` reads it
+from standard input, so it never appears in the shell's history or in `ps`.
 
 **Rotating the pepper keeps the old one.** It moves to `token_hash_pepper_previous`,
 which the platform accepts for verification only and re-hashes away from as
@@ -51,10 +55,14 @@ GENERATED = {
 }
 """Secrets this tool can generate, and the variable each replaces."""
 
+TUNNEL_TOKEN = "tunnel_token"
+"""Issued by Cloudflare; stored by `set`, read by docker-compose.public.yml."""
+
 READERS = {
     PEPPER: ("api",),
     "metrics_token": ("api", "jobs", "prometheus"),
     "registration_invite_token": ("api",),
+    TUNNEL_TOKEN: ("tunnel",),
 }
 """The services that read each secret at start and must be recreated."""
 
@@ -145,6 +153,16 @@ def rotate(directory: Path, name: str) -> None:
     write_secret(directory, name, new_secret())
 
 
+def set_secret(directory: Path, name: str, value: str) -> None:
+    """Store a secret someone else issued, such as the tunnel token."""
+    if name != TUNNEL_TOKEN:
+        raise ToolError(f"only {TUNNEL_TOKEN} is set by hand; rotate the others")
+    if not value.strip():
+        raise ToolError("nothing was given on standard input")
+    directory.mkdir(mode=DIR_MODE, exist_ok=True)
+    write_secret(directory, name, value.strip())
+
+
 def retire(directory: Path, name: str) -> None:
     """End a pepper rotation: forget the previous pepper."""
     if name != PEPPER:
@@ -155,7 +173,8 @@ def retire(directory: Path, name: str) -> None:
 def recreate_command(name: str) -> str:
     """The command that makes the running services read `name` again."""
     services = " ".join(READERS.get(name, ("api",)))
-    return f"{COMPOSE} up -d --force-recreate {services}"
+    public = " -f deploy/docker-compose.public.yml" if name == TUNNEL_TOKEN else ""
+    return f"{COMPOSE}{public} up -d --force-recreate {services}"
 
 
 def run(action: str, name: str | None, directory: Path, env_file: Path) -> str:
@@ -165,14 +184,18 @@ def run(action: str, name: str | None, directory: Path, env_file: Path) -> str:
         return "\n".join([*lines, f"then: {COMPOSE} up -d"])
     if not name:
         raise ToolError(f"{action} needs the name of a secret")
-    (rotate if action == "rotate" else retire)(directory, name)
-    return f"{action}d {name}; then: {recreate_command(name)}"
+    if action == "set":
+        set_secret(directory, name, sys.stdin.read())
+    else:
+        (rotate if action == "rotate" else retire)(directory, name)
+    done = {"rotate": "rotated", "retire": "retired", "set": "stored"}[action]
+    return f"{done} {name}; then: {recreate_command(name)}"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("action", choices=("init", "rotate", "retire"))
-    parser.add_argument("name", nargs="?", help="the secret, for rotate and retire")
+    parser.add_argument("action", choices=("init", "rotate", "retire", "set"))
+    parser.add_argument("name", nargs="?", help="the secret, for rotate, retire, set")
     parser.add_argument("--dir", type=Path, default=SECRETS_DIR)
     parser.add_argument("--env-file", type=Path, default=ENV_FILE)
     args = parser.parse_args(argv)

@@ -3652,6 +3652,38 @@ Every dependency was pinned (D-113, `uv.lock`, `package-lock.json`) and nothing 
 
 ---
 
+## D-206 — Every container is hardened, and the public deployment is a file that takes the API port away
+
+**2026-09-28 · accepted** · *`deploy/docker-compose.yml`, `deploy/docker-compose.public.yml`, `meridian.config_checks`, `meridian.cli_jobs`, Stage 23* · *closes the gap D-051 named*
+
+**Every service drops every Linux capability, runs with `no-new-privileges`, and has a read-only root filesystem.** One YAML anchor, `x-hardening`, merged into each service, and `tests/unit/test_compose_hardening.py` fails with the service's name if one is added without it. What each service writes is named beside it: a volume for state, a tmpfs for scratch.
+
+- **The platform services** write nothing outside their volumes. The image sets `PYTHONDONTWRITEBYTECODE`, and uv compiled the bytecode at build. Each gets a tmpfs `/tmp`, and the API keeps its metrics directory as before.
+- **The database runs as uid 70, its own `postgres` user, from the start.** The image's entrypoint, started as root, needs `CHOWN`, `SETUID` and `SETGID` to hand the data directory over and step down. Started as the owner, it needs none, and a named volume copies the image directory's ownership, which is already 70. Its socket directory and `/tmp` are tmpfs. Measured on a fresh volume: initdb, TimescaleDB's tuning script and the extension all run.
+- **Grafana** gets tmpfs for `/tmp` and `/var/log/grafana`, which it creates at start even when logging to the console only. Prometheus and Alertmanager write only to their volumes.
+
+**No service adds a capability back.** Nothing binds below port 1024 and nothing changes ownership at runtime, which the test also asserts.
+
+**The public deployment is `deploy/docker-compose.public.yml`, not a profile.** D-051 recorded that `CF-Connecting-IP` is forgeable while compose publishes the API port on the host, and D-202's per-client limits key on that header. A profile can add a service but cannot remove a port. So the tunnel moved from the `public` profile into an override file, together with the two things that must come with it:
+
+- `ports: !reset []` on the API, so the host publishes nothing and the only way to the API from outside the compose network is through Cloudflare, which overwrites `CF-Connecting-IP` on every request it forwards;
+- `CLIENT_ADDRESS_HEADER=CF-Connecting-IP`, set in this file only, which the test checks;
+- `MERIDIAN_PUBLIC=1` for the API and the jobs process, since running the tunnel is what makes the platform public.
+
+None of the three can be had without the others. The tunnel reads its token from `deploy/secrets/tunnel_token` through cloudflared's `TUNNEL_TOKEN_FILE`, not from `.env`; `rotate_secret.py set tunnel_token` stores it from standard input. The file needs Docker Compose 2.24.4 or later, for `!reset`.
+
+**The main file keeps its port.** The laptop, the simulator profile and CI's ten-minute bring-up reach the API on `:8000`, and there `CF-Connecting-IP` is never trusted. A `CLOUDFLARE_TUNNEL_TOKEN` left in an older `.env` still sets `MERIDIAN_PUBLIC`, so an upgrade never makes a deployment that considered itself public stop checking its secrets.
+
+**Found on the way: the jobs process could never start publicly.** The placeholder refusal checks five secrets, and compose gives the jobs process two of them, the database URL and the metrics token. The other three fell back to `change-me`, so on any deployment marked public the process refused to start and restarted forever. It had never been run publicly: the Phase 1 run (D-088) predates the jobs service. `load_settings` now takes the names of the secrets a process holds, and the jobs process answers for its two. The API still answers for all five, which `tests/unit/test_config.py` uses as the control.
+
+**Checked on a local stack before commit:** the default and `metrics` profiles came up healthy from a fresh volume in 22 s with the hardened file, and CI's image-job sequence passed against it — the dashboard, `/metrics`, both Prometheus targets and every rule, Grafana's provisioned dashboard, a simulated station registering and counted online, and a backup restored to the same rows. With the public file and a placeholder tunnel token, the API and the jobs process were healthy, `curl localhost:8000` on the host was refused, and cloudflared read the token file and rejected the placeholder.
+
+*Rejected: binding the API port to `127.0.0.1` in public mode.* A local user could still forge the header, and compose cannot choose a binding by profile either.
+
+*Rejected: `cap_add` for the database instead of `user`.* It keeps a root process in the container for the life of the entrypoint, to perform a hand-over that a named volume has already made unnecessary.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

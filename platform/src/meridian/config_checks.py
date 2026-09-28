@@ -19,11 +19,39 @@ from meridian.secret_files import PLACEHOLDER, InsecureConfigurationError
 if TYPE_CHECKING:
     from meridian.config import Settings
 
-__all__ = ["check_settings", "secrets_of"]
+__all__ = [
+    "DATABASE_PASSWORD",
+    "EVERY_SECRET",
+    "METRICS_TOKEN",
+    "check_settings",
+    "secrets_of",
+]
+
+PEPPER = "TOKEN_HASH_PEPPER"
+INVITE = "REGISTRATION_INVITE_TOKEN"
+DATABASE_PASSWORD = "DATABASE_URL password"
+GRAFANA_PASSWORD = "GRAFANA_ADMIN_PASSWORD"
+METRICS_TOKEN = "METRICS_TOKEN"
+
+EVERY_SECRET = frozenset(
+    {PEPPER, INVITE, DATABASE_PASSWORD, GRAFANA_PASSWORD, METRICS_TOKEN}
+)
+"""What a process is assumed to hold unless it says otherwise (D-206).
+
+The API holds all of them, or answers for them: Grafana's password is checked
+there because nothing else in the platform can see it. The jobs process holds
+only the database password and the metrics token, and is given only those, so
+checking the rest there refused every public start of it.
+"""
 
 
-def check_settings(settings: Settings) -> None:
-    """Remember every secret for redaction, then refuse an unsafe combination."""
+def check_settings(settings: Settings, held: frozenset[str] = EVERY_SECRET) -> None:
+    """Remember every secret for redaction, then refuse an unsafe combination.
+
+    Args:
+        settings: What was read.
+        held: The secrets this process holds, by the names in the refusal.
+    """
     # Before any refusal, so a message that quotes a value cannot print one.
     # Every process that loads settings holds these, so every one redacts them
     # (D-204).
@@ -32,7 +60,7 @@ def check_settings(settings: Settings) -> None:
     _refuse_a_rotation_that_did_not_happen(settings)
 
     if settings.is_public:
-        _refuse_placeholder_secrets(settings)
+        _refuse_placeholder_secrets(settings, held)
         _refuse_unlimited_public_start(settings)
 
 
@@ -97,7 +125,7 @@ def _refuse_unlimited_public_start(settings: Settings) -> None:
     )
 
 
-def _refuse_placeholder_secrets(settings: Settings) -> None:
+def _refuse_placeholder_secrets(settings: Settings, held: frozenset[str]) -> None:
     """Raise if any secret is still ``change-me`` on a publicly reachable deployment."""
     # The database password is read back out of the URL the process will
     # actually connect with, not from POSTGRES_PASSWORD. Compose embeds the
@@ -115,17 +143,17 @@ def _refuse_placeholder_secrets(settings: Settings) -> None:
     placeholders = [
         name
         for name, value in (
-            ("TOKEN_HASH_PEPPER", settings.token_hash_pepper),
-            ("REGISTRATION_INVITE_TOKEN", settings.registration_invite_token),
-            ("DATABASE_URL password", settings.database_password),
-            ("GRAFANA_ADMIN_PASSWORD", settings.grafana_admin_password),
+            (PEPPER, settings.token_hash_pepper),
+            (INVITE, settings.registration_invite_token),
+            (DATABASE_PASSWORD, settings.database_password),
+            (GRAFANA_PASSWORD, settings.grafana_admin_password),
             # D-087. A placeholder here is worse than a placeholder elsewhere:
             # the token is the only thing standing between a public hostname and
             # the process internals, and `change-me` is the first value anyone
             # guessing would try.
-            ("METRICS_TOKEN", settings.metrics_token),
+            (METRICS_TOKEN, settings.metrics_token),
         )
-        if value == PLACEHOLDER
+        if value == PLACEHOLDER and name in held
     ]
     if not placeholders:
         return
