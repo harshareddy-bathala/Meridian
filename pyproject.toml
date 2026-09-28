@@ -171,6 +171,8 @@ convention = "google"
 "deploy/tools/restore.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/compose_db.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/rotate_secret.py" = ["T201", "D", "ANN", "PLR", "C90"]
+"deploy/tools/restore_drill.py" = ["T201", "D", "ANN", "PLR", "C90"]
+"deploy/tools/scheduled_backup.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
 # The ban below is global; this is the one module exempt from it, so the boundary
 # is checked by CI rather than remembered by a reviewer.

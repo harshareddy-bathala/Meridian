@@ -3752,6 +3752,47 @@ form-action 'none'; frame-ancestors 'none'
 
 ---
 
+## D-209 — Backups run nightly with a stated retention, and a weekly drill restores one
+
+**2026-09-28 · accepted** · *`deploy/tools/scheduled_backup.py`, `deploy/tools/restore_drill.py`, `deploy/systemd/`, Stage 23* · *completes D-115*
+
+D-115 built backup and restore and left "a backup schedule, retention, and a restore drill on the real deployment" to this stage. CI's round trip proves the tools work on a runner; nothing proved that last night's dump on the Pi would restore, and nothing took one.
+
+**A nightly backup, as systemd units in `deploy/`.** `meridian-backup.timer` runs `scheduled_backup.py` at 02:47 with up to ten minutes of jitter, and `Persistent=true` makes up a night the host was off. The script takes `meridian-<UTC time>.dump` with `backup.py`, reads the file back against the manifest it just wrote, and then prunes. Nothing is pruned after a failed backup, since the old dumps may then be all there is. The service runs with `UMask=0077`, because a dump holds every token hash and invite.
+
+**Retention: every dump from the last 7 days, the newest of each of the last 4 ISO weeks, and the newest of each of the last 6 months** — 17 dumps at most. The newest dump is always kept, however old, so a host that was off for a year still has its last backup. Only files named as the script names them are ever deleted, so a dump taken by hand before an upgrade stays until someone removes it. Weeks are counted between Mondays, so a 53-week ISO year does not shift the policy.
+
+**A weekly drill that never touches the deployment.** `meridian-restore-drill.timer` runs `restore_drill.py --latest backups` on Sundays, an hour after that night's backup. It checks the manifest exactly as `restore.py` does, restores the dump into a scratch database, `meridian_restore_drill`, on the same server, between TimescaleDB's pre- and post-restore steps and with `--exit-on-error --no-acl`, then checks that the copy is at the manifest's migration and reads every table, printing its row count. The scratch database is dropped whether the drill passed or not, and a drill that died is cleaned up by the next, because the name is fixed. A failed drill is a failed systemd unit, visible in `systemctl --failed`. It needs free disk for one more copy of the database while it runs.
+
+**The drill is a test, and the test is the drill.** `tests/integration/test_restore_drill.py` runs the same tool against the test database, with the `db` container replaced by a local shell and libpq's `PG*` variables pointing at the test server. It takes a dump with `backup.py`, drills it, and requires the restored copy's row count for every table to equal the source's, which is a stronger check than the drill can make on a live deployment, where rows arrive during the backup. A dump with one flipped byte is the control, refused on its checksum. The test needs `pg_dump`, `pg_restore` and `psql` on the path at the server's major version: without them it skips on a workstation and fails in CI, where a skipped drill would read as a passed one.
+
+**What this does not do: copy the dumps off the host.** A dump on the disk that holds the database protects against a mistake, not against the disk. Copying `backups/` elsewhere, and keeping the ingest raw store and dataset snapshots that `backup.py` already names as outside its dump, is the operator's step. `OPERATIONS.md` gives the command, and Stage 33, custody, owns the rest.
+
+*Rejected: a `backup` service in compose.* It would need the Docker socket inside a container to reach `pg_dump` in the `db` container, which is root on the host by another route, or a PostgreSQL client in the platform image, which D-115 rejected.
+
+*Rejected: counting rows into the manifest at backup time, for the drill to compare.* The counts and the dump would come from different moments while the API keeps writing, and would disagree on a healthy backup. The drill checks what can be checked on a live deployment, and the test checks the rest on a quiet one.
+
+---
+
+## D-210 — The public API's privacy is reviewed as a whole, and its fields are pinned
+
+**2026-09-28 · accepted** · *`docs/THREAT-MODEL.md` §7, `tests/unit/test_public_privacy.py`, Stage 23*
+
+Each public endpoint was reviewed for disclosure when it was built (D-082, D-086, D-093), and never all of them together. `THREAT-MODEL.md` §7 is that review: every response, what it discloses about a station, its operator or its site, what protects it, and a verdict.
+
+**A test pins every published field to the review.** `tests/unit/test_public_privacy.py` lists the fields of every public response model. A field added or removed fails the suite until the list and §7 change in the same commit, so the review stays true without anyone remembering to redo it. A second assertion refuses any field whose name contains a credential or station-internal word, the same list D-088's verifier uses from outside.
+
+**What the review found:**
+
+- **Pagination cursors are clean.** A cursor carries the last row's sort key, and a sort key at full precision would undo D-093's widened windows. Every cursor is an id, or a value its response already publishes.
+- **A station's altitude is published to the metre, and that is open.** With a terrain model, an altitude to the metre narrows D-082's 1.1 km cell to a contour line through it. Rounding altitude to 10 m when the declared precision is coarser than three decimal places is proposed, not done: it changes a published decision, and a published figure, so it is the team's to take.
+- **`name` and `operator` are published verbatim**, which MSP §4.1 does not tell an implementer. A sentence in the specification is owed, in a specification pull request of its own (`GIT-WORKFLOW.md` rule 9), and is not made here.
+- **The largest store of operator data is the heartbeat history,** including each heartbeat's opaque `health` object, kept indefinitely. Its retention belongs to Stage 19, which the roadmap already gives retention and aggregates, and §7 says so.
+
+**Operator data is already minimal and stays so.** The platform holds no contact (D-107), logs only the tunnel's address as a caller's, keeps callers' real addresses in memory only (D-202), and publishes no client implementation or version.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

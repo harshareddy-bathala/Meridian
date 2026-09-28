@@ -116,7 +116,8 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Rotate a platform secret | `python deploy/tools/rotate_secret.py rotate <name>` — § Rotating secrets |
 | Load satellites | `compose exec api meridian catalogue load --file deploy/catalogue/development.json` |
 | Migration status | `compose exec api meridian db status` — exit 0 only when at head |
-| Apply migrations | `compose run --rm migrate` |
+| Apply migrations, and re-grant the database roles | `compose run --rm migrate` |
+| Check that the newest backup restores | `python deploy/tools/restore_drill.py --latest backups` |
 | Generate passes now | `compose exec api meridian passes generate --from <ISO-8601 Z> --to <ISO-8601 Z>` |
 | Schedule now | `compose exec api meridian schedule --from <ISO-8601 Z> --to <ISO-8601 Z> --config A` |
 | One scheduling round now | `compose exec jobs meridian jobs run --once` |
@@ -824,7 +825,41 @@ If a step after the database is dropped fails, `api` and `jobs` stay stopped on 
 
 Afterwards, check with `compose exec api meridian db status`.
 
-A backup schedule, retention and a restore drill on the real deployment are Stage 23's. CI already performs the round trip on every pull request.
+### Every night, automatically
+
+`deploy/systemd/` holds two timers for the host that runs the stack (D-209):
+
+| Unit | When | Does |
+|---|---|---|
+| `meridian-backup.timer` | nightly, 02:47 | `scheduled_backup.py`: a dump named for its UTC time, checked against its manifest, then retention |
+| `meridian-restore-drill.timer` | Sundays, 03:47 | `restore_drill.py --latest backups`: the newest dump restored into a scratch database and checked |
+
+Install them once. Edit `WorkingDirectory` to the checkout's path and `User` to the account that runs `docker compose` in both `.service` files, then:
+
+```bash
+sudo cp deploy/systemd/meridian-* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now meridian-backup.timer meridian-restore-drill.timer
+systemctl list-timers 'meridian-*'
+```
+
+**Retention** keeps every dump from the last 7 days, the newest of each of the last 4 weeks, and the newest of each of the last 6 months: 17 at most. The newest is never deleted. A dump you took by hand under another name, such as `backups/meridian-before-upgrade.dump`, is never deleted either. Change the policy with `--keep-daily`, `--keep-weekly` and `--keep-monthly` in the service's `ExecStart`.
+
+**Copy `backups/` off the host.** A dump on the disk that holds the database does not survive that disk. The timers do not do this for you:
+
+```bash
+rsync -a --chmod=F600 backups/ you@elsewhere:meridian-backups/
+```
+
+### The restore drill
+
+```bash
+python deploy/tools/restore_drill.py --latest backups       # or a named dump
+```
+
+It restores into `meridian_restore_drill` beside the live database, never into it, checks the migration and reads every table, prints each table's row count, and drops the scratch database whatever happened. It needs free disk for one more copy of the database while it runs. Exit 0 means the dump would restore. **When it fails:** `journalctl -u meridian-restore-drill` says which step; a checksum failure means the file changed after it was written, so take a fresh backup now and check the disk.
+
+CI also performs the full round trip, back up, restore and compare row counts, on every pull request, and `tests/integration/test_restore_drill.py` runs the drill against the test database.
 
 ---
 

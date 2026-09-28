@@ -97,7 +97,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | P-8 | Script injection or framing of the dashboard | A strict content-security policy with no inline script or style and one foreign origin for map tiles, `frame-ancestors 'none'` and `X-Frame-Options`, on every response; checked in Chromium with no violation | D-208; `meridian.api.security_headers`; `tests/msp_conformance/test_security_headers.py` | mitigated |
 | P-9 | Another origin reading the API with a visitor's browser | No CORS middleware and no `Access-Control-Allow-*` header, pinned by a preflight and a plain request from another origin | D-091, D-208; `tests/msp_conformance/test_security_headers.py` | mitigated |
 | P-10 | Process internals exposed through `/metrics` | A bearer token, and a 404 indistinguishable from an unrouted path without it | D-087; `meridian.metrics.access` | mitigated |
-| P-11 | The public API publishes more than a visitor needs | Reviewed per endpoint when each was built; never reviewed as a whole | D-082, D-093, D-107 | open — Stage 23 part 9 |
+| P-11 | The public API publishes more than a visitor needs | Reviewed as a whole, field by field, with every field pinned by a test; one open finding, altitude | D-210; §7 below; `tests/unit/test_public_privacy.py` | partial — altitude to the metre, §7 |
 
 ### B3 — the tunnel
 
@@ -116,7 +116,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | O-2 | A leaked platform secret cannot be replaced safely | Each secret is a file written by a tool and read at start; the pepper overlaps with its predecessor, which verifies and re-hashes but never hashes anything new; a runbook per secret | D-201; `meridian.registry.pepper_rotation`; `deploy/tools/rotate_secret.py`; `tests/integration/test_pepper_rotation.py` | mitigated |
 | O-3 | Secrets committed to the repository | `.env`, `metrics_token` and the Alertmanager secret files are gitignored; `.env.example` holds only `change-me` | `.gitignore`; GIT-WORKFLOW rule 4 | mitigated |
 | O-4 | A compromised process escalating inside its container | Every service drops all capabilities, runs with `no-new-privileges` and a read-only root filesystem; the platform runs as uid 10001 and the database as uid 70 | D-206; `deploy/docker-compose.yml`; `tests/unit/test_compose_hardening.py` | mitigated |
-| O-5 | A backup file read by someone who should not | `backups/` and `*.dump` are gitignored; the runbook calls a dump a secret | `OPERATIONS.md` § Backup and restore | partial — no schedule or retention; Stage 23 part 9 |
+| O-5 | A backup file read by someone who should not | Written `0600` by the nightly unit (`UMask=0077`); `backups/` and `*.dump` are gitignored and excluded from the image build | D-201, D-209; `deploy/systemd/meridian-backup.service` | mitigated |
 | O-6 | Secrets baked into an image layer by a local build | `.dockerignore` excludes every secret path at any depth, checked by a test against each path the repository uses | D-201; `.dockerignore`; `tests/unit/test_layout.py` | mitigated |
 
 ### B5 — database
@@ -126,7 +126,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | D-1 | The database reachable from outside | `expose`, never `ports` | `deploy/docker-compose.yml` | mitigated |
 | D-2 | A compromised API process rewriting the schema or dropping tables | The API, the jobs process and the CLI connect as `meridian_api`, which may change rows and nothing else; only `migrate` holds the owner's password | D-207; `meridian.store.database_roles`; `tests/integration/test_database_roles.py` | partial — the owner is a superuser, which TimescaleDB requires |
 | D-3 | SQL injection | Every statement is parameterised through psycopg; no SQL is built from request text | `meridian.store` | mitigated |
-| D-4 | Losing the database | Backup and a checksummed restore that refuses a mismatched TimescaleDB | D-115; `deploy/tools/backup.py`, `restore.py`; CI's round trip | partial — no schedule, retention or drill; Stage 23 part 9 |
+| D-4 | Losing the database | Nightly checksummed backups kept by a daily, weekly and monthly policy; a weekly drill restores the newest into a scratch database and checks it; an off-host copy is the operator's step | D-115, D-209; `deploy/tools/scheduled_backup.py`, `restore_drill.py`; `tests/integration/test_restore_drill.py` | partial — the off-host copy is not automated |
 | D-5 | A migration failing half-way | An upgrade runs in one transaction, so a failure leaves the revision it started from; the API does not start until `migrate` succeeds | D-019; `deploy/migrations/env.py`; `deploy/docker-compose.yml` | partial — recovery undocumented; Stage 23 part 10 |
 
 ### B6 — supply chain
@@ -148,3 +148,22 @@ Stated so that nobody has to find them.
 - **The pepper is defence in depth, not the main defence.** Tokens and registration keys are 256-bit random values, so their hashes cannot be inverted with or without the pepper. What the pepper adds is that a database leak alone does not let an attacker confirm a guessed token offline.
 - **Cloudflare is trusted** with every public request in the clear (T-4).
 - **The operator is trusted.** Anyone who can run `docker compose` on the host is root there in effect.
+
+## 7. Public API privacy review
+
+Reviewed for Stage 23 (D-210), field by field, against one question: what does a stranger learn about a station, its operator or its site that they did not choose to publish? `tests/unit/test_public_privacy.py` pins every field below, so a field added to a public response fails the suite until this table covers it.
+
+| Response | Discloses | Protection | Verdict |
+|---|---|---|---|
+| Station | `name` and `operator` verbatim, as the operator typed them at registration | a display label, not a contact; no contact is held (D-107) | accepted — MSP §4.1 does not yet tell an implementer these two are public; a spec note is owed, in its own pull request |
+| Station `location` | latitude and longitude | rounded to the station's declared precision, 2 decimal places (about 1.1 km) unless it declared otherwise, at serialisation only | mitigated (D-082) |
+| Station `location.alt_m` | altitude to the metre | none beyond rounding to the metre | **open** — with a terrain model, an altitude to the metre narrows a 1.1 km cell to a contour line. Rounding it to 10 m when the declared precision is coarser than 3 decimal places is proposed; it changes D-082, so it is the team's decision |
+| Station capabilities | bands, modes, tracking, the declared horizon mask | the mask is what the operator chose to declare | accepted — an obstruction's bearing is a clue to the site, which the operator can see when they declare it |
+| Passes, assignments, observations | when a station hears what | windows widened to whole minutes, angles to whole degrees, so a schedule cannot be inverted into an exact position | mitigated (D-093) |
+| Heartbeats | state, what it holds and is listening to, clock offset, `sent_at` and `received_at` to the microsecond | no position in any field; the `health` object is never published | accepted — liveness is the point of the dashboard |
+| Observations | outcome, peak SNR, provenance, `submitted_at` | no position; no raw product | accepted |
+| Pagination cursors | the sort key of the last row served | every cursor is an id or a value the same response already publishes, never a timestamp the response widens | checked, no leak |
+| Satellites, transmitters, simulator runs | public catalogue data; a run's id and station count | nothing about a person or a place | accepted |
+| Every response | never a token, a registration key, an invite, `health`, a seed or a client version | the models name their fields, D-088's verifier checks from outside, and the test above checks from inside | mitigated |
+
+**What the platform holds about operators, and for how long.** A station's name, operator label and full-precision location, which scheduling needs; the hashes of its credentials; the opaque `health` object of every heartbeat, capped at 4 KiB (D-055), which a station could fill with anything, including a hostname. Container logs hold the tunnel's address rather than a caller's, and rotate after three 10 MB files (D-114); the rate limiter holds callers' addresses in memory only (D-202). Heartbeats and observations are kept indefinitely until Stage 19's retention policy exists; that is the largest store of operator data, and its retention is owed there.
