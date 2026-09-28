@@ -39,6 +39,7 @@ from meridian.cli_invite import run_invite
 from meridian.cli_jobs import add_jobs_parser, run_jobs
 from meridian.cli_model import add_model_parser, run_model
 from meridian.cli_passes import run_passes
+from meridian.cli_reliability import add_reliability_parser, run_reliability
 from meridian.cli_schedule import configurations, run_scheduler
 from meridian.cli_serve import add_serve_parser, run_serve
 from meridian.cli_snapshot import add_snapshot_parser, run_snapshot
@@ -319,13 +320,24 @@ def _build_parser() -> argparse.ArgumentParser:
     add_db_parser(subcommands)
     add_snapshot_parser(subcommands)
     add_model_parser(subcommands)
+    add_reliability_parser(subcommands)
     _add_pending_parsers(subcommands)
 
     return parser
 
 
 NEEDS_ACTION = frozenset(
-    {"catalogue", "db", "invite", "jobs", "model", "passes", "snapshot", "station"}
+    {
+        "catalogue",
+        "db",
+        "invite",
+        "jobs",
+        "model",
+        "passes",
+        "reliability",
+        "snapshot",
+        "station",
+    }
 )
 """Commands that are a noun and mean nothing without a verb after them.
 
@@ -342,6 +354,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "jobs": run_jobs,
     "model": run_model,
     "passes": run_passes,
+    "reliability": run_reliability,
     "schedule": run_scheduler,
     "serve": run_serve,
     "snapshot": run_snapshot,

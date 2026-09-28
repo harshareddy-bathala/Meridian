@@ -25,11 +25,14 @@ from prometheus_client.metrics_core import Metric
 from meridian.api import domain_collector
 from meridian.api.domain_collector import DomainCollector
 from meridian.registry.liveness_counts import count_by_liveness
+from meridian.reliability.classification import PASS_CLASSES
+from meridian.reliability.config import ReliabilityConfigError
 from meridian.store.monitoring import (
     ASSIGNMENT_STATES,
     MonitoringSnapshot,
     StationHeartbeat,
 )
+from meridian.store.reliability_reads import ClassifiedRow
 
 NOW = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
 
@@ -64,6 +67,31 @@ def _snapshot() -> MonitoringSnapshot:
             for simulated in (False, True)
         },
         overdue={False: 1, True: 0},
+    )
+
+
+@pytest.fixture(autouse=True)
+def classified(monkeypatch: pytest.MonkeyPatch) -> list[ClassifiedRow]:
+    """The classifications the fake database holds; empty unless a test adds."""
+    held: list[ClassifiedRow] = []
+    monkeypatch.setattr(
+        domain_collector, "find_classified_between", lambda *_, **__: held
+    )
+    return held
+
+
+def _classified(
+    n: int, classification: str, *, simulated: bool = False
+) -> ClassifiedRow:
+    return ClassifiedRow(
+        classification_id=n,
+        assignment_id=f"as_{n}",
+        station_id="st_a",
+        window_end=NOW - timedelta(days=2),
+        classification=classification,
+        listening_confirmed=True,
+        outcome=None,
+        simulated=simulated,
     )
 
 
@@ -186,3 +214,63 @@ def test_missing_migration_scripts_omit_the_schema_series(
     )
 
     assert "meridian_schema_up_to_date" not in _families(collector)
+
+
+def test_nothing_classified_publishes_no_reliability_series(
+    reachable: DomainCollector,
+) -> None:
+    """No passes settled yet is "not measured", not "no misses" (D-086)."""
+    families = _families(reachable)
+
+    assert families["meridian_passes_classified"].samples == []
+    assert families["meridian_loss_budget_remaining_ratio"].samples == []
+
+
+def test_a_population_with_passes_reports_every_class_and_its_budget(
+    reachable: DomainCollector, classified: list[ClassifiedRow]
+) -> None:
+    """Nineteen captures and one miss: one pass lost of two allowed."""
+    classified.extend(_classified(n, "successful_reception") for n in range(19))
+    classified.append(_classified(19, "confirmed_miss"))
+
+    families = _families(reachable)
+
+    counts = families["meridian_passes_classified"]
+    assert len(counts.samples) == len(PASS_CLASSES)
+    assert (
+        _value(counts, {"classification": "confirmed_miss", "simulated": "false"})
+        == 1.0
+    )
+    assert (
+        _value(counts, {"classification": "station_unavailable", "simulated": "false"})
+        == 0.0
+    )
+    remaining = families["meridian_loss_budget_remaining_ratio"]
+    assert _value(remaining, {"simulated": "false"}) == pytest.approx(0.5)
+    assert _value(remaining, {"simulated": "true"}) is None
+
+
+def test_a_refused_reliability_file_leaves_the_series_out(
+    monkeypatch: pytest.MonkeyPatch, classified: list[ClassifiedRow]
+) -> None:
+    monkeypatch.setattr(
+        domain_collector, "read_monitoring_snapshot", lambda *_, **__: _snapshot()
+    )
+    monkeypatch.setattr(domain_collector, "find_current_revision", lambda _: "0014")
+    classified.append(_classified(1, "confirmed_miss"))
+    pool = _Pool(reachable=True)
+
+    def refused() -> None:
+        raise ReliabilityConfigError("capture_rate_min must be between 0 and 1")
+
+    collector = DomainCollector(
+        lambda: pool,  # type: ignore[arg-type, return-value]
+        now=lambda: NOW,
+        head_revision_of=lambda: "0014",
+        reliability_of=refused,  # type: ignore[arg-type]
+    )
+
+    families = _families(collector)
+
+    assert "meridian_passes_classified" not in families
+    assert _value(families["meridian_database_reachable"], {}) == 1.0

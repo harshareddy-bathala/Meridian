@@ -23,21 +23,30 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tomllib
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import TypeVar
 
 __all__ = [
+    "RELIABILITY_CONFIG_ENV",
     "ClassificationConfig",
     "ReliabilityConfig",
     "ReliabilityConfigError",
     "SloConfig",
+    "load_deployed_reliability_config",
     "load_reliability_config",
     "parse_reliability_config",
 ]
 
 _DAY_S = 86_400
+
+RELIABILITY_CONFIG_ENV = "MERIDIAN_RELIABILITY_CONFIG"
+"""The deployment's reliability file, read by the jobs service, the API and
+its metrics. Unset means the defaults, which ``deploy/reliability.toml.example``
+spells out. Every process of one deployment must read the same file: the
+classification's hash is how the API finds the rows the jobs service wrote."""
 
 
 class ReliabilityConfigError(ValueError):
@@ -201,3 +210,13 @@ def load_reliability_config(path: Path | None) -> ReliabilityConfig:
     except OSError as exc:
         raise ReliabilityConfigError(f"cannot read {path}: {exc}") from exc
     return parse_reliability_config(text)
+
+
+def load_deployed_reliability_config() -> ReliabilityConfig:
+    """The file :data:`RELIABILITY_CONFIG_ENV` names, or the defaults.
+
+    Raises:
+        ReliabilityConfigError: The file named cannot be read, or is refused.
+    """
+    named = os.environ.get(RELIABILITY_CONFIG_ENV, "").strip()
+    return load_reliability_config(Path(named) if named else None)

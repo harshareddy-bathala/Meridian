@@ -2395,6 +2395,8 @@ No station, satellite, assignment or token identifier is ever a label (Stage 3).
 
 **Not published until Stage 20: confirmed misses, indeterminate outcomes and loss budget remaining.** The roadmap lists all three under Stage 12, and none of them can be computed yet. Only `platform/reliability` decides a miss, and it is still a docstring. A series held at zero would say "no misses" where the truth is "not measured", which D-086 already refuses for the public API. The loss-budget alert waits with them, and the rules file marks where it goes.
 
+*Settled by D-186:* all three are published now, as `meridian_passes_classified` by class and `meridian_loss_budget_remaining_ratio`, with `LossBudgetThresholdReached` watching the second.
+
 **The "observation queue growing" alert watches what the platform can see.** A station's upload queue is on the station, and MSP 0.2 heartbeats do not report its depth. The platform can see an assignment that is still `held` or `in_progress` when its window ended more than `OVERDUE_AFTER_S` ago. `meridian_assignments_overdue` counts those.
 
 This counts reports that have not arrived; it does not count misses, and nothing is classified from it. A queue-depth field in the heartbeat would be a separate `spec(msp)` change under Rule 9.
@@ -3665,6 +3667,49 @@ The roadmap asks for an irrecoverable loss budget, with every debit recorded by 
 
 ---
 
+## D-186 — What Prometheus sees of reliability, and when it alerts
+
+**2026-09-28 · accepted** · *`meridian/api/domain_collector.py`; `meridian/jobs/{reliability_round,job_metrics}.py`; `meridian/cli_jobs.py`; `deploy/prometheus/rules/meridian.yml`, Stage 20. Amends D-111.*
+
+D-111 left three series unpublished until a miss could be decided: confirmed misses, indeterminate outcomes and loss budget remaining. It also left the alert on the budget unwritten. They exist now.
+
+**Two families, read at scrape time from `pass_classifications` over the SLO window,** by the same collector and in the same transaction as the rest (D-109):
+- `meridian_passes_classified{classification, simulated}` counts each class. Confirmed misses are its `confirmed_miss` series, and indeterminate outcomes its `satellite_state_indeterminate` series. One family with a class label replaces the two names D-111 listed. A reader then sees a miss beside the seven other things that can happen to a pass, and cannot mistake a count of misses for a count of losses.
+- `meridian_loss_budget_remaining_ratio{simulated}` is the share of D-185's budget left. It is negative once the target is broken.
+
+Both are counted by `meridian.reliability`'s own functions, so a scrape and `meridian reliability report` over the same window agree.
+
+**`classification` joins D-111's bounded labels.** It has eight values, fixed by migration 0017's check. `task` gains two values, `expiry_sweep` and `reliability`.
+
+**A population with nothing classified publishes nothing,** neither zeros nor a ratio (D-086). A pass settles a day after its window, so a new deployment has no series for a day. The alert is silent through that, instead of firing on a budget it cannot yet know.
+
+**Only the scrape-cheap figures are metrics.** Availability needs every heartbeat in a 30-day window. That is a query for a report, not for every fifteen-second scrape, so it is printed by `meridian reliability report` and served by `/api/v1/reliability`, and it is not a series.
+
+**`LossBudgetThresholdReached`** fires when less than a quarter of a population's budget has been left for an hour. It is a warning, because a budget moves one settled pass at a time and nothing about it is urgent within minutes. Its runbook starts from the debits' reasons, because a spent budget made of outages needs different work from one made of misses. It has a firing test and a silent test, as D-112 requires, and a simulated fleet's healthy budget in the same test does not silence a measured one's.
+
+**The jobs service runs the sweep and the classification after scheduling, every round** (D-110). Each is timed and supervised like the scheduling tasks, and each has its own `ScheduledTaskNeverSucceeded` rule. The service reads the reliability file named by `MERIDIAN_RELIABILITY_CONFIG`, or takes the defaults. The API reads the same file, because it finds the rows the jobs service wrote by the hash of their `[classification]` table.
+
+---
+
+## D-187 — `/api/v1/reliability` publishes the report, with debits counted and never listed
+
+**2026-09-28 · accepted** · *`meridian/api/public/{reliability,models/reliability}.py`, Stage 20. Settles D-086's placeholder for this path.*
+
+The path has existed since Stage 11 and answered `not_yet_computed` (D-086). It now answers `"status": "computed"` with the body `meridian reliability report` prints:
+- measured and simulated as two objects, each with `simulated` stated;
+- every figure as a numerator, a denominator, an estimate and a Wilson interval;
+- each target with its verdict, and `SC-4`, `SC-5` or null for a proposed one;
+- each station's capture, budget and availability;
+- `failure_detection` as `{"status": "not_measured", "reason": …}`.
+
+A figure the platform cannot give is never a zero or a bare null (D-086).
+
+**The budget's debits are counted by reason and not listed.** A debit names a pass and the exact instant its window closed. D-093 widens every published window to whole minutes, so that a public schedule cannot be turned back into a station's position, and a list of exact debits would undo that. An operator reads them through `meridian reliability report` and `explain`.
+
+**Counted on each request, with no cache.** Availability reads every heartbeat in the window, which for one station is tens of thousands of rows. Stage 21 measures API latency at fifty stations. If this endpoint is slow there, a short cache here is the remedy, and Stage 23's per-endpoint rate limits cover it meanwhile.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -3879,6 +3924,8 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-183 a timed sweep expires only untaken work | `meridian/store/assignment_expiry.py` |
 | D-184 the indicators and their targets | `meridian/reliability/{slis,report,live,config}.py`; `meridian/store/reliability_reads.py`; `meridian/datasets/reliability_rows.py`; `meridian snapshot reliability`; `deploy/reliability.toml.example` |
 | D-185 the loss budget, spent by passes | `meridian/reliability/budget.py` |
+| D-186 reliability metrics, the budget alert, the jobs tasks | `meridian/api/domain_collector.py`; `meridian/jobs/{reliability_round,job_metrics}.py`; `meridian/cli_jobs.py`; `deploy/prometheus/`; `OPERATIONS.md` § LossBudgetThresholdReached |
+| D-187 the public reliability body | `meridian/api/public/{reliability,models/reliability}.py`; `meridian/cli_reliability.py` |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

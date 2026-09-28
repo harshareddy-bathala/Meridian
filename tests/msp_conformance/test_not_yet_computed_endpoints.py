@@ -25,9 +25,10 @@ from fastapi.testclient import TestClient
 from meridian.api.app import create_app
 
 ENDPOINTS = {
-    "/api/v1/reliability": 20,
     "/api/v1/aggregates": 19,
 }
+"""``/api/v1/reliability`` left this list when Stage 20 computed it (D-187);
+``tests/integration/test_public_reliability_endpoint.py`` pins its body now."""
 
 
 @pytest.fixture

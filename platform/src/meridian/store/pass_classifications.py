@@ -14,11 +14,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
+from psycopg.rows import class_row
 from psycopg.types.json import Jsonb
 
 from meridian.store.stations import Connection
 
-__all__ = ["NewClassification", "insert_classification"]
+__all__ = [
+    "NewClassification",
+    "StoredClassification",
+    "find_classifications_of",
+    "insert_classification",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,3 +84,50 @@ def insert_classification(conn: Connection, row: NewClassification) -> bool:
             ),
         )
         return cur.rowcount > 0
+
+
+@dataclass(frozen=True, slots=True)
+class StoredClassification:
+    """One stored classification, whole, as ``reliability explain`` prints it."""
+
+    classification_id: int
+    assignment_ids: list[str]
+    pass_id: int
+    station_id: str
+    satellite_id: str
+    window_start: datetime
+    window_end: datetime
+    classification: str
+    evidence: dict[str, object]
+    method: str
+    config_sha256: bytes
+    classified_at: datetime
+    simulated: bool
+
+
+def find_classifications_of(
+    conn: Connection, assignment_id: str
+) -> list[StoredClassification]:
+    """Every classification a scheduled assignment was pooled into.
+
+    Args:
+        conn: An open connection. Read-only.
+        assignment_id: Any assignment of the pass, not only its representative.
+
+    Returns:
+        One row per method and configuration it was classified under, oldest
+        first.
+    """
+    with conn.cursor(row_factory=class_row(StoredClassification)) as cur:
+        cur.execute(
+            """
+            select classification_id, assignment_ids, pass_id, station_id,
+                   satellite_id, window_start, window_end, classification,
+                   evidence, method, config_sha256, classified_at, simulated
+            from pass_classifications
+            where %s = any(assignment_ids)
+            order by classified_at, classification_id
+            """,
+            (assignment_id,),
+        )
+        return cur.fetchall()

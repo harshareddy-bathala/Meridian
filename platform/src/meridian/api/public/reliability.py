@@ -1,40 +1,49 @@
-"""``/api/v1/reliability`` — the reliability summary, once there is one.
+"""``/api/v1/reliability`` — the network's reliability, as the platform counts it.
 
-Fixed in the URL surface now and answered with :class:`NotYetComputed` (D-086),
-so the path does not move when the computation lands. Only ``meridian.reliability``
-may decide what counts as a miss (ARCHITECTURE.md rule 3), and that module is an
-interface until Stage 20 — publishing a figure before then would mean deciding it
-here, which is the one thing this layer must not do.
+Thin by rule, as every public endpoint is: the report is counted by
+``meridian.reliability.live`` from the stored classifications, the same report
+``meridian reliability report`` prints, and this module only shapes it. Only
+``meridian.reliability`` decides what a miss is (ARCHITECTURE.md rule 3).
 
-Reference: docs/DECISIONS.md D-083, D-086.
+The path was fixed in Stage 11 and answered ``not_yet_computed`` until now
+(D-086); a client that branched on ``status`` reads ``computed`` here.
+
+Reference: docs/DECISIONS.md D-083, D-086, D-184, D-187.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from meridian.api.public.models.not_yet_computed import NotYetComputed
+from meridian.api import platform_clock
+from meridian.api.dependencies import get_connection
+from meridian.api.public.models.reliability import PublicReliability
+from meridian.reliability.config import load_deployed_reliability_config
+from meridian.reliability.live import read_live_report
+from meridian.store.stations import Connection
 
-__all__ = ["RELIABILITY_STAGE", "router"]
-
-RELIABILITY_STAGE = 20
-"""Stage 20 — reliability and loss accounting."""
+__all__ = ["router"]
 
 router = APIRouter()
 
 
 @router.get("/reliability")
-def reliability_summary() -> NotYetComputed:
-    """The network's reliability summary: not yet computed.
+def reliability_summary(
+    conn: Connection = Depends(get_connection, scope="function"),
+) -> PublicReliability:
+    """Both populations' figures over the SLO window ending now.
+
+    Args:
+        conn: A pooled connection, injected.
 
     Returns:
-        A placeholder with no numeric field, naming the stage that computes it.
+        Every figure as a count over a count, the loss budget with its debits
+        counted by reason, and each target judged, for measured and simulated
+        stations apart.
     """
-    return NotYetComputed(
-        reason=(
-            "Reliability is measured by the reliability layer, which does not"
-            " compute anything yet; a miss is only counted once a heartbeat"
-            " confirms the station was listening."
-        ),
-        available_from_stage=RELIABILITY_STAGE,
+    report = read_live_report(
+        conn,
+        now=platform_clock.utc_now(),
+        config=load_deployed_reliability_config(),
     )
+    return PublicReliability.of(report)
