@@ -17,6 +17,8 @@ How every claim in this project is tested, and the threats to validity, stated b
 | SC-5 | Failures are detected quickly | ≤ 90 s time to detect |
 | SC-6 | A station is registered, online and publicly visible | Achieved / not |
 
+**SC-4's pass capture rate** is defined in D-184: decoded passes over every settled, scheduled pass of our station except those whose satellite was silent or indeterminate (§5), over a rolling 30 days. A pass lost while the station was offline counts against it, and is never counted as a miss (D-185). `meridian reliability report` prints it with its interval, and `meridian snapshot reliability` regenerates it from a snapshot.
+
 SC-6 is the only criterion that is pass/fail rather than measured, and it is effectively the Phase 1 exit criterion. It is listed here because a methodology document that omits the easiest criterion to verify — and the most visible to an examiner — has the omission the wrong way round.
 
 ### Proposed — to agree with the team

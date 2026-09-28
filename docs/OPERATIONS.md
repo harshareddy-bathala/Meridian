@@ -86,9 +86,13 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Read a dataset's completeness and weights | `uv run meridian snapshot completeness <dataset dir>` — § Completeness and weights |
 | Fit a model on a dataset | `uv run meridian model fit <dataset dir> --config model.toml` — needs the `fit` extra; § Models |
 | Judge a model | `uv run meridian model evaluate <model dir>` — § Models |
+| Reliability now | `compose exec api meridian reliability report` — § Reliability figures |
+| Why a pass counted as it did | `compose exec api meridian reliability explain <assignment id>` |
+| Classify settled passes now | `compose exec api meridian reliability classify` — the `jobs` service does this every round |
+| Reliability from a dataset | `uv run meridian snapshot reliability <dataset dir>` — needs no database |
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
-**Scheduling needs no command.** The `jobs` service generates passes and schedules them under configuration A every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
+**Scheduling needs no command.** The `jobs` service generates passes and schedules them under configuration A every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). Each round then expires work nobody took and classifies every pass that has settled (D-182, D-183). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
 
 ---
 
