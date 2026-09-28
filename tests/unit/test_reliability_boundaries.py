@@ -29,8 +29,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RELIABILITY = REPO_ROOT / "platform" / "src" / "meridian" / "reliability"
 
-SHARED_RULES = frozenset({"classification.py", "satellite_silence.py"})
-"""The modules both the labeller and the live accounting call."""
+SHARED_RULES = frozenset(
+    {
+        "classification.py",
+        "satellite_silence.py",
+        "config.py",
+        "slis.py",
+        "budget.py",
+        "report.py",
+    }
+)
+"""The modules both the snapshot path and the live path call: the rules, the
+configuration, the indicators, the budget and the report."""
 
 
 def imported_modules(path: Path) -> Iterator[tuple[int, str]]:

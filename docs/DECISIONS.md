@@ -3605,6 +3605,66 @@ The sweep runs as a task of the jobs service. That wiring, and its failure alert
 
 ---
 
+## D-184 — The service level indicators, counted as counts over counts, and their targets
+
+**2026-09-28 · accepted** · *`meridian/reliability/{slis,report,live,config}.py`; `meridian/store/reliability_reads.py`; `meridian/datasets/reliability_rows.py`; `meridian snapshot reliability`; `deploy/reliability.toml.example`, Stage 20*
+
+The roadmap names seven indicators and no definitions. `EVALUATION.md` gives SC-4 as "≥ 90% pass capture rate over 30 days" and never says what a pass capture rate is, and `DATA-MODEL.md` planned a `sli_current` view of "the four service level indicators" without naming them. These are the definitions. Each is written once, as a pure function of classified passes.
+
+| Indicator | Numerator | Denominator |
+|---|---|---|
+| **Pass capture rate** (SC-4) | `successful_reception` | every classified pass except `satellite_silent` and `satellite_state_indeterminate` |
+| **Confirmed miss rate** | `confirmed_miss` | the same passes, where listening was confirmed |
+| **Assignment completion rate** | passes with any report | every classified pass |
+| **Schedule execution rate** | passes with a report other than `not_attempted` | every classified pass |
+| **Station availability** | seconds a heartbeat vouches for | seconds since the later of the window's start and registration |
+| **Observation submission delay** | p50 and p95, nearest rank, of first arrival minus window end | reports in the window |
+| **Failure detection latency** (SC-5) | not measured until Stage 21 | — |
+
+**The capture rate leaves out only what the satellite decided.** A silent or indeterminate satellite says nothing about the station (`EVALUATION.md` §5). Every other pass counts: a station that was off, or did not confirm it was listening, or declined, failed to capture that pass. SC-4 is a claim about the station, not only its receiver. Only a decode counts as captured until Stage 27 writes the capture rule for a decode below the partial threshold (D-102).
+
+**A heartbeat vouches for the station until the next one, or for 90 seconds, whichever comes first.** 90 seconds is `OFFLINE_AFTER_S`, the registry's own threshold, which SC-5 sets. Availability therefore agrees with what `derive_liveness` would have said at every instant, and is not a second definition of being up.
+
+**Failure detection latency is defined and not measured.** It is the time from a failure to its detection. From heartbeats alone the failure's instant is unknowable, and the figure would only return the 90-second threshold that computed it. Stage 21 injects failures at recorded instants, and measures this there. Until then every report prints "not measured" and why, never a number (D-086).
+
+**Every figure is a count over a count,** printed with its Wilson 95% interval. A reader can check any of them by counting rows, which is the Stage 20 gate. Where nothing was counted there is no rate, and the report says so.
+
+**Two sources, one assembly.**
+- `meridian reliability report` counts from `pass_classifications` (D-182).
+- `meridian snapshot reliability <dataset>` counts from an evaluation dataset's `labels.jsonl`, the same classification (D-180), through the same `build_report`. That is what makes the figures regenerable from a snapshot and a configuration (rule 8).
+- A snapshot cannot give two figures, and says so instead of guessing. Availability is missing because the export keeps heartbeats only inside assignment windows (Stage 17's known limit). Submission delay is missing because the dataset keeps each report's outcome, not when it arrived.
+- The two sources can also differ on one classification: D-182's, where only an archive heard the satellite.
+
+**Measured and simulated are separate reports,** each with its own figures, budget and stations, and never a pooled number (rule 5).
+
+**The targets are configuration,** in `[slo]` of `deploy/reliability.toml`, beside the classification margins of D-182. They are not hashed with those margins, because a target changes no classification.
+- SC-4's 90% over 30 days and SC-5's 90 s are the project's claims.
+- Every other target is **proposed, to agree with the team**, as `EVALUATION.md` marks SC-7 to SC-10. Every report prints "(proposed)" or the claim beside each verdict.
+
+*Rejected: `sli_current` as a database view.* The indicators read the classification's consequences, captured or lost, and those are rules in code (D-182). A view would restate them in SQL, and a snapshot could not run it.
+
+---
+
+## D-185 — The loss budget is spent by passes, one debit per lost pass, and only one reason is a miss
+
+**2026-09-28 · accepted** · *`meridian/reliability/budget.py`, Stage 20*
+
+The roadmap asks for an irrecoverable loss budget, with every debit recorded by pass, station, reason, evidence, simulation status, timestamp and budget impact. A satellite pass cannot be retried, so the budget is counted in passes, not in time or in requests.
+
+**SC-4 sets the budget.** At a capture target of 90%, a tenth of the passes a station could have captured may be lost inside the window: `allowed = (1 − target) × eligible`. The budget is exhausted when more have been lost than that, and the report says so. The alert that watches it is Stage 20's surfaces.
+
+**Every eligible pass not captured is a debit, and it carries its class as its reason:** `confirmed_miss`, `signal_no_decode`, `station_unavailable`, `station_not_confirmed_listening` or `assignment_declined`. Each debit also names its pass (the representative assignment, or `pass:<id>` from a snapshot), its station, its window's end and its population. It spends one pass. Its evidence is the classification row it came from (D-182).
+
+**A station that was off spends the budget, and has not missed anything.** This follows the team's decision on 2026-09-28. SC-4 asks whether our station is reliable, and a pass lost to an outage is lost as completely as one lost to a deaf receiver. But rule 7 is about what is called a miss, and the budget does not relabel anything: an outage's debit is `station_unavailable`, a miss's is `confirmed_miss`, and the report lists them separately. A reader can therefore see how much of a spent budget was the receiver and how much was the station not being there.
+
+**A pass the satellite decided spends nothing,** because it was neither the station's to capture nor to lose.
+
+**Measured and simulated have separate budgets,** and so does each station.
+
+*Rejected: spending the budget only on confirmed misses.* The budget would then read full through a week-long outage that lost every pass, which is the event a loss budget exists to show.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -3817,6 +3877,8 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-181 a heartbeat before a decline, `labels-3` | `meridian/reliability/classification.py`; `meridian/datasets/labels.py` |
 | D-182 every settled pass classified once, with its evidence | migration 0017; `meridian/reliability/{accounting,config}.py`; `meridian/store/{pass_classifications,reliability_evidence}.py`; `DATA-MODEL.md` |
 | D-183 a timed sweep expires only untaken work | `meridian/store/assignment_expiry.py` |
+| D-184 the indicators and their targets | `meridian/reliability/{slis,report,live,config}.py`; `meridian/store/reliability_reads.py`; `meridian/datasets/reliability_rows.py`; `meridian snapshot reliability`; `deploy/reliability.toml.example` |
+| D-185 the loss budget, spent by passes | `meridian/reliability/budget.py` |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

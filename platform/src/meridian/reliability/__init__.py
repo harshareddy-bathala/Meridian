@@ -8,12 +8,17 @@ Built by Stage 20 of docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md:
   the satellite was transmitting;
 * :mod:`~meridian.reliability.accounting` — classifies every settled pass from
   the database and stores it with its evidence (D-182);
-* :mod:`~meridian.reliability.config` — the margins it classifies under.
+* :mod:`~meridian.reliability.config` — the margins it classifies under, and
+  the targets every figure is judged against (D-184);
+* :mod:`~meridian.reliability.slis`, :mod:`~meridian.reliability.budget` and
+  :mod:`~meridian.reliability.report` — the indicators, the loss budget and the
+  report, from classified passes however they were read (D-184, D-185);
+* :mod:`~meridian.reliability.live` — the report counted from the live record.
 
-The first two import the standard library only, because the snapshot labeller
-calls them and may reach no database (D-143, D-180). This package's
-``__init__`` therefore re-exports nothing: importing it must not drag in
-``accounting``, which reads the store.
+Everything but ``accounting`` and ``live`` imports the standard library only,
+because the snapshot path calls it and may reach no database (D-143, D-180).
+This package's ``__init__`` therefore re-exports nothing: importing it must not
+drag in a module that reads the store.
 
 One rule governs this module, and it is the reason the module exists:
 

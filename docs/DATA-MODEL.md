@@ -438,9 +438,10 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 
 `pass_completeness` is not a view. Completeness is `station_days.jsonl` in every evaluation dataset (D-149, D-154): a view over live tables would give a different answer each time it was read, and the ratio must be regenerable from a snapshot (rule 8).
 
+`sli_current` is not a view either. The service level indicators are counted in `meridian.reliability` from `pass_classifications` (D-184), because whether a class counts as captured or lost is a rule in code (D-182), and a snapshot must be able to count the same figures without a database.
+
 The rest wait on data Phase 1 does not yet produce:
 
 - `timing_error` — first detection minus predicted AOS, joined to element-set age.
-- `sli_current` — the four service level indicators over a rolling window.
 
 Views, not materialised tables, until profiling proves otherwise.

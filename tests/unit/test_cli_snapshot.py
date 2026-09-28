@@ -229,6 +229,72 @@ def test_completeness_of_nothing_exits_1(datasets_root: Path, tmp_path: Path) ->
     assert run(datasets_root, "completeness", str(tmp_path / "absent")) == EXIT_FAILED
 
 
+# --- reliability -------------------------------------------------------------
+
+
+def test_reliability_counts_from_the_labels_and_says_what_it_cannot(
+    raw_snapshot: Any,
+    world: Any,
+    datasets_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    dataset = labelled(datasets_root, raw_snapshot(world), capsys)
+
+    assert run(datasets_root, "reliability", dataset) == 0
+    printed = capsys.readouterr().out
+    assert printed.startswith("reliability from snapshot ")
+    assert "labels-3" in printed
+    assert "station availability       not measured — a snapshot keeps" in printed
+    assert "submission delay           not measured — a snapshot keeps" in printed
+    assert "failure detection: not measured" in printed
+
+
+def test_reliability_twice_prints_the_same_report(
+    raw_snapshot: Any,
+    world: Any,
+    datasets_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 8: the figures come from the snapshot and the configuration alone."""
+    dataset = labelled(datasets_root, raw_snapshot(world), capsys)
+
+    assert run(datasets_root, "reliability", dataset) == 0
+    first = capsys.readouterr().out
+    assert run(datasets_root, "reliability", dataset) == 0
+
+    assert capsys.readouterr().out == first
+
+
+def test_reliability_of_a_raw_snapshot_exits_1(
+    raw_snapshot: Any,
+    world: Any,
+    datasets_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw = raw_snapshot(world)
+
+    assert run(datasets_root, "reliability", str(raw)) == EXIT_FAILED
+    assert "label it first" in capsys.readouterr().err
+
+
+def test_reliability_refuses_a_target_it_cannot_judge(
+    raw_snapshot: Any,
+    world: Any,
+    datasets_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    dataset = labelled(datasets_root, raw_snapshot(world), capsys)
+    config = tmp_path / "reliability.toml"
+    config.write_text("[slo]\ncapture_rate_min = 1.2\n", encoding="utf-8")
+
+    assert (
+        run(datasets_root, "reliability", dataset, "--config", str(config))
+        == EXIT_FAILED
+    )
+    assert "between 0 and 1" in capsys.readouterr().err
+
+
 # --- verify ------------------------------------------------------------------
 
 

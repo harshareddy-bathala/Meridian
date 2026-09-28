@@ -1,0 +1,58 @@
+# Reliability settings, for `meridian reliability … --config <this file>`, the
+# jobs service, and `meridian snapshot reliability --config <this file>`.
+#
+# Every table and key is optional; the values below are the defaults. An
+# unknown key is refused rather than ignored, so a misspelling cannot silently
+# keep a default you believe you changed.
+
+[classification]
+
+# The margins a settled pass is classified under. Every stored classification
+# records the sha256 of these three values, so changing one classifies every
+# pass again beside the old rows rather than over them (D-182). The defaults are
+# the snapshot labeller's own (deploy/snapshot.toml.example).
+
+# How long after a window closes its pass waits to be classified. A station
+# queues reports through an outage (D-146). 0 .. 2592000 (30 days).
+settle_margin_s = 86400
+
+# How far either side of a pass another reception of the satellite counts as
+# evidence of whether it was transmitting (D-147). 1 .. 604800.
+silent_window_s = 43200
+
+# Confirmed silences needed to call a satellite silent (D-147). 1 .. 100.
+silent_min_attempts = 2
+
+[slo]
+
+# The window every figure is counted over, and each figure's target (D-184).
+# Changing these changes no classification. SC-4 and SC-5 are the project's
+# claims (EVALUATION.md §1); every other target is proposed, to agree with the
+# team, and every report says which is which.
+
+# Days of settled passes each figure counts. SC-4 is measured over 30. 1 .. 366.
+window_days = 30
+
+# SC-4: at least this share of eligible passes captured. Also sets the loss
+# budget: (1 - capture_rate_min) of eligible passes may be lost (D-185).
+capture_rate_min = 0.90
+
+# At most this share of confirmed-listening passes missed. Proposed.
+confirmed_miss_rate_max = 0.05
+
+# At least this share of station-time covered by heartbeats. Proposed.
+station_availability_min = 0.95
+
+# At least this share of passes reported on, whatever was heard. Proposed.
+assignment_completion_rate_min = 0.95
+
+# At least this share of passes attempted. Proposed.
+schedule_execution_rate_min = 0.90
+
+# The 95th percentile of report delay after a window closes, in seconds, at
+# most. Proposed. 1 .. 86400.
+submission_delay_p95_max_s = 3600
+
+# SC-5: a failure detected within this many seconds. Measured from Stage 21's
+# injected failures. 1 .. 3600.
+failure_detection_max_s = 90
