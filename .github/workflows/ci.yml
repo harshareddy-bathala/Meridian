@@ -393,6 +393,20 @@ jobs:
             api meridian --version
           docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint "" \
             api python -c "import meridian, meridian.cli, meridian_sim.station"
+          # D-167: the scheduler's solver is a runtime dependency with a native
+          # library, so the image must load it, and solve, not merely list it.
+          docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint "" \
+            api python -c "
+          from datetime import UTC, datetime, timedelta
+          from meridian.scheduler import Candidate, ScoredCandidate
+          from meridian.scheduler.constraints import Rules
+          from meridian.scheduler.optimiser import SolverSettings, optimise
+          t = datetime(2026, 1, 1, tzinfo=UTC)
+          one = Candidate(1, 'st', t, t + timedelta(minutes=11), 0.0, 40.0, 1.0, False)
+          run = optimise([ScoredCandidate(one, 40.0)], rules=Rules(0.0),
+                         settings=SolverSettings(time_limit_s=5.0)).run
+          assert run.status == 'optimal', run
+          "
 
       - name: The image carries no fitting stack
         # D-155: scikit-learn is the `fit` extra, for fitting on a workstation.

@@ -34,6 +34,7 @@ Libraries used as dependencies rather than reimplemented. Not attribution in the
 |---|---|---|
 | `sgp4` | MIT | Orbit propagation |
 | `skyfield` | MIT | Coordinate frames, look angles |
+| `highspy` (HiGHS) | MIT; bundled parts BSD-3, Apache-2.0, zlib, MIT | The scheduler's mixed-integer solver (D-167) |
 | Hamlib | LGPL-2.1 | Rotator control protocol |
 | GNU Radio | GPL-3.0 | Demodulation (invoked as a separate process) |
 | SatDump | GPL-3.0 | Decoding (invoked as a separate process) |

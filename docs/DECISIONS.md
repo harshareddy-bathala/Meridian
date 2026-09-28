@@ -3558,6 +3558,54 @@ It does not ask how the outcome was reached. The scheduler run checks each stati
 
 ---
 
+## D-167 — The optimiser is a mixed-integer programme solved by HiGHS, and its answer is checked
+
+**2026-09-28 · accepted** · *`meridian/scheduler/{optimiser,programme}.py`; `highspy` in `platform/pyproject.toml`, Stage 18*
+
+The roadmap asks for a solver to be chosen and documented, and forbids building an optimiser by hand where a maintained library provides the model.
+
+**The programme.** Maximise the summed score of the passes taken, subject to D-166's constraints:
+- one binary variable per candidate;
+- for each station, one row per window start, allowing at most one of the windows that hold it. A station's windows, each followed by its turnaround, are intervals, so two that overlap both hold the later one's start, and these rows cover every overlap;
+- for each station, one row per instant at which some eligibility begins, allowing what the station's commitments leave of the cap of eight. The most assignments eligible at once is reached where one begins, so this is the count `exceeds_cap` makes.
+
+Candidates a commitment already blocks are rejected before the solver sees them, naming the assignment, as greedy does (D-165).
+
+**The solver is HiGHS, through `highspy`:**
+- it is MIT-licensed, and its bundled parts are BSD-3, Apache-2.0, zlib and MIT. None is copyleft;
+- it ships manylinux wheels for x86_64 and aarch64 of about 5 MB, so the Pi's image installs it without a compiler;
+- it needs numpy, which skyfield already brings;
+- it solves mixed-integer programmes with a floating-point objective, so a probability can be a coefficient as it is.
+
+It is a runtime dependency of the platform, not an extra. Unlike scikit-learn (D-155), the scheduler runs on the Pi. CI loads it in the built image and solves a one-pass programme there.
+
+*Rejected:*
+- **OR-Tools CP-SAT.** It is Apache-2.0 and excellent, but a 28 MB wheel. It needs an integer objective, so every probability would be scaled and rounded, and it is deterministic only on one worker.
+- **`scipy.optimize.milp`.** It is the same HiGHS, but scipy is fit-extra only and the image must not carry it (D-155).
+- **Weighted interval scheduling by dynamic programming.** It is exact for one station with no cap, and the cap breaks it. Where it applies it is also what the library does anyway.
+
+**Deterministic for identical input.**
+- Candidates are put in one canonical order (station, acquisition, id) before the model is built, and rows are added sorted.
+- HiGHS runs on one thread, with a fixed `random_seed` and `mip_rel_gap = 0`.
+- The same candidates therefore make the same model and give the same answer, whatever order they arrived in. A unit test shuffles them and compares.
+- The exception is a time limit reached, where the incumbent depends on how far the search got. The status says when that happened.
+
+**The run records what it did.** A `SolverRun` holds:
+- the status: `optimal`, `time_limit` (the best found, valid, not proven) or `fallback`;
+- the solver and its version;
+- the objective of the schedule returned, and the solver's proven bound;
+- the runtime and the time limit;
+- for a fallback, why.
+
+**A solver's answer is a claim.** The selection is checked by D-166's `violations` before it is used:
+- A selection the check rejects, or no selection within the time limit, falls back to greedy under the same constraints, and the status and reason say so. A valid schedule always comes back, which is the first clause of Stage 18's gate.
+- A candidate the solver left out that still fits is taken. At the optimum none does while scores are positive, and under a time limit this only improves the answer.
+- Every rejection therefore has a reason: the best-scoring selection it overlaps, or the delivery cap.
+
+**Tested against brute force, not against the solver's word.** On sixty seeded instances small enough to enumerate every subset, the optimiser's total equals the best subset every rule allows. On two hundred larger ones it is valid, and never below greedy. On the textbook case, one high pass overlapping two that are worth more together, greedy takes the one and the optimiser the two.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

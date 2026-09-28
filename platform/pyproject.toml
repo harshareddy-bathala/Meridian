@@ -19,6 +19,12 @@ dependencies = [
     "sgp4>=2.23",
     "skyfield>=1.49",
     "prometheus-client>=0.21",
+    # The scheduler's mixed-integer solver (D-167). HiGHS is MIT-licensed, and
+    # highspy ships manylinux wheels for x86_64 and aarch64, so the Pi's image
+    # installs it without a compiler. It needs numpy, which skyfield already
+    # brings. 1.7 is the first release whose Python API exposes the model
+    # status and the MIP dual bound the scheduler records.
+    "highspy>=1.7",
 ]
 
 [project.optional-dependencies]
