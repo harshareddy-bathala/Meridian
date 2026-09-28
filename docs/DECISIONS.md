@@ -2366,6 +2366,8 @@ Passes and assignments are only produced when someone runs `meridian passes gene
 
 It runs as a `jobs` service in the **default** profile, and `sim-scheduler` is removed. Configuration A stays until Stage 18 supplies a constrained scheduler to switch to.
 
+*Amended by D-170.* Rounds schedule with the optimiser, under the `schedule.toml` that `SCHEDULE_CONFIG` names, or configuration A on the elevation proxy when none is named.
+
 *Rejected: cron, inside the container or on the host.* A host crontab is outside the repository and fails the clean-machine requirement. In-container cron needs root, and it hides a failing run in cron's own mail rather than in a metric.
 
 *Rejected: running the jobs inside the API process.* Several workers would each schedule, and a slow optimisation would compete with heartbeats for the same event loop.
@@ -3661,6 +3663,52 @@ A model that reads no history (A, B) is given no dataset.
 - A fresh interpreter that loads every scheduler module and the live path holds no scikit-learn, scipy or fitter.
 
 Each has a positive control.
+
+---
+
+## D-170 — Every run is a record, every decision explains itself, and the jobs service schedules with the optimiser
+
+**2026-09-28 · accepted** · *migration 0018; `meridian/scheduler/{run,explanations,live_inputs,scoring}.py`; `meridian/store/schedule_writes.py`; `meridian/jobs/`; `/api/v1/assignments`; the dashboard, Stage 18*
+
+**A run is recorded.** `schedule_runs` holds one row per run that decided anything:
+- the configuration's resolved values and their hash;
+- the yield source, and the model's hash where there is one;
+- for a model that reads history, the labelled dataset it read and that dataset's `as_of`;
+- the solver and its version, its status, the schedule's value, the proven bound, the time limit and the runtime;
+- for a fallback, why;
+- the counts.
+
+A round with nothing new to decide writes no row, as it writes no decision. The jobs service's metrics count those rounds instead.
+
+**Every decision names its run and says why.** `assignments` gains `schedule_run_id`, `model_sha256` and `explanation` (jsonb). The explanation holds:
+- the value and each of its terms, with where the yield came from and its route (D-161, D-168);
+- every pass the decision was weighed against: those it overlaps, selected or skipped, with their values, best first, and the commitments that bound it;
+- for a skip, the rule that decided it, `overlap` or `eligible_cap` (D-166);
+- the alternative: for a skip, what took its slot; for a selection, the best pass it displaced;
+- the run's solver status and history `as_of`, so one decision read alone says whether its schedule was proven best, and how old the record its model read was.
+
+A skip's `conflicts_with_assignment_id` is still the best-valued selection that overlaps it, or the commitment that blocked it (D-165). `predicted_yield` is at last filled, with a model's probability; the elevation proxy is not a prediction, so under it `predicted_yield` stays null and the proxy is in the explanation. Decisions made before migration 0018 keep nulls. No recorded run made them, and an explanation invented for them would be one nobody computed.
+
+The public API publishes `schedule_run_id`, `model_sha256` and `explanation`, typed. A unit test validates every explanation the scheduler builds against the API's model and serialises it back, and requires the two to be identical. That test caught the first draft storing `+00:00` where the API writes `Z`. The dashboard shows the value as the product it is, the pass a selection displaced, and a run that fell back.
+
+**One programme per run, across stations.** Stations share no constraint, so the programme's rows are per station. One solve gives one status, one objective and one bound for the run, instead of an aggregate of many.
+
+**The jobs service schedules with the optimiser. This amends D-110.**
+- `SCHEDULE_CONFIG` names a `schedule.toml`. When it is empty, rounds schedule configuration A on the elevation proxy, which needs no model.
+- The datasets directory is mounted read-only at `/datasets`, and a configured model is loaded once at start. A configuration the service cannot obey — a learned configuration without a model, another configuration's model, or a model or history that cannot be read — is refused before the first round, because a schedule that cannot be made as configured must not quietly become another one.
+- A model that reads history is reloaded only when a newer labelled dataset appears. A round reads the dataset manifests, and nothing more, to know its history is current.
+- `meridian schedule` takes the same file as `--config`, and the datasets root as `--root`. `--config A` is gone: the configuration is a file's, as the model's is.
+
+**Three metrics, from the jobs process alone** (D-109, D-111):
+- `meridian_scheduler_runs_total{status}`, where `status` is `optimal`, `time_limit` or `fallback`;
+- `meridian_scheduler_solver_seconds`;
+- `meridian_scheduler_history_age_seconds`, absent while no model reads history.
+
+A fallback that keeps happening, or a history left to age, is visible without reading a row.
+
+**The live track is export's track.** A model that reads the sky needs each pass's track (D-158), and prediction reaches no orbit. So the scheduler computes it with the rules export freezes it by: the step, the rounding, the folding, and no track for a simulated pass. A unit test propagates one pass both ways and requires them to be equal. A candidate's rise is the stored predictions of one satellite whose windows overlap, transitively (D-148).
+
+*Rejected: a `/api/v1/schedule-runs` endpoint.* Nothing on the dashboard reads a run apart from its decisions, and what a decision's reader needs from its run is in its explanation. `schedule_runs` is the record for operators and for replay.
 
 ---
 

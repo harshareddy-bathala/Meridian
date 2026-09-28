@@ -31,6 +31,7 @@ import argparse
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from meridian import __version__
 from meridian.cli_catalogue import run_catalogue
@@ -39,9 +40,14 @@ from meridian.cli_invite import run_invite
 from meridian.cli_jobs import add_jobs_parser, run_jobs
 from meridian.cli_model import add_model_parser, run_model
 from meridian.cli_passes import run_passes
-from meridian.cli_schedule import configurations, run_scheduler
+from meridian.cli_schedule import run_scheduler
 from meridian.cli_serve import add_serve_parser, run_serve
-from meridian.cli_snapshot import add_snapshot_parser, run_snapshot
+from meridian.cli_snapshot import (
+    DATASETS_ROOT_ENV,
+    DEFAULT_DATASETS_ROOT,
+    add_snapshot_parser,
+    run_snapshot,
+)
 from meridian.config import load_settings
 from meridian.store import station_tokens, stations
 from meridian.store.pool import DatabaseUnreachableError, connect_once
@@ -269,9 +275,9 @@ def _add_schedule_parser(
         "schedule",
         help="assign passes to stations over a horizon",
         description=(
-            "Ranks the generated passes under one of EVALUATION.md's "
-            "configurations and takes as many as each antenna allows, writing "
-            "down why every skipped pass was skipped. Re-running one "
+            "Values the generated passes under one of EVALUATION.md's "
+            "configurations, takes the best schedule each antenna allows, and "
+            "writes down why every pass was taken or skipped. Re-running one "
             "configuration over one horizon writes nothing (D-066)."
         ),
     )
@@ -279,10 +285,18 @@ def _add_schedule_parser(
     schedule.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
     schedule.add_argument(
         "--config",
-        dest="model_config",
-        choices=configurations(),
-        default="A",
-        help="ranking configuration (EVALUATION.md section 3)",
+        type=Path,
+        default=None,
+        help="schedule settings; see deploy/schedule.toml.example (default: A)",
+    )
+    schedule.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help=(
+            f"datasets root, where the model and its history are (default: "
+            f"${DATASETS_ROOT_ENV}, else {DEFAULT_DATASETS_ROOT})"
+        ),
     )
 
 

@@ -74,9 +74,18 @@ Note `element_set_id`: which element set produced this prediction, so timing err
 ### `assignments`
 Scheduler output. Links a pass to a station with a decision record.
 
-`(assignment_id, pass_id, station_id, issued_at, start_at, end_at, centre_freq_hz, mode, timing_uncertainty_s, predicted_yield, priority, decision, reason, model_config, state, simulated)`
+`(assignment_id, pass_id, station_id, issued_at, start_at, end_at, centre_freq_hz, mode, timing_uncertainty_s, predicted_yield, priority, decision, reason, model_config, score, conflicts_with_assignment_id, state, simulated, schedule_run_id, model_sha256, explanation)`
 
 `reason` is human-readable and shown on the dashboard. `model_config` records which ablation configuration produced the prediction — required for the evaluation to be reproducible.
+
+**Every decision since Stage 18 names its run and says why** (D-170, migration 0018):
+- `schedule_run_id` is the `schedule_runs` row that made it;
+- `score` is the value the optimiser weighed: yield × frames × priority, the last under B and D (D-168);
+- `predicted_yield` is a model's probability, and null under the elevation proxy, which is not a prediction;
+- `model_sha256` names that model;
+- `explanation` (jsonb) holds the terms of the value, every pass the decision was weighed against with its value, the rule that decided a skip, the alternative (what took a skip's slot, or the best pass a selection displaced), and the run's solver status and history `as_of`.
+
+Rows from before migration 0018 keep nulls: no recorded run made them.
 
 **`start_at` and `end_at` are the assignment's window, not the pass's `aos`/`los`.** They are widened from the pass by `timing_uncertainty_s`, because a station recording at exactly the predicted acquisition time starts after a pass whose element set was stale has already begun. These five columns are what let this table produce the MSP §4.3 assignment message; without them it could not. See D-021.
 
@@ -105,6 +114,16 @@ issued  →  held  →  in_progress  →  reported
 `expired` is the **decline** case. It is not the same as an observation with outcome `not_attempted`: `expired` means the station never took the work, `not_attempted` means it took the work and then failed to start. The reliability layer needs both and must never merge them.
 
 State is derived by reconciling `held_assignments` against what was issued — see `docs/DECISIONS.md` D-003 and D-008.
+
+### `schedule_runs`
+One scheduler run that decided something (D-170, migration 0018). A round with nothing new to decide writes no row.
+
+`(run_id, decided_at, horizon_start, horizon_end, model_config, config_sha256, parameters, yield_source, model_sha256, history_sha256, history_as_of, solver, solver_version, status, objective, bound, time_limit_s, runtime_s, detail, stations, candidates, scheduled, skipped, created_at)`
+
+- `parameters` is the resolved `schedule.toml`, and `config_sha256` its hash.
+- `yield_source` is `model` or `elevation_proxy`, and a model's run names it (`model_sha256`).
+- A model that reads history names the labelled dataset it read and its `as_of`; the two are null together.
+- `status` is `optimal`, `time_limit` (the best found, valid, not proven) or `fallback` (greedy's, and `detail` says why). `objective` is the value of the schedule written; `bound` is the solver's proven upper bound, null on a fallback.
 
 ### `observations` *(hypertable)*
 One row per attempt, including attempts that produced nothing.

@@ -34,7 +34,8 @@ _LOG_COLUMNS = """
     a.issued_at, a.start_at, a.end_at, a.centre_freq_hz, a.mode,
     a.timing_uncertainty_s, a.priority, a.predicted_yield,
     a.decision, a.reason, a.score, a.conflicts_with_assignment_id,
-    a.model_config, a.state, a.simulated
+    a.model_config, a.state, a.simulated,
+    a.schedule_run_id, a.model_sha256, a.explanation
 """
 """Shared by the list and the detail read, so the two cannot disagree."""
 
@@ -62,6 +63,12 @@ class LoggedAssignment:
     model_config: str | None
     state: str
     simulated: bool
+    schedule_run_id: str | None
+    """The run that decided it; ``None`` before Stage 18 (D-170)."""
+
+    model_sha256: bytes | None
+    explanation: dict[str, object] | None
+    """As the scheduler stored it: see ``meridian.scheduler.explanations``."""
 
 
 def find_assignments(  # noqa: PLR0913 — three filters, a cursor and a page size

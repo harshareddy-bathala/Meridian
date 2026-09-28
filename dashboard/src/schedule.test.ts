@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { Fetcher } from "./api";
-import { fetchLatestHeartbeat, fetchUpcomingAssignments } from "./schedule";
+import {
+  decodeExplanation,
+  describeValue,
+  fetchLatestHeartbeat,
+  fetchUpcomingAssignments,
+} from "./schedule";
 
 const signal = new AbortController().signal;
 
@@ -25,6 +30,25 @@ const skipped = {
   conflicts_with_assignment_id: "as_2",
   state: null,
   simulated: true,
+  explanation: null,
+};
+
+const explanation = {
+  terms: {
+    value: 669.6,
+    yield: 0.62,
+    yield_source: "model",
+    yield_path: "configured",
+    yield_reason: "32 settled outcomes, enough for history",
+    frames: 720,
+    frames_term: "duration",
+    priority: 1.5,
+    priority_weighted: true,
+  },
+  weighed_against: [{ pass_id: 7, decision: "scheduled", value: 700.2, assignment_id: null }],
+  rule: "overlap",
+  alternative: { pass_id: 7, decision: "scheduled", value: 700.2, assignment_id: null },
+  run: { status: "optimal", history_as_of: "2026-09-27T06:00:00Z" },
 };
 
 describe("fetchUpcomingAssignments", () => {
@@ -55,6 +79,49 @@ describe("fetchUpcomingAssignments", () => {
 
     await expect(fetchUpcomingAssignments(fetcher, null, signal)).rejects.toThrow(
       "page.items[0].decision",
+    );
+  });
+});
+
+describe("an explanation", () => {
+  it("is read term by term, with what took the slot", async () => {
+    const { fetcher } = serve({ items: [{ ...skipped, explanation }] });
+
+    const [assignment] = await fetchUpcomingAssignments(fetcher, null, signal);
+
+    expect(assignment?.explanation).toMatchObject({
+      yield: 0.62,
+      yieldSource: "model",
+      frames: 720,
+      priorityWeighted: true,
+      alternative: { passId: 7, value: 700.2 },
+      runStatus: "optimal",
+    });
+  });
+
+  it("is described as the product it is", () => {
+    const decoded = decodeExplanation(explanation, "e");
+
+    expect(decoded && describeValue(decoded)).toBe(
+      "yield 0.62 (model) × 720 s × priority 1.5 = 669.6",
+    );
+  });
+
+  it("names the elevation proxy, and leaves out terms that do not apply", () => {
+    const terms = { ...explanation.terms, yield_source: "elevation_proxy", priority_weighted: false };
+    const decoded = decodeExplanation({ ...explanation, terms }, "e");
+
+    expect(decoded && describeValue(decoded)).toBe(
+      "yield 0.62 (elevation proxy) × 720 s = 669.6",
+    );
+  });
+
+  it("refuses a yield source the scheduler does not have", async () => {
+    const terms = { ...explanation.terms, yield_source: "guess" };
+    const { fetcher } = serve({ items: [{ ...skipped, explanation: { ...explanation, terms } }] });
+
+    await expect(fetchUpcomingAssignments(fetcher, null, signal)).rejects.toThrow(
+      "page.items[0].explanation.terms.yield_source",
     );
   });
 });

@@ -76,7 +76,7 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Migration status | `compose exec api meridian db status` — exit 0 only when at head |
 | Apply migrations | `compose run --rm migrate` |
 | Generate passes now | `compose exec api meridian passes generate --from <ISO-8601 Z> --to <ISO-8601 Z>` |
-| Schedule now | `compose exec api meridian schedule --from <ISO-8601 Z> --to <ISO-8601 Z> --config A` |
+| Schedule now | `compose exec jobs meridian schedule --from <ISO-8601 Z> --to <ISO-8601 Z> [--config /datasets/schedule.toml]` — A on the elevation proxy without `--config` (D-168) |
 | One scheduling round now | `compose exec jobs meridian jobs run --once` |
 | Run the simulator | `compose --profile sim up -d` — `SIMULATOR_*` in `deploy/.env` set count, seed and scenario |
 | Check the public surface | `python deploy/tools/verify_public_surface.py https://<hostname>` |
@@ -688,7 +688,7 @@ Prometheus and Alertmanager are not published on the host. Grafana is, so its ad
 - **`simulated`:** every station series carries it. Measured and simulated stations are never summed into one figure.
 - **API panels:** `meridian_http_*` comes from every API worker.
 - **Pool panel:** reflects whichever worker answered the scrape.
-- **Scheduling panels:** `meridian_job_*`, `meridian_passes_computed` and `meridian_scheduler_candidates` come from the jobs process alone.
+- **Scheduling panels:** `meridian_job_*`, `meridian_passes_computed`, `meridian_scheduler_candidates`, `meridian_scheduler_runs_total{status}`, `meridian_scheduler_solver_seconds` and `meridian_scheduler_history_age_seconds` come from the jobs process alone. A rising `status="fallback"` count means the schedule is greedy's; the history age is how long the model's history has gone unrefreshed (D-170).
 - **Not published until Stage 20:** confirmed misses, indeterminate outcomes and loss budget remaining. A zero there would mean "not measured" (D-086, D-111).
 
 ### Delivering alerts

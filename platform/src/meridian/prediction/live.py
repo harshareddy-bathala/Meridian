@@ -39,8 +39,14 @@ from meridian.datasets.evaluation import EVALUATION
 from meridian.datasets.label_rows import read_labels
 from meridian.datasets.labels import LabelledPass
 from meridian.datasets.manifest import content_sha256, parse_manifest
-from meridian.datasets.manifest_parse import whole
-from meridian.datasets.publish import MANIFEST_NAME, SnapshotDirectory, read_directory
+from meridian.datasets.manifest_parse import MalformedManifestError, whole
+from meridian.datasets.publish import (
+    MANIFEST_NAME,
+    DamagedSnapshotError,
+    SnapshotDirectory,
+    read_directory,
+)
+from meridian.datasets.row_fields import MalformedSnapshotError
 from meridian.prediction.feature_rows import (
     FeatureRows,
     PassGeometry,
@@ -52,7 +58,12 @@ from meridian.prediction.history import History, events_of
 from meridian.prediction.lineage import LineageError, raw_of
 from meridian.prediction.model_files import read_model
 from meridian.prediction.profiles import Environment
-from meridian.prediction.score import Model, Prediction, predict
+from meridian.prediction.score import (
+    MalformedModelError,
+    Model,
+    Prediction,
+    predict,
+)
 
 __all__ = [
     "LivePass",
@@ -64,6 +75,7 @@ __all__ = [
     "Scored",
     "load_live_scorer",
     "newest_dataset",
+    "newest_dataset_path",
 ]
 
 
@@ -206,20 +218,15 @@ def _unlabelled(one: LivePass) -> LabelledPass:
     )
 
 
-def newest_dataset(root: Path) -> SnapshotDirectory | None:
-    """The labelled dataset under ``root`` with the latest ``as_of``, verified.
+def newest_dataset_path(root: Path) -> Path | None:
+    """Where the labelled dataset with the latest ``as_of`` is, from manifests alone.
 
     Two labelled from one raw snapshot share an ``as_of``; the one labelled
     later wins, then the directory name, so the choice never depends on the
-    order the file system lists them in.
-
-    Returns:
-        ``None`` when there is none.
+    order the file system lists them in. Only manifests are read, so a caller
+    can ask every round whether a newer one has appeared.
 
     Raises:
-        DamagedSnapshotError: The newest is not what its manifest says. An
-            older one is not taken instead: a history quietly older than the
-            operator thinks is worse than a refusal.
         MalformedManifestError: A dataset's manifest cannot be read.
     """
     under = root / EVALUATION
@@ -232,9 +239,23 @@ def newest_dataset(root: Path) -> SnapshotDirectory | None:
         manifest = parse_manifest((path / MANIFEST_NAME).read_bytes())
         if manifest.kind == "evaluation_dataset":
             ranked.append(((manifest.as_of, manifest.created_at, path.name), path))
-    if not ranked:
-        return None
-    return read_directory(max(ranked)[1])
+    return max(ranked)[1] if ranked else None
+
+
+def newest_dataset(root: Path) -> SnapshotDirectory | None:
+    """The labelled dataset with the latest ``as_of``, read and verified.
+
+    Returns:
+        ``None`` when there is none.
+
+    Raises:
+        DamagedSnapshotError: The newest is not what its manifest says. An
+            older one is not taken instead: a history quietly older than the
+            operator thinks is worse than a refusal.
+        MalformedManifestError: A dataset's manifest cannot be read.
+    """
+    path = newest_dataset_path(root)
+    return None if path is None else read_directory(path)
 
 
 def load_live_scorer(model_path: Path, *, root: Path) -> LiveScorer:
@@ -246,12 +267,31 @@ def load_live_scorer(model_path: Path, *, root: Path) -> LiveScorer:
             snapshot are.
 
     Raises:
-        LiveScoringError: The model reads history, and ``root`` holds no
-            labelled dataset or not the raw snapshot the newest was labelled
-            from.
-        DamagedSnapshotError: A directory is not what its manifest says.
-        MalformedModelError: The model cannot be scored.
+        LiveScoringError: Anything that stops the model scoring, named: the
+            model is damaged or cannot be scored, or it reads history and the
+            root holds no labelled dataset, a damaged one, or not the raw
+            snapshot the newest was labelled from. One error, so the scheduler
+            can refuse the run without importing the dataset layer's own.
     """
+    try:
+        return _load(model_path, root)
+    except LiveScoringError:
+        raise
+    except _UNREADABLE as exc:
+        message = f"the model at {model_path} cannot score: {exc}"
+        raise LiveScoringError(message) from exc
+
+
+_UNREADABLE = (
+    DamagedSnapshotError,
+    LineageError,
+    MalformedManifestError,
+    MalformedModelError,
+    MalformedSnapshotError,
+)
+
+
+def _load(model_path: Path, root: Path) -> LiveScorer:
     fitted = read_model(model_path)
     model_sha256 = content_sha256(fitted.directory.manifest)
     if not fitted.model.reads_history:

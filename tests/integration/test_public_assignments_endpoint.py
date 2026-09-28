@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 psycopg = pytest.importorskip("psycopg")
+pytest.importorskip("psycopg.types.json")
 
 from meridian.api import platform_clock  # noqa: E402
 from meridian.api.app import create_app  # noqa: E402
@@ -77,6 +78,49 @@ def test_a_skipped_pass_is_published_with_its_reason(client: TestClient) -> None
     # DATA-MODEL.md's column name, not the attribute Pydantic forced on the model.
     assert item["model_config"] == "A"
     assert "prediction_config" not in item
+    # Made by no recorded run, so nothing explains it beyond its reason (D-170).
+    assert (item["explanation"], item["schedule_run_id"]) == (None, None)
+
+
+EXPLANATION = {
+    "terms": {
+        "value": 330.0,
+        "yield": 0.5,
+        "yield_source": "elevation_proxy",
+        "yield_path": None,
+        "yield_reason": "no model configured: peak elevation over 90°",
+        "frames": 660.0,
+        "frames_term": "duration",
+        "priority": 1.0,
+        "priority_weighted": False,
+    },
+    "weighed_against": [
+        {"pass_id": 7, "decision": "scheduled", "value": 513.3, "assignment_id": None}
+    ],
+    "rule": "overlap",
+    "alternative": {
+        "pass_id": 7,
+        "decision": "scheduled",
+        "value": 513.3,
+        "assignment_id": None,
+    },
+    "run": {"status": "optimal", "history_as_of": None},
+}
+
+
+def test_an_explanation_is_published_as_stored(
+    client: TestClient, rollback: Any
+) -> None:
+    """The terms, what it was weighed against, and the rule (D-170)."""
+    with rollback.cursor() as cur:
+        cur.execute(
+            "update assignments set explanation = %s where assignment_id = 'as_e_1'",
+            (psycopg.types.json.Jsonb(EXPLANATION),),
+        )
+
+    item = client.get("/api/v1/assignments/as_e_1").json()
+
+    assert item["explanation"] == EXPLANATION
 
 
 def test_the_window_is_widened_to_whole_minutes(client: TestClient) -> None:

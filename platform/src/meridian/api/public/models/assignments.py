@@ -9,7 +9,13 @@ record, published as written, because the reason and the score are the point.
 it (D-008). A pass can be ``scheduled`` and ``expired``. A ``skipped`` pass
 has no state: it was never delivered, so ``state`` is null (D-165).
 
-Reference: docs/DATA-MODEL.md ``assignments``; docs/DECISIONS.md D-008, D-093.
+``explanation`` is why: the terms of the pass's value, the passes it was weighed
+against and the rule that decided it, as the scheduler stored it when it
+decided (D-170). Null for a decision made before Stage 18, which no recorded
+run made.
+
+Reference: docs/DATA-MODEL.md ``assignments``; docs/DECISIONS.md D-008, D-093,
+D-170.
 """
 
 from __future__ import annotations
@@ -22,10 +28,68 @@ from pydantic import BaseModel, ConfigDict, Field
 from meridian.api.public.window_privacy import publish_window
 from meridian.store.assignment_log import LoggedAssignment
 
-__all__ = ["AssignmentDecision", "AssignmentState", "PublicAssignment"]
+__all__ = [
+    "AssignmentDecision",
+    "AssignmentState",
+    "Explanation",
+    "ExplanationRun",
+    "ExplanationTerms",
+    "PublicAssignment",
+    "WeighedPass",
+]
 
 AssignmentDecision = Literal["scheduled", "skipped"]
 AssignmentState = Literal["issued", "held", "in_progress", "reported", "expired"]
+
+
+class ExplanationTerms(BaseModel):
+    """A pass's value, and the terms it is the product of (D-168)."""
+
+    model_config = ConfigDict(serialize_by_alias=True, validate_by_name=True)
+
+    value: float
+    yield_: float = Field(alias="yield")
+    """The probability of a decode: a model's, or the elevation proxy."""
+    yield_source: Literal["model", "elevation_proxy"]
+    yield_path: str | None
+    """The model's route (D-161); null for the proxy."""
+    yield_reason: str
+    frames: float
+    frames_term: str
+    priority: float
+    priority_weighted: bool
+
+
+class WeighedPass(BaseModel):
+    """A pass this one could not share the station with."""
+
+    pass_id: int
+    decision: Literal["scheduled", "skipped", "committed"]
+    """``committed``: an assignment an earlier run made, which bound this one."""
+    value: float | None
+    """Null for a commitment, whose value this run did not weigh."""
+    assignment_id: str | None
+    """Set for a commitment, whose id already existed."""
+
+
+class ExplanationRun(BaseModel):
+    """What the decision's run shares with every other decision in it."""
+
+    status: Literal["optimal", "time_limit", "fallback"]
+    history_as_of: datetime | None
+
+
+class Explanation(BaseModel):
+    """Why a decision went the way it did (D-170)."""
+
+    terms: ExplanationTerms
+    weighed_against: list[WeighedPass]
+    """Best value first; commitments last."""
+    rule: Literal["overlap", "eligible_cap"] | None
+    """For a skip, the constraint that decided it (D-166)."""
+    alternative: WeighedPass | None
+    """For a skip, what took its slot; for a selection, the best it displaced."""
+    run: ExplanationRun
 
 
 class PublicAssignment(BaseModel):
@@ -70,6 +134,12 @@ class PublicAssignment(BaseModel):
     station is never given (D-165)."""
     simulated: bool
 
+    schedule_run_id: str | None
+    """The run that decided it; null before Stage 18."""
+    model_sha256: str | None
+    """The model that gave ``predicted_yield``, as hex; null without one."""
+    explanation: Explanation | None
+
     @classmethod
     def from_row(cls, row: LoggedAssignment) -> Self:
         """Publish one stored decision."""
@@ -94,6 +164,11 @@ class PublicAssignment(BaseModel):
             prediction_config=row.model_config,
             state=None if row.decision == "skipped" else _state(row.state),
             simulated=row.simulated,
+            schedule_run_id=row.schedule_run_id,
+            model_sha256=None if row.model_sha256 is None else row.model_sha256.hex(),
+            explanation=None
+            if row.explanation is None
+            else Explanation.model_validate(row.explanation),
         )
 
 

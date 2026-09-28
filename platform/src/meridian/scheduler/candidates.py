@@ -33,6 +33,7 @@ from meridian.scheduler import Candidate, Commitment
 from meridian.scheduler.assignment_records import PassFacts
 from meridian.scheduler.constraints import DELIVERY_LEAD, window
 from meridian.scheduler.priority_baseline import NEUTRAL_PRIORITY
+from meridian.scheduler.schedule_config import ScheduleConfig
 from meridian.store.element_sets import find_element_set_by_id
 from meridian.store.passes import StoredPass, find_passes_in_horizon
 from meridian.store.receiving_stations import ReceivingStation
@@ -53,6 +54,7 @@ __all__ = [
     "Catalogue",
     "ScheduleRequest",
     "StationWork",
+    "element_set_for",
     "is_available",
     "load_catalogue",
     "work_for_station",
@@ -61,28 +63,37 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class ScheduleRequest:
-    """One scheduling run: over what, under which configuration, for what hardware."""
+    """One scheduling run: over what, when, and under which configuration."""
 
     start: datetime
     end: datetime
     """Half-open on acquisition, matching ``find_passes_in_horizon`` — a pass
     belongs to the horizon it rises in (D-059)."""
 
-    model_config: str
-    """``A`` or ``B``. Recorded on every row so a schedule can be attributed."""
-
     now: datetime
     """When the run is made, timezone-aware UTC: the instant each station's
     liveness is judged at (D-166). Passed rather than read, as ``start`` is,
     so a run can be stated exactly."""
 
-    turnaround_s: float
-    """Seconds a station needs between two receptions, for slew and settling.
+    config: ScheduleConfig
+    """The configuration, the model, the objective's terms, the solver's limit
+    and the station turnaround (D-168)."""
 
-    One value for the run. Phase 1's stations receive on a fixed QFH antenna,
-    which does not slew, so the honest value is zero — see D-066 for what has to
-    change before a tracking station can be scheduled correctly.
-    """
+    @property
+    def model_config(self) -> str:
+        """``A`` to ``D``, recorded on every row so a schedule can be attributed."""
+        return self.config.configuration
+
+    @property
+    def turnaround_s(self) -> float:
+        """Seconds a station needs between two receptions (D-066).
+
+        One value for the run. Phase 1's stations receive on a fixed QFH
+        antenna, which does not slew, so the honest value is zero — see D-066
+        for what has to change before a tracking station can be scheduled
+        correctly.
+        """
+        return float(self.config.turnaround_s)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +121,10 @@ class StationWork:
 
     commitments: list[Commitment]
     """Open assignments near the candidates, of any configuration."""
+
+    stored: dict[int, StoredPass]
+    """Every prediction rising in the horizon for this station, decided or
+    not: a candidate's rise is read from them (D-148, D-169)."""
 
 
 def _load_capabilities(conn: Connection, station_id: str) -> list[ReceiveCapability]:
@@ -155,7 +170,7 @@ def _timing_uncertainty_s(
     return orbit.timing_uncertainty(element_set, stored.aos).sigma_s
 
 
-def _element_set_for(conn: Connection, element_set_id: int) -> ElementSet:
+def element_set_for(conn: Connection, element_set_id: int) -> ElementSet:
     """The archived set a stored pass was computed from.
 
     Read back by id rather than by "which set is current": the pass names the
@@ -312,7 +327,7 @@ def work_for_station(
             unusable.append(stored.id)
             continue
 
-        element_set = _element_set_for(conn, stored.element_set_id)
+        element_set = element_set_for(conn, stored.element_set_id)
         margin_s = _timing_uncertainty_s(orbit, stored, element_set)
         candidates.append(
             _candidate_from(
@@ -329,4 +344,5 @@ def work_for_station(
         passes_without_a_usable_transmitter=unusable,
         already_decided=len(decided),
         commitments=_commitments_near(conn, candidates, request.turnaround_s),
+        stored={stored.id: stored for stored in stored_passes},
     )

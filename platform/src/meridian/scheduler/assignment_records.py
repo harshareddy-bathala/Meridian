@@ -21,14 +21,16 @@ window), D-060 (the timing prior), D-065, D-066.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from meridian.scheduler import Rejection, ScheduleOutcome, ScoredCandidate
-from meridian.store.assignments import NewAssignment
+from meridian.store.schedule_writes import NewAssignment
 
 __all__ = [
     "PassFacts",
+    "Stamp",
     "assignment_id_for",
     "to_assignment_rows",
     "widened_window",
@@ -62,6 +64,22 @@ class PassFacts:
     los: datetime
     timing_uncertainty_s: float
     """The platform's stated 1σ confidence in those two boundaries (D-060)."""
+
+
+@dataclass(frozen=True, slots=True)
+class Stamp:
+    """What a recorded run adds to each decision it makes (D-170)."""
+
+    run_id: str
+    model_sha256: bytes | None
+    """The model that gave the yields; ``None`` under the elevation proxy."""
+
+    explanations: Mapping[int, Mapping[str, object]]
+    """By pass id, every decision's."""
+
+    predicted_yields: Mapping[int, float]
+    """By pass id, a model's probability; empty under the elevation proxy,
+    which is not a prediction and is never written as one."""
 
 
 def assignment_id_for(pass_id: int, model_config: str) -> str:
@@ -210,6 +228,7 @@ def to_assignment_rows(
     outcome: ScheduleOutcome,
     facts_by_pass_id: dict[int, PassFacts],
     model_config: str,
+    stamp: Stamp | None = None,
 ) -> list[NewAssignment]:
     """Every decision in one outcome, as rows ready to insert.
 
@@ -218,6 +237,9 @@ def to_assignment_rows(
         facts_by_pass_id: The transmitter and timing facts for every candidate
             in ``outcome``, keyed by ``pass_id``.
         model_config: The configuration that produced the outcome.
+        stamp: The run that made it, its model and every decision's
+            explanation. ``None`` only where no run is recorded, as for a
+            baseline's schedule compared by replay.
 
     Returns:
         Selections first, then rejections.
@@ -247,5 +269,15 @@ def to_assignment_rows(
         )
         for rejection in outcome.rejected
     )
-
-    return rows
+    if stamp is None:
+        return rows
+    return [
+        replace(
+            row,
+            predicted_yield=stamp.predicted_yields.get(row.pass_id),
+            schedule_run_id=stamp.run_id,
+            model_sha256=stamp.model_sha256,
+            explanation=stamp.explanations[row.pass_id],
+        )
+        for row in rows
+    ]

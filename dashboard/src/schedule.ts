@@ -17,6 +17,31 @@ import {
 export const DECISIONS = ["scheduled", "skipped"] as const;
 export type Decision = (typeof DECISIONS)[number];
 
+export const YIELD_SOURCES = ["model", "elevation_proxy"] as const;
+export const RUN_STATUSES = ["optimal", "time_limit", "fallback"] as const;
+
+/** A pass weighed against another: what it was, and what it was worth. */
+export interface Weighed {
+  passId: number;
+  decision: string;
+  /** Null for a commitment an earlier run made, which this run did not value. */
+  value: number | null;
+}
+
+/** Why a decision went the way it did, as the scheduler stored it (D-170). */
+export interface Explanation {
+  value: number;
+  yield: number;
+  yieldSource: (typeof YIELD_SOURCES)[number];
+  frames: number;
+  framesTerm: string;
+  priority: number;
+  priorityWeighted: boolean;
+  /** For a skip, what took its slot; for a selection, the best it displaced. */
+  alternative: Weighed | null;
+  runStatus: (typeof RUN_STATUSES)[number];
+}
+
 export interface Assignment {
   assignmentId: string;
   stationId: string;
@@ -29,6 +54,8 @@ export interface Assignment {
   /** Null for a skip: a station is never given one, so it has no state (D-165). */
   state: string | null;
   simulated: boolean;
+  /** Null for a decision made before Stage 18, which no recorded run made. */
+  explanation: Explanation | null;
 }
 
 export interface Listening {
@@ -59,7 +86,53 @@ export function decodeAssignment(value: unknown, path: string): Assignment {
     conflictsWith: asNullableString(fields, "conflicts_with_assignment_id", path),
     state: asNullableString(fields, "state", path),
     simulated: asBoolean(fields, "simulated", path),
+    explanation: decodeExplanation(fields.explanation, `${path}.explanation`),
   };
+}
+
+function decodeWeighed(value: unknown, path: string): Weighed | null {
+  if (value === null) {
+    return null;
+  }
+  const fields = asObject(value, path);
+  return {
+    passId: asNumber(fields, "pass_id", path),
+    decision: asString(fields, "decision", path),
+    value: fields.value === null ? null : asNumber(fields, "value", path),
+  };
+}
+
+export function decodeExplanation(value: unknown, path: string): Explanation | null {
+  if (value === null) {
+    return null;
+  }
+  const fields = asObject(value, path);
+  const terms = asObject(fields.terms, `${path}.terms`);
+  const run = asObject(fields.run, `${path}.run`);
+  return {
+    value: asNumber(terms, "value", `${path}.terms`),
+    yield: asNumber(terms, "yield", `${path}.terms`),
+    yieldSource: asOneOf(terms, "yield_source", YIELD_SOURCES, `${path}.terms`),
+    frames: asNumber(terms, "frames", `${path}.terms`),
+    framesTerm: asString(terms, "frames_term", `${path}.terms`),
+    priority: asNumber(terms, "priority", `${path}.terms`),
+    priorityWeighted: asBoolean(terms, "priority_weighted", `${path}.terms`),
+    alternative: decodeWeighed(fields.alternative, `${path}.alternative`),
+    runStatus: asOneOf(run, "status", RUN_STATUSES, `${path}.run`),
+  };
+}
+
+/** The value as the product it is: "0.62 × 720 s × priority 1.5 = 669.6". */
+export function describeValue(explanation: Explanation): string {
+  const source = explanation.yieldSource === "model" ? "model" : "elevation proxy";
+  const factors = [`yield ${explanation.yield.toFixed(2)} (${source})`];
+  if (explanation.framesTerm === "duration") {
+    factors.push(`${explanation.frames.toFixed(0)} s`);
+  }
+  if (explanation.priorityWeighted) {
+    factors.push(`priority ${String(explanation.priority)}`);
+  }
+  return `${factors.join(" × ")} = ${explanation.value.toFixed(1)}`;
 }
 
 function decodeListening(value: unknown, path: string): Listening | null {

@@ -1,75 +1,68 @@
 """The job that turns predicted passes into a schedule a station can be given.
 
-Reads the passes generated over a horizon, ranks them under one of
-docs/EVALUATION.md §3's configurations, takes as many as each station's antenna
-allows, and writes both the selections and the skips to ``assignments``.
+Reads the passes generated over a horizon, values each under the configured
+objective (D-168), and hands them to the optimiser (D-167), which takes the
+selection of greatest total value that every station's antenna and delivery cap
+allow (D-166). It writes the run and every decision, taken or skipped, each
+with its explanation (D-170), in one transaction.
 
-This is where Phase 1's operational path closes: ``pass_generation`` says what is
-possible, and this says what will be attempted. Nothing here reaches a network,
-and it never reads the observation store — what a station *did* is not an input
-to what it should be asked to do next (docs/ARCHITECTURE.md).
-
-I/O is confined to the ``_load_*`` functions and ``insert_assignments``. The
-ranking, the non-overlap rule and the row building are pure modules beside this
-one, so what the scheduler decides is testable without a database.
+Nothing here reaches a network, and it never reads the observation store — what
+a station *did* reaches a schedule only as a model's probability, which reads a
+labelled dataset (D-169, ``docs/ARCHITECTURE.md``).
 
 Running it twice over one horizon writes nothing the second time: a pass this
 configuration has already decided is not a candidate again (D-165), and each
 decision's id is derived from its pass and its configuration, so a race between
 two runs still collapses onto ``assignment_decision_unique`` (D-066). A pass new
-to a later run — the tail of an overlapping horizon, or a newer element set's
-prediction — is decided around the assignments already made, never on top of
+to a later run is decided around the assignments already made, never on top of
 one.
 
-Reference: docs/EVALUATION.md §3; docs/DECISIONS.md D-021, D-065, D-066, D-165.
+Reference: docs/DECISIONS.md D-065, D-066, D-165 to D-170.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 
 from meridian.orbit.service import OrbitService
-from meridian.orbit.types import require_utc
-from meridian.scheduler import Candidate, ScoredCandidate
-from meridian.scheduler.assignment_records import to_assignment_rows
+from meridian.orbit.types import ElementSet, require_utc
+from meridian.prediction.live import LiveScorer
+from meridian.scheduler import Candidate, Commitment
+from meridian.scheduler.assignment_records import PassFacts, Stamp, to_assignment_rows
 from meridian.scheduler.candidates import (
     ScheduleRequest,
-    StationWork,
+    element_set_for,
     is_available,
     load_catalogue,
     work_for_station,
 )
-from meridian.scheduler.conflict_rejection import select_without_conflict
 from meridian.scheduler.constraints import Problem, Rules, Violation, violations
-from meridian.scheduler.elevation_baseline import rank_by_elevation
-from meridian.scheduler.priority_baseline import rank_by_priority_weighted_elevation
-from meridian.store.assignments import NewAssignment, insert_assignments
+from meridian.scheduler.explanations import RunFacts, explain
+from meridian.scheduler.live_inputs import live_inputs
+from meridian.scheduler.objective import ELEVATION_PROXY, MODEL, Yield, value_candidates
+from meridian.scheduler.optimiser import (
+    Optimised,
+    SolverRun,
+    SolverSettings,
+    optimise,
+)
+from meridian.scheduler.schedule_config import check_model, schedule_config_sha256
+from meridian.scheduler.scoring import yields_of
 from meridian.store.receiving_stations import find_receiving_stations
+from meridian.store.schedule_writes import NewScheduleRun, insert_schedule
 from meridian.store.stations import Connection
 
 __all__ = [
-    "RANKERS",
     "ScheduleInvalidError",
     "ScheduleReport",
     "ScheduleRequest",
     "run_schedule",
 ]
 
-Ranker = Callable[[Sequence[Candidate]], list[ScoredCandidate]]
-
-RANKERS: dict[str, Ranker] = {
-    "A": rank_by_elevation,
-    "B": rank_by_priority_weighted_elevation,
-}
-"""The configurations this stage implements, selectable by flag.
-
-docs/EVALUATION.md §3 requires any configuration to be runnable by config flag,
-and names four. C and D are learned models and arrive at Stage 17; they join
-this table rather than replacing it, so the same run, the same non-overlap rule
-and the same row building serve all four and nothing but the ranking differs
-between the numbers eventually reported.
-"""
+RUN_ID_PREFIX = "sr_"
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +84,7 @@ class ScheduleReport:
     them (D-165)."""
 
     passes_without_a_usable_transmitter: tuple[int, ...]
-    """Passes dropped before ranking because no live downlink of that satellite
+    """Passes dropped before valuing because no live downlink of that satellite
     matches the station's declared hardware.
 
     Normally empty: pass generation applies the same test (D-064). It fills when
@@ -107,6 +100,16 @@ class ScheduleReport:
     """Their undecided passes, left undecided rather than skipped, so a round
     after the station returns decides them."""
 
+    yield_source: str
+    """``model`` or ``elevation_proxy`` (D-168)."""
+
+    run_id: str | None = None
+    """The recorded run; ``None`` when there was nothing to decide."""
+
+    solver: SolverRun | None = None
+    history_as_of: datetime | None = None
+    """How recent the history the model read was; ``None`` without one."""
+
 
 class ScheduleInvalidError(RuntimeError):
     """A schedule broke a constraint, so none of the run was written (D-166)."""
@@ -119,114 +122,213 @@ class ScheduleInvalidError(RuntimeError):
 
 
 @dataclass(slots=True)
-class _Tally:
-    """What the run has decided so far, across stations."""
+class _Gathered:
+    """Every available station's candidates, and what the run needs about them."""
 
-    rows: list[NewAssignment] = field(default_factory=list)
-    considered: int = 0
-    scheduled: int = 0
+    candidates: list[Candidate] = field(default_factory=list)
+    commitments: list[Commitment] = field(default_factory=list)
+    facts: dict[int, PassFacts] = field(default_factory=dict)
+    yields: dict[int, Yield] = field(default_factory=dict)
+    stations: int = 0
     already_decided: int = 0
     unusable: list[int] = field(default_factory=list)
     unavailable: list[str] = field(default_factory=list)
     deferred: int = 0
 
 
-def _schedule_station(
-    work: StationWork, ranker: Ranker, request: ScheduleRequest, tally: _Tally
-) -> None:
-    """Decide one available station's candidates, checked before they are kept."""
-    rules = Rules(turnaround_s=request.turnaround_s)
-    outcome = select_without_conflict(
-        ranker(work.candidates), rules=rules, committed=work.commitments
-    )
-    problem = Problem(
-        candidates=tuple(work.candidates),
-        commitments=tuple(work.commitments),
-        unavailable=frozenset(),
-        rules=rules,
-    )
-    found = violations(problem, outcome)
-    if found:
-        raise ScheduleInvalidError(found)
-    tally.considered += len(work.candidates)
-    tally.scheduled += len(outcome.selected)
-    tally.rows.extend(
-        to_assignment_rows(outcome, work.facts_by_pass_id, request.model_config)
-    )
+def _gather(
+    conn: Connection,
+    orbit: OrbitService,
+    request: ScheduleRequest,
+    scorer: LiveScorer | None,
+) -> _Gathered:
+    """Read every station's candidates, and score them where a model is configured."""
+    catalogue = load_catalogue(conn)
+    gathered = _Gathered()
+    element_sets: dict[int, ElementSet] = {}
+
+    def element_set(set_id: int) -> ElementSet:
+        if set_id not in element_sets:
+            element_sets[set_id] = element_set_for(conn, set_id)
+        return element_sets[set_id]
+
+    for station in find_receiving_stations(conn):
+        gathered.stations += 1
+        work = work_for_station(conn, orbit, station, catalogue, request)
+        gathered.unusable.extend(work.passes_without_a_usable_transmitter)
+        gathered.already_decided += work.already_decided
+        if not is_available(conn, station.station_id, request.now):
+            gathered.unavailable.append(station.station_id)
+            gathered.deferred += len(work.candidates)
+            continue
+        gathered.candidates.extend(work.candidates)
+        gathered.commitments.extend(work.commitments)
+        gathered.facts.update(work.facts_by_pass_id)
+        if scorer is not None and work.candidates:
+            passes, geometry = live_inputs(
+                orbit,
+                station,
+                work.stored,
+                [one.pass_id for one in work.candidates],
+                element_set,
+            )
+            gathered.yields.update(yields_of(scorer.score(passes, geometry)))
+    return gathered
 
 
 def run_schedule(
-    conn: Connection, orbit: OrbitService, request: ScheduleRequest
+    conn: Connection,
+    orbit: OrbitService,
+    request: ScheduleRequest,
+    scorer: LiveScorer | None = None,
 ) -> ScheduleReport:
     """Schedule every station's passes over a horizon under one configuration.
 
     Args:
-        conn: An open connection. Every decision from the run is written in one
-            transaction — unlike pass generation, a half-written schedule is not
-            a partial result but a wrong one, because its rows reference each
-            other.
-        orbit: The propagator, used only to state how confident the platform is
-            in each pass's boundaries. Injected so the scheduling decisions can
-            be exercised against a stub.
-        request: The horizon, the configuration, and the station turnaround.
+        conn: An open connection. The run and all its decisions are written in
+            one transaction — a half-written schedule is not a partial result
+            but a wrong one, because its rows reference each other.
+        orbit: The propagator: timing uncertainty, and a model's tracks.
+        request: The horizon, the instant and the schedule configuration.
+        scorer: The configured model, loaded; ``None`` when none is configured.
 
     Returns:
         A :class:`ScheduleReport` describing what was decided and what landed.
 
     Raises:
-        ValueError: The horizon is naive or not UTC, or ``model_config`` names
-            a configuration this stage does not implement. Naming C or D today
-            fails loudly rather than silently falling back to A, which would
-            publish a number under a label it did not earn.
+        ValueError: A time is naive or not UTC, or the scorer does not match
+            the configuration: given where none is configured, missing where
+            one is, or another configuration's model.
         LookupError: A stored pass references an element set that is gone.
         ScheduleInvalidError: The schedule broke a constraint. Nothing is
             written: every schedule is checked by
             :func:`~meridian.scheduler.constraints.violations` before it is
             kept, however it was found (D-166).
-
-    Note:
-        **Re-running over one horizon writes nothing.** A pass this
-        configuration has decided is not considered again (D-165), and the
-        decision ids collapse onto ``assignment_decision_unique`` besides
-        (D-066). A *different* configuration over the same horizon decides the
-        same passes again, around the first one's assignments: a station has
-        one antenna, and configurations are compared by replay (D-172), not by
-        delivering two schedules to it.
     """
     require_utc(request.start, "request.start")
     require_utc(request.end, "request.end")
     require_utc(request.now, "request.now")
-
-    ranker = RANKERS.get(request.model_config)
-    if ranker is None:
-        raise ValueError(
-            f"no ranking for configuration {request.model_config!r}; "
-            f"this stage implements {sorted(RANKERS)}"
+    config = request.config
+    if (config.model is None) != (scorer is None):
+        message = (
+            "the scorer must be given exactly when the configuration names a"
+            f" model; it names {config.model!r}"
         )
+        raise ValueError(message)
+    if scorer is not None:
+        check_model(config, scorer.model.configuration)
 
-    catalogue = load_catalogue(conn)
-    stations = find_receiving_stations(conn)
-    tally = _Tally()
+    gathered = _gather(conn, orbit, request, scorer)
+    report = ScheduleReport(
+        model_config=config.configuration,
+        stations_considered=gathered.stations,
+        candidates_considered=len(gathered.candidates),
+        scheduled=0,
+        skipped=0,
+        rows_written=0,
+        passes_without_a_usable_transmitter=tuple(gathered.unusable),
+        already_decided=gathered.already_decided,
+        stations_unavailable=tuple(gathered.unavailable),
+        passes_deferred=gathered.deferred,
+        yield_source=ELEVATION_PROXY if scorer is None else MODEL,
+        history_as_of=None
+        if scorer is None or scorer.past is None
+        else scorer.past.as_of,
+    )
+    if not gathered.candidates:
+        return report
+    optimised, stamp = _decide(request, gathered, scorer)
+    outcome = optimised.outcome
+    rows = to_assignment_rows(outcome, gathered.facts, config.configuration, stamp)
+    run = _run_row(request, report, optimised, scorer, stamp.run_id)
+    return replace(
+        report,
+        scheduled=len(outcome.selected),
+        skipped=len(outcome.rejected),
+        rows_written=insert_schedule(conn, run, rows),
+        run_id=stamp.run_id,
+        solver=optimised.run,
+    )
 
-    for station in stations:
-        work = work_for_station(conn, orbit, station, catalogue, request)
-        tally.unusable.extend(work.passes_without_a_usable_transmitter)
-        tally.already_decided += work.already_decided
-        if is_available(conn, station.station_id, request.now):
-            _schedule_station(work, ranker, request, tally)
-        else:
-            tally.unavailable.append(station.station_id)
-            tally.deferred += len(work.candidates)
 
-    return ScheduleReport(
-        model_config=request.model_config,
-        stations_considered=len(stations),
-        candidates_considered=tally.considered,
-        scheduled=tally.scheduled,
-        skipped=tally.considered - tally.scheduled,
-        rows_written=insert_assignments(conn, tally.rows),
-        passes_without_a_usable_transmitter=tuple(tally.unusable),
-        already_decided=tally.already_decided,
-        stations_unavailable=tuple(tally.unavailable),
-        passes_deferred=tally.deferred,
+def _decide(
+    request: ScheduleRequest, gathered: _Gathered, scorer: LiveScorer | None
+) -> tuple[Optimised, Stamp]:
+    """Value, optimise and check the schedule, and explain every decision."""
+    config = request.config
+    scored, terms = value_candidates(
+        gathered.candidates,
+        configuration=config.configuration,
+        frames_term=config.frames,
+        yields=None if scorer is None else gathered.yields,
+    )
+    rules = Rules(turnaround_s=request.turnaround_s)
+    optimised = optimise(
+        scored,
+        rules=rules,
+        settings=SolverSettings(time_limit_s=config.time_limit_s, seed=config.seed),
+        committed=gathered.commitments,
+    )
+    problem = Problem(
+        candidates=tuple(gathered.candidates),
+        commitments=tuple(gathered.commitments),
+        unavailable=frozenset(),
+        rules=rules,
+    )
+    found = violations(problem, optimised.outcome)
+    if found:
+        raise ScheduleInvalidError(found)
+    history_as_of = None if scorer is None or scorer.past is None else scorer.past.as_of
+    stamp = Stamp(
+        run_id=f"{RUN_ID_PREFIX}{uuid.uuid4().hex[:12]}",
+        model_sha256=None if scorer is None else scorer.model_sha256,
+        explanations=explain(
+            optimised.outcome,
+            terms,
+            gathered.commitments,
+            turnaround_s=request.turnaround_s,
+            run=RunFacts(status=optimised.run.status, history_as_of=history_as_of),
+        ),
+        predicted_yields={
+            pass_id: one.probability for pass_id, one in gathered.yields.items()
+        },
+    )
+    return optimised, stamp
+
+
+def _run_row(
+    request: ScheduleRequest,
+    report: ScheduleReport,
+    optimised: Optimised,
+    scorer: LiveScorer | None,
+    run_id: str,
+) -> NewScheduleRun:
+    """The run as ``schedule_runs`` records it."""
+    config = request.config
+    solver = optimised.run
+    past = None if scorer is None else scorer.past
+    return NewScheduleRun(
+        run_id=run_id,
+        decided_at=request.now,
+        horizon_start=request.start,
+        horizon_end=request.end,
+        model_config=config.configuration,
+        config_sha256=schedule_config_sha256(config),
+        parameters=config.parameters(),
+        yield_source=report.yield_source,
+        model_sha256=None if scorer is None else scorer.model_sha256,
+        history_sha256=None if past is None else past.dataset_sha256,
+        history_as_of=None if past is None else past.as_of,
+        solver=solver.solver,
+        solver_version=solver.version,
+        status=solver.status,
+        objective=solver.objective,
+        bound=solver.bound,
+        time_limit_s=solver.time_limit_s,
+        runtime_s=solver.runtime_s,
+        detail=solver.detail,
+        stations=report.stations_considered - len(report.stations_unavailable),
+        candidates=report.candidates_considered,
+        scheduled=len(optimised.outcome.selected),
+        skipped=len(optimised.outcome.rejected),
     )

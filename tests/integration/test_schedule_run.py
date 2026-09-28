@@ -23,8 +23,21 @@ psycopg = pytest.importorskip("psycopg")
 
 from meridian.orbit.skyfield_service import SkyfieldOrbitService  # noqa: E402
 from meridian.orbit.uncertainty import timing_uncertainty_at_age  # noqa: E402
+from meridian.prediction.live import LiveScorer  # noqa: E402
+from meridian.prediction.score import Linear, Model, sigmoid  # noqa: E402
+from meridian.scheduler import ScheduleOutcome  # noqa: E402
+from meridian.scheduler import run as run_module  # noqa: E402
 from meridian.scheduler.assignment_records import assignment_id_for  # noqa: E402
-from meridian.scheduler.run import ScheduleRequest, run_schedule  # noqa: E402
+from meridian.scheduler.optimiser import Optimised, SolverRun  # noqa: E402
+from meridian.scheduler.run import (  # noqa: E402
+    ScheduleInvalidError,
+    ScheduleRequest,
+    run_schedule,
+)
+from meridian.scheduler.schedule_config import (  # noqa: E402
+    ScheduleConfig,
+    schedule_config_sha256,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -43,14 +56,13 @@ LINE1 = "1 57166U 23091A   26220.09250000  .00000098  00000-0  61234-4 0  9995"
 LINE2 = "2 57166  98.7123 201.3345 0002145  85.1234 275.0123 14.22150000123456"
 
 
-def a_request(model_config: str = "A") -> ScheduleRequest:
+def a_request(model_config: str = "A", model: str | None = None) -> ScheduleRequest:
     """One run over the whole horizon, for a station that does not slew."""
     return ScheduleRequest(
         start=HORIZON_START,
         end=HORIZON_END,
-        model_config=model_config,
         now=datetime.now(UTC),
-        turnaround_s=0.0,
+        config=ScheduleConfig(configuration=model_config, model=model),
     )
 
 
@@ -319,7 +331,11 @@ def test_priority_changes_which_pass_b_takes_and_leaves_a_alone(
 def test_the_score_stored_is_the_one_the_decision_was_made_with(
     rollback: Any, network: dict[str, int]
 ) -> None:
-    """Configuration A stores degrees; B stores degrees times the weighting."""
+    """The value the optimiser weighed, stored as the score (D-168).
+
+    A 45° pass of eleven minutes under the elevation proxy is worth
+    45/90 × 660 s = 330; B weights that by the satellite's priority of two.
+    """
     with rollback.cursor() as cur:
         cur.execute(
             "update satellites set priority = 2.0 where satellite_id = %s", (METEOR,)
@@ -335,7 +351,7 @@ def test_the_score_stored_is_the_one_the_decision_was_made_with(
             (row,) = _decisions(rollback, model_config)
             scores[model_config] = (row[1], row[2])
 
-    assert scores == {"A": ("scheduled", 45.0), "B": ("scheduled", 90.0)}
+    assert scores == {"A": ("scheduled", 330.0), "B": ("scheduled", 660.0)}
 
 
 def _round(conn: Any, start_minute: float, length_minutes: float) -> Any:
@@ -347,9 +363,8 @@ def _round(conn: Any, start_minute: float, length_minutes: float) -> Any:
         ScheduleRequest(
             start=start,
             end=start + timedelta(minutes=length_minutes),
-            model_config="A",
             now=datetime.now(UTC),
-            turnaround_s=0.0,
+            config=ScheduleConfig(),
         ),
     )
 
@@ -527,17 +542,29 @@ def test_simulated_survives_from_the_station_through_to_the_assignment(
     assert _decisions(rollback)[0][7] is True
 
 
-def test_a_configuration_this_stage_does_not_implement_is_refused(
+def test_a_model_configured_and_not_loaded_is_refused(
     rollback: Any, network: dict[str, int]
 ) -> None:
-    """Naming D today must fail loudly rather than fall back to A.
-
-    A silent fallback would publish a number under a label it did not earn, and
-    the ablation is exactly a comparison between labels.
-    """
+    """A run labelled D that no model scored would publish a number under a
+    label it did not earn; so would one scored by a model nobody configured."""
     assert network
-    with pytest.raises(ValueError, match="configuration"):
-        run_schedule(rollback, SkyfieldOrbitService(), a_request("D"))
+    with pytest.raises(ValueError, match="scorer must be given exactly when"):
+        run_schedule(rollback, SkyfieldOrbitService(), a_request("D", "models/d"))
+    with pytest.raises(ValueError, match="scorer must be given exactly when"):
+        run_schedule(rollback, SkyfieldOrbitService(), a_request(), a_scorer("A"))
+
+
+def test_another_configuration_s_model_is_refused(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    assert network
+    with pytest.raises(ValueError, match="is scored by a model of"):
+        run_schedule(
+            rollback,
+            SkyfieldOrbitService(),
+            a_request("C", "models/a"),
+            a_scorer("A"),
+        )
 
 
 def test_a_naive_horizon_is_refused(rollback: Any, network: dict[str, int]) -> None:
@@ -546,9 +573,207 @@ def test_a_naive_horizon_is_refused(rollback: Any, network: dict[str, int]) -> N
     naive = ScheduleRequest(
         start=HORIZON_START.replace(tzinfo=None),
         end=HORIZON_END,
-        model_config="A",
         now=datetime.now(UTC),
-        turnaround_s=0.0,
+        config=ScheduleConfig(),
     )
     with pytest.raises(ValueError, match="naive"):
         run_schedule(rollback, SkyfieldOrbitService(), naive)
+
+
+# --- the optimiser, the run, and the explanation (D-167, D-170) ---------------
+
+
+def a_scorer(configuration: str) -> LiveScorer:
+    """A model reading peak elevation alone, written by hand: sigmoid((e − 30)/10)."""
+    linear = Linear(
+        features=("max_elevation_deg",),
+        mean=(30.0,),
+        scale=(10.0,),
+        coefficients=(1.0,),
+        intercept=0.0,
+        calibration_a=1.0,
+        calibration_b=0.0,
+    )
+    model = Model(
+        configuration=configuration,
+        reads_history=False,
+        min_station_history=0,
+        configured=linear,
+        fallback=None,
+    )
+    return LiveScorer(model, bytes([configuration.encode()[0]]) * 32)
+
+
+def _run_record(conn: Any, run_id: str) -> tuple[Any, ...]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "select status, yield_source, model_sha256, history_as_of, candidates,"
+            " scheduled, skipped, config_sha256, solver, objective"
+            " from schedule_runs where run_id = %s",
+            (run_id,),
+        )
+        return cur.fetchone()
+
+
+def _explained(conn: Any) -> dict[int, tuple[Any, ...]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "select pass_id, schedule_run_id, explanation, predicted_yield,"
+            " model_sha256 from assignments"
+        )
+        return {row[0]: row[1:] for row in cur.fetchall()}
+
+
+def test_the_optimiser_takes_two_passes_greedy_would_trade_for_one(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """One high pass overlapping two lower ones that do not overlap each other.
+
+    Greedy takes the high pass, worth 70/90 × 660 = 513; the two lower ones
+    are worth 330 each, 660 together, and the optimiser takes them.
+    """
+    with rollback.cursor() as cur:
+        low_early = _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=45
+        )
+        high = _insert_pass(
+            cur,
+            network[CUBESAT],
+            satellite_id=CUBESAT,
+            at_minute=10,
+            max_elevation_deg=70,
+        )
+        low_late = _insert_pass(
+            cur,
+            network[METEOR],
+            satellite_id=METEOR,
+            at_minute=20,
+            max_elevation_deg=45,
+        )
+
+    report = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    decisions = {row[0]: row[1] for row in _decisions(rollback)}
+    assert decisions == {low_early: "scheduled", high: "skipped", low_late: "scheduled"}
+    assert report.solver is not None
+    assert report.solver.status == "optimal"
+    assert report.solver.objective == pytest.approx(660.0)
+
+
+def test_a_run_is_recorded_and_every_decision_names_it_and_explains_itself(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    with rollback.cursor() as cur:
+        winner = _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=70
+        )
+        loser = _insert_pass(
+            cur,
+            network[CUBESAT],
+            satellite_id=CUBESAT,
+            at_minute=5,
+            max_elevation_deg=20,
+        )
+
+    report = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    assert report.run_id is not None
+    status, source, model, as_of, candidates, scheduled, skipped, config_sha, *_ = (
+        _run_record(rollback, report.run_id)
+    )
+    assert (status, source, model, as_of) == ("optimal", "elevation_proxy", None, None)
+    assert (candidates, scheduled, skipped) == (2, 1, 1)
+    assert bytes(config_sha) == schedule_config_sha256(ScheduleConfig())
+    explained = _explained(rollback)
+    assert {row[0] for row in explained.values()} == {report.run_id}
+    lost = explained[loser][1]
+    assert lost["rule"] == "overlap"
+    assert lost["alternative"]["pass_id"] == winner
+    assert lost["terms"]["yield_source"] == "elevation_proxy"
+    assert lost["terms"]["frames"] == 660.0
+    assert lost["run"]["status"] == "optimal"
+    kept = explained[winner][1]
+    assert (kept["rule"], kept["alternative"]["pass_id"]) == (None, loser)
+    assert [row[2] for row in explained.values()] == [None, None]
+    assert [row[3] for row in explained.values()] == [None, None]
+
+
+def test_a_run_with_nothing_to_decide_records_no_run(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    with rollback.cursor() as cur:
+        _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
+        )
+        cur.execute("select count(*) from schedule_runs")
+        (before,) = cur.fetchone()
+
+    first = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+    again = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    with rollback.cursor() as cur:
+        cur.execute("select count(*) from schedule_runs")
+        (after,) = cur.fetchone()
+    assert first.run_id is not None
+    assert (again.run_id, again.solver) == (None, None)
+    assert after == before + 1
+
+
+def test_a_model_s_probability_is_the_yield_and_is_stored_as_predicted(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """The scorer's probability, not the proxy, and the run names the model."""
+    with rollback.cursor() as cur:
+        pass_id = _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
+        )
+    scorer = a_scorer("A")
+
+    report = run_schedule(
+        rollback, SkyfieldOrbitService(), a_request("A", "models/a"), scorer
+    )
+
+    expected = sigmoid((40.0 - 30.0) / 10.0)
+    assert report.run_id is not None
+    run = _run_record(rollback, report.run_id)
+    assert (run[1], bytes(run[2])) == ("model", scorer.model_sha256)
+    run_id, explanation, predicted, model = _explained(rollback)[pass_id]
+    assert predicted == pytest.approx(expected)
+    assert bytes(model) == scorer.model_sha256
+    assert explanation["terms"]["yield_source"] == "model"
+    assert explanation["terms"]["yield_path"] == "configured"
+    assert explanation["terms"]["value"] == pytest.approx(expected * 660.0)
+    assert run_id == report.run_id
+
+
+def test_a_schedule_that_breaks_a_constraint_is_never_written(
+    rollback: Any, network: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-166: the run checks what it is handed, whoever found it.
+
+    The optimiser checks its own answer; this proves the run does not take
+    that on trust. It is handed a schedule taking two overlapping passes.
+    """
+    with rollback.cursor() as cur:
+        _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=70
+        )
+        _insert_pass(
+            cur,
+            network[CUBESAT],
+            satellite_id=CUBESAT,
+            at_minute=5,
+            max_elevation_deg=20,
+        )
+
+    def everything(scored: Any, **_: Any) -> Optimised:
+        return Optimised(
+            ScheduleOutcome(selected=list(scored), rejected=[]),
+            SolverRun("optimal", "highs", "x", 0.0, 0.0, 0.0, 10.0, None),
+        )
+
+    monkeypatch.setattr(run_module, "optimise", everything)
+
+    with pytest.raises(ScheduleInvalidError, match="overlap"):
+        run_schedule(rollback, SkyfieldOrbitService(), a_request())
+    assert _decisions(rollback) == []

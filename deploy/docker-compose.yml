@@ -154,11 +154,19 @@ services:
       API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
       SCHEDULE_INTERVAL_S: ${SCHEDULE_INTERVAL_S:-300}
       SCHEDULE_HORIZON_S: ${SCHEDULE_HORIZON_S:-21600}
+      # A schedule.toml inside the container, usually under /datasets; empty
+      # schedules configuration A on the elevation proxy (D-168, D-170).
+      SCHEDULE_CONFIG: ${SCHEDULE_CONFIG:-}
+      MERIDIAN_DATASETS_ROOT: /datasets
       # Its metrics listener requires the same token as the API's /metrics,
       # and the same placeholder refusal applies when the deployment is public.
       METRICS_TOKEN: ${METRICS_TOKEN:-change-me}
       MERIDIAN_PUBLIC: ${CLOUDFLARE_TUNNEL_TOKEN:+1}
     command: ["meridian", "jobs", "run", "--metrics-host", "0.0.0.0"]
+    # The published models and labelled datasets a configured model scores
+    # from (D-169). Read-only: scheduling reads them and never writes one.
+    volumes:
+      - ${DATASETS_DIR:-../data/datasets}:/datasets:ro
     # Scraped by Prometheus inside this network (D-109); never published.
     expose:
       - "9464"
