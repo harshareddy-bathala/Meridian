@@ -713,6 +713,25 @@ A station's own token is rotated through a bound invite, and withdrawn with `mer
 
 ---
 
+## Security scanning
+
+`.github/workflows/security.yml` scans the Python lock, the dashboard lock and the built image on every pull request, on `main`, and every Monday (D-205). Each run keeps three CycloneDX SBOMs as artefacts: `sbom-python`, `sbom-dashboard` and `sbom-image`.
+
+**When the Monday run fails** with no code changed, an advisory was published against something already pinned:
+- **Python or npm:** raise the pin in `uv.lock` (`uv lock --upgrade-package <name>`) or `package-lock.json`, and let CI prove the rest still works.
+- **The image:** a Debian package is fixed by rebuilding, since the runtime stage applies Debian's updates; a base image is fixed by moving its digest in `deploy/Dockerfile`.
+- **Nothing can be done yet:** add the advisory to `.trivyignore` at the repository root, with a comment giving the reason and an `exp:YYYY-MM-DD` after which it fails again.
+
+To scan a local build the same way:
+
+```bash
+docker build -f deploy/Dockerfile -t meridian:scan .
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.74.0 \
+  image --severity HIGH,CRITICAL --ignore-unfixed meridian:scan
+```
+
+---
+
 ## Backup and restore
 
 Host tools, standard library only (D-115). They reach the database through `compose exec db`, so no password appears on the host's command line.

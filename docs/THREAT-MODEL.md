@@ -135,8 +135,8 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 |---|---|---|---|---|
 | S-1 | A moved base image | Every base image pinned by tag and digest | D-113; `deploy/Dockerfile` | mitigated |
 | S-2 | A changed dependency | `uv.lock` and `package-lock.json`, installed frozen | `deploy/Dockerfile`; `uv lock --check` in CI | mitigated |
-| S-3 | A dependency or image with a known vulnerability | Nothing scans either | — | open — Stage 23 part 5 |
-| S-4 | Not knowing what an image contains | No SBOM is published | — | open — Stage 23 part 5 |
+| S-3 | A dependency or image with a known vulnerability | `pip-audit` over the whole lock, `npm audit`, and Trivy over the built image, on every change and weekly; fixable HIGH and CRITICAL fail the run | D-205; `.github/workflows/security.yml`; `deploy/Dockerfile` | mitigated |
+| S-4 | Not knowing what an image contains | CycloneDX SBOMs of the Python lock, the dashboard lock and the image, kept with every run | D-205; `.github/workflows/security.yml` | mitigated |
 | S-5 | Code copied from a GPL project | Read, never copy; attribution in the same commit | `CLAUDE.md` rules 2 and 3; `ATTRIBUTION.md` | mitigated |
 | S-6 | External archives reachable from the deployment | `meridian-ingest` is excluded from the image | D-138; `tests/unit/test_layout.py` | mitigated |
 

@@ -1,0 +1,147 @@
+name: Security
+
+# Dependency and container scanning, and the SBOMs (D-205). A workflow of its own
+# rather than jobs in ci.yml: it also runs on a schedule, because an advisory is
+# published against a dependency that has not changed, and a scan that ran only
+# when the code changed would never see it.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Mondays at 03:17 UTC, off the hour so it is not queued behind every other
+    # scheduled workflow on GitHub.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned by tag and by digest, like every image in deploy/ (D-113). A scanner
+  # is code that runs with the checkout and the Docker socket in reach, and a
+  # moved tag would run someone else's.
+  TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+  PIP_AUDIT: pip-audit==2.10.1
+  # The uv deploy/Dockerfile builds with. Its `uv export` writes CycloneDX.
+  UV_VERSION: "0.11.20"
+
+jobs:
+  python-dependencies:
+    # Every package uv.lock resolves, with its hash: the four distributions, the
+    # `fit` extra and the dev tools. More than the image carries, on purpose —
+    # a vulnerable test dependency runs in CI with the checkout in reach.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Export the lockfile
+        run: |
+          uv export --frozen --all-packages --all-groups --all-extras \
+            --no-emit-workspace --format requirements-txt \
+            --output-file "$RUNNER_TEMP/requirements.txt"
+      - name: pip-audit
+        # --disable-pip: audit exactly what the lockfile pins, hashes included,
+        # rather than letting pip resolve something else.
+        run: |
+          uvx "$PIP_AUDIT" --requirement "$RUNNER_TEMP/requirements.txt" \
+            --disable-pip --progress-spinner off
+      - name: SBOM of the Python dependencies
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/sbom"
+          uv export --frozen --all-packages --all-groups --all-extras \
+            --format cyclonedx1.5 --output-file "$RUNNER_TEMP/sbom/meridian-python.cdx.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-python
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: error
+          retention-days: 90
+
+  dashboard-dependencies:
+    # The dashboard's runtime packages are bundled into the page the platform
+    # serves, and its build tools run in the image build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # The same release deploy/Dockerfile builds with.
+          node-version: "24.21.0"
+      - name: npm audit
+        run: npm audit --package-lock-only --audit-level=high
+      - name: SBOM of the dashboard's dependencies
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/sbom"
+          npm sbom --package-lock-only --sbom-format cyclonedx \
+            > "$RUNNER_TEMP/sbom/meridian-dashboard.cdx.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-dashboard
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: error
+          retention-days: 90
+
+  image:
+    # The image a Pi runs, scanned as built, with an SBOM of what is in it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the platform image
+        run: docker build --file deploy/Dockerfile --tag meridian:scan .
+
+      - name: Pull the scanner
+        run: docker pull "$TRIVY_IMAGE"
+
+      - name: SBOM of the image
+        # Debian packages and the virtual environment's Python packages, in
+        # CycloneDX like the other two. Before the scan, so a failing scan still
+        # leaves the inventory behind.
+        run: |
+          mkdir -p "$RUNNER_TEMP/sbom"
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$RUNNER_TEMP/sbom:/sbom" \
+            -v trivy-cache:/root/.cache \
+            "$TRIVY_IMAGE" image --format cyclonedx \
+              --output /sbom/meridian-image.cdx.json meridian:scan
+
+      - name: Scan the image
+        # HIGH and CRITICAL with a fix available fail the run. An advisory
+        # without a fix cannot be acted on here, and failing on it would train
+        # everyone to ignore this job. An accepted finding goes in .trivyignore
+        # at the repository root, with its reason and an expiry (D-205).
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/work:ro" -w /work \
+            -v trivy-cache:/root/.cache \
+            "$TRIVY_IMAGE" image \
+              --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+              --exit-code 1 --no-progress meridian:scan
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-image
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: error
+          retention-days: 90

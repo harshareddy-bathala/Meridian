@@ -3623,6 +3623,35 @@ Values shorter than 16 characters are left to the patterns. The real secrets are
 
 ---
 
+## D-205 — Dependencies and the image are scanned on every change and every week, with an SBOM
+
+**2026-09-28 · accepted** · *`.github/workflows/security.yml`, `deploy/Dockerfile`, Stage 23*
+
+Every dependency was pinned (D-113, `uv.lock`, `package-lock.json`) and nothing asked whether a pinned version had a published advisory. A pin keeps a build reproducible; it also keeps a vulnerability in place until somebody looks.
+
+**`.github/workflows/security.yml`, three jobs, on every pull request, on `main`, and every Monday.** The schedule is the point of a separate workflow: an advisory is published against a version that has not changed, and a scan that runs only when code changes never sees it.
+
+- **Python:** `pip-audit` over `uv export` of the whole lock, hashes included, with `--disable-pip` so what is audited is exactly what is pinned. The whole lock and not only the image's share: the `fit` extra runs on a workstation and the dev tools run in CI with the checkout in reach.
+- **Dashboard:** `npm audit --audit-level=high` over the lockfile. Its runtime packages are bundled into the page the platform serves.
+- **Image:** the image `deploy/Dockerfile` builds, scanned by Trivy for HIGH and CRITICAL advisories that have a fix. One without a fix cannot be acted on, and a job that fails on what nobody can change is a job people learn to ignore. An accepted finding goes in `.trivyignore` with its reason and an `exp:` date, so that accepting it is a reviewed commit that expires rather than a silent exclusion.
+
+**Three SBOMs, CycloneDX 1.5, kept as run artefacts for 90 days:** the Python lock (`uv export --format cyclonedx1.5`), the dashboard lock (`npm sbom`), and the image (Trivy), which adds the Debian packages. Each is written even when its scan fails. `trivy fs` over the checkout was tried for the source SBOM and found one Python package, because it reads only the root project of a uv workspace, and ours has no dependencies of its own.
+
+**The scanners are pinned like the images.** Trivy runs as its container pinned by tag and digest, not as a marketplace action, and pip-audit by version. A scanner runs with the checkout and the Docker socket in reach, and a moved tag would run someone else's code there.
+
+**The first scan found five HIGH advisories in the image, and they are fixed rather than ignored.**
+
+- three in Debian's `libpcre2-8-0`, fixed in bookworm but absent from the digest-pinned base image. The runtime stage now applies Debian's updates with `apt-get upgrade`. That is the one layer whose contents depend on the day it is built, which is the cost of shipping a fix a pinned digest never receives, and the image SBOM records what it installed;
+- two in packages vendored by the base image's own setuptools, in the system Python. The platform runs from `/app/.venv`, which uv builds without pip or setuptools, so the runtime stage uninstalls the system pip, setuptools and wheel.
+
+`pip-audit` and `npm audit` found nothing. The Python fix was checked by rescanning a local build. The Debian fix could not be: `deb.debian.org` is not reachable from the environment this was written in, so the first run of this workflow is its test.
+
+*Rejected: scanning jobs in `ci.yml`.* It would give no schedule, and that workflow belongs to another stage's work in flight.
+
+*Rejected: GitHub's Dependabot alerts alone.* They see manifests, not the built image or its Debian layer, and they are configured outside the repository, where nobody reviewing a pull request can see whether they are on.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
