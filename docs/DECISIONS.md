@@ -3718,6 +3718,40 @@ So no migration is added by this stage. **Grants survive a restore by being re-a
 
 ---
 
+## D-208 — The dashboard gets a strict content-security policy, and the platform stays single-origin with no CORS
+
+**2026-09-28 · accepted** · *`meridian.api.security_headers`, `meridian.api.app`, Stage 23* · *follows D-081 and D-091*
+
+The dashboard was served with no content-security policy and no framing header. D-081 and D-091 keep it on the platform's own origin, and `site/_headers` already gives the static site a strict policy, so the dashboard had no reason to be the looser of the two surfaces.
+
+**One policy, on every response the platform builds:**
+
+```
+default-src 'none'; script-src 'self'; style-src 'self';
+img-src 'self' data: https://tile.openstreetmap.org; font-src 'self';
+connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none';
+form-action 'none'; frame-ancestors 'none'
+```
+
+- **No `'unsafe-inline'` and no `'unsafe-eval'`.** Vite's build emits one module script and one stylesheet by URL and nothing inline, and a test reads `dashboard/index.html` for an inline script, a `<style>` or a `style=` attribute. React and Leaflet set styles through the DOM, which a policy does not govern.
+- **`data:` images** are Leaflet's own control icons and blank tile, inlined in its stylesheet, and the page's empty favicon.
+- **One foreign origin, the map's tiles** (D-092). `StationMap.tsx` and the policy must name the same host, and a test holds them equal. A build with another `VITE_MAP_TILE_URL` has to change the policy too; if it does not, the tiles are refused and the map falls back to the graticule it draws itself, which is the failure D-092 designed for.
+- **Beside it:** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` for browsers without `frame-ancestors`, `Referrer-Policy: no-referrer`, a `Permissions-Policy` naming the features the page will never use, `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy: same-origin`, and `Strict-Transport-Security`, which browsers ignore over plain HTTP and honour through the tunnel.
+
+**On every response, not only the page.** The middleware is the outermost the platform adds, so the API's JSON, MSP, and refusals made before routing carry the same headers; one policy for the origin means no path can be served without it. A 500 from Starlette's own error middleware, which sits outside every added middleware, does not; it carries a fixed JSON body and nothing to execute.
+
+**Checked in a browser.** Chromium, driven by Playwright against a local platform serving the built dashboard with one registered station, loaded the page, the map and the station's detail with no policy violation reported. The control was the same page under a policy denying images and styles, which reported violations for the tiles, the stylesheet and Leaflet's `data:` images, so the check can see one.
+
+**Single origin, no CORS, pinned.** No CORS middleware exists, so the platform sends no `Access-Control-Allow-*` header and a browser on another origin cannot read what it answers. A station is not a browser and needs none. `tests/msp_conformance/test_security_headers.py` asks as another origin would, by preflight and by a plain request, and finds no such header, and finds no `CORSMiddleware` installed. Opening the API to other origins later is a decision to record, not a middleware to add.
+
+**Cloudflare features that inject script would now be refused**, such as Rocket Loader, e-mail obfuscation and the Web Analytics beacon. D-041 already turned off the ones that edit the site; the tunnel hostname must keep them off.
+
+*Rejected: a policy on the page only.* It leaves a path that serves HTML without one, which is the path someone finds.
+
+*Rejected: `'unsafe-inline'` for styles, as many policies allow.* Nothing needs it, and adding it back is one line if something ever does.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

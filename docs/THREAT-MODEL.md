@@ -94,8 +94,8 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | P-5 | Scraping or flooding the public API | The edge rule, 50 requests per 10 s per IP on `/api/`, and the same figures per client in the process, keyed on the edge's header | D-088, D-202, D-206; `meridian.api.rate_limits` | mitigated |
 | P-6 | Oversized requests to the public API | No body accepted, the query string capped at 2 KiB, and the request head bounded by h11 at 16 KiB | D-203; `meridian.api.request_limits`; `meridian.cli_serve` | mitigated |
 | P-7 | Deep pagination as a denial of service | Keyset pagination, never offset | D-085 | mitigated |
-| P-8 | Script injection or framing of the dashboard | Same origin, no CORS; no content-security policy or framing header is sent | D-081, D-091 | open — Stage 23 part 8 |
-| P-9 | Another origin reading the API with a visitor's browser | No CORS middleware exists, so browsers refuse cross-origin reads; nothing pins that | D-091 | partial — Stage 23 part 8 |
+| P-8 | Script injection or framing of the dashboard | A strict content-security policy with no inline script or style and one foreign origin for map tiles, `frame-ancestors 'none'` and `X-Frame-Options`, on every response; checked in Chromium with no violation | D-208; `meridian.api.security_headers`; `tests/msp_conformance/test_security_headers.py` | mitigated |
+| P-9 | Another origin reading the API with a visitor's browser | No CORS middleware and no `Access-Control-Allow-*` header, pinned by a preflight and a plain request from another origin | D-091, D-208; `tests/msp_conformance/test_security_headers.py` | mitigated |
 | P-10 | Process internals exposed through `/metrics` | A bearer token, and a 404 indistinguishable from an unrouted path without it | D-087; `meridian.metrics.access` | mitigated |
 | P-11 | The public API publishes more than a visitor needs | Reviewed per endpoint when each was built; never reviewed as a whole | D-082, D-093, D-107 | open — Stage 23 part 9 |
 

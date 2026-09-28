@@ -26,6 +26,7 @@ from meridian.api.public.surface import router as public_router
 from meridian.api.rate_limits import RateLimiter, RateLimitMiddleware
 from meridian.api.request_limits import RequestSizeLimitMiddleware
 from meridian.api.request_metrics import RequestMetricsMiddleware
+from meridian.api.security_headers import SecurityHeadersMiddleware
 from meridian.config import Settings, load_settings
 from meridian.metrics.access import is_metrics_scrape_authorised
 from meridian.metrics.exposition import build_scrape_source, exposition
@@ -109,6 +110,11 @@ def create_app() -> FastAPI:
     # is still a request the platform answered, and an operator watching 4xx
     # rates needs to see it (D-109).
     app.add_middleware(RequestMetricsMiddleware)
+    # Outermost of ours, so every response the platform builds carries the
+    # content-security policy and its companions, refusals before routing
+    # included (D-208). No CORS middleware is added, deliberately: the
+    # dashboard is same-origin, and no other origin may read the API.
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # Before the routes, so a failure inside one already leaves in MSP §6's shape
     # rather than in FastAPI's default 422 or a bare 500.

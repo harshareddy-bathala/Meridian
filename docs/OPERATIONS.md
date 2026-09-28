@@ -82,6 +82,8 @@ compose exec api python -c "import urllib.request; print(urllib.request.urlopen(
 
 `compose` in the commands elsewhere on this page then means all three files.
 
+**Keep Cloudflare's Rocket Loader, e-mail obfuscation and Web Analytics off for the tunnel hostname.** Each injects a script, and the dashboard's content-security policy refuses anything not served by the platform itself (D-208), so the page would load without them and log a violation in the browser's console.
+
 ### Database roles
 
 The API, the jobs process and the CLI inside them connect as `meridian_api`, which may read and write rows and cannot change the schema; `meridian_reader` may only read; only `migrate` uses the owner (D-207). `migrate` runs `meridian db roles` after every migration, so the roles, their grants and their passwords are put right by every `up`.
