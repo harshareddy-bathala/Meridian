@@ -440,7 +440,7 @@ def test_a_simulated_stations_floor_is_simulated(
 def test_every_noise_row_is_its_observations_floor(
     rollback: Any, insert_assignment: InsertAssignment
 ) -> None:
-    """The pairing a foreign key cannot hold between two hypertables (0020).
+    """The pairing a foreign key cannot hold between two hypertables (0021).
 
     Every observation revision with a floor has exactly one noise row, and that
     row repeats the observation's floor, gain, start, station and provenance.

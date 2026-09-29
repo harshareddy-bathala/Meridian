@@ -475,7 +475,7 @@ def test_0021_backfills_noise_and_products_from_a_compressed_chunk(
         assert kept == (4,)
 
 
-def test_0021_s_hourly_aggregate_agrees_with_the_raw_heartbeats(
+def test_0022_s_hourly_aggregate_agrees_with_the_raw_heartbeats(
     scratch_database: str, monkeypatch
 ) -> None:
     """D-178's check before anything relies on it: the aggregate loses nothing.

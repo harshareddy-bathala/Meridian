@@ -1,6 +1,6 @@
 """How much of each hour a station was heard from, read from ``heartbeats_hourly``.
 
-The continuous aggregate (migration 0021, D-178) serves the reads that need
+The continuous aggregate (migration 0022, D-178) serves the reads that need
 coverage rather than evidence. Whether a station was listening for one pass is
 ``Registry.was_listening``'s question, and that reads raw heartbeats and nothing
 else (rule 7).

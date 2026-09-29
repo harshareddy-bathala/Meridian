@@ -1346,7 +1346,7 @@ def test_the_profiles_and_products_are_plain_tables(conn) -> None:
     assert not ({"horizon_profiles", "interference_profiles", "products"} & hypertables)
 
 
-# --- 0021, the views and the hourly aggregate -----------------------------------
+# --- 0022, the views and the hourly aggregate -----------------------------------
 
 
 def _detected_observation(execute: Any, assignment_id: str, *, seconds: int) -> Any:
