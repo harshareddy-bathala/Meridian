@@ -22,6 +22,7 @@ from meridian.store.assignments import (  # noqa: E402 — after importorskip
     find_assignment_ids_by_state,
     find_due_assignments,
     mark_assignment_in_progress,
+    mark_assignment_reported,
     mark_assignments_held,
 )
 
@@ -98,12 +99,14 @@ def insert_assignment(rollback: Any) -> InsertAssignment:
         start_at: datetime,
         end_at: datetime,
         state: str = "issued",
+        decision: str = "scheduled",
     ) -> None:
         with rollback.cursor() as cur:
             cur.execute(
                 "insert into assignments (assignment_id, pass_id, station_id, start_at,"
-                " end_at, centre_freq_hz, mode, timing_uncertainty_s, reason, state)"
-                " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                " end_at, centre_freq_hz, mode, timing_uncertainty_s, reason, state,"
+                " decision)"
+                " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     assignment_id,
                     pass_id,
@@ -115,6 +118,7 @@ def insert_assignment(rollback: Any) -> InsertAssignment:
                     4.2,
                     "test fixture",
                     state,
+                    decision,
                 ),
             )
 
@@ -394,3 +398,93 @@ def test_find_due_assignments_returns_more_than_eight_when_eligible(
     )
 
     assert len(due) == 9
+
+
+# --- D-165: a skip is a record, never an assignment ---------------------------
+
+
+def _states(conn: Any) -> dict[str, str]:
+    with conn.cursor() as cur:
+        cur.execute("select assignment_id, state from assignments")
+        return dict(cur.fetchall())
+
+
+def test_find_due_assignments_never_delivers_a_skip(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """A station is told what to receive, not what the scheduler turned down.
+
+    The scheduled row beside it is the positive control: the same window, the
+    same station, delivered.
+    """
+    now = datetime.now(UTC)
+    for assignment_id, decision in (("as_taken", "scheduled"), ("as_lost", "skipped")):
+        insert_assignment(
+            assignment_id=assignment_id,
+            start_at=now + timedelta(minutes=5),
+            end_at=now + timedelta(minutes=15),
+            decision=decision,
+        )
+
+    due = find_due_assignments(
+        rollback, STATION_ID, horizon_end=now + timedelta(hours=2)
+    )
+
+    assert [d.assignment_id for d in due] == ["as_taken"]
+
+
+def test_a_skip_is_never_expired_as_a_decline(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """``expired`` means the station never took the work it was given."""
+    past_end = datetime.now(UTC) - timedelta(hours=1)
+    for assignment_id, decision in (("as_taken", "scheduled"), ("as_lost", "skipped")):
+        insert_assignment(
+            assignment_id=assignment_id,
+            start_at=past_end - timedelta(minutes=15),
+            end_at=past_end,
+            decision=decision,
+        )
+
+    assert expire_overdue_assignments(rollback, STATION_ID, still_held=[]) == 1
+    assert _states(rollback) == {"as_taken": "expired", "as_lost": "issued"}
+
+
+def test_a_skip_named_by_a_station_is_not_held_or_reported(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """A station still naming a skip delivered before D-165 moves nothing."""
+    now = datetime.now(UTC)
+    for assignment_id, decision in (("as_taken", "scheduled"), ("as_lost", "skipped")):
+        insert_assignment(
+            assignment_id=assignment_id,
+            start_at=now,
+            end_at=now + timedelta(minutes=10),
+            decision=decision,
+        )
+
+    assert mark_assignments_held(rollback, STATION_ID, ["as_taken", "as_lost"]) == 1
+    assert not mark_assignment_reported(
+        rollback, station_id=STATION_ID, assignment_id="as_lost"
+    )
+    assert not mark_assignment_in_progress(
+        rollback, station_id=STATION_ID, assignment_id="as_lost"
+    )
+    assert _states(rollback) == {"as_taken": "held", "as_lost": "issued"}
+
+
+def test_a_skip_is_not_among_the_ids_issued_to_a_station(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    now = datetime.now(UTC)
+    for assignment_id, decision in (("as_taken", "scheduled"), ("as_lost", "skipped")):
+        insert_assignment(
+            assignment_id=assignment_id,
+            start_at=now,
+            end_at=now + timedelta(minutes=10),
+            decision=decision,
+        )
+
+    ids = find_assignment_ids_by_state(rollback, STATION_ID, ["issued"])
+
+    assert ids == {"as_taken"}

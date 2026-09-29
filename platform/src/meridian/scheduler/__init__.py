@@ -30,13 +30,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 __all__ = [
     "Candidate",
+    "Commitment",
     "Rejection",
+    "RejectionRule",
     "ScheduleOutcome",
     "ScoredCandidate",
 ]
+
+RejectionRule = Literal["overlap", "eligible_cap"]
+"""The constraints a candidate can lose to.
+
+``overlap``: the station is assigned another pass over this window, turnaround
+included. ``eligible_cap``: the station already holds as many assignments as a
+heartbeat delivers at once (D-035). The rest of D-166's constraints — a live,
+receivable downlink and an available station — decide which passes become
+candidates at all, so no candidate loses to them.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,12 +75,16 @@ class Candidate:
     station_id: str
     aos: datetime
     los: datetime
-    """Both timezone-aware UTC, and both the *pass* boundaries.
+    """Both timezone-aware UTC, and both the *pass* boundaries."""
 
-    An assignment's window is wider — the pass opened out by the platform's
-    stated timing uncertainty (D-021, D-060) — and that widening happens when
-    the assignment is written. Conflicts are judged on the pass, so two
-    schedules computed under different uncertainty models stay comparable.
+    margin_s: float
+    """The platform's 1σ timing uncertainty for this pass (D-060).
+
+    The assignment's window is the pass opened out by this much at each end
+    (D-021), and **conflicts are judged on that window**, not on the pass
+    (D-166): a station recording one pass until its widened end cannot start
+    the next at its widened start. Every scheduler judges the same way, so
+    schedules stay comparable.
     """
 
     max_elevation_deg: float
@@ -102,6 +119,23 @@ class ScoredCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class Commitment:
+    """A pass the station is already assigned, by an earlier run.
+
+    Fixed for this run: it is never displaced, and a candidate it blocks is
+    skipped naming it. Without it, rounds over overlapping horizons (D-110)
+    each decided their own passes as though the station were free, and a pass
+    new to a later round could be scheduled on top of one already taken
+    (D-165).
+    """
+
+    candidate: Candidate
+    """The pass the assignment was made for, seen as the scheduler sees one."""
+
+    assignment_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class Rejection:
     """A candidate that lost, and the candidate it lost to.
 
@@ -113,7 +147,18 @@ class Rejection:
     """
 
     scored: ScoredCandidate
-    conflicts_with_pass_id: int
+    rule: RejectionRule
+    """Which constraint turned it down (D-166)."""
+
+    conflicts_with_pass_id: int | None
+    """The pass whose assignment blocked it; ``None`` when no single one did,
+    as when the station's eligible assignments were already at the cap."""
+
+    committed_assignment_id: str | None = None
+    """Set when the blocker is a :class:`Commitment`, whose id already exists.
+
+    ``None`` when it is a selection of this run, whose id the run mints.
+    """
 
 
 @dataclass(frozen=True, slots=True)

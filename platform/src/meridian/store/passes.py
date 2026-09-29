@@ -174,8 +174,9 @@ def find_passes_in_horizon(
         **Selected on acquisition, not on overlap**, and half-open — the same
         rule ``OrbitService.pass_windows`` uses to decide which search a pass
         belongs to (D-059). Two adjacent horizons therefore partition the passes
-        between them, so a scheduler run per horizon considers each pass exactly
-        once rather than re-deciding one that a neighbouring run already placed.
+        between them. Overlapping ones, as the jobs service's rounds are, do
+        not; the scheduler run leaves out what it already decided and works
+        around what it already assigned (D-165).
 
         A pass whose window runs past ``end`` is still returned when it rose
         inside: the window is the pass, and truncating it to the horizon would

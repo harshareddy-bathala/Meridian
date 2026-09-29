@@ -34,7 +34,9 @@ _LOG_COLUMNS = """
     a.issued_at, a.start_at, a.end_at, a.centre_freq_hz, a.mode,
     a.timing_uncertainty_s, a.priority, a.predicted_yield,
     a.decision, a.reason, a.score, a.conflicts_with_assignment_id,
-    a.model_config, a.state, a.simulated
+    a.model_config, a.state, a.simulated,
+    a.schedule_run_id, a.model_sha256, a.explanation,
+    a.revision, a.revoked_reason
 """
 """Shared by the list and the detail read, so the two cannot disagree."""
 
@@ -62,6 +64,15 @@ class LoggedAssignment:
     model_config: str | None
     state: str
     simulated: bool
+    schedule_run_id: str | None
+    """The run that decided it; ``None`` before Stage 18 (D-170)."""
+
+    model_sha256: bytes | None
+    explanation: dict[str, object] | None
+    """As the scheduler stored it: see ``meridian.scheduler.explanations``."""
+
+    revision: int
+    revoked_reason: str | None
 
 
 def find_assignments(  # noqa: PLR0913 — three filters, a cursor and a page size
@@ -86,8 +97,10 @@ def find_assignments(  # noqa: PLR0913 — three filters, a cursor and a page si
         limit: The most rows to return; callers ask for one more than they need.
 
     Returns:
-        Decisions in ascending ``(start_at, assignment_id)`` order. A soft-deleted
-        station's are excluded.
+        Decisions in ascending ``(start_at, assignment_id)`` order, each pass's
+        current one only: an earlier revision is reachable by its id, and a
+        list showing both would show a pass decided twice (D-171). A
+        soft-deleted station's are excluded.
     """
     with conn.cursor(row_factory=class_row(LoggedAssignment)) as cur:
         cur.execute(
@@ -100,6 +113,12 @@ def find_assignments(  # noqa: PLR0913 — three filters, a cursor and a page si
               and a.end_at > %(not_before)s
               and (%(station_id)s::text is null or a.station_id = %(station_id)s)
               and (%(decision)s::text is null or a.decision = %(decision)s)
+              and not exists (
+                select 1 from assignments later
+                where later.pass_id = a.pass_id
+                  and later.model_config is not distinct from a.model_config
+                  and later.revision > a.revision
+              )
               and (
                 %(after)s::text is null
                 or (a.start_at, a.assignment_id) > (

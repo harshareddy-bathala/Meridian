@@ -720,6 +720,26 @@ def test_a_scheduled_assignment_names_no_conflict(fixtures) -> None:
     assert stored[0] == (55.0, None)
 
 
+def test_a_skip_cannot_leave_issued(fixtures) -> None:
+    """0017: a skip is a record, so no transition may move it (D-165)."""
+    element_set_id = _insert_element_set(fixtures)
+    pass_id = _insert_scheduled_pass(fixtures, element_set_id)
+    other_pass_id = _insert_scheduled_pass(fixtures, element_set_id, hours_ahead=2)
+    _insert_assignment(fixtures, "asg_kept", pass_id, score=70.0)
+    _insert_assignment(
+        fixtures, "asg_lost", other_pass_id, score=12.0, conflicts_with="asg_kept"
+    )
+
+    fixtures(
+        "update assignments set state = 'held' where assignment_id = %s", "asg_kept"
+    )
+    with pytest.raises(psycopg.errors.CheckViolation):
+        fixtures(
+            "update assignments set state = 'expired' where assignment_id = %s",
+            "asg_lost",
+        )
+
+
 # --- Migration 0016's ingest and archive tables ------------------------------
 #
 # The completion gate for Stage 14 is that a snapshot downloaded once can be

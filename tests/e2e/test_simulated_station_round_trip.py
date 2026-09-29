@@ -39,6 +39,7 @@ from meridian.cli_catalogue import load_document
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.pass_generation import GenerationHorizon, generate_passes
 from meridian.scheduler.run import ScheduleRequest, run_schedule
+from meridian.scheduler.schedule_config import ScheduleConfig
 from meridian.store.invites import hash_invite_token
 from meridian.store.satellites import find_active_transmitters
 from meridian_sim import supervisor as supervisor_module
@@ -185,8 +186,8 @@ def seed_the_platform(rollback: Any, station_id: str) -> tuple[int, int]:
         ScheduleRequest(
             start=now,
             end=now + GENERATION_HORIZON,
-            model_config="A",
-            turnaround_s=0.0,
+            now=now,
+            config=ScheduleConfig(),
         ),
     )
     assert scheduled.scheduled > 0, "the scheduler took none of the generated passes"

@@ -17,11 +17,14 @@ from __future__ import annotations
 from prometheus_client import Counter, Gauge, Histogram
 
 __all__ = [
+    "HISTORY_AGE",
     "LAST_SUCCESS",
     "PASSES_COMPUTED",
     "PASS_GENERATION",
     "SCHEDULE",
     "SCHEDULER_CANDIDATES",
+    "SCHEDULE_RUNS",
+    "SOLVER_SECONDS",
     "TASKS",
     "TASK_DURATION",
     "TASK_FAILURES",
@@ -69,3 +72,24 @@ SCHEDULER_CANDIDATES = Gauge(
     "meridian_scheduler_candidates",
     "Passes the most recent scheduling task had to choose from.",
 )
+
+SCHEDULE_RUNS = Counter(
+    "meridian_scheduler_runs",
+    "Scheduler runs that decided something, by the solver's status (D-167).",
+    ["status"],
+)
+"""``status`` is ``optimal``, ``time_limit`` or ``fallback``. A rising
+``fallback`` count means the solver's answers are being refused or never
+arrive, and the schedule is greedy's."""
+
+SOLVER_SECONDS = Gauge(
+    "meridian_scheduler_solver_seconds",
+    "Solver wall time in the most recent run that decided something.",
+)
+
+HISTORY_AGE = Gauge(
+    "meridian_scheduler_history_age_seconds",
+    "Seconds from the as_of of the history the model read to the round's start.",
+)
+"""Absent while no model reads history. Refreshing the history is an operator
+step (export, then label), and this is how long it has gone undone (D-169)."""

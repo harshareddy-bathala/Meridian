@@ -38,7 +38,8 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from copy import copy
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from statistics import median
 
@@ -132,6 +133,20 @@ class Environment:
             float(len(timing)),
             _divergence(one, self._rows),
         )
+
+    def with_predictions(self, geometry: Mapping[int, PassGeometry]) -> Environment:
+        """This environment, reading these predictions' geometry as well.
+
+        A pass scored live is not in the raw snapshot, nor are the other
+        predictions of its rise, and a rise's divergence is read from them. The
+        settled reports are shared, not placed again: nothing here changes
+        what the past says, only which predictions of the future are known.
+        """
+        extended = copy(self)
+        extended._rows = replace(
+            self._rows, geometry={**self._rows.geometry, **geometry}
+        )
+        return extended
 
     def _before(self, station_id: str, at: datetime) -> Sequence[_Heard]:
         times = self._times.get(station_id)

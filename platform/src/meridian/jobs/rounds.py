@@ -1,9 +1,11 @@
 """One round of scheduled work, and the loop that repeats it.
 
 A round generates passes over ``[now, now + horizon)`` and then schedules them
-under configuration A (D-110). Both steps are idempotent over a horizon (D-063,
-D-066), so consecutive rounds overlap without writing anything twice, and a round
-that is interrupted leaves nothing the next one cannot finish.
+under the configured schedule (D-110, amended by D-170): configuration A on the
+elevation proxy when no ``schedule.toml`` is given. Both steps are idempotent
+over a horizon (D-063, D-066), so consecutive rounds overlap without writing
+anything twice, and a round that is interrupted leaves nothing the next one
+cannot finish.
 
 **A failed task is recorded and the process carries on.** Scheduling still runs
 after pass generation fails, because it schedules passes already stored and a
@@ -29,11 +31,14 @@ from datetime import datetime, timedelta
 from typing import Protocol, TypeVar
 
 from meridian.jobs.job_metrics import (
+    HISTORY_AGE,
     LAST_SUCCESS,
     PASS_GENERATION,
     PASSES_COMPUTED,
     SCHEDULE,
+    SCHEDULE_RUNS,
     SCHEDULER_CANDIDATES,
+    SOLVER_SECONDS,
     TASK_DURATION,
     TASK_FAILURES,
 )
@@ -43,7 +48,9 @@ from meridian.pass_generation import (
     GenerationReport,
     generate_passes,
 )
+from meridian.prediction.live import LiveScorer
 from meridian.scheduler.run import ScheduleReport, ScheduleRequest, run_schedule
+from meridian.scheduler.schedule_config import ScheduleConfig
 from meridian.store.stations import Connection
 
 __all__ = [
@@ -65,8 +72,7 @@ class RoundPlan:
     """What every round does, fixed for the life of the process."""
 
     horizon: timedelta
-    model_config: str
-    turnaround_s: float
+    config: ScheduleConfig
 
 
 class RoundWork(Protocol):
@@ -88,17 +94,21 @@ class DatabaseRoundWork:
         self,
         connect: Callable[[], AbstractContextManager[Connection]],
         orbit: OrbitService,
+        scorer: Callable[[], LiveScorer | None],
     ) -> None:
-        """Bind the tasks to a way of connecting and one propagator.
+        """Bind the tasks to a way of connecting, one propagator and the model.
 
         Args:
             connect: Returns a connection as a context manager that commits on
                 a clean exit — ``psycopg.connect(...)`` itself, in production.
             orbit: Built once for the process; building it parses a
                 leap-second table.
+            scorer: The configured model over the newest history, asked once
+                per round — ``ScorerSource.current`` in production.
         """
         self._connect = connect
         self._orbit = orbit
+        self._scorer = scorer
 
     def generate(self, horizon: GenerationHorizon) -> GenerationReport:
         """Run ``meridian.pass_generation`` exactly as the CLI does."""
@@ -107,8 +117,9 @@ class DatabaseRoundWork:
 
     def schedule(self, request: ScheduleRequest) -> ScheduleReport:
         """Run ``meridian.scheduler`` exactly as the CLI does."""
+        scorer = self._scorer()
         with self._connect() as conn:
-            return run_schedule(conn, self._orbit, request)
+            return run_schedule(conn, self._orbit, request, scorer)
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,23 +175,31 @@ def run_round(work: RoundWork, plan: RoundPlan, now: datetime) -> RoundOutcome:
             generated.passes_stored,
         )
 
-    request = ScheduleRequest(
-        start=now,
-        end=end,
-        model_config=plan.model_config,
-        turnaround_s=plan.turnaround_s,
-    )
+    request = ScheduleRequest(start=now, end=end, now=now, config=plan.config)
     scheduled = _timed(SCHEDULE, lambda: work.schedule(request))
     if scheduled is not None:
-        SCHEDULER_CANDIDATES.set(scheduled.candidates_considered)
-        _log.info(
-            "scheduled %d and skipped %d of %d candidates, %d rows written",
-            scheduled.scheduled,
-            scheduled.skipped,
-            scheduled.candidates_considered,
-            scheduled.rows_written,
-        )
+        _record(scheduled, now)
     return RoundOutcome(generated=generated, scheduled=scheduled)
+
+
+def _record(scheduled: ScheduleReport, now: datetime) -> None:
+    """What one scheduling task decided, as metrics and a log line."""
+    SCHEDULER_CANDIDATES.set(scheduled.candidates_considered)
+    if scheduled.solver is not None:
+        SCHEDULE_RUNS.labels(status=scheduled.solver.status).inc()
+        SOLVER_SECONDS.set(scheduled.solver.runtime_s)
+    if scheduled.history_as_of is not None:
+        HISTORY_AGE.set((now - scheduled.history_as_of).total_seconds())
+    _log.info(
+        "scheduled %d and skipped %d of %d candidates, %d rows written, %s",
+        scheduled.scheduled,
+        scheduled.skipped,
+        scheduled.candidates_considered,
+        scheduled.rows_written,
+        "nothing to decide"
+        if scheduled.solver is None
+        else f"run {scheduled.run_id} {scheduled.solver.status}",
+    )
 
 
 def run_until_stopped(
