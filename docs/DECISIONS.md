@@ -4105,6 +4105,55 @@ A delay short of the client's timeout changes nothing the platform can observe, 
 
 ---
 
+## D-193 — The pool checks a connection as it lends it
+
+**2026-09-29 · accepted** · *`meridian/store/pool.py`, Stage 21. The pool itself is Stage 2's, and no earlier entry recorded it.*
+
+When the database restarts, every idle connection in the API's pool dies with it. psycopg_pool learns that a connection is dead only when someone uses it. So without a check, each dead connection failed the request that borrowed it — **up to eight refused MSP requests per database restart**, one for each connection `POOL_MAX_SIZE` allows. Stage 21's database-restart fault found this. A probe that terminates the pool's backends shows the first request failing with `AdminShutdown` and the rest succeeding.
+
+The pool is now built with `check=ConnectionPool.check_connection`, which tests a connection before lending it and replaces it if it is dead. The same probe then fails nothing. `tests/integration/test_pool.py` terminates the pool's warm connections and requires every following request to succeed; without the check, that test fails.
+
+**The cost** is one round trip on the local socket per borrow. Against a heartbeat's own transaction that is noise, and it buys a database restart that costs no station a refused request.
+
+*Rejected:* retrying a failed request inside the API, which would need every handler to know which failures are safe to repeat. Also rejected: a short `max_idle` on the pool, which narrows the window but does not close it — a restart can land inside any interval.
+
+---
+
+## D-194 — Platform faults are injected from the host, by an operator's tool
+
+**2026-09-29 · accepted** · *`deploy/tools/chaos.py`; the CI step "The platform survives its own faults"; `tests/msp_conformance/test_platform_restart.py`; `tests/unit/test_jobs_rounds.py`, Stage 21.*
+
+Four of the roadmap's faults are the platform's own, not a station's:
+
+| Fault | Injected as |
+|---|---|
+| platform restart | `docker compose restart api` |
+| database restart | `docker compose restart db` |
+| scheduler failure | `docker compose stop jobs`, a wait, then `start jobs` |
+| slow API | `docker compose pause api`, 20 s by default, then `unpause api` |
+
+For slow API, 20 s is past the client's 10 s read timeout and short of `stale`.
+
+**From the host, not from the simulator.** The simulator speaks only MSP (D-075), and a simulator that could restart the platform could do anything else to it. `chaos.py` is a stdlib host script beside `backup.py` and `restore.py`. It addresses the stack the way they do (D-115), and does what an operator would do by hand.
+
+**The same ledger, in the same format.** Each fault is a window opened before the break and closed after the mend, with target `platform:<service>`, in the run's fault ledger (D-189). The two packages share no code, so a unit test reads every line the tool writes with the simulator's own reader.
+
+**A mend always runs.** Starting the service again sits in a `finally`: a tool that stopped the scheduler and then failed must not leave it stopped. And a window is always closed, even when the break itself failed.
+
+**`run` draws a seeded schedule.** Faults are spaced exponentially, an hour apart on average and never less than fifteen minutes after the previous one ends. The run then injects them in turn. `--plan` prints the schedule and does nothing, so the long run's faults can be read before it starts.
+
+**What CI proves, and where.**
+- **Against the real stack:** CI's `compose` job injects all four faults against the running stack with a simulated station. It then requires:
+  - the simulator still running, and never restarted;
+  - no station registered twice;
+  - heartbeats being stored again;
+  - four closed windows in the ledger.
+- **In process:** a fleet lives through the API process stopping and a new one starting on the same database. A failed scheduling round costs that round and nothing more. D-193's pool test covers the database restart.
+
+*Rejected:* a fault endpoint in the platform, which would be a way to break production shipped in production.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -4352,6 +4401,8 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-189 the fault ledger | `meridian_sim/{ledger,station}.py`; `tests/msp_conformance/test_simulator_supervisor.py` |
 | D-190 expected detection decided by the verifier | `meridian_sim/faults.py` |
 | D-191 slow API as a response lost after commit | `meridian_sim/faults.py` |
+| D-193 the pool checks a connection as it lends it | `meridian/store/pool.py`; `tests/integration/test_pool.py` |
+| D-194 platform faults from the host | `deploy/tools/chaos.py`; `pyproject.toml` (its lint set); `.github/workflows/ci.yml` (the compose job's fault step); `tests/msp_conformance/test_platform_restart.py`; `tests/unit/{test_chaos_tool,test_jobs_rounds}.py` |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

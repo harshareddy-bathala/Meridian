@@ -9,6 +9,9 @@ Marked ``integration`` by the directory hook in ``tests/conftest.py``.
 
 from __future__ import annotations
 
+import contextlib
+
+import psycopg
 import pytest
 
 from meridian.config import Settings, load_settings
@@ -100,6 +103,44 @@ def test_the_pool_is_bounded(settings: Settings) -> None:
     pool = open_pool(settings)
     try:
         assert pool.max_size == POOL_MAX_SIZE
+    finally:
+        pool.close()
+
+
+WARM_CONNECTIONS = 3
+
+
+def test_a_database_restart_costs_no_request(
+    settings: Settings, database_url: str
+) -> None:
+    """Stage 21's database restart, as the pool sees it: every idle connection dies.
+
+    Without a check on lending, each dead connection fails the request that
+    borrows it before the pool learns so, and a restart costs up to eight
+    refused heartbeats (D-193). Terminating the pool's own backends is what a
+    restart does to them, without restarting a database other tests share.
+    """
+    pool = open_pool(settings)
+    try:
+        pool.wait()
+        with contextlib.ExitStack() as held:
+            borrowed = [
+                held.enter_context(pool.connection()) for _ in range(WARM_CONNECTIONS)
+            ]
+            pids = [one.info.backend_pid for one in borrowed]
+        with psycopg.connect(database_url, autocommit=True) as admin:
+            admin.execute(
+                "select pg_terminate_backend(pid) from unnest(%s::int[]) as pid",
+                (pids,),
+            )
+
+        answers = []
+        for _ in range(WARM_CONNECTIONS):
+            with pool.connection() as conn, conn.cursor() as cur:
+                cur.execute("select 1")
+                answers.append(cur.fetchone())
+
+        assert answers == [(1,)] * WARM_CONNECTIONS
     finally:
         pool.close()
 

@@ -170,6 +170,8 @@ convention = "google"
 "deploy/tools/backup.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/restore.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/compose_db.py" = ["T201", "D", "ANN", "PLR", "C90"]
+# chaos.py is the same kind of host script, and imports compose_db the same way (D-194).
+"deploy/tools/chaos.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
 # The ban below is global; this is the one module exempt from it, so the boundary
 # is checked by CI rather than remembered by a reviewer.
