@@ -209,6 +209,19 @@ def test_a_mask_outside_the_sky_is_refused() -> None:
         RegisterRequestBody.model_validate(body)
 
 
+def test_a_mask_closed_at_360_is_accepted() -> None:
+    """360 is north again, where a closed mask often ends."""
+    body = build_register_body(
+        replace(PROFILE, horizon_mask=((0.0, 10.0), (360.0, 10.0))),
+        "an-invite",
+        "a-key",
+    )
+
+    parsed = RegisterRequestBody.model_validate(body)
+
+    assert parsed.capabilities[0].horizon_mask[1].azimuth_deg == 360.0
+
+
 def test_the_key_is_on_disk_before_the_platform_is_asked(
     transport: MspTransport, rollback: Any, tmp_path: Path
 ) -> None:

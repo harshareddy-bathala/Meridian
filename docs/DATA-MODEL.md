@@ -204,7 +204,7 @@ What a station declared it holds from one reception — a waterfall, an image, d
 `(id, assignment_id, revision, observation_started_at, station_id, element_index, kind, sha256, size_bytes, uri, created_at, simulated)`, with a foreign key to the observation revision it came from.
 
 - **Producer:** observation ingest, from each element of `products_json` with a non-empty `kind` and a 64-hex `sha256`, in the transaction that writes the revision. Migration `0021` backfilled every earlier observation by the same rule. The reference client declares only files its decoder named and its product store holds.
-- **Consumers:** the public observation list, which serves kind, hash and size, never `uri`; the raw snapshot, likewise without `uri`; Stage 30's evidence dataset, by hash.
+- **Consumers:** the public observation list, which serves kind, hash and size, never `uri`; the raw snapshot's `products.jsonl`, without `uri` — though the snapshot's `observations` still carry it inside `products_json`, verbatim, and a raw snapshot is private; Stage 30's evidence dataset, by hash.
 - **No transfer.** MSP 0.x defines none (D-029); `uri` is `station:products/<sha256>` for the reference client, meaning held by the station, not fetchable. An element outside the rule stays in `products_json` and gets no row.
 - **Retention:** as long as the observation it belongs to — never dropped. The bytes live on the station under its store's cap, oldest evicted first, and an eviction is not reported.
 
@@ -387,7 +387,7 @@ Stage 15's two artefacts, and Stage 17's models, are directories on disk, not ro
 
 Written by `meridian snapshot export`, the only step that reads the database, inside one `REPEATABLE READ, READ ONLY` transaction. `as_of` is that transaction's time and cannot be chosen, because several columns are current state rather than history (D-143). It holds, for passes from `--since` to `as_of`:
 
-- `passes`, `assignments`, and every `observations` revision submitted by `as_of`, with the `noise_measurements` and `products` recorded from them *(Stage 19)* — `products` without `uri`, which names a place on one station (D-173, D-176);
+- `passes`, `assignments`, and every `observations` revision submitted by `as_of`, with the `noise_measurements` and `products` recorded from them *(Stage 19)* — `products` without its `uri` column, which names a place on one station, though `products_json` still holds it verbatim (D-173, D-176);
 - `listening` — per settled scheduled assignment, `listening_confirmed` as `Registry.was_listening()` answered it at export (D-145) — and the `heartbeats` overlapping those windows;
 - the `element_sets` the passes were computed from, `satellites` with their `transmitters`, and `stations` with their `capabilities`, effective from `registered_at` until `deleted_at`;
 - `archive_stations`, `archive_observations` and `ingest_provenance`, kept in their own files and their own vocabulary;

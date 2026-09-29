@@ -71,6 +71,7 @@ flowchart TD
   - a product evicted from a station's store is not reported, so a row says where a product was declared held, not that it is still there (D-176);
   - a heartbeat restored into an hour the aggregate has already refreshed is counted at its next refresh, within 30 minutes (D-178);
   - the views answer differently each time they are read, which is why no reported figure comes from them (D-177).
+  - at a station that declares a mask, each candidate's track is propagated once for the mask and again for scoring; one computation could serve both, and at this network's size the second costs little (found in review).
 
 **Stage 32's software is built** (2026-09-29), on top of Stage 31 and in the same change. Its decisions are D-227 through D-233, and `docs/OPERATIONS.md` § Regional monitoring is its runbook.
 - **The completion gate passes, and is demonstrable at a prompt.** `meridian regions add` registers an area; `meridian regions report --snapshot …` computes its record and coverage from the snapshot alone and publishes them, naming the same directory when run again. `tests/unit/test_regions_gate.py` builds a snapshot by hand — an area over Bengaluru and a retired one, a vegetation index that falls, rain that does not, fires that appear, a tile, and decoded, far-away, undecoded and simulated receptions — and asserts each clause of the stage's test list with the network refused.

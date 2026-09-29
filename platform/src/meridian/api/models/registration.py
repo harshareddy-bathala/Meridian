@@ -62,10 +62,12 @@ class HorizonMaskEntry(BaseModel):
 
     Bounded, because a declared mask constrains scheduling (D-175): an azimuth
     of 720 or an elevation of 400 would exclude passes for a reason no
-    operator meant. ``400 malformed`` says so instead.
+    operator meant. ``400 malformed`` says so instead. 360 is admitted, as
+    north again: a mask closed where it began often ends there, and the
+    scheduler reads azimuth modulo 360.
     """
 
-    azimuth_deg: float = Field(alias="az_deg", ge=0, lt=360)
+    azimuth_deg: float = Field(alias="az_deg", ge=0, le=360)
     min_elevation_deg: float = Field(alias="min_el_deg", ge=-90, le=90)
 
 

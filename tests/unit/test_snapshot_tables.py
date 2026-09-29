@@ -28,7 +28,9 @@ NEVER_EXPORTED = (
     "uri",
 )
 """Credentials, a column that may name a person, current state no label may
-use (D-143), and where a station keeps a product (D-176)."""
+use (D-143), and the ``products.uri`` column (D-176). The verbatim
+``observations.products_json`` still holds each uri, as it holds everything a
+station sent; a raw snapshot is private, and this pins columns, not contents."""
 
 
 def test_every_table_is_a_file_the_manifest_accepts() -> None:

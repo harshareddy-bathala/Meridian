@@ -15,9 +15,14 @@ migration adding a column changes no snapshot until someone decides it should.
 **Columns left out on purpose.** A station's ``token_sha256`` and
 ``registration_key_sha256`` are credentials. ``operator`` may name a person,
 and no feature needs it. The token timestamps are current state that D-143
-says no label may use. A product's ``uri`` is where one station keeps a file,
-of use to nobody reading a snapshot and never published (D-176). None of them
-is read, so none can reach a file.
+says no label may use. None of them is read, so none can reach a file.
+
+**A product's ``uri`` is left out of ``products.jsonl``**, since it is where one
+station keeps a file and no snapshot reader needs it (D-176). It is not absent
+from the snapshot: ``observations.products_json`` carries the array verbatim, as
+it carries everything a station sent, and a raw snapshot is private for that
+reason among others. What an evidence dataset may publish is Stage 30's to
+decide.
 
 **What a raw snapshot is not.** Coordinates are kept at full precision, because
 Stage 17 computes geometry from them. That makes a raw snapshot private: it is

@@ -757,7 +757,7 @@ Decisions this section puts into practice: D-165 to D-172.
 
 ### Passes behind a declared horizon
 
-A station's capability may declare a horizon mask: a building, a ridge. A pass whose track clears the declared floor nowhere is **not scheduled and not skipped**. It is left undecided, so correcting the mask gives it back on the next round, and the run's report counts it (`below the declared horizon, left undecided`). Only the declared mask does this; the learned horizon informs the yield prediction instead (D-175). A mask is re-sent by registering again, and an entry outside `[0, 360)` for azimuth or `[-90, 90]` for elevation is refused as `malformed`.
+A station's capability may declare a horizon mask: a building, a ridge. A pass whose track clears the declared floor nowhere is **not scheduled and not skipped**. It is left undecided, so correcting the mask gives it back on the next round, and the run's report counts it (`below the declared horizon, left undecided`). Only the declared mask does this; the learned horizon informs the yield prediction instead (D-175). A mask is re-sent by registering again, and an entry outside `[0, 360]` for azimuth or `[-90, 90]` for elevation is refused as `malformed`.
 
 ### Declined and offline work
 
@@ -1006,7 +1006,7 @@ The `jobs` service builds them each round, and `meridian profiles build` does th
 
 `GET /api/v1/stations/{id}/profiles` serves the newest of each, and a station's dashboard page draws the declared horizon dashed and the learned one shaded. **Nothing here feeds prediction**: live scoring reads the dataset itself (D-174). New learned profiles need a new labelled dataset (§ Dataset snapshots).
 
-A failing `profiles` task raises `ScheduledTaskNeverSucceeded` at warning, not critical: receiving and scheduling do not wait on it.
+A failing `profiles` task raises `ScheduledTaskNeverSucceeded` or `ScheduledTaskStalled` at warning, not critical: receiving and scheduling do not wait on it.
 
 ### Reading the views
 
@@ -1259,7 +1259,7 @@ If every station was switched off on purpose, this is expected.
 
 ### ScheduledTaskStalled
 
-**Critical.** A task (`task` label: `pass_generation`, `schedule`, `profiles`, `expiry_sweep` or `reliability`) has not completed in over 15 minutes, which is three rounds at the default interval. One failed round is logged and retried; three in a row is a problem.
+**Critical** for every task but `profiles`, which is a **warning**. A task (`task` label: `pass_generation`, `schedule`, `profiles`, `expiry_sweep` or `reliability`) has not completed in over 15 minutes, which is three rounds at the default interval. One failed round is logged and retried; three in a row is a problem.
 
 1. `compose logs --since 30m jobs`. Each failed round logs `<task> failed; the next round will try again` with the exception.
 2. The *Task failures per hour* panel shows whether it fails every round or only some.
