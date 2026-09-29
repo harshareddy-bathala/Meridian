@@ -13,7 +13,9 @@ Reference: docs/DECISIONS.md D-174, D-175.
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -27,8 +29,14 @@ from meridian.datasets.export import export_snapshot, read_snapshot
 from meridian.datasets.label_config import LabelConfig
 from meridian.datasets.manifest import content_sha256
 from meridian.datasets.publish import read_directory
+from meridian.prediction.live import LiveScoringError
 from meridian.prediction.profiles import PROFILE_METHOD
-from meridian.profile_build import build_profiles, declared_bins
+from meridian.profile_build import (
+    build_learned_profiles,
+    build_profiles,
+    build_profiles_apart,
+    declared_bins,
+)
 from meridian.registry.psycopg_registry import PsycopgRegistry
 from meridian.store.profiles import HorizonBin
 
@@ -163,3 +171,70 @@ def test_a_declared_mask_reads_as_the_scheduler_reads_it() -> None:
     assert declared_bins(
         [{"az_deg": 315.0, "min_el_deg": 30.0}, {"az_deg": 90.0, "min_el_deg": 8.0}]
     ) == [HorizonBin(90.0, 225.0, 8.0, None), HorizonBin(315.0, 135.0, 30.0, None)]
+
+
+def _savepoint(conn: Any) -> Any:
+    """A ``connect`` whose transactions commit into the test's own, or roll back."""
+
+    @contextmanager
+    def connect() -> Iterator[Any]:
+        with conn.transaction():
+            yield conn
+
+    return connect
+
+
+def _declared_rows(conn: Any, station: str) -> int:
+    return conn.execute(
+        "select count(*) from horizon_profiles"
+        " where station_id = %s and source = 'declared'",
+        (station,),
+    ).fetchone()[0]
+
+
+def test_a_dataset_that_cannot_be_read_does_not_undo_a_changed_mask(
+    rollback: Any, root: Path, seeded: str
+) -> None:
+    """The two halves are independent (D-174): the masks commit first."""
+    broken = root / "evaluation" / "20260923T060000Z-broken"
+    broken.mkdir(parents=True)
+    (broken / "manifest.json").write_text("{not json")
+
+    with pytest.raises(LiveScoringError):
+        build_profiles_apart(_savepoint(rollback), root)
+
+    assert _declared_rows(rollback, seeded) == 2
+
+
+def test_the_same_request_in_one_transaction_loses_the_mask_with_it(
+    rollback: Any, root: Path, seeded: str
+) -> None:
+    """The control: in one transaction the failure takes the masks with it."""
+    broken = root / "evaluation" / "20260923T060000Z-broken"
+    broken.mkdir(parents=True)
+    (broken / "manifest.json").write_text("{not json")
+
+    with pytest.raises(LiveScoringError), rollback.transaction():
+        build_profiles(rollback, root)
+
+    assert _declared_rows(rollback, seeded) == 0
+
+
+@pytest.mark.usefixtures("seeded")
+def test_a_dataset_this_process_built_is_not_read_again(
+    rollback: Any, root: Path
+) -> None:
+    """A dataset that wrote nothing is otherwise re-read every round."""
+    dataset = labelled_dataset(rollback, root)
+    for raw in (root / "snapshots").iterdir():
+        raw.chmod(0o700)
+        for path in raw.rglob("*"):
+            path.chmod(0o700 if path.is_dir() else 0o600)
+        shutil.rmtree(raw)
+    sha256 = content_sha256(dataset.manifest)
+
+    remembered = build_learned_profiles(rollback, root, skip=sha256)
+
+    assert remembered.already_built
+    with pytest.raises(LiveScoringError):
+        build_learned_profiles(rollback, root)

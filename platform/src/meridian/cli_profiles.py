@@ -27,7 +27,7 @@ from meridian.cli_snapshot import (
 )
 from meridian.config import load_settings
 from meridian.prediction.live import LiveScoringError
-from meridian.profile_build import ProfileBuildReport, build_profiles
+from meridian.profile_build import ProfileBuildReport, build_profiles_apart
 from meridian.store.pool import DatabaseUnreachableError, connect_once
 
 __all__ = ["add_profiles_parser", "print_profile_report", "run_profiles"]
@@ -66,8 +66,8 @@ def run_profiles(args: argparse.Namespace) -> int:
     """Handle ``meridian profiles build``."""
     root = datasets_root(args.root)
     try:
-        with connect_once(load_settings()) as conn:
-            report = build_profiles(conn, root)
+        settings = load_settings()
+        report = build_profiles_apart(lambda: connect_once(settings), root)
     except _REFUSED as exc:
         return _refuse(str(exc))
     print_profile_report(report)

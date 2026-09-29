@@ -27,6 +27,7 @@ def report(**changes: object) -> ProfileBuildReport:
         "declared_capabilities": 2,
         "declared_written": 1,
         "dataset": Path("/datasets/evaluation/20260923T060000Z-abc"),
+        "dataset_sha256": bytes(32),
         "dataset_as_of": AS_OF,
         "already_built": False,
         "stations_built": 3,

@@ -96,6 +96,7 @@ class _Work:
             declared_capabilities=1,
             declared_written=0,
             dataset=None,
+            dataset_sha256=None,
             dataset_as_of=None,
             already_built=False,
             stations_built=0,

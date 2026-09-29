@@ -20,6 +20,8 @@ Reference: docs/DECISIONS.md D-031, D-159, D-174, D-175.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -43,13 +45,22 @@ from meridian.store.stations import Connection
 
 __all__ = [
     "DECLARED_METHOD",
+    "PROFILES_LOCK",
     "ProfileBuildReport",
+    "build_learned_profiles",
     "build_profiles",
+    "build_profiles_apart",
     "declared_bins",
+    "record_declared_masks",
 ]
 
 DECLARED_METHOD = "declared"
 """A declared profile's method: what the operator said, read as D-175 reads it."""
+
+PROFILES_LOCK = 0x6D65726964_5046
+"""The advisory lock one profile build holds at a time, as the scheduler holds
+``SCHEDULER_LOCK``: a jobs round and a ``meridian profiles build`` typed beside
+it wait for each other rather than both finding the same work undone."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +74,8 @@ class ProfileBuildReport:
 
     dataset: Path | None
     """The newest labelled dataset, or ``None`` if there is none."""
+    dataset_sha256: bytes | None
+    """Its manifest's hash, which identifies its build."""
     dataset_as_of: datetime | None
     already_built: bool
     """The newest dataset's profiles were already held, so none were written."""
@@ -90,23 +103,42 @@ def declared_bins(points: list[dict[str, float]]) -> list[DeclaredBin]:
     return bins
 
 
-def build_profiles(conn: Connection, root: Path) -> ProfileBuildReport:
-    """Write every changed declared mask and the newest dataset's learned profiles.
+def record_declared_masks(conn: Connection) -> tuple[int, int]:
+    """Write every mask that changed. Returns the masks seen and those written.
+
+    Holds :data:`PROFILES_LOCK` for the transaction, so a command typed beside a
+    jobs round waits for it rather than writing the same mask twice.
+    """
+    _lock(conn)
+    return _record_declared(conn)
+
+
+def build_learned_profiles(
+    conn: Connection, root: Path, *, skip: bytes | None = None
+) -> ProfileBuildReport:
+    """Build the newest labelled dataset's profiles, unless they are held already.
 
     Args:
         conn: An open connection. The caller commits.
         root: The datasets root, where labelled datasets are looked for.
+        skip: A dataset hash this process has built already. A dataset that
+            wrote no rows — no station of it is still registered — is
+            otherwise read again every round, since no row says it was built.
+
+    Returns:
+        The learned half of the report; its declared counts are zero.
 
     Raises:
         LiveScoringError: The newest dataset cannot be read or profiled. An
             older one is not built instead.
     """
-    capabilities, written = _record_declared(conn)
+    _lock(conn)
     newest = newest_dataset(root)
     empty = ProfileBuildReport(
-        declared_capabilities=capabilities,
-        declared_written=written,
+        declared_capabilities=0,
+        declared_written=0,
         dataset=None if newest is None else newest.path,
+        dataset_sha256=None if newest is None else newest.sha256,
         dataset_as_of=None if newest is None else newest.as_of,
         already_built=False,
         stations_built=0,
@@ -115,7 +147,7 @@ def build_profiles(conn: Connection, root: Path) -> ProfileBuildReport:
     )
     if newest is None:
         return empty
-    if learned_profiles_built(conn, newest.sha256):
+    if newest.sha256 == skip or learned_profiles_built(conn, newest.sha256):
         return replace(empty, already_built=True)
 
     source = read_profiles(newest, root=root)
@@ -140,6 +172,58 @@ def build_profiles(conn: Connection, root: Path) -> ProfileBuildReport:
         horizon_rows=horizon,
         interference_rows=interference,
     )
+
+
+def build_profiles(conn: Connection, root: Path) -> ProfileBuildReport:
+    """Both halves on one connection, in the caller's transaction.
+
+    For a caller that holds one transaction open, as the tests do. The command
+    and the jobs round use :func:`build_profiles_apart`, which commits the
+    masks before it reads the dataset.
+
+    Raises:
+        LiveScoringError: As :func:`build_learned_profiles`.
+    """
+    capabilities, written = record_declared_masks(conn)
+    learned = build_learned_profiles(conn, root)
+    return replace(
+        learned, declared_capabilities=capabilities, declared_written=written
+    )
+
+
+def build_profiles_apart(
+    connect: Callable[[], AbstractContextManager[Connection]],
+    root: Path,
+    *,
+    skip: bytes | None = None,
+) -> ProfileBuildReport:
+    """Each half in its own transaction, the declared masks committed first.
+
+    The halves are independent (D-174): a dataset that cannot be read must not
+    undo a mask the operator has just changed, and it does not, because the
+    masks are committed before the dataset is opened.
+
+    Args:
+        connect: Returns a connection that commits on a clean exit.
+        root: The datasets root.
+        skip: As :func:`build_learned_profiles`.
+
+    Raises:
+        LiveScoringError: As :func:`build_learned_profiles`, after the masks
+            have been committed.
+    """
+    with connect() as conn:
+        capabilities, written = record_declared_masks(conn)
+    with connect() as conn:
+        learned = build_learned_profiles(conn, root, skip=skip)
+    return replace(
+        learned, declared_capabilities=capabilities, declared_written=written
+    )
+
+
+def _lock(conn: Connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute("select pg_advisory_xact_lock(%s)", (PROFILES_LOCK,))
 
 
 def _record_declared(conn: Connection) -> tuple[int, int]:

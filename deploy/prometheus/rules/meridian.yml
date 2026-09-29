@@ -148,9 +148,19 @@ groups:
       - alert: ScheduledTaskStalled
         # 900 s is three rounds at the default SCHEDULE_INTERVAL_S=300: one
         # failed round is logged and retried, three in a row is a problem.
-        expr: time() - meridian_job_last_success_timestamp_seconds > 900
+        expr: time() - meridian_job_last_success_timestamp_seconds{task!="profiles"} > 900
         labels:
           severity: critical
+        annotations:
+          summary: "The {{ $labels.task }} task has not completed in over 15 minutes."
+          runbook: docs/OPERATIONS.md#scheduledtaskstalled
+
+      # The profiles task at warning: it builds what is shown and cited, and a
+      # round that cannot build it still receives and schedules (D-174).
+      - alert: ScheduledTaskStalled
+        expr: time() - meridian_job_last_success_timestamp_seconds{task="profiles"} > 900
+        labels:
+          severity: warning
         annotations:
           summary: "The {{ $labels.task }} task has not completed in over 15 minutes."
           runbook: docs/OPERATIONS.md#scheduledtaskstalled

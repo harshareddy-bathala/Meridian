@@ -55,7 +55,7 @@ from meridian.pass_generation import (
     generate_passes,
 )
 from meridian.prediction.live import LiveScorer
-from meridian.profile_build import ProfileBuildReport, build_profiles
+from meridian.profile_build import ProfileBuildReport, build_profiles_apart
 from meridian.scheduler.run import ScheduleReport, ScheduleRequest, run_schedule
 from meridian.scheduler.schedule_config import ScheduleConfig
 from meridian.store.stations import Connection
@@ -123,6 +123,7 @@ class DatabaseRoundWork:
         self._orbit = orbit
         self._scorer = scorer
         self._datasets = datasets
+        self._built: bytes | None = None
 
     def generate(self, horizon: GenerationHorizon) -> GenerationReport:
         """Run ``meridian.pass_generation`` exactly as the CLI does."""
@@ -136,9 +137,15 @@ class DatabaseRoundWork:
             return run_schedule(conn, self._orbit, request, scorer)
 
     def profiles(self) -> ProfileBuildReport:
-        """Run ``meridian.profile_build`` exactly as the CLI does."""
-        with self._connect() as conn:
-            return build_profiles(conn, self._datasets)
+        """Run ``meridian.profile_build`` as the CLI does, remembering what it built.
+
+        A dataset built once is not read again by this process, even one that
+        wrote no rows and so left nothing in the database to say so.
+        """
+        report = build_profiles_apart(self._connect, self._datasets, skip=self._built)
+        if report.dataset_sha256 is not None:
+            self._built = report.dataset_sha256
+        return report
 
 
 @dataclass(frozen=True, slots=True)
