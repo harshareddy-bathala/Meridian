@@ -23,7 +23,9 @@ no connection, so it cannot reach the database — and propagates:
 * **each archive station's denominator** (D-150): its published location over
   the days it was active, frozen in ``archive_passes.jsonl``;
 * **each measured pass's track** (D-158): azimuth and elevation every 30 s,
-  frozen in ``pass_tracks.jsonl``.
+  frozen in ``pass_tracks.jsonl``;
+* **each reported pass's ground track** (D-230): the sub-satellite point every
+  30 s, frozen in ``pass_ground_tracks.jsonl`` for regional coverage.
 
 So labelling and fitting count against files and never propagate, and however
 long propagation takes as archive ingest grows, the database snapshot is not
@@ -56,6 +58,12 @@ from meridian.datasets.archive_passes import (
     compute_archive_passes,
 )
 from meridian.datasets.canonical import canonical_line
+from meridian.datasets.ground_tracks import (
+    GROUND_TRACKS,
+    GroundRows,
+    GroundTrackFinder,
+    compute_ground_tracks,
+)
 from meridian.datasets.manifest import Manifest, SourceEntry, content_sha256, file_entry
 from meridian.datasets.pass_tracks import (
     PASS_TRACKS,
@@ -103,8 +111,8 @@ class SchemaMissingError(RuntimeError):
     """The database records no migration, so no snapshot could say what it read."""
 
 
-class Propagator(PassFinder, TrackFinder, Protocol):
-    """What the export propagates with: pass windows and look angles."""
+class Propagator(PassFinder, TrackFinder, GroundTrackFinder, Protocol):
+    """What the export propagates with: pass windows, look angles, ground tracks."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +132,7 @@ class _Computed:
 
     archive_passes: Sequence[Mapping[str, object]]
     pass_tracks: Sequence[Mapping[str, object]]
+    ground_tracks: Sequence[Mapping[str, object]]
     counts: Mapping[str, int]
 
 
@@ -233,6 +242,7 @@ def export_snapshot(
             (LISTENING, read.listening),
             (ARCHIVE_PASSES, computed.archive_passes),
             (PASS_TRACKS, computed.pass_tracks),
+            (GROUND_TRACKS, computed.ground_tracks),
         )
     }
     manifest = Manifest(
@@ -271,12 +281,23 @@ def _compute(read: SnapshotRead, orbit: Propagator) -> _Computed:
         ),
         orbit,
     )
+    ground = compute_ground_tracks(
+        GroundRows(
+            passes=tables["passes"],
+            assignments=tables["assignments"],
+            observations=tables["observations"],
+            element_sets=tables["element_sets"],
+        ),
+        orbit,
+    )
     return _Computed(
         archive_passes=archive.rows,
         pass_tracks=tracks.rows,
+        ground_tracks=ground.rows,
         counts={"archive_passes": len(archive.rows)}
         | dict(archive.counts)
-        | dict(tracks.counts),
+        | dict(tracks.counts)
+        | dict(ground.counts),
     )
 
 

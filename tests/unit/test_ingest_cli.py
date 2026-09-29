@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from meridian.store.archive_observations import NormalisationDisagreementError
-from meridian_ingest import cli
+from meridian_ingest import cli_load
 from meridian_ingest.adapters.reference import REFERENCE_SOURCE
 from meridian_ingest.cli import EXIT_CORRUPT, EXIT_FAILED, EXIT_USAGE, main
 from meridian_ingest.cli_fetch import check_attribution
@@ -92,7 +92,8 @@ def test_an_unregistered_source_is_refused_as_a_sentence(
 
     said = capsys.readouterr().err
     assert "no source is registered as 'nope'" in said
-    assert f"registered: {SOURCE}" in said
+    assert "registered: " in said
+    assert SOURCE in said.split("registered: ")[-1]
 
 
 def test_a_settings_file_that_cannot_be_obeyed_stops_everything(
@@ -346,12 +347,12 @@ def test_load_commits_each_artefact_on_its_own(
     class _SeenError(Exception):
         pass
 
-    def record(conn: _Connection, *_args: object) -> object:
+    def record(conn: _Connection, *_args: object, **_kwargs: object) -> object:
         seen.append(conn.autocommit)
         raise _SeenError
 
-    monkeypatch.setattr(cli, "connect_once", lambda _settings: connection)
-    monkeypatch.setattr(cli, "load_source", record)
+    monkeypatch.setattr(cli_load, "connect_once", lambda _settings: connection)
+    monkeypatch.setattr(cli_load, "load_source", record)
 
     with pytest.raises(_SeenError):
         run(config, "load")
@@ -377,11 +378,11 @@ def test_a_load_that_is_refused_says_why_without_a_traceback(
 ) -> None:
     """Exit 1 and the error's own sentence, like every other refusal here."""
 
-    def refuse(*_args: object) -> object:
+    def refuse(*_args: object, **_kwargs: object) -> object:
         raise error
 
-    monkeypatch.setattr(cli, "connect_once", lambda _settings: _Connection())
-    monkeypatch.setattr(cli, "load_source", refuse)
+    monkeypatch.setattr(cli_load, "connect_once", lambda _settings: _Connection())
+    monkeypatch.setattr(cli_load, "load_source", refuse)
 
     assert run(config, "load") == EXIT_FAILED
 

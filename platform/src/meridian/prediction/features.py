@@ -5,11 +5,12 @@ own ``aos``: geometry from the pass's representative prediction (D-148), and
 history from :class:`~meridian.prediction.history.History`, which answers only
 with outcomes settled before the pass began (D-157).
 
-**Every feature has a value for every pass.** No NaN, no missing: an angle is
+**Every feature has a value for every pass.** No NaN: an angle is
 written as its sine and cosine so north is not a discontinuity; a rate with no
 history is one half, beside a count of zero; a pass whose track the export
 could not compute takes its peak and sweep from its rise and set azimuths, and
-says so in ``track_known``. What a model does with a thin history is for the
+says so in ``track_known``; a published condition that is missing is 0 beside a
+``known`` of 0 (D-224). What a model does with a thin history is for the
 model to learn from the counts, or for the cold-start path (D-161) to decide —
 never for a NaN to decide by accident.
 
@@ -17,7 +18,8 @@ never for a NaN to decide by accident.
 (D-160): ``elevation`` is configuration A's one input; ``geometry`` is the rest
 of what the orbit says; ``ours`` is what EVALUATION.md §2 marks as ours —
 element-set age, the station's own record, and the learned environment of
-D-159 from :mod:`meridian.prediction.profiles`.
+D-159 from :mod:`meridian.prediction.profiles`; ``conditions`` is what public
+sources published before the pass (:mod:`meridian.prediction.conditions`).
 
 Reference: docs/DECISIONS.md D-148, D-157, D-159, D-160, D-161.
 """
@@ -30,6 +32,7 @@ from datetime import datetime
 
 from meridian.datasets.labels import LabelledPass
 from meridian.datasets.row_fields import MalformedSnapshotError
+from meridian.prediction.conditions import CONDITION_FEATURES
 from meridian.prediction.feature_rows import FeatureRows, PassGeometry
 from meridian.prediction.geometry import circle, peak_and_sweep
 from meridian.prediction.history import RECENT, History, Rate
@@ -74,6 +77,7 @@ FEATURES: tuple[Feature, ...] = (
     Feature("station_availability", "ours", f"last {RECENT} scheduled taken up"),
     Feature("station_availability_n", "ours", "how many that share is over"),
     *(Feature(name, "ours", meaning) for name, meaning in ENVIRONMENT),
+    *(Feature(name, "conditions", meaning) for name, meaning in CONDITION_FEATURES),
 )
 
 
@@ -141,6 +145,7 @@ def _vector(
         *_rate(history.decode_rate(("band", one.station_id, band), at)),
         *_rate(history.availability(one.station_id, at, recent=RECENT)),
         *environment.values(one, geometry),
+        *rows.conditions.values(one.station_id, at),
     )
     return FeatureVector(
         pass_id=one.pass_id,

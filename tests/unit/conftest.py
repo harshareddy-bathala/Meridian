@@ -43,9 +43,12 @@ RAW_TABLES = (
     "listening",
     "archive_passes",
     "pass_tracks",
+    "environment_samples",
+    "areas_of_interest",
+    "pass_ground_tracks",
 )
 """What an export writes: every snapshot table, the frozen listening answers,
-the archive stations' computed passes and our passes' tracks."""
+the archive stations' computed passes, and our passes' sky and ground tracks."""
 
 SOURCE = SourceEntry(
     source_id="reference_archive",

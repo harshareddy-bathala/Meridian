@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
+from meridian_ingest.extent import BoundingBox, GeoPoint
 from meridian_ingest.normalise.records import NormalisedBatch
 from meridian_ingest.provenance import SOURCE_ID, Provenance
 from meridian_ingest.raw_store import StoredArtefact
@@ -167,6 +168,14 @@ class FetchRequest:
     since: datetime | None = None
     until: datetime | None = None
     limit: int = 50
+    points: tuple[GeoPoint, ...] = ()
+    """Places a point product is asked about, from the settings file."""
+
+    bbox: BoundingBox | None = None
+    """The box an area product is asked about, from the settings file."""
+
+    layers: tuple[str, ...] = ()
+    """Named layers of an imagery service, from the settings file."""
 
     def __post_init__(self) -> None:
         """Refuse a request that cannot be honoured politely."""

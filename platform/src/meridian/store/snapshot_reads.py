@@ -119,6 +119,41 @@ current at the start of every UTC day in scope — the set pass generation would
 have used (``find_element_set_current_at``), and what the export propagates an
 archive station's denominator from (D-150)."""
 
+CONDITIONS_LOOKBACK = "interval '7 days'"
+"""How far before ``since`` a published value can still describe a pass in
+scope. A Kp interval that ended the evening before ``since`` is the value a
+pass at ``since`` reads; nothing a feature reads is older than this (D-224)."""
+
+_SCOPED_SAMPLES = (
+    "select sample_id from environment_samples"
+    " where published_at < %(as_of)s"
+    f" and observed_to >= %(since)s::timestamptz - {CONDITIONS_LOOKBACK}"
+)
+"""Published values a snapshot carries: made public before ``as_of``, and
+describing time near enough the scope to be read by a pass in it (D-222)."""
+
+_PUBLIC_RECORDS = (
+    "select r.record_id from ingest_records r"
+    " join ingest_sources s on s.source_id = r.source_id"
+    " where s.source_class <> 'archive_receptions'"
+    " and r.retrieved_at < %(as_of)s"
+    " and (r.valid_from is null or r.valid_from < %(as_of)s)"
+    " and coalesce(r.valid_to, r.retrieved_at)"
+    f"  >= %(since)s::timestamptz - {CONDITIONS_LOOKBACK}"
+)
+"""Every public artefact fetched before ``as_of`` about time near the scope,
+whether or not anything was derived from it. A FIRMS day with no detections
+cites no sample, but it is the evidence that the day was asked about, and a
+tile is displayed behind an area as imagery (D-221, D-229)."""
+
+_CITED_RECORDS = (
+    "select record_id from archive_observations"
+    f" where archive_observation_id in ({_SCOPED_ARCHIVE})"
+    " union select record_id from environment_samples"
+    f" where sample_id in ({_SCOPED_SAMPLES})"
+    f" union {_PUBLIC_RECORDS}"
+)
+
 SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
     SnapshotTable(
         "passes",
@@ -230,11 +265,25 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         "ingest_records",
         "select record_id, source_id, original_identifier, source_version,"
         " payload_kind, retrieved_at, sha256, raw_path, media_type, byte_count,"
-        " valid_from, valid_to, superseded_by"
-        " from ingest_provenance where record_id in ("
-        "  select record_id from archive_observations"
-        f"  where archive_observation_id in ({_SCOPED_ARCHIVE}))"
+        " valid_from, valid_to, superseded_by, spatial_extent"
+        f" from ingest_provenance where record_id in ({_CITED_RECORDS})"
         " order by record_id",
+    ),
+    SnapshotTable(
+        "environment_samples",
+        "select sample_id, record_id, source_id, transformation_version,"
+        " series_key, content_sha256, quantity, value, missing_reason, value_unit,"
+        " observed_from, observed_to, published_at, published_basis, product,"
+        " lat_deg, lon_deg, footprint_m, quality"
+        f" from environment_samples where sample_id in ({_SCOPED_SAMPLES})"
+        " order by sample_id",
+    ),
+    SnapshotTable(
+        "areas_of_interest",
+        "select area_id, label, geometry, geometry_sha256, centroid_lat_deg,"
+        " centroid_lon_deg, area_km2, created_at, active"
+        " from areas_of_interest where created_at < %(as_of)s"
+        " order by area_id",
     ),
 )
 """Every file a raw snapshot holds, in the order the export writes them."""
@@ -294,7 +343,7 @@ def read_table(
 
 
 def read_source_terms(conn: Connection, scope: SnapshotScope) -> list[SourceTerms]:
-    """The terms of every archive source the snapshot holds receptions from.
+    """The terms of every source the snapshot holds receptions or values from.
 
     Args:
         conn: A connection inside the export's transaction.
@@ -307,9 +356,7 @@ def read_source_terms(conn: Connection, scope: SnapshotScope) -> list[SourceTerm
     with conn.cursor() as cur:
         cur.execute(
             "select source_id, licence, terms_url, attribution_entry,"
-            " count(*) from ingest_provenance where record_id in ("
-            "  select record_id from archive_observations"
-            f"  where archive_observation_id in ({_SCOPED_ARCHIVE}))"
+            f" count(*) from ingest_provenance where record_id in ({_CITED_RECORDS})"
             " group by source_id, licence, terms_url, attribution_entry"
             " order by source_id",
             {"since": scope.since, "as_of": scope.as_of},

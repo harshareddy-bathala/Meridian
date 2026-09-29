@@ -26,6 +26,12 @@ dependencies = [
     "httpx>=0.27",
 ]
 
+# HDF5 is read by one normaliser, night-time lights, whose product is published
+# in no other format. An extra rather than a dependency, so an installation
+# that never takes that source never carries a C library for it (D-226).
+[project.optional-dependencies]
+hdf5 = ["h5py>=3.10"]
+
 # One binary, not a `meridian` subcommand: `meridian.cli` imports every `cli_*`
 # module eagerly, so a subcommand would make the platform import the archive
 # layer at start-up (D-138). An operator who never installs this still has a

@@ -59,17 +59,25 @@ REACHES_OUTSIDE = (
 that name a database. The labelling path needs none of them."""
 
 MAY_IMPORT_DATASETS = frozenset(
-    {PLATFORM / "cli_snapshot.py", PLATFORM / "cli_model.py"}
+    {
+        PLATFORM / "cli_snapshot.py",
+        PLATFORM / "cli_model.py",
+        PLATFORM / "cli_regions.py",
+    }
 )
 PREDICTION = PLATFORM / "prediction"
+REGIONS = PLATFORM / "regions"
+"""Regional reports read snapshots offline, as fitting does (D-229); nothing on
+the scheduling path imports them (tests/unit/test_regions_boundaries.py)."""
 SCORED_AT_RUNTIME = frozenset({"score.py"})
 """The one prediction module the scheduler will import (D-155). It reads a
 model file, never a dataset, so it is held to the runtime rule."""
 
 
 def may_import_datasets(path: Path) -> bool:
-    """The snapshot and model commands, and prediction's fitting side (D-156)."""
-    if path in MAY_IMPORT_DATASETS:
+    """The snapshot, model and regions commands, prediction's fitting side
+    (D-156), and the regional reports (D-229)."""
+    if path in MAY_IMPORT_DATASETS or REGIONS in path.parents:
         return True
     return PREDICTION in path.parents and path.name not in SCORED_AT_RUNTIME
 
@@ -146,9 +154,11 @@ def test_the_commands_are_seen_importing_it() -> None:
 MAY_PROPAGATE = frozenset({"export.py"})
 """Holds the orbit service. The two modules below hold only the orbit's types."""
 
-HANDED_A_PROPAGATOR = frozenset({"archive_passes.py", "pass_tracks.py"})
+HANDED_A_PROPAGATOR = frozenset(
+    {"archive_passes.py", "pass_tracks.py", "ground_tracks.py"}
+)
 """The export side's pure halves: rows and a propagator in, rows out (D-150,
-D-158). Nothing on the labelling path imports either."""
+D-158, D-230). Nothing on the labelling path imports any of them."""
 
 OUTCOME_FREE = {
     "propensity.py": frozenset({"meridian.datasets.selection_config"}),

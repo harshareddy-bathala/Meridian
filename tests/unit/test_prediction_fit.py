@@ -546,7 +546,7 @@ def _document() -> dict[str, Any]:
     [
         (lambda d: d.update(model_format=2), "unknown model format 2"),
         (lambda d: d.pop("configured"), "no 'configured'"),
-        (lambda d: d["configured"]["mean"].pop(), "mean has 25 values for 26"),
+        (lambda d: d["configured"]["mean"].pop(), "mean has 29 values for 30"),
         (lambda d: d.update(fallback=None), "fallback exactly when"),
         (lambda d: d["configured"]["scale"].__setitem__(0, 0.0), "not positive"),
         (lambda d: d["configured"].update(intercept="0"), "intercept is '0'"),

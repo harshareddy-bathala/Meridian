@@ -429,6 +429,57 @@ The tree is read-only by construction: a record's directory is sealed after publ
 
 ---
 
+### Public environmental and space-weather sources
+
+Stage 31's nine sources — one per class, listed with their terms by `meridian-ingest sources` and in `ATTRIBUTION.md` — arrive through the same four verbs, into `environment_samples` instead of the archive tables (D-220, D-221). **Every one is off until you enable or name it**, so a fresh install still fetches only the reference archive. Re-read a source's terms page, named in `ATTRIBUTION.md`, before its first live fetch.
+
+A source asked about places reads them from its table in `ingest.toml`:
+
+```toml
+[sources.open_meteo_cloud]
+enabled = true
+points = [[12.97, 77.59]]            # [latitude, longitude]; sent rounded to 0.01°
+
+[sources.nasa_firms]
+enabled = true
+bbox = [74.0, 11.5, 78.6, 18.5]      # west, south, east, north
+# key from $FIRMS_MAP_KEY (or $FIRMS_MAP_KEY_FILE)
+
+[sources.isro_bhuvan]
+bbox = [74.0, 11.5, 78.6, 18.5]
+layers = ["<a Bhuvan layer name>"]   # display only; no default
+```
+
+| Source | Needs | Key variable |
+|---|---|---|
+| `noaa_swpc_kp` | nothing | — |
+| `open_meteo_cloud`, `open_meteo_aerosol` | `points` | — |
+| `nasa_gibs` | `bbox`, optionally `layers` | — |
+| `nasa_firms` | `bbox` | `FIRMS_MAP_KEY` |
+| `ornl_modis_ndvi`, `nasa_power_precipitation` | `points`, and `--since`/`--until` | — |
+| `nasa_black_marble` | `bbox`, `--since`/`--until`, the `hdf5` extra | `EARTHDATA_TOKEN` |
+| `isro_bhuvan` | `bbox`, `layers` | — |
+
+- **Keys never appear in anything printed.** A source that takes its key in the URL is planned with a placeholder, substituted at the request, and redacted from every error (D-223).
+- **Published limits are honoured before they are reached.** Each source's own limits are counted in `<raw_root>/.ledger/`, which survives between runs; a fetch waits for a slot that reopens soon and otherwise stops and says when to come back. `sources` prints what is left of each window.
+- **Tiles are recorded and never read for a number** — `load` reports them as skipped (D-133). Bhuvan's map images are display only because its terms say so (D-220).
+- **Night-time lights need `uv sync --extra hdf5`** (or `pip install 'meridian-ingest[hdf5]'`); without it `normalise` refuses that source by name (D-226).
+
+**Near real time is `follow`, run where `meridian-ingest` is installed, never in the compose stack** (D-225):
+
+```bash
+uv run meridian-ingest follow --once        # one round: each due source fetched, then loaded
+uv run meridian-ingest follow --interval 300 # rounds until interrupted
+```
+
+A source is due when its newest retrieval is older than its cadence (Kp and cloud hourly, fires three-hourly, the rest daily or slower). A round loads only artefacts not yet recorded, so its cost is what arrived, not everything ever held; after a normaliser changes, run `meridian-ingest load` once to re-apply it to what is held. `--no-load` fetches only. A cron line for the machine holding the raw store:
+
+```cron
+*/15 * * * *  cd /srv/meridian && DATABASE_URL=... uv run meridian-ingest follow --once >> /var/log/meridian-ingest.log 2>&1
+```
+
+**A value is a feature only for passes after it was published**, and "published" is our own fetch unless the artefact states an earlier production time (D-222). So a backfill never supplies features for passes already flown: the conditions group fills in from when `follow` starts running. Features are read from a snapshot's `environment_samples.jsonl`, never from the table while scheduling (D-224).
+
 ## Dataset snapshots
 
 Prediction and evaluation never read the live tables. They read an **immutable snapshot**, so every number in a report can be regenerated from a snapshot, a configuration and a seed (rule 8). There are two steps, and only the first one needs the database (D-143):
@@ -871,6 +922,51 @@ docker build -f deploy/Dockerfile -t meridian:scan .
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.74.0 \
   image --severity HIGH,CRITICAL --ignore-unfixed meridian:scan
 ```
+
+---
+
+## Regional monitoring
+
+Stage 32 watches places, not Meridian. Its decisions are D-227 to D-233. **It is not the platform's monitoring**: nothing here is a Prometheus metric, an alert rule or an Alertmanager route, and nothing on the scheduling or reception path reads it (D-228).
+
+### Areas of interest
+
+An area is a place and a label, registered by an operator — there is no endpoint that creates one, and nothing about an area is published until the team settles D-137 (D-227).
+
+| Task | Command |
+|---|---|
+| Register a rectangle | `meridian regions add --label "Bengaluru urban" --bbox 77.45,12.85,77.75,13.10` |
+| Register a polygon | `meridian regions add --label "…" --geojson area.geojson` — one Polygon, one ring |
+| List areas | `meridian regions list` |
+| Stop watching one | `meridian regions retire <area id>` — kept, never deleted |
+
+A label or note that looks like an email address, a phone number or a street address is refused: an area describes ground, never a person. The same shape registered twice is the same area.
+
+### Reports
+
+```bash
+meridian snapshot export --since 2026-06-01T00:00:00Z   # far enough back for the baseline
+cp deploy/regions.toml.example regions.toml             # set [baseline] and [current]
+meridian regions report --snapshot data/datasets/snapshots/<dir> --config regions.toml
+```
+
+The report is computed from the snapshot alone and published under `data/datasets/regions/<hash>/`. Run it twice and the second run prints `already held, identically`. It prints, per active area:
+
+- each series — points, how many are missing, and the latest value with the product it came from;
+- each change against the baseline: `ALERT`, `WITHIN` or `insufficient`, with the change, its interval and both periods' counts. An alert needs the whole interval past the threshold (D-231);
+- how many of our measured decoded receptions covered the area — simulated ones only if `include_simulated = true`, and then printed apart;
+- the two cross-checks (D-233). An **ingest gap** lists the days we imaged the area and a public product had no value: check that `meridian-ingest follow` ran and the source's box covers the area. A chain check that **differs** means decode rates on wet and dry days disagree beyond their intervals: at 137 MHz that is the station, not the sky — look at connectors and feedline weatherproofing;
+- how many tiles are held for the area, always called imagery.
+
+A baseline outside the snapshot's scope gives `insufficient`, never a zero: export with an earlier `--since`.
+
+### Alerts
+
+```bash
+meridian regions record-alerts --report data/datasets/regions/<dir>
+```
+
+Each alert is recorded in `region_alerts` once — recording the same report again writes nothing — and handed to the delivery interface, which **records only** until Stage 29 builds notifications: each attempt is a `region_alert_deliveries` row with channel `record_only` saying so (D-232). An alert recorded by a run that stopped before its delivery was recorded is delivered by the next run, not passed by. Nothing is emailed or messaged.
 
 ---
 

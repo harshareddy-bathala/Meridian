@@ -46,7 +46,35 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-09-28. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-09-29. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stage 32's software is built** (2026-09-29), on top of Stage 31 and in the same change. Its decisions are D-227 through D-233, and `docs/OPERATIONS.md` § Regional monitoring is its runbook.
+- **The completion gate passes, and is demonstrable at a prompt.** `meridian regions add` registers an area; `meridian regions report --snapshot …` computes its record and coverage from the snapshot alone and publishes them, naming the same directory when run again. `tests/unit/test_regions_gate.py` builds a snapshot by hand — an area over Bengaluru and a retired one, a vegetation index that falls, rain that does not, fires that appear, a tile, and decoded, far-away, undecoded and simulated receptions — and asserts each clause of the stage's test list with the network refused.
+- **`platform/src/meridian/regions/`** with its own commit scope (D-228), sharing no name with Prometheus or Grafana, imported by nothing on the scheduling path.
+- **Areas** (migration 0022, D-227): a place and a label, operator-registered, unpublished until D-137 is settled; a label that looks like a person's contact is refused.
+- **Series as files, not rows** (D-229): pixels inside, cells inside or nearest, detections on covered days — each point citing its sources, products, records and retrieval time. `area_series` is not built.
+- **Coverage** (D-230): decoded receptions whose ground track, frozen at export by the new `OrbitService.ground_track`, came within half a swath; simulated only when asked for by name.
+- **Change and alerts** (D-231, D-232): baseline against current with a seeded bootstrap interval; an alert only when the whole interval is past the threshold; recorded in `region_alerts` behind a delivery interface that records only until Stage 29.
+- **Cross-checks** (D-233): public-product gaps on the days we imaged an area, and decode rates on wet and dry days at a station inside it.
+- **Not built:** any presentation outside the operator's report — no endpoint or dashboard view shows an area until D-137 is settled; notification channels (Stage 29).
+- **Known limits:** distances and areas use a local equirectangular projection, under a percent off at the scale an area is registered at; the swath is one number for every satellite.
+
+**Stage 31's software is built** (2026-09-29), ahead of its place in the sequence, because it depends only on Stages 14 and 15. Its decisions are D-220 through D-226, and `docs/OPERATIONS.md` § External archive ingest, *Public environmental and space-weather sources*, is its runbook.
+- **The completion gate passes, and is demonstrable at a prompt.** `tests/unit/test_conditions_gate.py` publishes synthetic artefacts in the providers' formats as a fetch would, deletes them, and then — with every socket and database connection refused — normalises, freezes a raw snapshot and reads the features three times, identically. The Kp product is fetched twice a day apart with one interval revised: a pass between the fetches reads the first value, a pass after reads the revision, and every value names the artefact it came from.
+- **Nine sources, one per class** (D-220): Kp from NOAA SWPC, cloud cover and aerosol from Open-Meteo (CAMS), fires from NASA FIRMS, NDVI from the ORNL DAAC subsets, precipitation from NASA POWER, night-time lights from NASA Black Marble, and display-only imagery from NASA GIBS and ISRO Bhuvan — Bhuvan display-only because its terms say so. Each is registered off, asks about places from the settings file, and rounds a point before sending it.
+- **`environment_samples`** (migration 0021, D-221): one row per published value, append-only and content-hashed; a missing value is a row with a reason, never a zero; a tile is never a row.
+- **Published before the pass** (D-222): `published_at` is the artefact's declared production time where that precedes our fetch, otherwise our fetch. A revision is a new row, and `value_before` reads only rows published before the pass.
+- **Keys and limits** (D-223): a key is a placeholder until the socket and is redacted from every error; each source's published limits are honoured at 90% by a ledger that survives between runs.
+- **The `conditions` feature group** (D-224): Kp and cloud cover with their indicators, read by configuration D only, from snapshots only.
+- **Near real time** is `meridian-ingest follow` on the ingest machine (D-225); HDF5 is the `hdf5` extra (D-226).
+- **Not built:**
+  - any live retrieval: every adapter is exercised against synthetic fixtures, and each source's terms page is re-read before its first real fetch (D-220);
+  - D-131's leave-one-group-out run, which waits on a model of real data (D-224);
+  - the minimum count of disturbed passes `EVALUATION.md` §3 asks to be stated in advance;
+  - a GFZ definitive Kp as the reanalysis column, which D-131 keeps apart from the feature and which nothing yet reads.
+- **Known limits, each stated rather than hidden:**
+  - a backfill never supplies features for passes already flown, because a value we fetched after a pass cannot be shown to have existed before it;
+  - the terms in `ATTRIBUTION.md` were read from quotations of the providers' pages, because the build environment could not reach them.
 
 **Stage 23's software is built, ahead of its turn; Stage 19 is still next.** It was built beside Stages 18 and 20, both merged first, and touches none of their files. Its decisions are D-200 through D-211, `docs/THREAT-MODEL.md` is its threat model, and `docs/OPERATIONS.md` § Rate limits, § Rotating secrets, § Security scanning, § Backup and restore and § Failure recovery are its runbook. It added no migration.
 - **The completion gate passes, clause by clause:**

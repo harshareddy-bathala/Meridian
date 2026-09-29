@@ -146,7 +146,9 @@ Regional monitoring (module 19): registered areas of interest, and what the inge
 
 **Not the platform's own monitoring.** Prometheus, Grafana and the alert rules watch Meridian; this module watches places on the ground, and the two never share a name in code (the same separation D-013 made for "health").
 
-Reads ingested records through `ingest`'s normalised tables and **never at runtime from a source**. Holds no personal data: an area of interest is a place and a label, and who may register one is open (D-137).
+Reads ingested records through `ingest`'s normalised tables and **never at runtime from a source**. Holds no personal data: an area of interest is a place and a label, and who may register one is open (D-137) — until it is settled, an operator registers one and nothing about it is published (D-227).
+
+Built at Stage 32 as `platform/src/meridian/regions/`. A regional report — series, change against a baseline with its interval, coverage by our own decoded receptions, and two cross-checks — is a pure function of a raw snapshot and a configuration, published as a content-addressed directory (D-229 to D-233). Only areas and recorded alerts are rows. Nothing on the scheduling or reception path imports it.
 
 ### `firmware`
 Arduino rotator controller. Stepper control, homing, limit switches, network command interface.
@@ -154,7 +156,7 @@ Arduino rotator controller. Stepper control, homing, limit switches, network com
 Target is an Arduino Uno R4 WiFi — **Renesas RA4M1, not AVR.** AVR-targeted stepper libraries will not port unchanged.
 
 ### `ingest`
-External archive adapters, and — from Stage 31 — adapters for published environmental and space-weather products (D-132). **Optional path.** Failure here degrades model quality; it never blocks scheduling or reception.
+External archive adapters, and adapters for published environmental and space-weather products — nine source classes since Stage 31, into `environment_samples` (D-132, D-220, D-221). **Optional path.** Failure here degrades model quality; it never blocks scheduling or reception. Near-real-time ingest is `meridian-ingest follow`, run beside the platform and never inside its jobs service (D-225); features read what it loaded from a snapshot, never live (D-224).
 
 One subsystem, whatever the payload. Every source records the same provenance — source, original identifier, retrieval time, source version, licence, checksum, transformation version — and every adapter downloads into immutable raw storage, validates, hashes and normalises separately. Access constraints differ per source and are recorded per source: some need a free key and count requests, some need registration before a download, at least one needs neither. Keys are secrets and are never committed.
 
