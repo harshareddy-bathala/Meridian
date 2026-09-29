@@ -56,6 +56,9 @@ class SettledAssignment:
     simulated: bool
     """True if the assignment or its pass is simulated."""
 
+    revoked_reason: str | None = None
+    """``declined`` or ``offline`` if the platform took it back (D-171)."""
+
 
 @dataclass(frozen=True, slots=True)
 class LatestReport:
@@ -117,7 +120,8 @@ def find_unclassified_settled(
             """
             select a.assignment_id, a.pass_id, a.station_id, p.satellite_id,
                    a.start_at, a.end_at, a.centre_freq_hz, a.mode, a.state,
-                   p.aos, p.los, (a.simulated or p.simulated) as simulated
+                   p.aos, p.los, (a.simulated or p.simulated) as simulated,
+                   a.revoked_reason
             from assignments a
             join passes p on p.id = a.pass_id
             where a.decision = 'scheduled'

@@ -213,7 +213,9 @@ All four of its fields are stored, `mode` included: a station tuned to the right
 | Situation | Platform reads it as |
 |---|---|
 | Issued, and present in the list | The station holds it — state `held` |
-| Issued, absent, window still ahead | The station has not accepted it. **Phase 1 changes nothing** — it stays `issued`, is offered again on the next heartbeat, and expires after `end_at` if it is never taken. Reissue to another station arrives with the scheduler (D-022) |
+| Issued, never held, absent, window still ahead | It may not have arrived. It stays `issued`, is offered again on the next heartbeat, and expires after `end_at` if it is never taken (D-026) |
+| Held, then absent, window still ahead | A decline. The platform marks it `revoked` and never delivers it again, and its time may be given to another pass (D-171) |
+| Revoked, and present | The station still holds it and will execute it: `held` again, while its window is open and nothing newer — a later decision about the pass, or another live assignment over the same window — claims it. Otherwise it stays `revoked`, and the platform logs that the station holds it (D-171) |
 | Absent, window has passed | `expired` — the station never took the work |
 | **Present**, window has passed | **Not `expired`.** The station took the work and is finishing with it; its observation may still arrive. Overdue alone is not the test (D-067) |
 | Present, but never issued to this station | Protocol error. Log and ignore; do not act on it |
@@ -252,7 +254,7 @@ sorted by `start_at` ascending, capped at 8.
 
 **The cap is not a queue.** Because held assignments are redelivered, returning the earliest 8 of 9 returns the *same* 8 every time: the ninth waits behind them rather than arriving in turn, and may never be delivered at all. MSP 0.x forbids the situation rather than paginating it — **at most 8 assignments may be eligible for one station at any instant**, which is an invariant on whoever creates them: by hand in Phase 1, the scheduler in Phase 2. The platform logs a warning when a station's eligible set exceeds 8, so a violation is visible rather than silent. Pagination, or the per-assignment delivery state it would need, arrives with the scheduler that could produce the overload. See `docs/DECISIONS.md` D-035.
 
-Consequently there is no acknowledgement message and none is needed. An assignment expires when its `end_at` has passed and the station never reported it. Phase 1 does not reissue an expired assignment to another station; that arrives with the scheduler (`docs/DECISIONS.md` D-022, D-026).
+Consequently there is no acknowledgement message and none is needed. An assignment expires when its `end_at` has passed and the station never reported it. An expired assignment is never reissued. A held assignment dropped before its window, a decline, is revoked instead, and the scheduler may give its time to another pass; the platform never tells the station, because the station already let it go (`docs/DECISIONS.md` D-022, D-026, D-171).
 
 `server_time` lets a station estimate clock offset without NTP. Stations should report their offset in the next heartbeat.
 

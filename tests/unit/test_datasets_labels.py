@@ -215,6 +215,64 @@ def test_an_expiry_nobody_was_heard_during_is_a_station_that_was_not_there() -> 
     assert labelled.label == "station_unavailable"
 
 
+# --- revoked before the window (D-171) ----------------------------------------
+
+
+def revoked(target: PassRow, why: str, assignment_id: str = "as_1") -> AssignmentRow:
+    return assigned(target, assignment_id, state="revoked", revoked_reason=why)
+
+
+def test_a_pass_the_station_declined_before_its_window_was_declined() -> None:
+    target = a_pass()
+
+    labelled = label(rows(passes=(target,), assignments=(revoked(target, "declined"),)))
+
+    assert labelled.label == "assignment_declined"
+    assert labelled.scheduled_by == ("A",)
+
+
+def test_a_pass_taken_back_while_its_station_was_offline_is_unavailability() -> None:
+    """Never a miss: the station was not asked to listen, and heard nothing
+    because nothing was asked of it — with or without heartbeats in the window,
+    and with listening confirmed for the station besides."""
+    target = a_pass()
+    snapshot = rows(
+        passes=(target,),
+        assignments=(revoked(target, "offline"),),
+        heartbeats=(heard(target),),
+        listening={"as_1": True},
+    )
+
+    assert label(snapshot).label == "station_unavailable"
+
+
+def test_a_revoked_assignment_reissued_and_decoded_is_a_reception() -> None:
+    """The reissued assignment is the station's work, and its report decides."""
+    target = a_pass()
+    snapshot = rows(
+        passes=(target,),
+        assignments=(revoked(target, "offline"), assigned(target, "as_1r1")),
+        observations=(report("as_1r1", "decoded"),),
+        heartbeats=(heard(target),),
+    )
+
+    assert label(snapshot).label == "successful_reception"
+
+
+def test_a_revoked_assignment_does_not_make_its_reissue_look_declined() -> None:
+    """Only the live assignment's expiry says the station declined the pass."""
+    target = a_pass()
+    live = assigned(target, "as_1r1", state="issued")
+    snapshot = rows(
+        passes=(target,),
+        assignments=(revoked(target, "declined"), live),
+        heartbeats=(heard(target),),
+        listening={"as_1r1": True},
+    )
+
+    assert label(snapshot).label != "assignment_declined"
+
+
 @pytest.mark.parametrize(
     ("outcome", "expected"),
     [

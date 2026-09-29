@@ -40,9 +40,12 @@ from meridian.cli_jobs import add_jobs_parser, run_jobs
 from meridian.cli_model import add_model_parser, run_model
 from meridian.cli_passes import run_passes
 from meridian.cli_reliability import add_reliability_parser, run_reliability
-from meridian.cli_schedule import configurations, run_scheduler
+from meridian.cli_schedule import add_schedule_parser, run_scheduler
 from meridian.cli_serve import add_serve_parser, run_serve
-from meridian.cli_snapshot import add_snapshot_parser, run_snapshot
+from meridian.cli_snapshot import (
+    add_snapshot_parser,
+    run_snapshot,
+)
 from meridian.config import load_settings
 from meridian.store import station_tokens, stations
 from meridian.store.pool import DatabaseUnreachableError, connect_once
@@ -262,31 +265,6 @@ def _add_passes_parser(
     generate.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
 
 
-def _add_schedule_parser(
-    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> None:
-    """Wire ``meridian schedule``, which takes a verb's arguments and no verb."""
-    schedule = subcommands.add_parser(
-        "schedule",
-        help="assign passes to stations over a horizon",
-        description=(
-            "Ranks the generated passes under one of EVALUATION.md's "
-            "configurations and takes as many as each antenna allows, writing "
-            "down why every skipped pass was skipped. Re-running one "
-            "configuration over one horizon writes nothing (D-066)."
-        ),
-    )
-    schedule.add_argument("--from", dest="start", required=True, help="ISO-8601 UTC")
-    schedule.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
-    schedule.add_argument(
-        "--config",
-        dest="model_config",
-        choices=configurations(),
-        default="A",
-        help="ranking configuration (EVALUATION.md section 3)",
-    )
-
-
 def _add_pending_parsers(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -314,7 +292,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_catalogue_parser(subcommands)
     _add_station_parser(subcommands)
     _add_passes_parser(subcommands)
-    _add_schedule_parser(subcommands)
+    add_schedule_parser(subcommands)
     add_serve_parser(subcommands)
     add_jobs_parser(subcommands)
     add_db_parser(subcommands)
@@ -343,7 +321,7 @@ NEEDS_ACTION = frozenset(
 
 ``meridian schedule`` is a verb already and carries its arguments directly, so
 it is absent: sending it to its own help text would make the command
-unrunnable.
+unrunnable. Its one verb, ``evaluate``, is optional.
 """
 
 

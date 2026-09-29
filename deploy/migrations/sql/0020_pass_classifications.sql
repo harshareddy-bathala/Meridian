@@ -1,4 +1,4 @@
--- 0017 — what happened to each settled, scheduled pass, and on what evidence
+-- 0020 — what happened to each settled, scheduled pass, and on what evidence
 --
 -- Stage 20 is the first stage that publishes a reliability number. Every one of
 -- them is counted from this table, and every row here says what it was decided

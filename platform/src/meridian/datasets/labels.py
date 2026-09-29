@@ -12,6 +12,7 @@ these holds:
 Otherwise its label is :func:`meridian.reliability.classification.classify`'s,
 the same classification the reliability layer counts misses by (D-180). That
 module states the rules; this one gathers their evidence from a snapshot. A
+revoked assignment is never the station's work, so never a miss (D-171). A
 heartbeat is looked for before a decline is read (D-181), which is what
 ``labels-3`` changed.
 
@@ -26,7 +27,7 @@ listening answers were frozen by the registry at export (D-145). The same rows
 and the same configuration always give the same labels, which is Stage 15's
 gate.
 
-Reference: docs/DECISIONS.md D-145, D-146, D-147, D-148, D-180, D-181.
+Reference: docs/DECISIONS.md D-145, D-146, D-147, D-148, D-171, D-180, D-181.
 """
 
 from __future__ import annotations
@@ -191,10 +192,11 @@ def _label(
 ) -> LabelledPass:
     """Rules 1 and 2 exclude the pass; otherwise the classification labels it."""
     target = physical.representative
-    ends = [physical.last_los, *(one.end_at for one in evidence.scheduled)]
+    chosen = (*evidence.scheduled, *evidence.revoked)
+    ends = [physical.last_los, *(one.end_at for one in chosen)]
     if max(ends) > context.settled_by:
         return _row(physical, evidence, None, "report_window_open")
-    if not evidence.scheduled:
+    if not chosen:
         return _row(physical, evidence, None, "not_scheduled")
     label = _outcome_label(target, evidence, context)
     return _row(physical, evidence, label, _exclusion(label, evidence.simulated))
@@ -206,6 +208,7 @@ def _outcome_label(target: PassRow, evidence: PooledEvidence, context: _Context)
         PassEvidence(
             outcome=None if evidence.report is None else evidence.report.outcome,
             assignment_states=tuple(one.state for one in evidence.scheduled),
+            revoked_reasons=tuple(one.revoked_reason or "" for one in evidence.revoked),
             heard_during_window=_heard_during(
                 target.station_id, evidence.scheduled, context.heard
             ),
@@ -237,7 +240,7 @@ def _row(
     excluded: str | None,
 ) -> LabelledPass:
     target = physical.representative
-    configs = {one.model_config for one in evidence.scheduled}
+    configs = {one.model_config for one in (*evidence.scheduled, *evidence.revoked)}
     return LabelledPass(
         pass_id=target.pass_id,
         pass_ids=physical.pass_ids,

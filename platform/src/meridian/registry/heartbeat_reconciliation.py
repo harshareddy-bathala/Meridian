@@ -16,7 +16,7 @@ deliberately absent — it depends on wall-clock time against each assignment's
 window, so it stays in SQL where the comparison happens against one clock.
 
 Reference: docs/MSP-SPEC.md §4.2 (the reconciliation table); docs/DECISIONS.md
-D-003, D-008 (the state machine), D-022 (Phase 1 does not reissue), D-067.
+D-003, D-008 (the state machine), D-067, D-171 (reissue).
 """
 
 from __future__ import annotations
@@ -112,13 +112,13 @@ def reconcile(live: LiveAssignments, reported: HeldReport) -> Reconciliation:
         confirm an assignment and report listening on it in the same message.
 
     Note:
-        **An issued assignment the station omits is left alone.** MSP §4.2 offers
-        "reissue elsewhere or mark expired" for a window still ahead, and D-008's
-        state machine has an arc for neither. Phase 1 changes nothing: the
-        assignment stays ``issued``, is offered again on the next heartbeat, and
-        expires after its window if it is never taken (D-022). That is why this
-        function returns no "to release" set — the absence is the whole of the
-        decline, and Phase 1's correct response to it is inaction.
+        **An issued assignment the station omits is left alone.** It may not
+        have arrived yet: it stays ``issued``, is offered again on the next
+        heartbeat, and expires after its window if it is never taken. A
+        *held* assignment the station omits before its window is a decline,
+        and is revoked so its time can be given to another pass (D-171); that
+        depends on the clock against each window, so it is applied in SQL
+        beside expiry, and this function returns no "to release" set.
     """
     to_hold = live.awaiting_hold & reported.held_assignment_ids
     holds_now = live.already_held | to_hold

@@ -381,6 +381,8 @@ MSP §4.2's reconciliation table says that when an assignment was issued, is abs
 
 This is the smaller change and Phase 1 has one station, so there is nowhere to reissue *to*. Recording it because the gap is real and a reader comparing MSP §4.2 against D-008 will otherwise find the contradiction and assume it was missed.
 
+*Amended by D-171.* `revoked` exists. A held assignment the station drops before its window is revoked as declined, and its time can be given to another of the station's passes; an offline station's work not yet begun is revoked, and reinstated if the station still names it on return.
+
 ---
 
 ## D-023 — Registration recovery: a client-generated registration key
@@ -458,6 +460,8 @@ MSP §4.2 defined the reconciliation table but not the delivery policy behind it
 | When does an assignment expire? | `now > end_at` and state is `issued` or `held` |
 | When is it eligible for reissue? | Never in Phase 1 (D-022) |
 | Does Phase 2 add `revoked`? | Yes, with the scheduler — not now |
+
+*Amended by D-171.* The last two rows are answered: a held assignment dropped before its window is revoked and its time reissued, and `revoked` exists. An expired assignment is still never reissued.
 
 *Amended by D-035.* The horizon above is stated as a bound on `start_at` alone, which excludes an assignment already under way and so contradicts the redelivery rule two rows above it. D-035 restates the eligibility predicate and resolves the cap.
 
@@ -1441,7 +1445,7 @@ The pass-generation job decides which station-and-satellite pairs are worth prop
 
 **Turnaround between two receptions is an input, not a constant, and its value is not decided here.** `ARCHITECTURE.md` requires non-overlap *including slew and settling time*, so the rule takes a `turnaround_s` and honours it; two passes that abut exactly are compatible for a fixed antenna and are not for a rotator, and both answers are correct for the station they describe. What the *platform* should pass is genuinely undecided: nobody has measured station 001's rotator, `stations` has no column for it, and `station_capabilities.tracking` is a boolean that does not imply a duration. **Recorded as owed by the scheduler run** (Stage 7 Session D), which is the first code that must supply a number.
 
-*Consequence, stated rather than discovered later:* whatever value that run picks, the baselines and the Stage 18 optimiser must use the same one, or `EVALUATION.md`'s SC-1 measurement of **D − B** compares two schedulers working to different physical constraints and attributes the difference to the model.
+*Consequence, stated rather than discovered later:* whatever value that run picks, the baselines and the Stage 18 optimiser must use the same one, or `EVALUATION.md`'s SC-1 measurement of **D − B** compares two schedulers working to different physical constraints and attributes the difference to the model. *Amended by D-166:* overlap is now judged on the assignment windows, and the rule, the delivery cap and the check of every schedule are written once for every scheduler.
 
 ---
 
@@ -1461,7 +1465,7 @@ The pass-generation job decides which station-and-satellite pairs are worth prop
 
 **Priority belongs to `satellites`, not to `assignments`.** `assignments.priority` records what a decision *used*, which is the right thing for it to record and useless as an input — reading it back would derive next week's weighting from last week's schedule, so the first run would have nothing and every run after it would be quoting itself. An operator has opinions about *objects*: "Meteor-M is the project, this cubesat is a bonus". Migration 0012 adds `satellites.priority`, defaulting to 1.0 to match `assignments.priority` and so preserve the reduction above.
 
-**A schedule has an identity, so a run can be repeated.** Re-running the scheduler inserted a second complete copy — the failure D-063 fixed for `passes`, in the table that consumes them, and worse here: two `scheduled` rows for one pass means a station told twice to receive the same thing, and MSP §4.2's reconciliation holds two ids for one reception. `unique (pass_id, model_config)` fixes it, and **both parts of the key matter**: keyed on the pass alone, configurations A and B would collide, and running both over one horizon is exactly what the ablation requires — the two schedules have to coexist to be compared.
+**A schedule has an identity, so a run can be repeated.** Re-running the scheduler inserted a second complete copy — the failure D-063 fixed for `passes`, in the table that consumes them, and worse here: two `scheduled` rows for one pass means a station told twice to receive the same thing, and MSP §4.2's reconciliation holds two ids for one reception. `unique (pass_id, model_config)` fixes it, and **both parts of the key matter**: keyed on the pass alone, configurations A and B would collide, and running both over one horizon is exactly what the ablation requires — the two schedules have to coexist to be compared. *Amended by D-165:* a station has one antenna, so a second configuration now decides around the first one's assignments, and configurations are compared by replay (D-172). The key is unchanged.
 
 **Assignment ids are derived, not random**: `as_` + the first twelve hex of `sha256(pass_id:model_config)`, following `observations.observation_id` (D-027). A repeat therefore mints the same ids and collapses onto that constraint, and a skip can name the assignment that displaced it without a round trip to discover what id the winner was given.
 
@@ -2367,6 +2371,8 @@ Passes and assignments are only produced when someone runs `meridian passes gene
 - SIGTERM ends the wait between rounds at once, and lets a running round finish its transaction.
 
 It runs as a `jobs` service in the **default** profile, and `sim-scheduler` is removed. Configuration A stays until Stage 18 supplies a constrained scheduler to switch to.
+
+*Amended by D-170.* Rounds schedule with the optimiser, under the `schedule.toml` that `SCHEDULE_CONFIG` names, or configuration A on the elevation proxy when none is named.
 
 *Rejected: cron, inside the container or on the host.* A host crontab is outside the repository and fails the clean-machine requirement. In-container cron needs root, and it hides a failing run in cron's own mail rather than in a metric.
 
@@ -3436,6 +3442,8 @@ Four features are learned from a station's own settled history (D-157), and each
 
 **The public-conditions group of `EVALUATION.md` §3 is a named group with no features** until Stage 31 ingests them, so D∖conditions can be run without a code change when it has something in it.
 
+*Amended by D-168.* D weights its objective by priority as B does, so D − B isolates the model. The table's D row now reads "probability × priority".
+
 ---
 
 ## D-161 — Cold start is a path, not a default
@@ -3497,6 +3505,310 @@ B is reported as A: its probabilities are A's, and priority weights the objectiv
 
 ---
 
+## D-165 — A skip is a record, not an assignment, and a round schedules around what earlier rounds assigned
+
+**2026-09-27 · accepted** · *migration 0017; `meridian/store/{assignments,schedule_reads}.py`; `meridian/scheduler/{candidates,conflict_rejection,run}.py`, Stage 18*
+
+Two defects in how Stage 7's schedule reached a station, both found by reading the delivery path before building on it.
+
+**Skips were delivered.** `assignments` holds every decision, the passes skipped beside the passes taken (D-065), and a skip took the column default `state = 'issued'`. None of the queries on the delivery path looked at `decision`. So:
+
+- every heartbeat handed a station the passes the scheduler had rejected, as well as the ones it had chosen;
+- a station naming one in `held_assignments` moved it to `held`;
+- when its window closed, reconciliation expired it, as though the station had declined work it was never meant to have.
+
+**Every query that delivers, moves or expires a row now says `decision = 'scheduled'`,** and migration 0017 makes the rule the table's own: `check (decision = 'scheduled' or state = 'issued')`. A skip stays `issued` for good. Skips a deployment already delivered are put back to `issued` by the migration. The states they had described a delivery that should not have happened, not anything a station did with an assignment. An observation submitted against one stays where it is, as a record of a real reception.
+
+**Rounds scheduled on top of one another.** The jobs service schedules `[now, now + 6 h)` every five minutes (D-110), so consecutive rounds overlap by all but five minutes, and `run_schedule` never read what was already stored. A pass new to a round could be ranked against passes that were already assigned. It might be at the horizon's tail, or a newer element set's prediction of a pass already taken (D-063). If it won, it was inserted as `scheduled`, the earlier assignment stayed `scheduled` under `on conflict do nothing`, and the station held two overlapping assignments. `find_passes_in_horizon`'s note that adjacent horizons partition the passes was true of `meridian schedule` run by hand, and not of the rounds that replaced it.
+
+**A round now works around what is decided:**
+
+- A pass this configuration has already decided, taken or skipped, is not a candidate again. The skip recorded why; a later round has no new reason to reverse it. When there is one, it is D-171's.
+- The station's open assignments (`issued`, `held` or `in_progress`) are **commitments**. They are fixed, never displaced, and a candidate one of them blocks is skipped naming that assignment.
+- Commitments of **every** configuration bind. A station has one antenna whichever configuration asked for the pass. A second configuration run over the same horizon still records its own decision about each pass, but it records a skip naming the first one's assignment, not a second assignment for the same reception. Configurations are compared by replaying them over a snapshot (D-172), not by delivering two schedules to one station. This withdraws D-066's reason for keying decisions on the configuration, "the two schedules have to coexist to be compared", while keeping the key: each configuration's decision is still its own row.
+
+`ScheduleReport` gains `already_decided`, and `meridian schedule` prints it, so a repeat that writes nothing says why.
+
+**The public API publishes a skip's `state` as null**, and the dashboard shows a dash. A skip was never delivered, so it has no state to report. Publishing `issued` would claim the platform had handed it to a station.
+
+**One run at a time** (found in review). Commitments bind only if the round reading them sees every earlier round's writes. Two runs at once — the jobs round and a `meridian schedule` typed beside it — could each read before the other wrote. Each would then keep half of a different schedule, and one antenna could hold two overlapping passes, since `on conflict do nothing` keeps whichever row landed first. So every run takes `pg_advisory_xact_lock` on one fixed key before its first read, and holds it until its transaction commits. The second run waits, then reads what the first wrote.
+
+*Rejected: re-deciding every pass in the horizon each round and replacing what changed.* It would move assignments a station may already hold, and turn a schedule into something that changes under the station every five minutes. Re-opening a decision is kept for a withdrawn reason (D-171), not for every round.
+
+---
+
+## D-166 — One set of constraints for every scheduler, checked before anything is written
+
+**2026-09-27 · accepted** · *`meridian/scheduler/{constraints,conflict_rejection,candidates,run}.py`, Stage 18*
+
+The roadmap lists the constraints a schedule obeys. D-065 records why every scheduler must obey the same ones: otherwise D − B compares two schedulers under different physics and credits the difference to the model. So they are written once, in `meridian.scheduler.constraints`, and the Stage 7 baselines, the optimiser and the oracle all keep them.
+
+**One antenna, judged on the assignment window.** A station's assignments never overlap. The window judged is the one the station records: the pass opened out by its timing uncertainty (D-021, D-060), plus the station's turnaround after it. This changes Stage 7's rule, stated on `Candidate`, that conflicts are judged on the pass. A station recording one pass to its widened end cannot start the next at its widened start, and two passes that only touch on paper overlap by the sum of their margins on the air. Every scheduler judges the same way, so schedules stay comparable. Turnaround is still one value for the run, zero for the fixed antennas that exist (D-066).
+
+**The delivery cap.** At no instant may a station hold more than 8 assignments that one heartbeat would deliver together. Eligible at instant `t` means `start ≤ t + 2 h` and `end ≥ t` (D-035), so an assignment is eligible over `[start − 2 h, end]`, and the cap bounds how many of those intervals share an instant. D-035 made more than 8 a broken invariant rather than a queue, and left enforcing it to whoever creates assignments. The two numbers are `MAX_ASSIGNMENTS_PER_RESPONSE` and the heartbeat's `ASSIGNMENT_HORIZON`, and a unit test holds them equal to the scheduler's. At 137 MHz a station sees a few passes in two hours, so the cap rarely binds; it is enforced because a denser catalogue would otherwise starve delivery silently.
+
+**Availability: an `offline` station is given nothing new.**
+- Liveness is the registry's own judgement (`derive_liveness`), taken at the run's `now`. That instant is passed in, not read, so a run can be stated exactly.
+- A station **never seen** is available. It has registered and not yet reported, which every station is until its first heartbeat, and that heartbeat is what delivers its work.
+- A **stale** station is still inside SC-5's 90 s, and is available too.
+- An offline station's passes are **left undecided, not skipped**. A skip is final (D-165), so skipping would give up six hours of passes for a ten-minute outage. The report names the station and counts its deferred passes, and the first round after it returns decides them.
+- Pass generation is unchanged. An offline station's passes stay in the completeness denominator, as `find_receiving_stations` requires.
+
+**A live, receivable downlink.** A pass becomes a candidate only if its satellite has an active transmitter the station declared it can receive (D-064). The candidate set is therefore the set that satisfies the rule, and no candidate can lose to it.
+
+**Commitments are fixed** (D-165).
+
+**Every schedule is checked, however it was found.** `violations(problem, outcome)` takes the candidates, the commitments, the unavailable stations and the rules, and reports every rule broken, by name and with the passes that break it:
+- an overlap;
+- a breach of the cap;
+- an assignment to an offline station;
+- a candidate undecided or decided twice;
+- a pass decided that was never a candidate;
+- a commitment selected again.
+
+It does not ask how the outcome was reached. The scheduler run checks each station's outcome before keeping it, and raises `ScheduleInvalidError`, writing nothing, if anything is found. For the greedy baselines this is a guard against a defect. For the optimiser, a solver's answer is a claim, and this is how it is checked (D-167).
+
+**A skip says which rule it lost to.** `Rejection.rule` is `overlap` or `eligible_cap`. An overlap names the assignment that took the slot. A cap rejection names none, since no single assignment took it, and its reason cites D-035.
+
+*Rejected: re-using the 8-per-response cap as a queue, by delivering the earliest eight and holding the rest back until a slot frees.* D-035 already rejected it: redelivery means the ninth is never delivered while the eight ahead of it are held.
+
+---
+
+## D-167 — The optimiser is a mixed-integer programme solved by HiGHS, and its answer is checked
+
+**2026-09-28 · accepted** · *`meridian/scheduler/{optimiser,programme}.py`; `highspy` in `platform/pyproject.toml`, Stage 18*
+
+The roadmap asks for a solver to be chosen and documented, and forbids building an optimiser by hand where a maintained library provides the model.
+
+**The programme.** Maximise the summed score of the passes taken, subject to D-166's constraints:
+- one binary variable per candidate;
+- for each station, one row per window start, allowing at most one of the windows that hold it. A station's windows, each followed by its turnaround, are intervals, so two that overlap both hold the later one's start, and these rows cover every overlap;
+- for each station, one row per instant at which some eligibility begins, allowing what the station's commitments leave of the cap of eight. The most assignments eligible at once is reached where one begins, so this is the count `exceeds_cap` makes.
+
+Candidates a commitment already blocks are rejected before the solver sees them, naming the assignment, as greedy does (D-165).
+
+**The solver is HiGHS, through `highspy`:**
+- it is MIT-licensed, and its bundled parts are BSD-3, Apache-2.0, zlib and MIT. None is copyleft;
+- it ships manylinux wheels for x86_64 and aarch64 of about 5 MB, so the Pi's image installs it without a compiler;
+- it needs numpy, which skyfield already brings;
+- it solves mixed-integer programmes with a floating-point objective, so a probability can be a coefficient as it is.
+
+It is a runtime dependency of the platform, not an extra. Unlike scikit-learn (D-155), the scheduler runs on the Pi. CI loads it in the built image and solves a one-pass programme there.
+
+*Rejected:*
+- **OR-Tools CP-SAT.** It is Apache-2.0 and excellent, but a 28 MB wheel. It needs an integer objective, so every probability would be scaled and rounded, and it is deterministic only on one worker.
+- **`scipy.optimize.milp`.** It is the same HiGHS, but scipy is fit-extra only and the image must not carry it (D-155).
+- **Weighted interval scheduling by dynamic programming.** It is exact for one station with no cap, and the cap breaks it. Where it applies it is also what the library does anyway.
+
+**Deterministic for identical input.**
+- Candidates are put in one canonical order (station, acquisition, id) before the model is built, and rows are added sorted.
+- HiGHS runs on one thread, with a fixed `random_seed` and `mip_rel_gap = 0`.
+- The same candidates therefore make the same model and give the same answer, whatever order they arrived in. A unit test shuffles them and compares.
+- The exception is a time limit reached, where the incumbent depends on how far the search got. The status says when that happened.
+
+**The run records what it did.** A `SolverRun` holds:
+- the status: `optimal`, `time_limit` (the best found, valid, not proven) or `fallback`;
+- the solver and its version;
+- the objective of the schedule returned, and the solver's proven bound;
+- the runtime and the time limit;
+- for a fallback, why.
+
+**A solver's answer is a claim.** The selection is checked by D-166's `violations` before it is used:
+- A selection the check rejects, or no selection within the time limit, falls back to greedy under the same constraints, and the status and reason say so. A valid schedule always comes back, which is the first clause of Stage 18's gate.
+- A candidate the solver left out that still fits is taken. At the optimum none does while scores are positive, and under a time limit this only improves the answer.
+- Every rejection therefore has a reason: the best-scoring selection it overlaps, or the delivery cap.
+
+**Tested against brute force, not against the solver's word.** On sixty seeded instances small enough to enumerate every subset, the optimiser's total equals the best subset every rule allows. On two hundred larger ones it is valid, and never below greedy. On the textbook case, one high pass overlapping two that are worth more together, greedy takes the one and the optimiser the two.
+
+---
+
+## D-168 — What a pass is worth: yield × frames × priority, each term kept
+
+**2026-09-28 · accepted** · *`meridian/scheduler/{objective,schedule_config}.py`; `deploy/schedule.toml.example`; `meridian/prediction/configurations.py`, Stage 18*
+
+The roadmap asks for an objective whose terms are visible and configurable. A candidate's value is the product of three terms, and each is kept beside its score, so a decision can say why one pass was worth more than another:
+
+- **yield**: the probability the pass decodes.
+  - It is a published model's probability for the configuration, with the route it took (D-161). B scores with A's model (D-160).
+  - With no model configured, it is the **elevation proxy**: peak elevation over 90°, clamped to [0, 1] and labelled `elevation_proxy`. This is allowed for A and B only. C and D are learned configurations, and a schedule labelled D that no model made would be a claim no data backs. Both the configuration and the objective refuse it.
+- **frames**: how long the satellite is above the horizon, `los − aos` in seconds. A decoded pass returns frames for as long as it is received. The term uses the pass, not the assignment window: the margin either side is recording time spent waiting for a pass whose timing is uncertain, not signal. `frames = "none"` counts every pass as one instead.
+- **priority**: the operator's weight for the satellite, under B and D only.
+
+**D weights by priority as B does. This amends D-160**, where D maximised the probability alone. A and C maximise expected yield, and B and D maximise it weighted as an operator would. So D − B, which is SC-1, differs only in the model, and C − A only in our features. Measured the old way, D − B would have mixed a better model with a different objective, and credited the model with whatever dropping priority did. `prediction.configurations` changes D to match, and a unit test holds its table equal to the scheduler's. A D model's `model.json` now records `weighted_by_priority: true`. The calibration report's note that B's probabilities are A's is now keyed on B by name, since D's are its own.
+
+A priority that is zero, negative or not finite is refused, as B's baseline refuses it (D-066): it would make a pass worth nothing, or worth avoiding, without anybody saying so.
+
+**Fairness and coverage terms are optional in the roadmap and not built.** One station's schedule has nobody to be fair to. Coverage of a satellite an operator cares about is what the priority term already expresses.
+
+**`schedule.toml` chooses all of it.** It is strict, as `model.toml` is: an unknown key or a value off its scale is refused by name, and the hash is of the resolved values. The keys are:
+- `configuration` (default A);
+- `model`, a published model directory under the datasets root or an absolute path. It must be its configuration's: A's for A or B, C's for C, D's for D;
+- `frames` (default `duration`);
+- `time_limit_s` (default 10, at most 3600);
+- `turnaround_s` (default 0);
+- `seed`.
+
+With no file, the run is A on the elevation proxy.
+
+---
+
+## D-169 — A live pass is scored by the same code its training example was
+
+**2026-09-28 · accepted** · *`meridian/prediction/live.py`; `meridian/prediction/profiles.py`; `tests/unit/test_scheduler_boundaries.py`, Stage 18*
+
+The scheduler consumes predictions and never reads the observation store (`ARCHITECTURE.md`). A model that reads a station's own record (C, D) therefore needs that record from somewhere, as data.
+
+**The past is the newest labelled dataset under the datasets root.**
+- It is chosen by the latest `as_of`, then the one labelled latest, then the directory name, so the choice never rests on the order a file system lists them in.
+- It is verified, as is the raw snapshot it was labelled from, through `lineage`.
+- A newest dataset that is damaged is refused, not passed over for an older one. A history quietly older than the operator believes is worse than a refusal.
+- Every scorer states the dataset's hash and `as_of`, so each decision can say how old its history was. Refreshing it (export, then label) is an operator step.
+
+A model that reads no history (A, B) is given no dataset.
+
+**No serving skew.** A pass to score becomes a `LabelledPass` with no label, and goes through `compute_features` with the History and Environment built from the dataset, exactly as a training example does. Nothing is recomputed differently for the live path. A unit test scores every example of a labelled world live, and each gets exactly its training features, route and probability. Because `History` answers only for events settled before a pass's `aos`, a pass scored live cannot see what happened after it. A second test reverses every outcome from the pass's rise on and finds its score unmoved, and its positive control reverses earlier outcomes and finds it moved.
+
+**The geometry is handed in.** Prediction reaches no orbit and no database (D-157, D-158), so the scheduler reads each prediction and the other predictions of its rise from `passes`, computes the track, and hands them over. `Environment.with_predictions` reads a rise's element-set divergence from them without placing the settled reports again.
+
+**What the scheduler may import is enforced.** `test_scheduler_boundaries.py` checks two things:
+- The scheduler's source imports nothing of the observation store, and nothing of prediction but `score` and `live`.
+- A fresh interpreter that loads every scheduler module and the live path holds no scikit-learn, scipy or fitter.
+
+Each has a positive control.
+
+---
+
+## D-170 — Every run is a record, every decision explains itself, and the jobs service schedules with the optimiser
+
+**2026-09-28 · accepted** · *migration 0018; `meridian/scheduler/{run,explanations,live_inputs,scoring}.py`; `meridian/store/schedule_writes.py`; `meridian/jobs/`; `/api/v1/assignments`; the dashboard, Stage 18*
+
+**A run is recorded.** `schedule_runs` holds one row per run that decided anything:
+- the configuration's resolved values and their hash;
+- the yield source, and the model's hash where there is one;
+- for a model that reads history, the labelled dataset it read and that dataset's `as_of`;
+- the solver and its version, its status, the schedule's value, the proven bound, the time limit and the runtime;
+- for a fallback, why;
+- the counts.
+
+A round with nothing new to decide writes no row, as it writes no decision. The jobs service's metrics count those rounds instead.
+
+**Every decision names its run and says why.** `assignments` gains `schedule_run_id`, `model_sha256` and `explanation` (jsonb). The explanation holds:
+- the value and each of its terms, with where the yield came from and its route (D-161, D-168);
+- every pass the decision was weighed against: those it overlaps, selected or skipped, with their values, best first, and the commitments that bound it;
+- for a skip, the rule that decided it, `overlap` or `eligible_cap` (D-166);
+- the alternative: for a skip, what took its slot; for a selection, the best pass it displaced;
+- the run's solver status and history `as_of`, so one decision read alone says whether its schedule was proven best, and how old the record its model read was.
+
+A skip's `conflicts_with_assignment_id` is still the best-valued selection that overlaps it, or the commitment that blocked it (D-165). `predicted_yield` is at last filled, with a model's probability; the elevation proxy is not a prediction, so under it `predicted_yield` stays null and the proxy is in the explanation. Decisions made before migration 0018 keep nulls. No recorded run made them, and an explanation invented for them would be one nobody computed.
+
+The public API publishes `schedule_run_id`, `model_sha256` and `explanation`, typed. A unit test validates every explanation the scheduler builds against the API's model and serialises it back, and requires the two to be identical. That test caught the first draft storing `+00:00` where the API writes `Z`. The dashboard shows the value as the product it is, the pass a selection displaced, and a run that fell back.
+
+**One programme per run, across stations.** Stations share no constraint, so the programme's rows are per station. One solve gives one status, one objective and one bound for the run, instead of an aggregate of many.
+
+**The jobs service schedules with the optimiser. This amends D-110.**
+- `SCHEDULE_CONFIG` names a `schedule.toml`. When it is empty, rounds schedule configuration A on the elevation proxy, which needs no model.
+- The datasets directory is mounted read-only at `/datasets`, and a configured model is loaded once at start. A configuration the service cannot obey — a learned configuration without a model, another configuration's model, or a model or history that cannot be read — is refused before the first round, because a schedule that cannot be made as configured must not quietly become another one.
+- A model that reads history is reloaded only when a newer labelled dataset appears. A round reads the dataset manifests, and nothing more, to know its history is current.
+- `meridian schedule` takes the same file as `--config`, and the datasets root as `--root`. `--config A` is gone: the configuration is a file's, as the model's is.
+
+**Three metrics, from the jobs process alone** (D-109, D-111):
+- `meridian_scheduler_runs_total{status}`, where `status` is `optimal`, `time_limit` or `fallback`;
+- `meridian_scheduler_solver_seconds`;
+- `meridian_scheduler_history_age_seconds`, absent while no model reads history.
+
+A fallback that keeps happening, or a history left to age, is visible without reading a row.
+
+**The live track is export's track.** A model that reads the sky needs each pass's track (D-158), and prediction reaches no orbit. So the scheduler computes it with the rules export freezes it by: the step, the rounding, the folding, and no track for a simulated pass. A unit test propagates one pass both ways and requires them to be equal. A candidate's rise is the stored predictions of one satellite whose windows overlap, transitively (D-148).
+
+*Rejected: a `/api/v1/schedule-runs` endpoint.* Nothing on the dashboard reads a run apart from its decisions, and what a decision's reader needs from its run is in its explanation. `schedule_runs` is the record for operators and for replay.
+
+---
+
+## D-171 — Reissue: a declined or offline assignment is revoked, and its pass decided again
+
+**2026-09-28 · accepted** · *migration 0019; `meridian/store/{revocations,schedule_reads}.py`; `meridian/scheduler/{reissue,candidates,run,assignment_records}.py`; `meridian/api/msp/heartbeat.py`; `meridian/datasets/{labels,pooled_evidence}.py`, Stage 18*
+
+D-022 deferred reissue to the scheduler, with `revoked` as "the obvious candidate", and D-026 said Phase 2 adds it. This is that.
+
+**`revoked` is an assignment the platform took back before its window began.** It is never delivered again, never expires, and is never a miss. `revoked_reason` says why, and is set with `revoked_at` exactly when the state is `revoked`:
+
+- **`declined`**: a `held` assignment the station stops naming before its window begins (D-003). The station let the work go, so its antenna's time is free. Revoking it is what lets the next round give that time to the pass skipped for it.
+- **`offline`**: a round finds the station `offline` (D-166) and takes back its `issued` and `held` work that has not begun.
+
+**An issued assignment never held keeps Phase 1's rule.** When the station omits it, it stays `issued` and is offered again. It may simply not have arrived, and redelivery is how it does (D-026). Only a *held* assignment dropped is a decline.
+
+**MSP cannot take work back from a station, and this shaped the rest.** There is no revoke message, and a station that still holds an assignment will execute it. So:
+
+- A revoked assignment the station names goes back to `held`, offline or declined alike. For an offline one, the reconciliation runs in the same transaction that makes the station live again, so no round can re-decide the pass first. For a declined one, it covers a station that dropped the assignment for a heartbeat and names it again.
+- Only while nothing newer claims the window: no later decision about the pass, and no live assignment of the station whose window overlaps it. Either means the window was given away, and the newer work stands. The station will execute the old one anyway, so the heartbeat logs it.
+- *Found in review:* the first version reinstated offline revocations only, and checked only for a later decision about the same pass. A declined assignment named again stayed revoked while the station still ran it, and a reinstated one could land beside newer work of another pass.
+- Nothing is reissued "to another station". A pass here belongs to one station, and each station's antenna is its own constraint set (D-166). The time a decline frees is that station's, and it goes to another of that station's passes. Another station's pass of the same rise is its own candidate, decided on its own merits already, and the objective has no cross-station coverage term (D-168) that would change it.
+
+**A pass can be decided again, as a new revision.** `(pass_id, model_config, revision)` is unique. Revision 0's id is digested as before (`pass_id:model_config`), so no stored id changes; later revisions add `:revision`. A round considers every pass in its horizon that is **open**:
+- never decided;
+- skipped;
+- revoked while its station was offline, now that the station is back and did not name it.
+
+Work held or done, and a declined assignment, are **closed**. Offering a station the pass it just let go would ask it to decline again.
+
+A skip decided again while the assignment it named still blocks it is **not written**. A skip names the best selection in its way when it is made. A later round, where that selection is a commitment among others, may name another of them first, so the test is that the named one still blocks, not that it is named again (found in review). Without that rule, every round would copy every skip in its horizon every five minutes. Anything else is a new row: a skip now taken, a skip now blocked by something else, or a revoked pass decided at all. A run that writes no row records no run. The public list shows each pass's current decision only, and earlier revisions stay reachable by their id.
+
+**Labelling never reads a revoked assignment as a miss** (`CLAUDE.md` rule 7, D-146). Pooled evidence keeps revoked assignments apart from the station's work. A pass whose assignments were all revoked, with no report, is labelled:
+- `assignment_declined` if one was declined;
+- `station_unavailable` otherwise.
+
+Neither is a yield label (D-149), so neither reaches a model as a negative. A report on a revoked assignment is still a reception, and still counts. A live reissue decides its own label, and a revoked sibling does not make it look declined. Snapshots export `revision` and `revoked_reason`. A snapshot from before migration 0019 has neither and holds no revoked row, so its labels are unchanged, and the labelling version is not bumped.
+
+*Amended by D-181:* these two rules now live in `meridian.reliability.classification`, first in its table, so the live accounting (D-182) reads a revoked pass exactly as the labeller does, and never as a miss.
+
+This amends D-022, D-026 and MSP §4.2's reconciliation table. The wire protocol is unchanged: no message is added, and a station that never declines sees no difference.
+
+---
+
+## D-172 — The retrospective comparison, and the oracle
+
+**2026-09-28 · accepted** · *`meridian/prediction/{replay,replay_models}.py`; `meridian/scheduler/{replay,oracle,comparison,comparison_config,comparison_report}.py`; `meridian schedule evaluate`; `deploy/schedule-evaluation.toml.example`, Stage 18*
+
+The roadmap asks for every scheduler to be compared against baselines and an oracle, each given the same candidates, constraints, horizon, station state and runtime limit. SC-1 is measured as D − B (`EVALUATION.md` §3). `meridian schedule evaluate <dataset> --config <file>` does this. It opens no database, and the same dataset, file and seed print the same bytes.
+
+**What is replayed.**
+- **The span** is the models' test span: from the shared `validate_until` to the dataset's `as_of`. A's, C's and D's models are named in the file. Each must be the configuration it is named as, fitted on the dataset being compared, and all three must share one population (`own`) and one pair of split dates, or the command refuses. B names no model, since its model is A's (D-160).
+- **The problems** are the station-days of that span whose completeness reaches the threshold (D-151): the dataset's own threshold, or the file's `threshold`. Each such day is one problem. Its candidates are the day's eligible physical passes (D-148, D-149): the completeness denominator itself, so a day's completeness is the share of its candidates the historical policy attempted. Simulated passes are never candidates (D-078), and are counted.
+- **The same problem for every scheduler.** Each gets the day's candidates and D-166's rules at the configured turnaround. Timing margins come from each prediction's element-set age, as a live run computes them (D-060). There are no commitments, and every station is available, since a retained day is one the station was attempting passes on. Each gets the same per-day time limit. Every schedule passes through `violations`, and a broken one stops the comparison rather than being scored.
+- **A pass belongs to the day it rises on.** Two passes either side of midnight are therefore in two problems, and both may be taken. This relaxation is the same for every scheduler, the oracle included.
+
+**Seven schedulers:**
+- greedy A and greedy B, Stage 7's baselines and existing practice;
+- the optimiser under A, B, C and D, each valued by D-168's objective with its configuration's model;
+- the oracle.
+
+**The oracle is the optimiser valued by what each pass decoded.** It is non-deployable, since the values exist only after the passes have flown. It is held to the same constraints, solver and time limit. A pass that decoded nothing, or was confirmed silent, is worth 0. A pass nobody attempted is also worth 0 and is counted, because the oracle cannot know what it would have returned any more than a scheduler can. Solved to optimality, it takes at least the frames of every other schedule on every day. Where it is not solved to optimality, the report says so.
+
+**Frames come from the raw snapshot.** The pooled report of each physical pass (D-146) gives `observations.frames_decoded`, which the snapshot rows now carry and no label reads:
+- `signal_no_decode` and `confirmed_miss` count as 0 frames;
+- a decode whose client reported no count is *unknown*, not 0;
+- anything unattempted is unknown.
+
+**The metric is decoded frames per station-hour.** A station-hour is an hour of a replayed day inside the test span, and the hours are the same for every scheduler. Unknown outcomes add no frames. Each scheduler's unknown count and share is printed beside its rate, because a scheduler that leaves the historical policy's passes for unattempted ones is judged low by exactly that share. That share is the selection bias of `EVALUATION.md` §4 made visible rather than corrected, and the completeness threshold is what keeps it small.
+
+**SC-1 is the optimised D minus the optimised B.** Both use the same solver and an objective of the same form, so the difference is the model alone (D-168). This is the conservative reading: it takes no credit for the optimiser, since B has the optimiser too. D minus greedy B, the shipped system against Stage 7's existing practice, is printed on the next line and is not SC-1. Each gain is printed per station-hour and relative to the second scheduler, with a 95% paired-bootstrap interval:
+- station-days are drawn with replacement, and both schedulers are read on the same draw;
+- the draws come from the configuration's seed;
+- bounds are taken by nearest rank.
+
+Where some resample gives the second scheduler no frames, the relative interval is printed as absent rather than infinite.
+
+**Nothing that varies between runs is printed.** Solver runtimes are left out. A day cut short by the time limit is counted in its scheduler's `solved` column, since only then could a figure depend on the machine.
+
+**The scheduler reads datasets only through `meridian.prediction.replay`.** That module joins `score` and `live` as the third prediction module the scheduler may import (`test_scheduler_boundaries.py`). The outcomes are a mapping of their own, which only the oracle and the tally read. A test reverses every outcome and finds all six other schedules unmoved.
+
+*Rejected:*
+- **One problem per station over the whole span.** Midnight would cost nothing, but the oracle would bound only each station's total, not each day. The day is also the unit completeness and the bootstrap are both counted in.
+- **Imputing unattempted passes from the model.** Every number would then rest on the model it is meant to judge.
+- **Priority-weighted frames as the metric.** SC-1 is stated in frames, and B and D are judged on frames like the rest.
+
+---
+
 ## D-180 — A miss is defined once, in `meridian.reliability`, and the labeller calls it
 
 **2026-09-28 · accepted** · *`meridian/reliability/{classification,satellite_silence}.py`; `meridian/datasets/{labels,evidence}.py`, Stage 20*
@@ -3525,7 +3837,7 @@ Each has a positive control.
 
 ## D-181 — A heartbeat is looked for before a decline is read, and labels become `labels-3`
 
-**2026-09-28 · accepted** · *`meridian/reliability/classification.py`; `TRANSFORMATION_VERSION` in `meridian/datasets/labels.py`, Stage 20. Amends D-146.*
+**2026-09-28 · accepted** · *`meridian/reliability/classification.py`; `TRANSFORMATION_VERSION` in `meridian/datasets/labels.py`, Stage 20. Amends D-146 and D-171.*
 
 D-146 read an assignment that expired unreported as a decline, before looking at anything else. `expired` means the station never took the work (D-008), and the only thing that expires an assignment today is the station's own heartbeat. It sweeps rows it no longer names, even when they are overdue (D-067). So a station that is off during a window and comes back afterwards has that window's assignment expired by its first heartbeat, and the pass is labelled `assignment_declined`. What actually happened is `station_unavailable`: the station was not there to refuse anything.
 
@@ -3535,15 +3847,17 @@ The periodic sweep D-067 owes to this stage makes the case common rather than oc
 
 | # | Condition | Result |
 |---|---|---|
-| 1 | The report is `decoded` | `successful_reception` |
-| 2 | The report is `signal_no_decode` | `signal_no_decode` |
-| 3 | The report is `aborted` or `not_attempted` | `station_unavailable` |
-| 4 | No heartbeat at all overlaps any scheduled window | `station_unavailable` |
-| 5 | No report, and every scheduled assignment is `expired` | `assignment_declined` |
-| 6 | Listening is not confirmed | `station_not_confirmed_listening` |
-| 7 | Listening is confirmed | `confirmed_miss`, `satellite_silent` or `satellite_state_indeterminate`, by D-147 |
+| 1 | No report, every assignment revoked, one as declined (D-171) | `assignment_declined` |
+| 2 | No report, every assignment revoked (D-171) | `station_unavailable` |
+| 3 | The report is `decoded` | `successful_reception` |
+| 4 | The report is `signal_no_decode` | `signal_no_decode` |
+| 5 | The report is `aborted` or `not_attempted` | `station_unavailable` |
+| 6 | No heartbeat at all overlaps any scheduled window | `station_unavailable` |
+| 7 | No report, and every scheduled assignment is `expired` | `assignment_declined` |
+| 8 | Listening is not confirmed | `station_not_confirmed_listening` |
+| 9 | Listening is confirmed | `confirmed_miss`, `satellite_silent` or `satellite_state_indeterminate`, by D-147 |
 
-D-146's two exclusions still come first, unchanged. Moving the heartbeat rule changes exactly one case: an expired, unreported pass with no heartbeat in its window. That goes from `assignment_declined` to `station_unavailable`. Every other pass gets the label it had, because rules 1 to 3 and the old rule 3 never matched the same pass.
+D-146's two exclusions still come first, unchanged. Rules 1 and 2 are Stage 18's (D-171), read first as it wrote them, and rules 6 to 9 read only the assignments left with the station. Moving the heartbeat rule changes exactly one case: an expired, unreported pass with no heartbeat in its window. That goes from `assignment_declined` to `station_unavailable`. Every other pass gets the label it had, because rules 1 to 3 and the old rule 3 never matched the same pass.
 
 **A station heard during the window that did not take the work still declined it.** Its heartbeats named its held assignments and left this one out, and that is a refusal.
 
@@ -3555,7 +3869,7 @@ D-146's two exclusions still come first, unchanged. Moving the heartbeat rule ch
 
 ## D-182 — Every settled pass is classified once, and the row keeps its evidence
 
-**2026-09-28 · accepted** · *migration 0017; `meridian/reliability/{accounting,config}.py`; `meridian/store/{pass_classifications,reliability_evidence}.py`, Stage 20*
+**2026-09-28 · accepted** · *migration 0020; `meridian/reliability/{accounting,config}.py`; `meridian/store/{pass_classifications,reliability_evidence}.py`, Stage 20*
 
 The roadmap's Stage 20 gate is that every reliability number can be traced back to assignments, observations and heartbeat evidence. The Stage 15 labeller already classifies passes, but only from a snapshot and only when someone exports one. A live figure needs a live record, and the record is what makes the trace possible.
 
@@ -3568,7 +3882,7 @@ The roadmap's Stage 20 gate is that every reliability number can be traced back 
 - **A run can be bounded.** The jobs service classifies at most 500 passes a round, those that closed first, so the first round over a long history is many short transactions instead of one that holds the round up. `meridian reliability classify` is unbounded, for an operator draining a backlog by hand.
 
 **The row stores what was read, not only what was decided.** `evidence` holds:
-- each assignment, with its state, its window and the registry's listening answer for it;
+- each assignment, with its state, its window, its `revoked_reason` and the registry's listening answer for it. An assignment revoked before its window (D-171) is not asked about, and its answer is null: it was never the station's work, and its window's heartbeats are not read either;
 - the report and its revision;
 - whether any heartbeat arrived in the window;
 - when the satellite had to be judged, the ids of the receptions counted as signals and as confirmed silences.
@@ -3688,7 +4002,7 @@ D-111 left three series unpublished until a miss could be decided: confirmed mis
 
 Both are counted by `meridian.reliability`'s own arithmetic: the budget from the class counts by `remaining_ratio_of`, the function `LossBudget.remaining_ratio` also uses. A scrape and `meridian reliability report` over the same window therefore agree, and a scrape never carries a month of rows.
 
-**`classification` joins D-111's bounded labels.** It has eight values, fixed by migration 0017's check. `task` gains two values, `expiry_sweep` and `reliability`.
+**`classification` joins D-111's bounded labels.** It has eight values, fixed by migration 0020's check. `task` gains two values, `expiry_sweep` and `reliability`.
 
 **A population with nothing classified publishes nothing,** neither zeros nor a ratio (D-086). A pass settles a day after its window, so a new deployment has no series for a day. The alert is silent through that, instead of firing on a budget it cannot yet know.
 
@@ -3929,14 +4243,36 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-163 a model is a published directory | `meridian/prediction/model_files.py`; the `model` kind in `meridian/datasets/manifest.py`; `DATA-MODEL.md` |
 | D-164 the calibration report | `meridian/prediction/{calibration,calibration_report,evaluation}.py`; `meridian/cli_model.py` |
 | — the completion gate, and how to run it by hand | `tests/unit/test_prediction_gate.py`; `OPERATIONS.md` § Models |
+
+**Landed 2026-09-28**, building the constrained scheduler and Stage 18's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-165 a skip is a record, and rounds schedule around commitments | `deploy/migrations/sql/0017_skip_is_a_record.sql`; `meridian/store/assignments.py`; `meridian/scheduler/{candidates,conflict_rejection}.py` |
+| D-166 one constraint set, checked before anything is written | `meridian/scheduler/{constraints,conflict_rejection,run}.py`; `meridian/registry/liveness.py` read at round time |
+| D-167 HiGHS, deterministic, its answer checked | `meridian/scheduler/{optimiser,programme}.py`; `highspy` in `platform/pyproject.toml`; the image check in `.github/workflows/ci.yml` |
+| D-168 yield × frames × priority, each term kept | `meridian/scheduler/{objective,schedule_config}.py`; `meridian/prediction/configurations.py`; `deploy/schedule.toml.example` |
+| D-169 live scoring through the training features | `meridian/prediction/{live,profiles}.py`; `meridian/scheduler/{live_inputs,scoring}.py`; `tests/unit/test_scheduler_boundaries.py` |
+| D-170 runs, explanations and the live switch | `deploy/migrations/sql/0018_schedule_runs.sql`; `meridian/store/schedule_writes.py`; `meridian/scheduler/{explanations,run}.py`; `meridian/jobs/{rounds,job_metrics}.py`; `meridian/cli_{schedule,jobs}.py`; the public `Explanation`; the dashboard's decision panel; `deploy/grafana/dashboards/meridian-platform.json`; `DATA-MODEL.md` |
+| D-171 reissue: `revoked`, revisions, reinstatement | `deploy/migrations/sql/0019_reissue.sql`; `meridian/store/{revocations,schedule_reads,assignment_log}.py`; `meridian/scheduler/reissue.py`; `meridian/api/msp/heartbeat.py`; `meridian/datasets/{labels,pooled_evidence}.py`; `MSP-SPEC.md` §4.2, §4.3; `DATA-MODEL.md` |
+| D-172 the retrospective comparison and the oracle | `meridian/prediction/{replay,replay_models}.py`; `meridian/scheduler/{replay,oracle,comparison,comparison_config,comparison_report}.py`; `meridian schedule evaluate`; `deploy/schedule-evaluation.toml.example`; `EVALUATION.md` §3 |
+| — the amended entries | D-022, D-026, D-065, D-066, D-110 and D-160, each with a note naming its amendment |
+| — the completion gate, and how to run it by hand | `tests/unit/test_scheduler_gate.py`; `tests/integration/test_scheduler_gate.py`; `OPERATIONS.md` § Scheduling |
+
+**Landed 2026-09-29**, building reliability and loss accounting and Stage 20's completion gate.
+
+| Decision | Applied to |
+|---|---|
 | D-180 a miss is defined once, in reliability | `meridian/reliability/{classification,satellite_silence}.py`; `meridian/datasets/{labels,evidence}.py`; `tests/unit/test_reliability_boundaries.py` |
 | D-181 a heartbeat before a decline, `labels-3` | `meridian/reliability/classification.py`; `meridian/datasets/labels.py` |
-| D-182 every settled pass classified once, with its evidence | migration 0017; `meridian/reliability/{accounting,config}.py`; `meridian/store/{pass_classifications,reliability_evidence}.py`; `DATA-MODEL.md` |
+| D-182 every settled pass classified once, with its evidence | migration 0020; `meridian/reliability/{accounting,config}.py`; `meridian/store/{pass_classifications,reliability_evidence}.py`; `DATA-MODEL.md` |
 | D-183 a timed sweep expires only untaken work | `meridian/store/assignment_expiry.py` |
 | D-184 the indicators and their targets | `meridian/reliability/{slis,report,live,config}.py`; `meridian/store/reliability_reads.py`; `meridian/datasets/reliability_rows.py`; `meridian snapshot reliability`; `deploy/reliability.toml.example` |
 | D-185 the loss budget, spent by passes | `meridian/reliability/budget.py` |
 | D-186 reliability metrics, the budget alert, the jobs tasks | `meridian/api/domain_collector.py`; `meridian/jobs/{reliability_round,job_metrics}.py`; `meridian/cli_jobs.py`; `deploy/prometheus/`; `OPERATIONS.md` § LossBudgetThresholdReached |
 | D-187 the public reliability body | `meridian/api/public/{reliability,models/reliability}.py`; `meridian/cli_reliability.py` |
+| — the amended entries | D-067, D-111, D-146 and D-171, each with a note naming its amendment |
+| — the completion gate, and how to run it by hand | `tests/integration/test_reliability_gate.py`; `OPERATIONS.md` § Reliability figures |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

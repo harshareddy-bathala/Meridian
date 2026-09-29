@@ -1,5 +1,5 @@
 import { formatAge, formatFrequency, formatWindow } from "./format";
-import type { Assignment, LatestHeartbeat } from "./schedule";
+import { describeValue, type Assignment, type LatestHeartbeat } from "./schedule";
 import type { Station } from "./stations";
 import { useStationDetail } from "./useStationDetail";
 
@@ -28,6 +28,7 @@ function ListeningState({ heartbeat }: { heartbeat: LatestHeartbeat | null | und
 }
 
 function AssignmentRow({ assignment, showStation }: { assignment: Assignment; showStation: boolean }) {
+  const { explanation } = assignment;
   return (
     <tr>
       <td className="mono">{assignment.satelliteId}</td>
@@ -41,8 +42,17 @@ function AssignmentRow({ assignment, showStation }: { assignment: Assignment; sh
         {assignment.conflictsWith !== null && (
           <div className="dim mono">lost to {assignment.conflictsWith}</div>
         )}
+        {explanation !== null && (
+          <div className="dim">
+            {describeValue(explanation)}
+            {assignment.decision === "scheduled" && explanation.alternative !== null && (
+              <>; displaced pass {explanation.alternative.passId}</>
+            )}
+            {explanation.runStatus === "fallback" && <>; the solver fell back to greedy</>}
+          </div>
+        )}
       </td>
-      <td>{assignment.state.replace("_", " ")}</td>
+      <td>{assignment.state === null ? "—" : assignment.state.replace("_", " ")}</td>
     </tr>
   );
 }

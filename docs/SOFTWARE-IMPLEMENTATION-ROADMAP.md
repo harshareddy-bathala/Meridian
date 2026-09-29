@@ -46,14 +46,14 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-09-26. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-09-28. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stage 20's software is built, ahead of Stage 18** (2026-09-28), which is being built alongside it on its own branch. Stage 20 needs no scheduler: it classifies whatever was scheduled. Its decisions are D-180 through D-187, and `docs/OPERATIONS.md` § Alerts, *LossBudgetThresholdReached* and *Reliability figures*, is its runbook.
+**Stage 20's software is built** (2026-09-28), ahead of Stage 19, which it does not need: it classifies whatever was scheduled. **Stage 19 is next.** Its decisions are D-180 through D-187, and `docs/OPERATIONS.md` § Alerts, *LossBudgetThresholdReached* and *Reliability figures*, is its runbook.
 - **The completion gate passes, and is demonstrable at a prompt.** Every reliability number can be traced back to assignments, observations and heartbeat evidence:
   - `meridian reliability classify`, then `report`, then `explain <assignment id>` prints the evidence behind any pass a figure counted;
   - `tests/integration/test_reliability_gate.py` checks every stored evidence against the source tables, recounts every figure in SQL, compares the public body, and removes one listening heartbeat as its positive control.
-- **A miss is defined once** (D-180, D-181). `reliability/classification.py`, imported by nothing outside the standard library, holds the rules that `datasets/labels.py` used to hold, and both the labeller and the live accounting call it. A heartbeat is now looked for before a decline is read, so a pass given to an absent station is `station_unavailable`, not `assignment_declined`; labels are `labels-3`.
-- **Every settled pass is classified once, with its evidence** (D-182). Migration 0017 adds `pass_classifications`, append-only and keyed by method and configuration hash. A pass settles a day after its window. The jobs service classifies every round, and D-067's owed sweep now expires untaken work on a timer (D-183).
+- **A miss is defined once** (D-180, D-181). `reliability/classification.py`, imported by nothing outside the standard library, holds the rules that `datasets/labels.py` used to hold, and both the labeller and the live accounting call it. A heartbeat is now looked for before a decline is read, so a pass given to an absent station is `station_unavailable`, not `assignment_declined`; labels are `labels-3`. Stage 18's revocations (D-171) are rules of the same classification, so a revoked assignment is never a miss in a report either.
+- **Every settled pass is classified once, with its evidence** (D-182). Migration 0020 adds `pass_classifications`, append-only and keyed by method and configuration hash. A pass settles a day after its window. The jobs service classifies every round, and D-067's owed sweep now expires untaken work on a timer (D-183).
 - **The indicators and the budget are counts over counts** (D-184, D-185):
   - capture rate (SC-4), confirmed miss rate, availability, completion, execution and report delay;
   - the loss budget SC-4 sets, spent one pass per debit with the pass's class as its reason. An outage spends it; only `confirmed_miss` is a miss;
@@ -73,7 +73,43 @@ flowchart TD
   - the live record judges a satellite on our own receptions only, so it can call a measured silence indeterminate where a snapshot, which also reads archives, calls it a miss (D-182);
   - a snapshot cannot give availability or report delay, because the export keeps heartbeats only inside assignment windows and does not keep arrival times.
 
-**Stage 17's software is built.** Its decisions are D-155 through D-164, and `docs/OPERATIONS.md` § Models is its runbook. **Stage 18 is next.**
+**Stage 18's software is built.** Its decisions are D-165 through D-172, and `docs/OPERATIONS.md` § Scheduling is its runbook.
+- **The completion gate passes, and is demonstrable at a prompt.** Every schedule is checked against the constraints before it is written, including when the solver fails or gives a wrong answer. Every stored decision names its run and explains itself. `meridian schedule evaluate`, run twice, prints the same bytes.
+
+  `tests/unit/test_scheduler_gate.py` asserts each clause through the commands. `tests/integration/test_scheduler_gate.py` asserts the database half. Every claim has a positive control.
+- **Two defects were found and fixed first:**
+  - skipped decisions were being delivered to stations, and expired as declines;
+  - rolling rounds could schedule a new pass on top of one already assigned.
+
+  A skip is now a record that never moves, and each round schedules around what earlier rounds assigned (D-165).
+- **One set of constraints for every scheduler** (D-166):
+  - windows widened by timing uncertainty, plus turnaround;
+  - D-035's cap of eight eligible assignments, now enforced;
+  - the downlink;
+  - availability;
+  - commitments.
+
+  `violations` checks every schedule, the Stage 7 baselines included, before anything is written.
+- **The optimiser is a mixed-integer programme solved by HiGHS** (`highspy`, MIT, D-167). It runs on one thread with a fixed seed and zero gap, so identical input gives an identical schedule. Its answer is a claim: one that breaks a rule, or no answer within the time limit, falls back to greedy under the same constraints, and the run says so.
+- **A pass is worth yield × frames × priority**, the last under B and D only (D-168). D is weighted as B is, amending D-160, so D − B is the model alone. With no model, A and B use a labelled elevation proxy; C and D refuse to run without one.
+- **Live passes are scored by the same feature code as training examples** (D-169). A model that reads history reads it from the newest labelled dataset, and every decision states that dataset's `as_of`.
+- **Every run is a `schedule_runs` row, and every decision stores its explanation** (D-170): its terms, what it was weighed against, the deciding rule and the alternative. The jobs service schedules with the optimiser under `SCHEDULE_CONFIG`, amending D-110. The public API and the dashboard show the explanation. Three metrics and three Grafana panels watch the solver and the history's age.
+- **Reissue** (D-171). A held assignment dropped before its window is `revoked` as declined, and its time goes to another of that station's passes. An offline station's work not yet begun is `revoked` as offline. A revoked assignment the station still names is reinstated while nothing newer claims its window, since MSP cannot take work back. Decisions carry a `revision`, and a revoked assignment is never counted as a miss.
+- **SC-1 is measured by replay** (D-172). `meridian schedule evaluate` runs seven schedulers over the models' test span, on the station-days at or above the completeness threshold:
+  - greedy A and greedy B;
+  - the optimiser under A to D;
+  - an oracle valued by the frames each pass actually decoded.
+
+  It reports frames per station-hour, each schedule's unknown-outcome share, and D − B with a paired-bootstrap interval. An unattempted pass is never imputed.
+- **Not built:**
+  - an SC-1 figure on real data, which waits on the same measured passes the model does;
+  - fairness and coverage terms in the objective, which are optional in the roadmap and have nothing to act on at one station (D-168);
+  - cross-station reissue: a pass belongs to one station, and there is no coverage term to reward moving it (D-171).
+- **Known limits, each stated rather than hidden:**
+  - the replay solves each station-day on its own, so two passes either side of midnight can both be taken; every scheduler, the oracle included, gets the same leeway;
+  - turnaround is one number for every station, as `stations` holds none.
+
+**Stage 17's software is built.** Its decisions are D-155 through D-164, and `docs/OPERATIONS.md` § Models is its runbook.
 - **The completion gate passes, and is demonstrable at a prompt:**
   - **One interface.** Configurations A–D are one key in `model.toml`.
   - **Temporal splits.** Splits are on dates the configuration states.

@@ -4,7 +4,7 @@ One case per rule, then one per place two rules could both claim a pass, then
 D-147's verdict. The snapshot labeller's own tests cover the same rules
 through its rows; these cover them at the function both paths call.
 
-Reference: docs/DECISIONS.md D-146, D-147, D-180, D-181.
+Reference: docs/DECISIONS.md D-146, D-147, D-171, D-180, D-181.
 """
 
 from __future__ import annotations
@@ -28,12 +28,14 @@ def evidence(
     states: tuple[str, ...] = ("reported",),
     heard: bool = True,
     listening: bool | None = True,
+    revoked: tuple[str, ...] = (),
 ) -> PassEvidence:
     return PassEvidence(
         outcome=outcome,
         assignment_states=states,
         heard_during_window=heard,
         listening_confirmed=listening,
+        revoked_reasons=revoked,
     )
 
 
@@ -151,3 +153,39 @@ def test_one_signal_outweighs_any_number_of_silences(
     got = judge_satellite(signals=signals, silences=silences, min_silent_attempts=2)
 
     assert got == expected
+
+
+# --- taken back before the window (D-171) -------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("reasons", "expected"),
+    [
+        (("declined",), "assignment_declined"),
+        (("offline",), "station_unavailable"),
+        (("offline", "declined"), "assignment_declined"),
+    ],
+)
+def test_work_taken_back_is_never_a_miss(
+    reasons: tuple[str, ...], expected: str
+) -> None:
+    """Even heard and confirmed listening: nothing was asked of the station."""
+    got = classify(evidence(None, states=(), revoked=reasons), never_asked)
+
+    assert got == expected
+
+
+def test_a_reissue_left_with_the_station_decides_the_pass() -> None:
+    """A revoked sibling does not make the live assignment look declined."""
+    got = classify(
+        evidence(None, states=("issued",), revoked=("declined",), listening=False),
+        never_asked,
+    )
+
+    assert got == "station_not_confirmed_listening"
+
+
+def test_a_report_on_a_revoked_assignment_is_still_a_reception() -> None:
+    got = classify(evidence("decoded", states=(), revoked=("offline",)), never_asked)
+
+    assert got == "successful_reception"

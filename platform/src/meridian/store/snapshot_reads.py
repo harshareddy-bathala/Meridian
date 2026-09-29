@@ -132,7 +132,7 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         "select assignment_id, pass_id, station_id, issued_at, start_at, end_at,"
         " centre_freq_hz, mode, timing_uncertainty_s, predicted_yield, priority,"
         " decision, reason, model_config, score, conflicts_with_assignment_id,"
-        " state, simulated"
+        " state, simulated, revision, revoked_reason"
         f" from assignments where pass_id in ({_SCOPED_PASSES})"
         " order by assignment_id",
     ),

@@ -25,14 +25,17 @@ the same whether or not that sweep ran (D-183).
 and leaves the rest for the next run, so the first run over a long history
 does not hold one transaction for all of it.
 
-**Listening is the registry's answer, asked for every pooled assignment.** A
-miss exists only on ``Registry.was_listening``'s word (CLAUDE.md rule 7), and
-this module never looks at a heartbeat's listening block itself.
+**Listening is the registry's answer, asked for every pooled assignment left
+with the station.** A miss exists only on ``Registry.was_listening``'s word
+(CLAUDE.md rule 7), and this module never looks at a heartbeat's listening
+block itself. An assignment the platform revoked before its window was never
+the station's work (D-171): it is kept in the evidence with its reason, and
+neither its listening nor its window's heartbeats are read.
 
 **The satellite is judged on our own receptions only** (D-182). An archive is
 training input, never a runtime dependency.
 
-Reference: docs/DECISIONS.md D-146, D-147, D-165, D-180, D-182.
+Reference: docs/DECISIONS.md D-146, D-147, D-165, D-171, D-180, D-182.
 """
 
 from __future__ import annotations
@@ -257,14 +260,12 @@ def _classify(
         key=lambda one: _informativeness(one.outcome, one.assignment_id),
         default=None,
     )
+    kept = [held for held in one.assignments if held.revoked_reason is None]
     listening = {
-        held.assignment_id: registry.was_listening(_question(held))
-        for held in one.assignments
+        held.assignment_id: registry.was_listening(_question(held)) for held in kept
     }
     heard = heard_during(
-        conn,
-        target.station_id,
-        [(held.start_at, held.end_at) for held in one.assignments],
+        conn, target.station_id, [(held.start_at, held.end_at) for held in kept]
     )
     simulated = any(held.simulated for held in one.assignments) or any(
         held.simulated for held in reports.values()
@@ -289,7 +290,12 @@ def _classify(
     classification = classify(
         PassEvidence(
             outcome=None if report is None else report.outcome,
-            assignment_states=tuple(held.state for held in one.assignments),
+            assignment_states=tuple(held.state for held in kept),
+            revoked_reasons=tuple(
+                held.revoked_reason
+                for held in one.assignments
+                if held.revoked_reason is not None
+            ),
             heard_during_window=heard,
             listening_confirmed=any(listening.values()),
         ),
@@ -302,7 +308,8 @@ def _classify(
                 "pass_id": held.pass_id,
                 "state": held.state,
                 "window": [held.start_at.isoformat(), held.end_at.isoformat()],
-                "listening_confirmed": listening[held.assignment_id],
+                "revoked_reason": held.revoked_reason,
+                "listening_confirmed": listening.get(held.assignment_id),
             }
             for held in sorted(one.assignments, key=lambda held: held.assignment_id)
         ],

@@ -104,7 +104,7 @@ meridian/
 │   └── src/meridian/
 │       ├── orbit/        propagation, element sets, uncertainty
 │       ├── prediction/   features, models, calibration
-│       ├── scheduler/    optimiser, policies, baselines
+│       ├── scheduler/    optimiser, constraints, baselines, oracle, replay
 │       ├── registry/     station registration and health
 │       ├── observations/ ingest, store, dedup
 │       ├── reliability/  SLI computation, budget, chaos
@@ -171,7 +171,7 @@ Key points that constrain implementation:
 
 **Phase 1 — Foundations — is done.** Its exit criterion, a virtual station visible on the public site from outside the college network, was met on 2026-09-14 (D-088).
 
-Work now follows the stage order in `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md`, whose "Where the build has got to" section says which stage is next. Do not scaffold a module ahead of the stage that builds it: scheduler optimisation and hardware stay empty stubs with documented interfaces until their stages arrive.
+Work now follows the stage order in `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md`, whose "Where the build has got to" section says which stage is next. Do not scaffold a module ahead of the stage that builds it: failure injection and hardware stay empty stubs with documented interfaces until their stages arrive.
 
 ---
 

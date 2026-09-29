@@ -31,6 +31,12 @@ class PooledEvidence:
     """What one physical pass's scheduled assignments add up to."""
 
     scheduled: tuple[AssignmentRow, ...]
+    """The station's work: scheduled and not taken back."""
+
+    revoked: tuple[AssignmentRow, ...]
+    """Scheduled and taken back before the window (D-171). Never the station's
+    work, so never evidence that it missed anything."""
+
     report: ObservationRow | None
     listening: bool | None
     simulated: bool
@@ -63,14 +69,15 @@ def _pool(
 
     Assignments to any prediction of the rise count, in assignment-id order.
     """
-    scheduled = tuple(
-        sorted(
-            (one for one in assignments if one.decision == "scheduled"),
-            key=lambda one: one.assignment_id,
-        )
+    chosen = sorted(
+        (one for one in assignments if one.decision == "scheduled"),
+        key=lambda one: one.assignment_id,
     )
+    scheduled = tuple(one for one in chosen if one.state != "revoked")
+    revoked = tuple(one for one in chosen if one.state == "revoked")
+    # A report on a revoked assignment is still a reception, and is kept.
     reports = [
-        latest[one.assignment_id] for one in scheduled if one.assignment_id in latest
+        latest[one.assignment_id] for one in chosen if one.assignment_id in latest
     ]
     report = min(reports, key=_informativeness, default=None)
     answers = [
@@ -80,10 +87,11 @@ def _pool(
     ]
     return PooledEvidence(
         scheduled=scheduled,
+        revoked=revoked,
         report=report,
         listening=any(answers) if answers else None,
         simulated=physical.simulated
-        or any(one.simulated for one in scheduled)
+        or any(one.simulated for one in chosen)
         or any(one.simulated for one in reports),
     )
 

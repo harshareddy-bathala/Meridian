@@ -1,6 +1,6 @@
-"""Revision 0017 - what happened to each settled, scheduled pass.
+"""Revision 0017 - a skipped decision is a record, never an assignment.
 
-Applies sql/0017_pass_classifications.sql. See deploy/migrations/_sql.py.
+Applies sql/0017_skip_is_a_record.sql. See deploy/migrations/_sql.py.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    apply("0017_pass_classifications")
+    apply("0017_skip_is_a_record")
 
 
 def downgrade() -> None:

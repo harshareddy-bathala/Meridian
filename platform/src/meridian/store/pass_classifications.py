@@ -5,7 +5,7 @@ figure. Append-only: a row is never updated, and re-running under the same
 method and configuration writes nothing, because the table's unique key says
 so rather than a check made here (D-182).
 
-Reference: docs/DECISIONS.md D-180, D-182; migration 0017.
+Reference: docs/DECISIONS.md D-180, D-182; migration 0020.
 """
 
 from __future__ import annotations

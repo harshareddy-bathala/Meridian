@@ -42,6 +42,7 @@ def a_candidate(
         station_id="st_001",
         aos=aos,
         los=aos + timedelta(minutes=11),
+        margin_s=0.0,
         max_elevation_deg=max_elevation_deg,
         priority=priority,
         simulated=False,

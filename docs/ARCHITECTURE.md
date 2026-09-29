@@ -45,7 +45,7 @@ The sections below describe each module's responsibility in the finished system.
 | Module | On disk today |
 |---|---|
 | `platform/orbit`, `registry`, `store`, `api` | Implemented, and still growing. The API serves all four MSP endpoints; the public read API is Stage 11. |
-| `platform/scheduler` | Value types, and the two baselines that exist to be beaten (Stage 7). The constrained optimiser and the retrospective oracle are Stage 18. |
+| `platform/scheduler` | The two baselines that exist to be beaten (Stage 7), and the constrained optimiser (Stage 18): one set of constraints checked before anything is written, a mixed-integer programme solved by HiGHS, yield × frames × priority, an explanation on every decision, reissue of declined and offline work, and the retrospective comparison against the baselines and an oracle. |
 | `platform/prediction` | The yield model (Stage 17): point-in-time features, configurations A–D, the cold-start route, temporal splits, a calibrated logistic regression fitted with the `fit` extra and scored in plain Python, and the calibration report. The reception verdict is a later stage. |
 | `platform/observations` | Ingest and the canonical body a revision is compared against (Stage 9). |
 | `platform/reliability` | Miss classification, the live record of every settled pass with its evidence, the service level indicators, the loss budget and their targets (Stage 20). Failure injection is Stage 21; loss diagnosis and the health watch are Stages 27 and 28. |
@@ -80,7 +80,7 @@ Constrained optimisation over candidate passes.
 
 Consumes predictions; **does not read the observation store directly.** Enforces non-overlap including slew and settling time, per-station capability limits, and operator priority weights. Produces assignments and the reasoning behind each — the dashboard shows *why* a pass was chosen or skipped, so the justification must be a first-class output, not reconstructed later.
 
-Also computes the retrospective oracle schedule for the schedule-efficiency metric.
+Also computes the retrospective oracle schedule for the schedule-efficiency metric, by replaying a dataset's test span under every configuration (D-172). It reads that dataset only through `platform/prediction`, and the outcomes it holds only for the oracle and the tally: no scheduler that could be deployed reads one.
 
 ### `platform/registry`
 Station registration, capabilities, tokens, health state, last-heartbeat age.

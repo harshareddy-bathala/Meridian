@@ -10,7 +10,8 @@
 #   B  as A, with priority weighting the objective, never the model
 #                                             — what existing practice achieves
 #   C  our features only                      — do our signals carry information?
-#   D  every group                            — the shipped system
+#   D  every group, with priority weighting the objective as B's does (D-168)
+#                                             — the shipped system
 configuration = "D"
 
 # Whose passes to fit on (D-156): "own" or "archive". Never both at once. An

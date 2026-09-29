@@ -8,28 +8,37 @@ rules, so a pass cannot be a miss in a report and something else in a dataset.
 
 The rules are a first-match table, read top to bottom:
 
-1. the report is ``decoded`` → ``successful_reception``;
-2. the report is ``signal_no_decode`` → ``signal_no_decode``;
-3. the report is ``aborted`` or ``not_attempted`` → ``station_unavailable``;
-4. no heartbeat at all arrived in the window → ``station_unavailable``;
-5. no report, and every scheduled assignment expired → ``assignment_declined``;
-6. listening was not confirmed → ``station_not_confirmed_listening``;
-7. listening was confirmed and nothing was heard → ``confirmed_miss``,
+1. no report, and every assignment was taken back before its window, one of
+   them because the station declined it → ``assignment_declined``;
+2. no report, and every assignment was taken back → ``station_unavailable``:
+   the station was offline when a round ran, and the work was withdrawn;
+3. the report is ``decoded`` → ``successful_reception``;
+4. the report is ``signal_no_decode`` → ``signal_no_decode``;
+5. the report is ``aborted`` or ``not_attempted`` → ``station_unavailable``;
+6. no heartbeat at all arrived in the window → ``station_unavailable``;
+7. no report, and every assignment left with the station expired →
+   ``assignment_declined``;
+8. listening was not confirmed → ``station_not_confirmed_listening``;
+9. listening was confirmed and nothing was heard → ``confirmed_miss``,
    ``satellite_silent`` or ``satellite_state_indeterminate``, by D-147.
+
+**A revoked assignment is never the station's work** (D-171). The platform
+took it back before its window began, so it is never a miss, and rules 6 to 9
+read only the assignments left with the station.
 
 A heartbeat is looked for before a decline is read (D-181). An assignment
 expires whenever its window closes untaken, which is also what happens to one
 handed to a station that was not there to take it; only a station that was
 heard while the window was open can be said to have declined.
 
-**Absence is not a miss.** Rule 7 is the only road to ``confirmed_miss``, and
+**Absence is not a miss.** Rule 9 is the only road to ``confirmed_miss``, and
 it needs the registry's own answer that the station was listening on the right
 frequency for the right target (``Registry.was_listening``, CLAUDE.md rule 7).
 
 This module imports the standard library and nothing else, so the labelling
 path, which may reach no database, can call it (D-180).
 
-Reference: docs/DECISIONS.md D-146, D-147, D-180, D-181.
+Reference: docs/DECISIONS.md D-146, D-147, D-171, D-180, D-181.
 """
 
 from __future__ import annotations
@@ -112,7 +121,8 @@ class PassEvidence:
     """The report's outcome, or None if no report arrived."""
 
     assignment_states: tuple[str, ...]
-    """The state of every scheduled assignment of the pass; never empty."""
+    """The state of every scheduled assignment left with the station: every
+    one not revoked. Empty only if every assignment was revoked."""
 
     heard_during_window: bool
     """Whether any heartbeat from the station arrived inside any of those
@@ -121,9 +131,13 @@ class PassEvidence:
     listening_confirmed: bool | None
     """``Registry.was_listening``'s answer for any of them; None if unasked."""
 
+    revoked_reasons: tuple[str, ...] = ()
+    """``revoked_reason`` of each assignment taken back before its window:
+    ``declined`` or ``offline`` (D-171)."""
+
     def __post_init__(self) -> None:
         """Refuse a pass nothing scheduled; the labeller excludes those first."""
-        if not self.assignment_states:
+        if not self.assignment_states and not self.revoked_reasons:
             raise ValueError("a pass nothing scheduled has no classification")
 
 
@@ -142,7 +156,13 @@ def classify(
         The pass's class.
     """
     outcome = evidence.outcome
+    taken_back = outcome is None and not evidence.assignment_states
     rules: tuple[tuple[Callable[[], bool], PassClass], ...] = (
+        (
+            lambda: taken_back and "declined" in evidence.revoked_reasons,
+            "assignment_declined",
+        ),
+        (lambda: taken_back, "station_unavailable"),
         (lambda: outcome == "decoded", "successful_reception"),
         (lambda: outcome == "signal_no_decode", "signal_no_decode"),
         (lambda: outcome in _UNAVAILABLE, "station_unavailable"),

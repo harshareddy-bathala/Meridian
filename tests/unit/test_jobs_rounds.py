@@ -22,17 +22,23 @@ from prometheus_client import REGISTRY
 from meridian.jobs.job_metrics import PASS_GENERATION, SCHEDULE
 from meridian.jobs.rounds import RoundPlan, run_round, run_until_stopped
 from meridian.pass_generation import GenerationHorizon, GenerationReport
+from meridian.scheduler.optimiser import SolverRun
 from meridian.scheduler.run import ScheduleReport, ScheduleRequest
+from meridian.scheduler.schedule_config import ScheduleConfig
 
 NOW = datetime(2026, 9, 14, 6, 0, tzinfo=UTC)
-PLAN = RoundPlan(horizon=timedelta(hours=6), model_config="A", turnaround_s=0.0)
+PLAN = RoundPlan(horizon=timedelta(hours=6), config=ScheduleConfig())
+HISTORY_AS_OF = NOW - timedelta(days=2)
 
 
 class _Work:
     """Two tasks that record what they were asked and can be made to fail."""
 
-    def __init__(self, *, generation_fails: bool = False) -> None:
+    def __init__(
+        self, *, generation_fails: bool = False, status: str = "optimal"
+    ) -> None:
         self.generation_fails = generation_fails
+        self.status = status
         self.horizons: list[GenerationHorizon] = []
         self.requests: list[ScheduleRequest] = []
 
@@ -58,6 +64,22 @@ class _Work:
             skipped=2,
             rows_written=7,
             passes_without_a_usable_transmitter=(),
+            already_decided=0,
+            stations_unavailable=(),
+            passes_deferred=0,
+            yield_source="model",
+            run_id="sr_000000000001",
+            solver=SolverRun(
+                status=self.status,  # type: ignore[arg-type]
+                solver="highs",
+                version="1.15.1",
+                objective=1234.5,
+                bound=1234.5,
+                runtime_s=0.042,
+                time_limit_s=10.0,
+                detail=None,
+            ),
+            history_as_of=HISTORY_AS_OF,
         )
 
 
@@ -74,10 +96,11 @@ def test_a_round_covers_the_horizon_from_now_for_both_tasks() -> None:
 
     assert work.horizons == [GenerationHorizon(start=NOW, end=NOW + PLAN.horizon)]
     (request,) = work.requests
-    assert (request.start, request.end, request.model_config) == (
+    assert (request.start, request.end, request.model_config, request.now) == (
         NOW,
         NOW + PLAN.horizon,
         "A",
+        NOW,
     )
     assert outcome.generated is not None
     assert outcome.scheduled is not None
@@ -93,6 +116,28 @@ def test_a_successful_round_is_visible_to_prometheus() -> None:
     assert sample("meridian_job_duration_seconds_count", SCHEDULE) == before + 1
     assert sample("meridian_scheduler_candidates") == 7.0
     assert sample("meridian_passes_computed") == 7.0
+
+
+def test_a_run_s_solver_status_runtime_and_history_age_are_published() -> None:
+    """D-170: a fallback is counted where an alert can see it, and the age of
+    the history the model read is how long its refresh has gone undone."""
+    before = (
+        REGISTRY.get_sample_value(
+            "meridian_scheduler_runs_total", {"status": "fallback"}
+        )
+        or 0.0
+    )
+
+    run_round(_Work(status="fallback"), PLAN, NOW)
+
+    assert (
+        REGISTRY.get_sample_value(
+            "meridian_scheduler_runs_total", {"status": "fallback"}
+        )
+        == before + 1
+    )
+    assert sample("meridian_scheduler_solver_seconds") == 0.042
+    assert sample("meridian_scheduler_history_age_seconds") == 2 * 86400.0
 
 
 def test_a_failed_generation_is_counted_and_scheduling_still_runs(

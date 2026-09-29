@@ -415,3 +415,58 @@ def test_another_station_counts_once_however_many_assignments_it_held(
     row = next(one for one in stored(rows.conn) if one["assignment_id"] == "as_1")
     assert row["classification"] == "satellite_state_indeterminate"
     assert row["evidence"]["satellite"]["silence_assignment_ids"] == ["as_2"]
+
+
+def revoke(conn: Any, assignment_id: str, why: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "update assignments set state = 'revoked', revoked_reason = %s,"
+            " revoked_at = start_at - interval '1 hour' where assignment_id = %s",
+            (why, assignment_id),
+        )
+
+
+@pytest.mark.parametrize(
+    ("why", "expected"),
+    [("declined", "assignment_declined"), ("offline", "station_unavailable")],
+)
+def test_work_taken_back_is_never_a_miss(rows: Any, why: str, expected: str) -> None:
+    """D-171, live: heard and confirmed listening, but nothing was asked of it."""
+    rows.station("st_a", simulated=False)
+    scheduled_pass(rows, "st_a", "as_1", state="held")
+    listened(rows.conn, "st_a", "as_1")
+    revoke(rows.conn, "as_1", why)
+
+    run(rows.conn)
+
+    row = only(rows.conn)
+    assert row["classification"] == expected
+    held = row["evidence"]["assignments"][0]
+    assert (held["revoked_reason"], held["listening_confirmed"]) == (why, None)
+    assert row["evidence"]["listening_confirmed"] is False
+
+
+def test_a_reissue_decides_its_pass_beside_the_revoked_assignment(
+    rows: Any, element_set: int
+) -> None:
+    rows.station("st_a", simulated=False)
+    pass_id = rows.pass_("st_a", AOS, element_set_id=element_set)
+    rows.assignment("as_1", pass_id, state="held")
+    revoke(rows.conn, "as_1", "offline")
+    with rows.conn.cursor() as cur:
+        cur.execute(
+            "insert into assignments (assignment_id, pass_id, station_id, start_at,"
+            " end_at, centre_freq_hz, mode, timing_uncertainty_s, priority,"
+            " decision, reason, state, score, model_config, revision, simulated)"
+            " select 'as_1r1', pass_id, station_id, start_at, end_at,"
+            " centre_freq_hz, mode, timing_uncertainty_s, priority, decision,"
+            " reason, 'reported', score, model_config, 1, simulated"
+            " from assignments where assignment_id = 'as_1'"
+        )
+    rows.observation("as_1r1", outcome="decoded")
+
+    run(rows.conn)
+
+    row = only(rows.conn)
+    assert row["assignment_ids"] == ["as_1", "as_1r1"]
+    assert row["classification"] == "successful_reception"
