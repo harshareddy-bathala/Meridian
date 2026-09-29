@@ -13,7 +13,8 @@ Pi that scores passes with a dot product (D-155).
 
 The two orbit assertions at the end of this file are about ``meridian.orbit``
 rather than about the layout, and would be easier to find beside the rest of the
-orbit tests.
+orbit tests. The last one is about the image again: that no path the repository
+keeps a secret at reaches its build context (D-201).
 """
 
 from __future__ import annotations
@@ -154,3 +155,55 @@ def test_element_set_age_is_measured_from_epoch() -> None:
         line2="2 ...",
     )
     assert element_set.age_s(epoch + timedelta(days=6)) == pytest.approx(518400.0)
+
+
+SECRET_PATHS = (
+    ".env",
+    "deploy/.env",
+    "deploy/secrets/token_hash_pepper",
+    "deploy/secrets/metrics_token",
+    "deploy/prometheus/metrics_token",
+    "deploy/alertmanager/webhook_url",
+    "deploy/alertmanager/smtp_password",
+    "deploy/alertmanager/alertmanager.local.yml",
+    "backups/meridian-2026-09-28.dump",
+)
+"""Every path the repository keeps a secret at, gitignored and never in an image."""
+
+
+def _dockerignore_excludes(path: str, patterns: list[str]) -> bool:
+    """Docker's rule, enough of it: a pattern excludes a path or any parent of it.
+
+    ``**`` matches any number of directories, including none. ``!`` lines
+    re-include, and the last matching line wins, as in Docker.
+    """
+    parts = path.split("/")
+    candidates = ["/".join(parts[: i + 1]) for i in range(len(parts))]
+    excluded = False
+    for raw in patterns:
+        negated = raw.startswith("!")
+        pattern = raw.removeprefix("!").rstrip("/")
+        regex = re.escape(pattern).replace(r"\*\*/", "(?:.*/)?").replace(r"\*", "[^/]*")
+        if any(re.fullmatch(regex, c) for c in candidates):
+            excluded = not negated
+    return excluded
+
+
+def test_no_secret_path_reaches_the_image_build_context() -> None:
+    """D-201: `COPY deploy/ deploy/` once baked deploy/.env into every local build.
+
+    The positive control is a path that must reach the image, the example file
+    with the same prefix, so a pattern broad enough to exclude everything fails.
+    """
+    lines = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    patterns = [
+        line.strip() for line in lines if line.strip() and not line.startswith("#")
+    ]
+
+    leaked = [p for p in SECRET_PATHS if not _dockerignore_excludes(p, patterns)]
+
+    assert leaked == []
+    assert not _dockerignore_excludes("deploy/.env.example", patterns)
+    assert not _dockerignore_excludes(
+        "deploy/prometheus/metrics_token.example", patterns
+    )

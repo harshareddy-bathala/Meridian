@@ -17,7 +17,8 @@ Five claims, one per check:
                      provenance applies (CLAUDE.md rule 5) and no key matching
                      the do-not-expose list.
   rate limited       a burst against the public API is refused at the Cloudflare
-                     edge (D-088). Only with --burst: firing one unasked would be
+                     edge (D-088), told apart from the platform's own 429
+                     (D-202). Only with --burst: firing one unasked would be
                      a small self-inflicted denial of service.
 
 **A check whose subject does not exist yet reports SKIP and does not fail the
@@ -180,12 +181,28 @@ def check_dashboard_is_served(base_url: str) -> tuple[str, str]:
     return PASS, "the dashboard page is served at /"
 
 
-def judge_burst(statuses: list[int]) -> tuple[str, str]:
-    """PASS when the edge refused any request of a burst with 429."""
-    refused = statuses.count(429)
-    if refused:
-        return PASS, f"{refused} of {len(statuses)} request(s) refused with 429"
-    return FAIL, f"{len(statuses)} requests, none refused (D-088)"
+PLATFORM_REFUSAL = '"error":"rate_limited"'
+"""How the platform's own 429 begins its body (D-202); the edge's is a page."""
+
+
+def judge_burst(answers: list[tuple[int, str]]) -> tuple[str, str]:
+    """PASS when the edge refused any request of a burst with 429.
+
+    The platform limits requests itself since D-202, and its 429 would pass a
+    check that only counted statuses, whether or not the edge rule exists. Its
+    refusals carry the two-field body, so they are counted apart and do not
+    count towards the edge's.
+    """
+    platform = sum(1 for status, body in answers if status == 429 and _ours(body))
+    edge = sum(1 for status, body in answers if status == 429 and not _ours(body))
+    detail = f"{edge} of {len(answers)} refused at the edge, {platform} by the platform"
+    if edge:
+        return PASS, detail
+    return FAIL, f"{detail}; the edge rule is not on (D-088)"
+
+
+def _ours(body: str) -> bool:
+    return PLATFORM_REFUSAL in body.replace(" ", "")
 
 
 def check_rate_limit_is_applied(base_url: str, burst: int) -> tuple[str, str]:
@@ -201,14 +218,14 @@ def check_rate_limit_is_applied(base_url: str, burst: int) -> tuple[str, str]:
         return SKIP, "not attempted; rerun with --burst N once the edge rule is on"
     url = f"{base_url}/api/v1/stations?limit=1"
 
-    def status_of(_: int) -> int:
+    def answer_to(_: int) -> tuple[int, str]:
         try:
-            return fetch(url)[0]
+            return fetch(url)
         except OSError:
-            return 0
+            return 0, ""
 
     with ThreadPoolExecutor(max_workers=BURST_WORKERS) as pool:
-        return judge_burst(list(pool.map(status_of, range(burst))))
+        return judge_burst(list(pool.map(answer_to, range(burst))))
 
 
 def main(argv: list[str]) -> int:

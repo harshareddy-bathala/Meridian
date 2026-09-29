@@ -4035,6 +4035,327 @@ A figure the platform cannot give is never a zero or a bare null (D-086).
 
 ---
 
+## D-200 — The threat model is a document mapped to code, and a gap stays a row until it closes
+
+**2026-09-28 · accepted** · *`docs/THREAT-MODEL.md`, Stage 23*
+
+Stage 23 asks for a documented threat model. The security decisions already exist — D-006, D-017, D-023, D-034, D-046, D-050, D-082, D-087, D-088, D-114, D-115 among them — but they are scattered through 3,500 lines of this file, and no page says which threat each one answers or which threats nothing answers.
+
+**`docs/THREAT-MODEL.md` lists assets, actors and five trust boundaries, then one row per threat.** Each row names its mitigation and where the mitigation lives: a module, a file in `deploy/`, or a `D-` entry. The boundaries are the ones the roadmap names: station ↔ MSP, the public API, the tunnel, the operator CLI and the database, plus the supply chain, because a threat model that stops at our own code misses where most of the image comes from.
+
+**A row with nothing behind it is marked `open`, not left out.** The first version lists every gap Stage 23 closes as an open row naming the part that closes it, and each later commit that moves a mitigation edits its row in the same commit. So the document is true at every commit, and the history shows which gaps closed when.
+
+**The status vocabulary is four words: mitigated, partial, accepted, open.** `mitigated` requires a test or a CI step that exercises the control. `accepted` requires a stated reason. Residual risks that no control can close — a compromised station reporting plausible lies about its own passes, Cloudflare reading traffic it terminates — are listed as such rather than dressed up as mitigated.
+
+*Rejected: a STRIDE table per component.* It produces many empty cells for a system this size, and the empty cells read as analysis. One row per real threat, grouped by the boundary it crosses, is shorter and says more.
+
+---
+
+## D-201 — Platform secrets rotate through files, and the pepper overlaps
+
+**2026-09-28 · accepted** · *`meridian.registry.pepper_rotation`, `meridian.secret_files`, `deploy/docker-compose.secrets.yml`, `deploy/tools/rotate_secret.py`, Stage 23* · *extends D-114*
+
+D-114 let each platform secret be read from a file named by `*_FILE` and left rotation to this stage. Rotation is two problems: getting a new value to the processes that read it, and not breaking whatever depended on the old one.
+
+**Files, one per secret, written by a tool.** `deploy/secrets/` holds `token_hash_pepper`, `token_hash_pepper_previous`, `metrics_token` and `registration_invite_token`. `deploy/docker-compose.secrets.yml` bind-mounts each file separately into the services that read it and sets the `*_FILE` variables. `deploy/tools/rotate_secret.py` writes them: `init` creates what is missing, `rotate` replaces one, `retire` ends a pepper rotation.
+
+- **Modes.** The directory is `0700` and each file `0444`. The file has to be readable by the container's own uid, which is not the operator's, and the directory is what keeps other users on the host out. A single-file bind mount does not need the container to traverse the host directory, so the two do not conflict.
+- **Atomic replacement, then recreate.** A file is written beside its target and renamed into place. A bind mount holds the old inode, so the change reaches a container only when it is recreated; the tool prints the `up -d --force-recreate` command naming the services that read that secret. Settings are read once at start-up, so there is nothing to reload in place.
+- **`init` carries values over.** A secret already set in `deploy/.env` is copied, not regenerated. Moving the pepper to a file is not a reason to change it, and a new one would strand every station.
+- **Prometheus reads the metrics token from the same file** as the API and the jobs process. D-087's failure mode, where the two copies disagree and the target reads as down, cannot happen with one file.
+
+**The pepper overlaps; nothing else needs to.** Replacing `TOKEN_HASH_PEPPER` outright stops every bearer token matching. `.env.example` said recovery was then per station through a bound invite (D-034). **That was wrong:** the registration key a bound invite checks is peppered too (D-023), so it stopped matching as well, and the only way back was re-registering under a new `station_id`, which splits the station's history. `tests/integration/test_pepper_rotation.py` keeps that failure as its control.
+
+So the platform now holds two peppers during a rotation. `TOKEN_HASH_PEPPER_PREVIOUS` (or its `_FILE`) is tried after the current pepper, and only to verify:
+
+- a bearer token it verifies is re-hashed under the current pepper in the same request, guarded on the old hash, so a revocation or rotation in between is not overwritten. Every live station has moved after one heartbeat interval, with no 401 and nothing for the station to do;
+- a registration key it verifies is re-hashed when it is presented, after every other check has passed;
+- nothing new is ever hashed with it;
+- an empty previous pepper means no rotation. This is the one secret whose file may be empty (D-114 refuses empty files), because an empty previous pepper accepts fewer credentials, not more;
+- a previous pepper equal to the current one is refused at start-up, because it means the step that writes the new one was skipped;
+- `rotate` refuses to start a second pepper rotation until the first is retired, since that would drop the pepper some stations still use.
+
+**Retiring has a stated cost.** A registration key moves only when it is presented, and a healthy station never presents it. Emptying the previous pepper therefore leaves every station that has not recovered since the rotation unrecoverable through a bound invite, though still able to heartbeat. The runbook says to retire the previous pepper only when that is acceptable, and it usually need not be hurried: both secrets are 256-bit random values whose hashes cannot be inverted with or without the pepper (`THREAT-MODEL.md` §6), so a leaked old pepper kept for verification exposes nothing a new one protects.
+
+**The metrics token and the bootstrap invite do not overlap.** `meridian.metrics.access` and the jobs listener each accept exactly one token. With one shared file and one recreate, the gap is the few seconds the API takes to restart, well inside `ApiUnavailable`'s one minute. `REGISTRATION_INVITE_TOKEN` seeds an invite only into an empty `invite_tokens` table (D-020), so changing it on a running deployment changes nothing; a leaked bootstrap invite is withdrawn with `meridian invite revoke --label "environment bootstrap"`.
+
+**The tunnel token is not in this file.** Using it from a file means the tunnel starts without `CLOUDFLARE_TUNNEL_TOKEN` in `.env`, and that variable is what tells the API it is public. It moves to a file together with the compose change that makes the public deployment its own file.
+
+**Found on the way: every locally built image carried `deploy/.env`.** `.dockerignore` listed `.env` and `*.env`, which Docker matches at the root of the build context only, and the Dockerfile copies `deploy/` whole. So `up --build` on the laptop that served the public run baked that deployment's `.env` and `deploy/prometheus/metrics_token` into a layer, readable by anyone who could pull or inspect the image. The images CI publishes were clean, because CI builds from a fresh checkout. The patterns are now `**/.env` and friends, with `deploy/secrets/`, the Alertmanager secret files and dumps beside them, and `tests/unit/test_layout.py` checks every secret path the repository uses against the list, with a path that must still reach the image as its control. A rebuilt image was inspected and holds neither file.
+
+*Rejected: re-reading secrets on a signal.* Every process would need a reload path, and a secret half-applied across two API workers is harder to reason about than a restart that takes seconds.
+
+*Rejected: a pepper version column.* It would say which pepper hashed each row, and so when retiring is safe. It needs a migration and a second secret store for old peppers, for a guarantee the entropy of the secrets already gives.
+
+---
+
+## D-202 — Rate limits in the process: by station token for MSP, by client for everything
+
+**2026-09-28 · accepted** · *`meridian.api.rate_limits`, `meridian.api.token_bucket`, `meridian.config`, `deploy/tools/verify_public_surface.py`, Stage 23* · *revisits D-051 and D-088*
+
+D-051 deferred an in-process limiter for three reasons, and D-088 put one rule at the Cloudflare edge instead. That rule matches `/api/` only, because the free plan allows one rule, so **MSP had no rate limit at all**: `/msp/v0/register` is unauthenticated and does a database lookup per request, and a heartbeat with an unknown token does one too. Stage 23 asks for per-endpoint limits in the process. Each of D-051's objections is answered rather than ignored:
+
+- *"The client IP is not the peer address."* **MSP's tight limits are keyed on the station's bearer token, not on any address.** A token names one station wherever its requests come from, so a busy network is never mistaken for one client. Addresses are used only for the loose per-client limits below.
+- *"`CF-Connecting-IP` is forgeable on the port compose also publishes."* **The header is trusted only when `CLIENT_ADDRESS_HEADER` names it**, and the deployment that sets it is the one that stops publishing the API port, so the only way in is through the edge that writes the header (the compose hardening later in Stage 23 wires this). Without the setting the peer address is used, which is the right key on a laptop or for the simulator inside the compose network.
+- *"In-process state is the wrong lifetime."* **Accepted and stated.** Buckets start full on a restart, and each API worker keeps its own, so with `API_WORKERS=2` a caller can get up to twice the figures below. The purpose is bounding the work one process does for one caller, which is exactly per-worker; a network-wide limit stays the edge's job.
+
+**Four token buckets:**
+
+| Bucket | Key | Burst | Refill | Sized for |
+|---|---|---|---|---|
+| `heartbeat` | the bearer token | 6 | 1 per 10 s | MSP §4.2's 30 s heartbeat is 2 a minute; 6 leaves room for the client's retries |
+| `observations` | the bearer token | 20 | 1 per 6 s | a station flushing a queue after an outage; what is refused stays queued (D-073) |
+| `msp` | the client | 300 | 10 per s | a 50-station simulated fleet on one host registering at once, then heartbeating from one address |
+| `public` | the client | 50 | 5 per s | the edge rule's own figures, 50 per 10 s (D-088) |
+
+Heartbeats and observations have separate buckets so that a queue flush can never starve the heartbeat, which would make a healthy station read `stale` — a limiter that manufactured liveness failures would corrupt exactly what rule 7 protects. A request is refused if any bucket it draws on is empty, and it takes a token from each only when all have one. `/`, `/assets/`, `/healthz` and `/metrics` are not limited: the healthcheck and the tunnel poll `/healthz`, and `/metrics` answers 404 without its token (D-087).
+
+**A refused request gets MSP §6's `rate_limited` at 429 on an MSP path**, or the public API's own `rate_limited` at 429 on `/api/v1` (added to its table, D-084), each with a `Retry-After` header in whole seconds. The body is the fixed two-field shape; the header is ordinary HTTP and needs no change to MSP. The reference client already retries 429 with backoff and keeps an unsent observation queued (`meridian_client.transport.RETRIABLE_STATUSES`), so nothing in the client changes.
+
+**Token hashes, not tokens, are the keys.** The limiter holds `sha256(token)` and never the token, so a heap dump of the API process holds no credential it did not already have. It does no database lookup: an unknown token is limited exactly like a valid one, and the lookup it spares is the point. The store is bounded at 10,000 keys per bucket, least recently used first, so an attacker rotating tokens or addresses costs memory that is capped. A key evicted and seen again starts with a full bucket, which is why the per-client bucket exists beside the per-token ones: rotating tokens from one address is still limited by the address.
+
+**`RATE_LIMITS=off` turns the limiter off, and is refused on a public deployment.** Accelerated simulations drive hundreds of heartbeats a second through one process on purpose, and a limit sized for real time would refuse them. On a public address the refusal is the same kind as the placeholder refusal: a start-up error naming the variable.
+
+**D-088's verifier had to learn the difference.** `verify_public_surface.py --burst` passed on any 429, so once the platform answers 429 itself the check would pass with no edge rule at all. It now counts the platform's refusals, recognised by their two-field body, apart from the edge's, and passes only on the edge's.
+
+*Rejected: keying MSP on the client address only.* It works only once the header is trusted, and even then it lumps every station behind one NAT together.
+
+*Rejected: a shared store such as Redis.* It would give exact network-wide figures, at the cost of a service on the Pi that must be up for the platform to answer at all. The edge already gives the network-wide figure for the public API.
+
+---
+
+## D-203 — The public API takes no body, and its query string is capped
+
+**2026-09-28 · accepted** · *`meridian.api.request_limits`, `meridian.cli_serve`, Stage 23* · *extends D-028 and D-050*
+
+MSP §6's caps apply to MSP bodies. `/api/v1` is read-only, every route is a `GET`, and nothing bounded what a request to it could carry.
+
+**A request to `/api/v1` that declares a body is refused before routing:** a `Content-Length` other than `0`, or any `Transfer-Encoding`. The public API has no operation that reads one, so a body there is either a mistake or someone measuring what the platform will buffer.
+
+**The query string is capped at 2 KiB.** The longest legitimate query is a keyset cursor (D-085) and a handful of filters, a few hundred bytes. The cap is checked from the request line, before any parameter is parsed.
+
+**Both refusals are `invalid_query` at 400, in the public vocabulary.** Before this, a `POST` to an `/api/v1` path without a length was refused as MSP's `malformed`, a code the public surface does not use (D-084). Refusals on public paths are now answered in public words, and MSP paths keep §6's.
+
+**The request head is bounded by the server, and that needed a change.** `uvicorn[standard]` installs httptools and uses it by default. Measured here, it refused a request line past 64 KiB but accepted a **1 MB header**, so nothing bounded the headers of a request before the application saw them. `meridian serve` now runs uvicorn with `http="h11"`, which refuses a request head once it has buffered more than 16 KiB of it without completing; the same measurement against h11 refused the 1 MB header with 400. h11 is pure Python and slower, which a network of a few requests a second does not notice.
+
+---
+
+## D-204 — Logs are redacted on the handler, by pattern and by value
+
+**2026-09-28 · accepted** · *`meridian.log_redaction`, `meridian.cli_serve`, `meridian.config_checks`, Stage 23*
+
+D-004 keeps secrets out of error bodies by never deriving a body from an exception, and sends the detail to the log instead. Nothing kept secrets out of the log. `tests/integration/test_log_redaction.py` shows the gap with an ordinary request: a `register` body missing one field is logged at info with the whole body as the validation error's input, invite token and registration key included.
+
+**A filter on the handler, not on a logger.** `meridian serve` and `meridian jobs run` install one logging configuration (D-114), and its only handler now carries `RedactingFilter`. A filter on a logger sees only records logged through that logger; one on the handler sees every record written, including uvicorn's, httpx's, psycopg's and any module added later. The filter formats the message, redacts it, and stores it back with its arguments cleared, and does the same to the traceback text, so no formatter downstream can reintroduce what was removed.
+
+**What it removes:**
+
+- anything after `Bearer`;
+- the value of any field whose name ends in `token`, `registration_key`, `password`, `passwd`, `pepper` or `secret`, in the `name=value`, `name: value` and `'name': 'value'` spellings logs and Python reprs use;
+- the password in a URL's `user:password@`;
+- **every secret value the process loaded**, wherever it appears. `load_settings` registers the pepper, the previous pepper, the bootstrap invite, the metrics token, the Grafana password and the database password before running any check, so every process that reads a secret redacts it, however the value reached the line.
+
+Values shorter than 16 characters are left to the patterns. The real secrets are 64 hex characters, and the development database password is `meridian`, which would otherwise redact the project's own name from every line. The placeholder `change-me` is never registered, since it is public and is the word the placeholder refusal names.
+
+**The detail stays in the log.** A malformed station is diagnosed from the line saying which field failed and why, so the line is kept and its secrets removed, rather than the line being made generic.
+
+**The test searches what was actually written.** The platform is started with the production configuration writing to a buffer at `debug`, and driven through a registration, a malformed one, a refused recovery, heartbeats good, forged and malformed, a wrong and a right scrape, the public API, and a pepper rotation's re-hash. The buffer is then searched for every secret involved. Its positive control is the same flow without the filter, which must leak the invite and the registration key. A third test runs the reference client through registration and heartbeats and finds none of its credentials in any record; the client has no filter, so it must simply never log one.
+
+*Rejected: logging a generic message for a validation failure.* It removes the one leak found, not the class, and leaves an operator unable to see why a station's requests are refused.
+
+*Rejected: structured logging with a deny-list of keys.* It needs every call site rewritten to pass fields, and a secret interpolated into a message string would still pass straight through.
+
+---
+
+## D-205 — Dependencies and the image are scanned on every change and every week, with an SBOM
+
+**2026-09-28 · accepted** · *`.github/workflows/security.yml`, `deploy/Dockerfile`, Stage 23*
+
+Every dependency was pinned (D-113, `uv.lock`, `package-lock.json`) and nothing asked whether a pinned version had a published advisory. A pin keeps a build reproducible; it also keeps a vulnerability in place until somebody looks.
+
+**`.github/workflows/security.yml`, three jobs, on every pull request, on `main`, and every Monday.** The schedule is the point of a separate workflow: an advisory is published against a version that has not changed, and a scan that runs only when code changes never sees it.
+
+- **Python:** `pip-audit` over `uv export` of the whole lock, hashes included, with `--disable-pip` so what is audited is exactly what is pinned. The whole lock and not only the image's share: the `fit` extra runs on a workstation and the dev tools run in CI with the checkout in reach.
+- **Dashboard:** `npm audit --audit-level=high` over the lockfile. Its runtime packages are bundled into the page the platform serves.
+- **Image:** the image `deploy/Dockerfile` builds, scanned by Trivy for HIGH and CRITICAL advisories that have a fix. One without a fix cannot be acted on, and a job that fails on what nobody can change is a job people learn to ignore. An accepted finding goes in `.trivyignore` with its reason and an `exp:` date, so that accepting it is a reviewed commit that expires rather than a silent exclusion.
+
+**Three SBOMs, CycloneDX 1.5, kept as run artefacts for 90 days:** the Python lock (`uv export --format cyclonedx1.5`), the dashboard lock (`npm sbom`), and the image (Trivy), which adds the Debian packages. Each is written even when its scan fails. `trivy fs` over the checkout was tried for the source SBOM and found one Python package, because it reads only the root project of a uv workspace, and ours has no dependencies of its own.
+
+**The scanners are pinned like the images.** Trivy runs as its container pinned by tag and digest, not as a marketplace action, and pip-audit by version. A scanner runs with the checkout and the Docker socket in reach, and a moved tag would run someone else's code there.
+
+**The first scan found five HIGH advisories in the image, and they are fixed rather than ignored.**
+
+- three in Debian's `libpcre2-8-0`, fixed in bookworm but absent from the digest-pinned base image. The runtime stage now applies Debian's updates with `apt-get upgrade`. That is the one layer whose contents depend on the day it is built, which is the cost of shipping a fix a pinned digest never receives, and the image SBOM records what it installed;
+- two in packages vendored by the base image's own setuptools, in the system Python. The platform runs from `/app/.venv`, which uv builds without pip or setuptools, so the runtime stage uninstalls the system pip, setuptools and wheel.
+
+`pip-audit` and `npm audit` found nothing. The Python fix was checked by rescanning a local build. The Debian fix could not be: `deb.debian.org` is not reachable from the environment this was written in, so the first run of this workflow is its test.
+
+*Rejected: scanning jobs in `ci.yml`.* It would give no schedule, and that workflow belongs to another stage's work in flight.
+
+*Rejected: GitHub's Dependabot alerts alone.* They see manifests, not the built image or its Debian layer, and they are configured outside the repository, where nobody reviewing a pull request can see whether they are on.
+
+---
+
+## D-206 — Every container is hardened, and the public deployment is a file that takes the API port away
+
+**2026-09-28 · accepted** · *`deploy/docker-compose.yml`, `deploy/docker-compose.public.yml`, `meridian.config_checks`, `meridian.cli_jobs`, Stage 23* · *closes the gap D-051 named*
+
+**Every service drops every Linux capability, runs with `no-new-privileges`, and has a read-only root filesystem.** One YAML anchor, `x-hardening`, merged into each service, and `tests/unit/test_compose_hardening.py` fails with the service's name if one is added without it. What each service writes is named beside it: a volume for state, a tmpfs for scratch.
+
+- **The platform services** write nothing outside their volumes. The image sets `PYTHONDONTWRITEBYTECODE`, and uv compiled the bytecode at build. Each gets a tmpfs `/tmp`, and the API keeps its metrics directory as before.
+- **The database runs as uid 70, its own `postgres` user, from the start.** The image's entrypoint, started as root, needs `CHOWN`, `SETUID` and `SETGID` to hand the data directory over and step down. Started as the owner, it needs none, and a named volume copies the image directory's ownership, which is already 70. Its socket directory and `/tmp` are tmpfs. Measured on a fresh volume: initdb, TimescaleDB's tuning script and the extension all run.
+- **Grafana** gets tmpfs for `/tmp` and `/var/log/grafana`, which it creates at start even when logging to the console only. Prometheus and Alertmanager write only to their volumes.
+
+**No service adds a capability back.** Nothing binds below port 1024 and nothing changes ownership at runtime, which the test also asserts.
+
+**The public deployment is `deploy/docker-compose.public.yml`, not a profile.** D-051 recorded that `CF-Connecting-IP` is forgeable while compose publishes the API port on the host, and D-202's per-client limits key on that header. A profile can add a service but cannot remove a port. So the tunnel moved from the `public` profile into an override file, together with the two things that must come with it:
+
+- `ports: !reset []` on the API, so the host publishes nothing and the only way to the API from outside the compose network is through Cloudflare, which overwrites `CF-Connecting-IP` on every request it forwards;
+- `CLIENT_ADDRESS_HEADER=CF-Connecting-IP`, set in this file only, which the test checks;
+- `MERIDIAN_PUBLIC=1` for the API and the jobs process, since running the tunnel is what makes the platform public.
+
+None of the three can be had without the others. The tunnel reads its token from `deploy/secrets/tunnel_token` through cloudflared's `TUNNEL_TOKEN_FILE`, not from `.env`; `rotate_secret.py set tunnel_token` stores it from standard input. The file needs Docker Compose 2.24.4 or later, for `!reset`.
+
+**The main file keeps its port.** The laptop, the simulator profile and CI's ten-minute bring-up reach the API on `:8000`, and there `CF-Connecting-IP` is never trusted. A `CLOUDFLARE_TUNNEL_TOKEN` left in an older `.env` still sets `MERIDIAN_PUBLIC`, so an upgrade never makes a deployment that considered itself public stop checking its secrets.
+
+**Found on the way: the jobs process could never start publicly.** The placeholder refusal checks five secrets, and compose gives the jobs process two of them, the database URL and the metrics token. The other three fell back to `change-me`, so on any deployment marked public the process refused to start and restarted forever. It had never been run publicly: the Phase 1 run (D-088) predates the jobs service. `load_settings` now takes the names of the secrets a process holds, and the jobs process answers for its two. The API still answers for all five, which `tests/unit/test_config.py` uses as the control.
+
+**Checked on a local stack before commit:** the default and `metrics` profiles came up healthy from a fresh volume in 22 s with the hardened file, and CI's image-job sequence passed against it — the dashboard, `/metrics`, both Prometheus targets and every rule, Grafana's provisioned dashboard, a simulated station registering and counted online, and a backup restored to the same rows. With the public file and a placeholder tunnel token, the API and the jobs process were healthy, `curl localhost:8000` on the host was refused, and cloudflared read the token file and rejected the placeholder.
+
+*Rejected: binding the API port to `127.0.0.1` in public mode.* A local user could still forge the header, and compose cannot choose a binding by profile either.
+
+*Rejected: `cap_add` for the database instead of `user`.* It keeps a root process in the container for the life of the entrypoint, to perform a hand-over that a named volume has already made unnecessary.
+
+---
+
+## D-207 — The API connects as a role that can change rows and nothing else
+
+**2026-09-28 · accepted** · *`meridian.store.database_roles`, `meridian db roles`, `deploy/docker-compose.yml`, `deploy/tools/restore.py`, Stage 23*
+
+The API, the jobs process and the operator CLI all connected as `POSTGRES_USER`, the superuser the database image creates, which owns every table. A compromised API process could drop the observation store.
+
+**Three kinds of connection, each with only what it needs:**
+
+| Role | Used by | May |
+|---|---|---|
+| the owner, `POSTGRES_USER` | `migrate`, backup and restore | everything; it is a superuser, because TimescaleDB's extension needs one to be created or updated |
+| `meridian_api`, a member of `meridian_readwrite` | `api`, `jobs`, `sim-seed`, and the CLI run inside them | select, insert, update and delete rows, and use sequences |
+| `meridian_reader`, a member of `meridian_readonly` | ad-hoc queries, snapshot exports | select |
+
+Neither login role can create, alter, drop or truncate anything, create a temporary table, or grant. Privileges sit on the two group roles and passwords on the two login roles, so a login can be replaced without regranting. The owner stays a superuser: that is a limit on how far migration can be narrowed, stated rather than hidden, and the owner's password reaches only `migrate`.
+
+**An idempotent step after every migration, not a migration.** `meridian db roles` creates the roles if the cluster lacks them, sets both passwords, and grants on every table, sequence and view in `public`, with default privileges for tables the owner creates later. Compose's `migrate` service runs it after `alembic upgrade head`, on every `up`. A migration was considered and rejected for three reasons:
+
+- a password cannot be in a migration, which is committed to a public repository;
+- roles belong to the whole server, not to one database, so a downgrade cannot drop a role that another database on the same server still uses, which the migration lifecycle tests' scratch databases would do;
+- grants have to be put back after a restore, which runs no migration when the dump is already at head.
+
+So no migration is added by this stage. **Grants survive a restore by being re-applied, not restored:** `restore.py` now runs `pg_restore --no-acl`, because a dump's grants name roles a fresh server does not have and `--exit-on-error` stopped on the first of them. The `migrate` step it already runs afterwards grants them again.
+
+**The password never crosses the connection in plain text.** libpq's `PQencryptPasswordConn`, through psycopg, turns it into the SCRAM verifier the server stores, and `ALTER ROLE` sends that. A server logging statements would record the verifier. Both passwords are refused as `change-me` on a public deployment, like every other secret, and are registered for log redaction (D-204).
+
+**`tests/integration/test_database_roles.py` logs in as each role.** `meridian_api` is refused nine kinds of DDL, from `create table` to `create temporary table`, and each refusal is paired with the owner running the same statement, so no refusal can be a statement that fails for everybody. It reads and writes rows, reads every hypertable and the views over them, and can use a table the owner creates afterwards without running the step again. The reader can read and cannot write. Running the step again changes a password and nothing else.
+
+**Checked on a local stack:** from a fresh volume `migrate` set the roles, `pg_stat_activity` showed the API and the jobs process connected as `meridian_api`, a simulated station registered and was counted online, and a backup restored with `--no-acl` came back with the same rows and a working API.
+
+**Not done: database passwords from files.** The API's `DATABASE_URL` carries its password inline, as it always has, so these two passwords are variables in `deploy/.env`, like `POSTGRES_PASSWORD`. Reading a URL's password from a file is a change to `meridian.config` that this stage leaves for a deployment that needs it.
+
+---
+
+## D-208 — The dashboard gets a strict content-security policy, and the platform stays single-origin with no CORS
+
+**2026-09-28 · accepted** · *`meridian.api.security_headers`, `meridian.api.app`, Stage 23* · *follows D-081 and D-091*
+
+The dashboard was served with no content-security policy and no framing header. D-081 and D-091 keep it on the platform's own origin, and `site/_headers` already gives the static site a strict policy, so the dashboard had no reason to be the looser of the two surfaces.
+
+**One policy, on every response the platform builds:**
+
+```
+default-src 'none'; script-src 'self'; style-src 'self';
+img-src 'self' data: https://tile.openstreetmap.org; font-src 'self';
+connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none';
+form-action 'none'; frame-ancestors 'none'
+```
+
+- **No `'unsafe-inline'` and no `'unsafe-eval'`.** Vite's build emits one module script and one stylesheet by URL and nothing inline, and a test reads `dashboard/index.html` for an inline script, a `<style>` or a `style=` attribute. React and Leaflet set styles through the DOM, which a policy does not govern.
+- **`data:` images** are Leaflet's own control icons and blank tile, inlined in its stylesheet, and the page's empty favicon.
+- **One foreign origin, the map's tiles** (D-092). `StationMap.tsx` and the policy must name the same host, and a test holds them equal. A build with another `VITE_MAP_TILE_URL` has to change the policy too; if it does not, the tiles are refused and the map falls back to the graticule it draws itself, which is the failure D-092 designed for.
+- **Beside it:** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` for browsers without `frame-ancestors`, `Referrer-Policy: no-referrer`, a `Permissions-Policy` naming the features the page will never use, `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy: same-origin`, and `Strict-Transport-Security`, which browsers ignore over plain HTTP and honour through the tunnel.
+
+**On every response, not only the page.** The middleware is the outermost the platform adds, so the API's JSON, MSP, and refusals made before routing carry the same headers; one policy for the origin means no path can be served without it. A 500 from Starlette's own error middleware, which sits outside every added middleware, does not; it carries a fixed JSON body and nothing to execute.
+
+**Checked in a browser.** Chromium, driven by Playwright against a local platform serving the built dashboard with one registered station, loaded the page, the map and the station's detail with no policy violation reported. The control was the same page under a policy denying images and styles, which reported violations for the tiles, the stylesheet and Leaflet's `data:` images, so the check can see one.
+
+**Single origin, no CORS, pinned.** No CORS middleware exists, so the platform sends no `Access-Control-Allow-*` header and a browser on another origin cannot read what it answers. A station is not a browser and needs none. `tests/msp_conformance/test_security_headers.py` asks as another origin would, by preflight and by a plain request, and finds no such header, and finds no `CORSMiddleware` installed. Opening the API to other origins later is a decision to record, not a middleware to add.
+
+**Cloudflare features that inject script would now be refused**, such as Rocket Loader, e-mail obfuscation and the Web Analytics beacon. D-041 already turned off the ones that edit the site; the tunnel hostname must keep them off.
+
+*Rejected: a policy on the page only.* It leaves a path that serves HTML without one, which is the path someone finds.
+
+*Rejected: `'unsafe-inline'` for styles, as many policies allow.* Nothing needs it, and adding it back is one line if something ever does.
+
+---
+
+## D-209 — Backups run nightly with a stated retention, and a weekly drill restores one
+
+**2026-09-28 · accepted** · *`deploy/tools/scheduled_backup.py`, `deploy/tools/restore_drill.py`, `deploy/systemd/`, Stage 23* · *completes D-115*
+
+D-115 built backup and restore and left "a backup schedule, retention, and a restore drill on the real deployment" to this stage. CI's round trip proves the tools work on a runner; nothing proved that last night's dump on the Pi would restore, and nothing took one.
+
+**A nightly backup, as systemd units in `deploy/`.** `meridian-backup.timer` runs `scheduled_backup.py` at 02:47 with up to ten minutes of jitter, and `Persistent=true` makes up a night the host was off. The script takes `meridian-<UTC time>.dump` with `backup.py`, reads the file back against the manifest it just wrote, and then prunes. Nothing is pruned after a failed backup, since the old dumps may then be all there is. The service runs with `UMask=0077`, because a dump holds every token hash and invite.
+
+**Retention: every dump from the last 7 days, the newest of each of the last 4 ISO weeks, and the newest of each of the last 6 months** — 17 dumps at most. The newest dump is always kept, however old, so a host that was off for a year still has its last backup. Only files named as the script names them are ever deleted, so a dump taken by hand before an upgrade stays until someone removes it. Weeks are counted between Mondays, so a 53-week ISO year does not shift the policy.
+
+**A weekly drill that never touches the deployment.** `meridian-restore-drill.timer` runs `restore_drill.py --latest backups` on Sundays, an hour after that night's backup. It checks the manifest exactly as `restore.py` does, restores the dump into a scratch database, `meridian_restore_drill`, on the same server, between TimescaleDB's pre- and post-restore steps and with `--exit-on-error --no-acl`, then checks that the copy is at the manifest's migration and reads every table, printing its row count. The scratch database is dropped whether the drill passed or not, and a drill that died is cleaned up by the next, because the name is fixed. A failed drill is a failed systemd unit, visible in `systemctl --failed`. It needs free disk for one more copy of the database while it runs.
+
+**The drill is a test, and the test is the drill.** `tests/integration/test_restore_drill.py` runs the same tool against the test database, with the `db` container replaced by a local shell and libpq's `PG*` variables pointing at the test server. It takes a dump with `backup.py`, drills it, and requires the restored copy's row count for every table to equal the source's, which is a stronger check than the drill can make on a live deployment, where rows arrive during the backup. A dump with one flipped byte is the control, refused on its checksum. The test needs `pg_dump`, `pg_restore` and `psql` on the path at the server's major version: without them it skips on a workstation and fails in CI, where a skipped drill would read as a passed one.
+
+**What this does not do: copy the dumps off the host.** A dump on the disk that holds the database protects against a mistake, not against the disk. Copying `backups/` elsewhere, and keeping the ingest raw store and dataset snapshots that `backup.py` already names as outside its dump, is the operator's step. `OPERATIONS.md` gives the command, and Stage 33, custody, owns the rest.
+
+*Rejected: a `backup` service in compose.* It would need the Docker socket inside a container to reach `pg_dump` in the `db` container, which is root on the host by another route, or a PostgreSQL client in the platform image, which D-115 rejected.
+
+*Rejected: counting rows into the manifest at backup time, for the drill to compare.* The counts and the dump would come from different moments while the API keeps writing, and would disagree on a healthy backup. The drill checks what can be checked on a live deployment, and the test checks the rest on a quiet one.
+
+---
+
+## D-210 — The public API's privacy is reviewed as a whole, and its fields are pinned
+
+**2026-09-28 · accepted** · *`docs/THREAT-MODEL.md` §7, `tests/unit/test_public_privacy.py`, Stage 23*
+
+Each public endpoint was reviewed for disclosure when it was built (D-082, D-086, D-093), and never all of them together. `THREAT-MODEL.md` §7 is that review: every response, what it discloses about a station, its operator or its site, what protects it, and a verdict.
+
+**A test pins every published field to the review.** `tests/unit/test_public_privacy.py` lists the fields of every public response model. A field added or removed fails the suite until the list and §7 change in the same commit, so the review stays true without anyone remembering to redo it. A second assertion refuses any field whose name contains a credential or station-internal word, the same list D-088's verifier uses from outside.
+
+**What the review found:**
+
+- **Pagination cursors are clean.** A cursor carries the last row's sort key, and a sort key at full precision would undo D-093's widened windows. Every cursor is an id, or a value its response already publishes.
+- **A station's altitude is published to the metre, and that is open.** With a terrain model, an altitude to the metre narrows D-082's 1.1 km cell to a contour line through it. Rounding altitude to 10 m when the declared precision is coarser than three decimal places is proposed, not done: it changes a published decision, and a published figure, so it is the team's to take.
+- **`name` and `operator` are published verbatim**, which MSP §4.1 does not tell an implementer. A sentence in the specification is owed, in a specification pull request of its own (`GIT-WORKFLOW.md` rule 9), and is not made here.
+- **The largest store of operator data is the heartbeat history,** including each heartbeat's opaque `health` object, kept indefinitely. Its retention belongs to Stage 19, which the roadmap already gives retention and aggregates, and §7 says so.
+
+**Operator data is already minimal and stays so.** The platform holds no contact (D-107), logs only the tunnel's address as a caller's, keeps callers' real addresses in memory only (D-202), and publishes no client implementation or version.
+
+---
+
+## D-211 — Every failure the roadmap names has a recovery, a runbook row and a test
+
+**2026-09-28 · accepted** · *`docs/OPERATIONS.md` § Failure recovery, `tests/integration/test_failure_recovery.py`, Stage 23*
+
+The roadmap lists seven failures to document and test: database restore, lost client credentials, migration failure, a corrupted client queue, an interrupted observation upload, a scheduler crash, and a platform restart during a pass. Most of them were designed for long before this stage, one decision at a time, and tested where each was built. What did not exist was one place an operator could look during the failure.
+
+**`OPERATIONS.md` § Failure recovery is that place.** One row per failure: what happens by itself, what the operator does, and the test that proves the recovery. Where nothing needs doing, the row says so, because "nothing" is an answer an operator at 2 a.m. needs as much as a command.
+
+**Five of the seven were already tested; two were not, and now are,** in `tests/integration/test_failure_recovery.py`:
+
+- **A migration that fails part way.** The migrations are copied, a revision is added that creates a table and then fails, and a scratch database is upgraded through it. The database stays at the revision it started from, with no trace of the half-applied one, and the unbroken code then migrates it cleanly. This is what `env.py`'s single transaction promises (D-019), now shown.
+- **The jobs process dying mid-schedule.** A round is run whose connection raises after the scheduler has written its rows but before the commit, standing in for a process killed at that moment. Nothing it wrote survives, the next round schedules what the lost one would have, and a third writes nothing. Both conditions are asserted non-vacuously: the dead round generated passes, and the recovering one scheduled some.
+
+**Two outcomes are recorded as limits rather than recoveries.** A station that has lost its `registration_key` as well as its token cannot be recovered onto its old `station_id`: nothing may mint a token for a station without its key, which is the property D-023 exists for, so it registers afresh and its history stays under the old id. And a restore returns the database to the moment of its dump, so stations registered or rotated since then are refused and must be re-admitted, and reports for assignments issued since then are set aside as `unknown_assignment`. The runbook says what each looks like and what to do.
+
+*Rejected: a disaster-recovery test in CI that kills containers.* The CI workflow belongs to another stage's work in flight, and each recovery above is a property of code that a test can reach without killing anything: a transaction, an idempotent key, a queue on disk.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

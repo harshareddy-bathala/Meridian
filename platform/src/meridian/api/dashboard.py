@@ -7,7 +7,9 @@ API URL and, through Starlette's matching order, turn a wrong method on an MSP
 route from ``405`` into whatever the fallback says. D-091 records both.
 
 The dashboard never talks to anything but this origin, which is why no CORS
-middleware exists anywhere in the repository.
+middleware exists anywhere in the repository. The content-security policy every
+response carries says the same to the browser (``meridian.api.security_headers``,
+D-208).
 """
 
 from __future__ import annotations

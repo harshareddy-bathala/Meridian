@@ -77,9 +77,8 @@ NOT_OWNER = "not_owner"
 UNKNOWN_ASSIGNMENT = "unknown_assignment"
 MALFORMED = "malformed"
 UNSUPPORTED_VERSION = "unsupported_version"
-# Defined because MSP §6 defines it, and deliberately never raised: no limiter
-# exists, and D-051 records why building one before the deployment exists would
-# produce a control that fails open for the attacker and closed for the operator.
+# Sent by `meridian.api.rate_limits` before routing, never raised by a route
+# (D-202). D-051 deferred the limiter and records the objections it answers.
 RATE_LIMITED = "rate_limited"
 SERVER_ERROR = "server_error"
 
@@ -299,7 +298,9 @@ def _install_fallback_handlers(app: FastAPI) -> None:
         #
         # The message is generic rather than derived from `exc`, because the
         # validation detail echoes the submitted value — and on `register` the
-        # submitted value includes the invite token.
+        # submitted value includes the invite token. The log line keeps the
+        # detail, which is what makes a malformed station diagnosable, and the
+        # handler's redacting filter removes the secrets from it (D-204).
         _log.info("rejected a malformed request: %s", exc)
         if is_public_surface(request.url.path):
             # A read endpoint has no body to be malformed about; what a caller

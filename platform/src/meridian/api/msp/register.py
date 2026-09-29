@@ -74,6 +74,7 @@ def register(
     registry = PsycopgRegistry(
         conn,
         pepper=settings.token_hash_pepper,
+        previous_pepper=settings.token_hash_pepper_previous,
         recovery_window_s=settings.registration_recovery_window_s,
         now_utc=platform_clock.utc_now(),
     )

@@ -23,8 +23,10 @@ from meridian.api.domain_collector import DomainCollector
 from meridian.api.errors import install_error_handlers, no_such_endpoint_response
 from meridian.api.msp import router as msp_router
 from meridian.api.public.surface import router as public_router
+from meridian.api.rate_limits import RateLimiter, RateLimitMiddleware
 from meridian.api.request_limits import RequestSizeLimitMiddleware
 from meridian.api.request_metrics import RequestMetricsMiddleware
+from meridian.api.security_headers import SecurityHeadersMiddleware
 from meridian.config import Settings, load_settings
 from meridian.metrics.access import is_metrics_scrape_authorised
 from meridian.metrics.exposition import build_scrape_source, exposition
@@ -59,6 +61,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # loudly with the process rather than silently at first request.
     settings = load_settings()
     app.state.settings = settings
+    # Per process and per worker, and absent altogether with RATE_LIMITS=off,
+    # which the settings refuse on a public deployment (D-202).
+    app.state.rate_limiter = (
+        RateLimiter(client_header=settings.client_address_header)
+        if settings.rate_limits
+        else None
+    )
 
     # One pool for the process, opened here and closed on the way out. Before
     # this the health check opened a fresh connection per request, which is a TCP
@@ -93,10 +102,19 @@ def create_app() -> FastAPI:
     # it — which is what MSP §6's "before the body is parsed" and D-028's "ahead
     # of JSON parsing" require.
     app.add_middleware(RequestSizeLimitMiddleware)
-    # Added after the size limit, which makes it the outer of the two: a request
-    # refused before routing is still a request the platform answered, and an
-    # operator watching 4xx rates needs to see it (D-109).
+    # Outside the size limit, so a flood of oversized requests is limited like
+    # any other flood, and refused before its headers are even inspected for a
+    # length (D-202).
+    app.add_middleware(RateLimitMiddleware)
+    # Added last, which makes it the outermost: a request refused before routing
+    # is still a request the platform answered, and an operator watching 4xx
+    # rates needs to see it (D-109).
     app.add_middleware(RequestMetricsMiddleware)
+    # Outermost of ours, so every response the platform builds carries the
+    # content-security policy and its companions, refusals before routing
+    # included (D-208). No CORS middleware is added, deliberately: the
+    # dashboard is same-origin, and no other origin may read the API.
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # Before the routes, so a failure inside one already leaves in MSP §6's shape
     # rather than in FastAPI's default 422 or a bare 500.

@@ -1,4 +1,4 @@
-"""MSP §6's request size limits, enforced before a body is read.
+"""MSP §6's request size limits, and the public API's, enforced before a body is read.
 
 MSP §6 tabulates a cap per endpoint and requires that an oversized request is
 rejected as ``malformed`` **before the body is parsed**; D-028 records that this
@@ -16,7 +16,12 @@ body** — reading the body is the thing it exists to prevent. It decides from t
 request line and headers alone, which is the only information available before a
 body arrives.
 
-Reference: docs/MSP-SPEC.md §6 "Request limits", docs/DECISIONS.md D-028, D-050.
+The public read API takes no body at all and caps its query string (D-203). Its
+refusals are answered in its own vocabulary, ``invalid_query``, rather than
+MSP's ``malformed`` (D-084).
+
+Reference: docs/MSP-SPEC.md §6 "Request limits", docs/DECISIONS.md D-028, D-050,
+D-203.
 """
 
 from __future__ import annotations
@@ -25,10 +30,12 @@ from collections.abc import Iterable
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from meridian.api.errors import MALFORMED, error_response
+from meridian.api.errors import MALFORMED, error_response, public_error_response
+from meridian.api.public.envelope import INVALID_QUERY, is_public_surface
 
 __all__ = [
     "OBSERVATIONS_BODY_LIMIT_BYTES",
+    "PUBLIC_QUERY_LIMIT_BYTES",
     "STANDARD_BODY_LIMIT_BYTES",
     "RequestSizeLimitMiddleware",
     "is_declared_size_acceptable",
@@ -53,6 +60,12 @@ OBSERVATIONS_BODY_LIMIT_BYTES = 256 * _KIB
 Larger because that body carries the Doppler sample array: D-032 caps it at 512
 entries, which at roughly 50 bytes per sample is about 25 KiB, and D-029 sizes
 the rest of the body against this figure rather than the other way round.
+"""
+
+PUBLIC_QUERY_LIMIT_BYTES = 2 * _KIB
+"""The longest query string ``/api/v1`` reads (D-203).
+
+A keyset cursor and a handful of filters come to a few hundred bytes.
 """
 
 _OBSERVATIONS_PATH_SUFFIX = "/observations"
@@ -122,8 +135,25 @@ def _over_limit_message(limit_bytes: int) -> str:
     return f"Request body must declare a Content-Length of at most {limit_bytes} bytes."
 
 
-def _content_length_header(scope: Scope) -> str | None:
-    """The request's ``Content-Length`` as sent, or ``None`` if it sent none."""
+def public_request_refusal(
+    query_string: bytes, content_length: str | None, *, chunked: bool
+) -> str | None:
+    """Why a request to ``/api/v1`` is refused before routing, or ``None`` (D-203).
+
+    Args:
+        query_string: The raw query string, as the request line carried it.
+        content_length: The raw ``Content-Length`` header, or ``None``.
+        chunked: Whether the request declared any ``Transfer-Encoding``.
+    """
+    if len(query_string) > PUBLIC_QUERY_LIMIT_BYTES:
+        return f"Query string must be at most {PUBLIC_QUERY_LIMIT_BYTES} bytes."
+    if chunked or content_length not in (None, "0"):
+        return "The public API takes no request body."
+    return None
+
+
+def _header(scope: Scope, wanted: bytes) -> str | None:
+    """A request header as sent, or ``None`` if it was not sent."""
     # Annotated rather than read straight out of the scope: Starlette types the
     # ASGI scope as a mapping to Any, and an unannotated `value` would make
     # `value.decode(...)` an Any that mypy has no way to check — which is the
@@ -131,7 +161,7 @@ def _content_length_header(scope: Scope) -> str | None:
     # specification's own: header names lowercased, both halves raw bytes.
     headers: Iterable[tuple[bytes, bytes]] = scope["headers"]
     for name, value in headers:
-        if name == b"content-length":
+        if name == wanted:
             # latin-1, which is the encoding the ASGI specification gives header
             # bytes. The value is digits in every non-hostile case; decoding
             # rather than assuming is what keeps a hostile one from raising here
@@ -157,12 +187,18 @@ class RequestSizeLimitMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Serve one request, refusing it if its declared body is too large."""
-        if scope["type"] != "http" or scope["method"] not in _BODY_METHODS:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        if is_public_surface(scope["path"]):
+            await self._serve_public(scope, receive, send)
+            return
+        if scope["method"] not in _BODY_METHODS:
             await self._app(scope, receive, send)
             return
 
         limit_bytes = limit_for_path_bytes(scope["path"])
-        if is_declared_size_acceptable(_content_length_header(scope), limit_bytes):
+        if is_declared_size_acceptable(_header(scope, b"content-length"), limit_bytes):
             await self._app(scope, receive, send)
             return
 
@@ -171,4 +207,21 @@ class RequestSizeLimitMiddleware:
         # exception raised at this depth becomes a bare 500 in Starlette's
         # outermost handler, which is neither MSP §6's shape nor its status.
         response = error_response(MALFORMED, _over_limit_message(limit_bytes))
+        await response(scope, receive, send)
+
+    async def _serve_public(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Serve a request to ``/api/v1``, refusing a body or a long query (D-203).
+
+        Answered in the public vocabulary, which is what a dashboard reads; the
+        MSP caps above never apply here, because no public route reads a body.
+        """
+        refusal = public_request_refusal(
+            scope["query_string"],
+            _header(scope, b"content-length"),
+            chunked=_header(scope, b"transfer-encoding") is not None,
+        )
+        if refusal is None:
+            await self._app(scope, receive, send)
+            return
+        response = public_error_response(INVALID_QUERY, refusal)
         await response(scope, receive, send)

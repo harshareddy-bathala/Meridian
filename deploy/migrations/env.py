@@ -14,6 +14,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from meridian.config import load_settings, sqlalchemy_url
+from meridian.config_checks import DATABASE_PASSWORD
 
 config = context.config
 
@@ -37,8 +38,14 @@ def _database_url() -> str:
     Importing ``meridian`` here is not a new coupling: Alembic ships as a
     dependency of the ``meridian`` distribution, so anything that can run this
     file already has the package installed.
+
+    The URL is the owner's, which is what may change the schema. The API and
+    the jobs process connect as ``meridian_api``, which may not (D-207).
     """
-    return sqlalchemy_url(load_settings().database_url)
+    # The migration runner is given the owner's URL and no other secret, so it
+    # answers for that one alone when the deployment is public (D-206, D-207).
+    settings = load_settings(secrets_held=frozenset({DATABASE_PASSWORD}))
+    return sqlalchemy_url(settings.database_url)
 
 
 def run_migrations_offline() -> None:

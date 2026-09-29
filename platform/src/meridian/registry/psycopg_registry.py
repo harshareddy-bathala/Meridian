@@ -17,8 +17,6 @@ D-034, D-054, D-056.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import secrets
 from datetime import datetime, timedelta
 
@@ -32,6 +30,13 @@ from meridian.registry import (
 )
 from meridian.registry.doppler_tolerance import doppler_tolerance_hz
 from meridian.registry.liveness import derive_liveness
+from meridian.registry.pepper_rotation import (
+    Peppers,
+    authenticate_across_rotation,
+    hash_with_pepper,
+    refresh_registration_key,
+    registration_key_matches,
+)
 from meridian.store.heartbeats import (
     ListeningEvidenceQuery,
     has_listening_evidence,
@@ -41,10 +46,7 @@ from meridian.store.invites import (
     find_invite_by_hash,
     hash_invite_token,
 )
-from meridian.store.station_tokens import (
-    find_station_id_by_token_hash,
-    rotate_station_token,
-)
+from meridian.store.station_tokens import rotate_station_token
 from meridian.store.stations import (
     Connection,
     NewStation,
@@ -61,17 +63,6 @@ __all__ = [
     "hash_with_pepper",
     "is_recovery_eligible",
 ]
-
-
-def hash_with_pepper(pepper: str, secret: str) -> bytes:
-    """``sha256(pepper ‖ secret)`` — the peppered hash D-017 and D-023 both use.
-
-    Unlike an invite token (:func:`meridian.store.invites.hash_invite_token`),
-    a station's bearer token and registration key are long-lived credentials,
-    and the pepper is what keeps a read-only database leak from being enough
-    on its own to forge one.
-    """
-    return hashlib.sha256(pepper.encode("utf-8") + secret.encode("utf-8")).digest()
 
 
 def generate_station_id() -> str:
@@ -141,10 +132,16 @@ class PsycopgRegistry:
         pepper: str,
         recovery_window_s: int,
         now_utc: datetime,
+        previous_pepper: str = "",
     ) -> None:
-        """Bind this instance to one request's connection, configuration and instant."""
+        """Bind this instance to one request's connection, configuration and instant.
+
+        ``previous_pepper`` is the one being rotated away from, if any: accepted
+        when verifying a credential and never used to hash one (D-201).
+        """
         self._conn = conn
         self._pepper = pepper
+        self._peppers = Peppers(current=pepper, previous=previous_pepper)
         self._recovery_window_s = recovery_window_s
         self._now_utc = now_utc
 
@@ -182,9 +179,7 @@ class PsycopgRegistry:
 
     def authenticate(self, bearer_token: str) -> str | None:
         """See :meth:`meridian.registry.Registry.authenticate` for the contract."""
-        return find_station_id_by_token_hash(
-            self._conn, hash_with_pepper(self._pepper, bearer_token)
-        )
+        return authenticate_across_rotation(self._conn, self._peppers, bearer_token)
 
     def liveness(self, station_id: str, *, now: datetime) -> Liveness:
         """See :meth:`meridian.registry.Registry.liveness` for the contract.
@@ -264,9 +259,7 @@ class PsycopgRegistry:
             window_s=self._recovery_window_s,
         ):
             raise InvalidInviteError("registration recovery window has closed")
-        if not self._key_matches(info, request.registration_key):
-            raise InvalidInviteError("registration key does not match")
-        self._reject_simulated_mismatch(info, request)
+        self._verify_key(station_id, info, request)
         return self._mint_and_rotate(station_id)
 
     def _recover_bound_station(
@@ -274,9 +267,7 @@ class PsycopgRegistry:
     ) -> Registration:
         """The unconsumed-bound rows: D-034 ignores the recovery window."""
         info = self._recovery_info_or_raise(station_id)
-        if not self._key_matches(info, request.registration_key):
-            raise InvalidInviteError("registration key does not match")
-        self._reject_simulated_mismatch(info, request)
+        self._verify_key(station_id, info, request)
         with self._conn.transaction():
             registration = self._mint_and_rotate(station_id)
             self._consume_or_raise(invite_hash, station_id)
@@ -318,13 +309,26 @@ class PsycopgRegistry:
             raise InvalidInviteError("invite names no live station")
         return info
 
-    def _key_matches(self, info: StationRecoveryInfo, registration_key: str) -> bool:
-        """Whether the presented registration key hashes to the stored value."""
-        presented = hash_with_pepper(self._pepper, registration_key)
-        # compare_digest, not `==`: this key authorises minting a new bearer
-        # token on an existing station (D-023, D-034), so a timing oracle on
-        # it is a credential-recovery path, not merely an information leak.
-        return hmac.compare_digest(presented, info.registration_key_sha256)
+    def _verify_key(
+        self, station_id: str, info: StationRecoveryInfo, request: RegistrationRequest
+    ) -> None:
+        """Accept the presented registration key and ``simulated``, or refuse.
+
+        A key verified under the previous pepper is stored under the current
+        one before the recovery goes ahead (D-201).
+        """
+        if not registration_key_matches(
+            self._peppers, info.registration_key_sha256, request.registration_key
+        ):
+            raise InvalidInviteError("registration key does not match")
+        self._reject_simulated_mismatch(info, request)
+        refresh_registration_key(
+            self._conn,
+            self._peppers,
+            station_id=station_id,
+            stored_sha256=info.registration_key_sha256,
+            registration_key=request.registration_key,
+        )
 
     def _mint_and_rotate(self, station_id: str) -> Registration:
         """Issue a new bearer token on an existing station, or refuse."""
