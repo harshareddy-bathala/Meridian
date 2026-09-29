@@ -18,6 +18,7 @@ The ``conn`` and ``scalar`` fixtures come from ``tests/conftest.py``.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -1343,3 +1344,143 @@ def test_the_profiles_and_products_are_plain_tables(conn) -> None:
         cur.execute("select hypertable_name from timescaledb_information.hypertables")
         hypertables = {r[0] for r in cur.fetchall()}
     assert not ({"horizon_profiles", "interference_profiles", "products"} & hypertables)
+
+
+# --- 0021, the views and the hourly aggregate -----------------------------------
+
+
+def _detected_observation(execute: Any, assignment_id: str, *, seconds: int) -> Any:
+    """A pass, its assignment, and an observation first detected ``seconds`` in.
+
+    Returns the detection instant.
+    """
+    pass_id = _insert_scheduled_pass(execute, _insert_element_set(execute))
+    _insert_assignment(execute, assignment_id, pass_id)
+    rows = execute(
+        "insert into observations (assignment_id, revision, started_at, ended_at,"
+        " station_id, satellite_id, outcome, signal_detected, first_detection_at,"
+        " content_sha256)"
+        " select %s, 1, p.aos, p.los, 'st_fixture', 'norad:99999', 'decoded', true,"
+        " p.aos + %s * interval '1 second', %s from passes p where p.id = %s"
+        " returning first_detection_at",
+        assignment_id,
+        seconds,
+        ZERO_HASH,
+        pass_id,
+    )
+    return rows[0][0]
+
+
+def _clock(execute: Any, at: Any, offset_s: float, uncertainty_s: float) -> None:
+    execute(
+        "insert into heartbeats (station_id, sent_at, received_at, state,"
+        " clock_offset_s, clock_uncertainty_s)"
+        " values ('st_fixture', %s, %s, 'idle', %s, %s)",
+        at,
+        at,
+        offset_s,
+        uncertainty_s,
+    )
+
+
+def _timing(execute: Any, assignment_id: str) -> tuple[Any, ...]:
+    rows = execute(
+        "select uncorrected_error_s, timing_error_s, excluded, simulated"
+        " from timing_error where assignment_id = %s",
+        assignment_id,
+    )
+    return tuple(rows[0])
+
+
+def test_timing_error_is_corrected_by_the_station_s_clock(fixtures) -> None:
+    """EVALUATION.md §6.1: first detection + clock offset − predicted AOS."""
+    detected = _detected_observation(fixtures, "as_timed", seconds=40)
+    _clock(fixtures, detected, -2.0, 0.5)
+
+    uncorrected, corrected, excluded, simulated = _timing(fixtures, "as_timed")
+
+    assert float(uncorrected) == 40.0
+    assert float(corrected) == 38.0
+    assert excluded is None
+    assert simulated is False
+
+
+def test_an_unknown_clock_offset_is_excluded_not_assumed_zero(fixtures) -> None:
+    _detected_observation(fixtures, "as_untimed", seconds=40)
+
+    _, corrected, excluded, _ = _timing(fixtures, "as_untimed")
+
+    assert corrected is None
+    assert excluded == "clock_offset_unknown"
+
+
+def test_an_error_inside_the_clock_s_uncertainty_is_flagged(fixtures) -> None:
+    detected = _detected_observation(fixtures, "as_fuzzy", seconds=3)
+    _clock(fixtures, detected, 0.0, 5.0)
+
+    assert _timing(fixtures, "as_fuzzy")[2] == "within_clock_uncertainty"
+
+
+def test_a_clock_reported_long_after_the_detection_is_not_used(fixtures) -> None:
+    """An offset reported later describes a clock the detection was not made on."""
+    detected = _detected_observation(fixtures, "as_late", seconds=40)
+    _clock(fixtures, detected + timedelta(hours=1), -2.0, 0.5)
+
+    assert _timing(fixtures, "as_late")[2] == "clock_offset_unknown"
+
+
+def test_scheduler_performance_follows_a_run_s_assignments(fixtures) -> None:
+    fixtures(
+        "insert into schedule_runs (run_id, decided_at, horizon_start, horizon_end,"
+        " model_config, config_sha256, parameters, yield_source, solver,"
+        " solver_version, status, objective, time_limit_s, runtime_s, stations,"
+        " candidates, scheduled, skipped)"
+        " values ('sr_perf', now(), now(), now() + interval '6 hours', 'A', %s,"
+        " '{}'::jsonb, 'elevation_proxy', 'highs', '1.0', 'fallback', 1.0, 10,"
+        " 0.1, 1, 2, 2, 0)",
+        ZERO_HASH,
+    )
+    element_set = _insert_element_set(fixtures)
+    for index, assignment_id in enumerate(("as_run_a", "as_run_b")):
+        _insert_assignment(
+            fixtures,
+            assignment_id,
+            _insert_scheduled_pass(fixtures, element_set, hours_ahead=index),
+        )
+    fixtures(
+        "update assignments set schedule_run_id = 'sr_perf'"
+        " where assignment_id in ('as_run_a', 'as_run_b')"
+    )
+    fixtures(
+        "insert into observations (assignment_id, revision, started_at, ended_at,"
+        " station_id, satellite_id, outcome, signal_detected, first_detection_at,"
+        " frames_decoded, decoder, content_sha256)"
+        " values ('as_run_a', 1, now(), now(), 'st_fixture', 'norad:99999',"
+        " 'decoded', true, now(), 12, 'satdump', %s)",
+        ZERO_HASH,
+    )
+
+    (row,) = fixtures(
+        "select fell_back, decoded, outstanding, frames_decoded"
+        " from scheduler_performance where run_id = 'sr_perf'"
+    )
+
+    assert row == (True, 1, 1, 12)
+
+
+def test_heartbeats_hourly_is_a_continuous_aggregate_with_no_retention(conn) -> None:
+    """D-178: the aggregate exists, is real-time, and nothing is dropped."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "select materialized_only"
+            " from timescaledb_information.continuous_aggregates"
+            " where view_name = 'heartbeats_hourly'"
+        )
+        assert cur.fetchall() == [(False,)]
+        cur.execute(
+            "select proc_name from timescaledb_information.jobs"
+            " where hypertable_name in ('heartbeats', 'observations')"
+            " or proc_name = 'policy_retention'"
+        )
+        procs = {row[0] for row in cur.fetchall()}
+    assert "policy_retention" not in procs

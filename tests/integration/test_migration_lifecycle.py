@@ -473,3 +473,76 @@ def test_0021_backfills_noise_and_products_from_a_compressed_chunk(
             " where assignment_id = 'as-old'"
         ).fetchone()
         assert kept == (4,)
+
+
+def test_0021_s_hourly_aggregate_agrees_with_the_raw_heartbeats(
+    scratch_database: str, monkeypatch
+) -> None:
+    """D-178's check before anything relies on it: the aggregate loses nothing.
+
+    Hours the policy has refreshed and hours it has not are compared with
+    ``count(*)`` over the raw rows, and agree. The refresh runs outside a
+    transaction, as the policy's own job does.
+
+    The limit, asserted rather than discovered: a row written into an hour
+    *below* the watermark is not seen until the next refresh, because a
+    real-time aggregate reads raw rows only above it. A heartbeat is stamped
+    with the platform's clock as it is received (D-013) and the policy stops an
+    hour short of now, so only a hand-written or restored row can land there.
+    """
+    monkeypatch.setenv("DATABASE_URL", scratch_database)
+    _upgrade_to_head(scratch_database)
+
+    insert = (
+        "insert into heartbeats (station_id, sent_at, received_at, state,"
+        " listening_assignment_id, listening_satellite_id, listening_freq_hz,"
+        " listening_mode, simulated)"
+        " select 'st-hb', t, t, 'listening', %s, %s, %s, %s, false"
+        " from generate_series(%s::timestamptz, %s::timestamptz,"
+        " interval '30 seconds') as t"
+    )
+    listening = ("as-1", "norad:1", 137100000, "lrpt")
+    idle = (None, None, None, None)
+    refresh = (
+        "call refresh_continuous_aggregate('heartbeats_hourly', null, %s::timestamptz)"
+    )
+
+    def totals(conn: Any) -> tuple[Any, Any]:
+        raw = conn.execute(
+            "select count(*), count(listening_assignment_id) from heartbeats"
+        ).fetchone()
+        summed = conn.execute(
+            "select sum(heartbeats)::bigint, sum(listening)::bigint"
+            " from heartbeats_hourly"
+        ).fetchone()
+        return raw, summed
+
+    with psycopg.connect(scratch_database, autocommit=True) as conn:
+        conn.execute(
+            "insert into satellites (satellite_id, name) values ('norad:1', 'T')"
+        )
+        conn.execute(INSERT_STATION, ("st-hb", "HB", 77.5, TOKEN_HASH, KEY_HASH))
+        conn.execute(
+            insert, (*listening, "2026-09-01T00:00:00Z", "2026-09-01T02:59:30Z")
+        )
+        conn.execute(refresh, ("2026-09-02T00:00:00Z",))
+        # Hours above the watermark, as every received heartbeat is.
+        conn.execute(insert, (*idle, "2026-09-03T00:00:00Z", "2026-09-03T00:59:30Z"))
+
+        raw, summed = totals(conn)
+        assert raw == summed == (480, 360)
+
+        # Below the watermark: unseen until the next refresh, then counted.
+        conn.execute(insert, (*idle, "2026-09-01T01:00:15Z", "2026-09-01T01:10:15Z"))
+        raw, summed = totals(conn)
+        assert raw == (501, 360)
+        assert summed == (480, 360)
+
+        conn.execute(refresh, ("2026-09-04T00:00:00Z",))
+        raw, summed = totals(conn)
+        assert raw == summed == (501, 360)
+        hour = conn.execute(
+            "select heartbeats, listening from heartbeats_hourly"
+            " where hour = '2026-09-01T01:00:00Z'"
+        ).fetchone()
+        assert hour == (141, 120)
