@@ -484,3 +484,96 @@ def test_every_noise_row_is_its_observations_floor(
 
     assert recorded == 3
     assert disagreeing == 0
+
+
+# --- D-176: declared products become rows ---------------------------------------
+
+WATERFALL = "ab" * 32
+
+
+def product_rows(rollback: Any, assignment_id: str = "as_ingest") -> list[Any]:
+    """The assignment's product rows, by revision and position."""
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select revision, element_index, kind, encode(sha256, 'hex'),"
+            " size_bytes, uri, simulated from products where assignment_id = %s"
+            " order by revision, element_index",
+            (assignment_id,),
+        )
+        return list(cur.fetchall())
+
+
+def test_each_declared_product_becomes_a_row(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """Valid elements get rows; the rest stay in products_json only."""
+    insert_assignment()
+    declared = (
+        {
+            "kind": "waterfall",
+            "uri": f"station:products/{WATERFALL}",
+            "sha256": WATERFALL,
+            "size_bytes": 2048,
+        },
+        {"kind": "image", "uri": "file:///no-hash.png"},
+    )
+
+    ingest(rollback, submission(products=declared), station_id=STATION_ID)
+
+    assert product_rows(rollback) == [
+        (1, 0, "waterfall", WATERFALL, 2048, f"station:products/{WATERFALL}", False)
+    ]
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select jsonb_array_length(products_json) from observations"
+            " where assignment_id = 'as_ingest'"
+        )
+        assert cur.fetchone() == (2,)
+
+
+def test_a_retry_declares_its_products_once(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    insert_assignment()
+    declared = ({"kind": "waterfall", "sha256": WATERFALL},)
+
+    ingest(rollback, submission(products=declared), station_id=STATION_ID)
+    ingest(rollback, submission(products=declared), station_id=STATION_ID)
+
+    assert len(product_rows(rollback)) == 1
+
+
+def test_a_correction_declares_its_own_products(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """A revision's products are its own; the first revision's stay (D-015)."""
+    insert_assignment()
+    ingest(
+        rollback,
+        submission(products=({"kind": "waterfall", "sha256": WATERFALL},)),
+        station_id=STATION_ID,
+    )
+    ingest(
+        rollback,
+        submission(outcome="signal_no_decode", products=()),
+        station_id=STATION_ID,
+    )
+
+    assert [(row[0], row[2]) for row in product_rows(rollback)] == [(1, "waterfall")]
+
+
+def test_a_simulated_stations_products_are_simulated(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    insert_assignment(assignment_id="as_sim", station_id=SIMULATED_STATION_ID)
+
+    ingest(
+        rollback,
+        submission(
+            assignment_id="as_sim",
+            products=({"kind": "waterfall", "sha256": WATERFALL},),
+        ),
+        station_id=SIMULATED_STATION_ID,
+    )
+
+    assert [row[6] for row in product_rows(rollback, "as_sim")] == [True]
