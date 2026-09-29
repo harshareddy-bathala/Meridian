@@ -132,11 +132,26 @@ _SCOPED_SAMPLES = (
 """Published values a snapshot carries: made public before ``as_of``, and
 describing time near enough the scope to be read by a pass in it (D-222)."""
 
+_PUBLIC_RECORDS = (
+    "select r.record_id from ingest_records r"
+    " join ingest_sources s on s.source_id = r.source_id"
+    " where s.source_class <> 'archive_receptions'"
+    " and r.retrieved_at < %(as_of)s"
+    " and (r.valid_from is null or r.valid_from < %(as_of)s)"
+    " and coalesce(r.valid_to, r.retrieved_at)"
+    f"  >= %(since)s::timestamptz - {CONDITIONS_LOOKBACK}"
+)
+"""Every public artefact fetched before ``as_of`` about time near the scope,
+whether or not anything was derived from it. A FIRMS day with no detections
+cites no sample, but it is the evidence that the day was asked about, and a
+tile is displayed behind an area as imagery (D-221, D-229)."""
+
 _CITED_RECORDS = (
     "select record_id from archive_observations"
     f" where archive_observation_id in ({_SCOPED_ARCHIVE})"
     " union select record_id from environment_samples"
     f" where sample_id in ({_SCOPED_SAMPLES})"
+    f" union {_PUBLIC_RECORDS}"
 )
 
 SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
@@ -250,7 +265,7 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         "ingest_records",
         "select record_id, source_id, original_identifier, source_version,"
         " payload_kind, retrieved_at, sha256, raw_path, media_type, byte_count,"
-        " valid_from, valid_to, superseded_by"
+        " valid_from, valid_to, superseded_by, spatial_extent"
         f" from ingest_provenance where record_id in ({_CITED_RECORDS})"
         " order by record_id",
     ),
@@ -262,6 +277,13 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         " lat_deg, lon_deg, footprint_m, quality"
         f" from environment_samples where sample_id in ({_SCOPED_SAMPLES})"
         " order by sample_id",
+    ),
+    SnapshotTable(
+        "areas_of_interest",
+        "select area_id, label, geometry, geometry_sha256, centroid_lat_deg,"
+        " centroid_lon_deg, area_km2, created_at, active"
+        " from areas_of_interest where created_at < %(as_of)s"
+        " order by area_id",
     ),
 )
 """Every file a raw snapshot holds, in the order the export writes them."""

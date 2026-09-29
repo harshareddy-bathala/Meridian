@@ -54,6 +54,7 @@ def test_the_snapshot_holds_what_d_143_lists() -> None:
         "archive_stations",
         "ingest_records",
         "environment_samples",
+        "areas_of_interest",
     }
 
 
