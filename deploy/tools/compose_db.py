@@ -75,6 +75,13 @@ class Compose:
         """Run a shell `script` inside the `db` container, stdin attached."""
         return self.command("exec", "-T", "db", "sh", "-c", script)
 
+    def psql_on(self, database: str) -> list[str]:
+        """psql reading SQL from stdin, on a database named here, not by the env.
+
+        For a scratch database such as the restore drill's, whose name is ours.
+        """
+        return self.in_db(f"{_PSQL} -d {database}")
+
     def psql(self, *, maintenance: bool = False) -> list[str]:
         """psql reading SQL from stdin, on the deployment's or maintenance database.
 
@@ -105,14 +112,25 @@ def compose_from(args: argparse.Namespace) -> Compose:
     return Compose(args.compose_file, args.project_name, args.env_file)
 
 
-def run_sql(compose: Compose, sql: str, *, maintenance: bool = False) -> str:
+def run_sql(
+    compose: Compose, sql: str, *, maintenance: bool = False, database: str = ""
+) -> str:
     """Run `sql` through psql in the `db` container and return its output.
+
+    Args:
+        compose: The deployment.
+        sql: What to run.
+        maintenance: Run it on the maintenance database, `postgres`.
+        database: Run it on this database instead; the restore drill's scratch.
 
     Raises:
         ToolError: psql, or `docker compose` in front of it, failed.
     """
+    command = (
+        compose.psql_on(database) if database else compose.psql(maintenance=maintenance)
+    )
     result = subprocess.run(
-        compose.psql(maintenance=maintenance),
+        command,
         input=sql,
         text=True,
         capture_output=True,

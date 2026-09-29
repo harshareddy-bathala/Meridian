@@ -1,0 +1,13 @@
+# Every night, at a time that is not on the hour, a little later on some nights.
+# Persistent: a night the host was off is made up when it next boots.
+
+[Unit]
+Description=Nightly Meridian database backup
+
+[Timer]
+OnCalendar=*-*-* 02:47:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

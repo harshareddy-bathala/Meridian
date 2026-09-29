@@ -1,0 +1,16 @@
+# Weekly restore drill: the newest dump restored into a scratch database beside
+# the live one, checked, and dropped (D-209). It never touches the live database.
+# Installed with meridian-backup.service; the same edits apply.
+
+[Unit]
+Description=Meridian restore drill on the newest backup
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=meridian
+WorkingDirectory=/opt/meridian
+ExecStart=/usr/bin/python3 deploy/tools/restore_drill.py --latest backups
+Nice=10
+IOSchedulingClass=idle

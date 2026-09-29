@@ -40,8 +40,21 @@ htmlcov/
 
 # Secrets. deploy/.env.example is tracked but nothing needs it inside an image,
 # and .env must never be baked into a layer.
-.env
-*.env
+#
+# `**/` matters. A bare `.env` matches only at the root of the context, and the
+# Dockerfile copies deploy/ whole, so until D-201 every image built with
+# `up --build` carried deploy/.env and deploy/prometheus/metrics_token in a
+# layer. tests/unit/test_layout.py checks each secret path against this list.
+**/.env
+**/*.env
+deploy/secrets/
+deploy/prometheus/metrics_token
+deploy/alertmanager/webhook_url
+deploy/alertmanager/smtp_password
+deploy/alertmanager/*.local.yml
+backups/
+**/*.dump
+**/*.dump.manifest.json
 
 # Not needed at runtime. The image serves the platform; it does not read the
 # specification or run the suite.

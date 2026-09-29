@@ -7,13 +7,16 @@ compose file — ``deploy/.env.example`` documents every value here.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
-from pathlib import Path
 from urllib.parse import urlparse
 
-from meridian.registry.liveness import (
-    MAX_HEARTBEAT_INTERVAL_S,
-    is_heartbeat_interval_consistent,
+from meridian.config_checks import EVERY_SECRET, check_settings
+from meridian.secret_files import (
+    PLACEHOLDER,
+    InsecureConfigurationError,
+    read_previous_secret,
+    read_secret,
 )
 
 __all__ = [
@@ -24,16 +27,10 @@ __all__ = [
     "sqlalchemy_url",
 ]
 
-PLACEHOLDER = "change-me"
-
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
 
 _DRIVER = "+psycopg"
 _SCHEMES = ("postgresql", "postgres")
-
-
-class InsecureConfigurationError(RuntimeError):
-    """Raised when a placeholder secret would be exposed publicly."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +54,13 @@ class Settings:
     """Where the scheduled jobs serve their metrics, inside the network (D-109)."""
 
     token_hash_pepper: str
+    token_hash_pepper_previous: str
+    """The pepper being rotated away from, or empty (D-201).
+
+    Accepted when verifying a bearer token or a registration key, never used to
+    hash anything new. A credential it verifies is re-hashed under
+    ``token_hash_pepper`` on the spot, so the overlap drains as stations call.
+    """
     registration_invite_token: str
     registration_recovery_window_s: int
     heartbeat_interval_s: int
@@ -73,6 +77,15 @@ class Settings:
     public_base_url: str
     tunnel_hostname: str
     public_mode: bool
+
+    rate_limits: bool
+    """Whether the API limits request rates in the process (D-202)."""
+    client_address_header: str
+    """The header naming the caller's address, or empty for the peer (D-202).
+
+    Trusted only because the deployment that sets it publishes no port the edge
+    does not front; set anywhere else, it lets a caller choose its own address.
+    """
 
     grafana_admin_password: str
 
@@ -197,37 +210,15 @@ def _int_env(name: str, default: int) -> int:
         ) from exc
 
 
-_FILE_SUFFIX = "_FILE"
+_HEADER_NAME = re.compile(r"[A-Za-z0-9-]*")
 
 
-def _secret_env(name: str, default: str) -> str:
-    """Read a secret from ``<name>_FILE`` when that is set, else from ``<name>``.
-
-    The file form keeps a secret out of the process environment, where
-    ``docker inspect`` and ``/proc/<pid>/environ`` show it to anyone on the host
-    (D-114). The file wins when both are set, so mounting one is enough to
-    override a value left behind in ``.env``.
-
-    Surrounding whitespace is removed, because ``openssl rand -hex 32 > file``
-    ends the file with a newline that is not part of the secret.
-
-    Raises:
-        InsecureConfigurationError: The named file cannot be read, or is empty.
-            Falling back to the variable would start the platform on a secret
-            the operator believes they replaced.
-    """
-    path = os.environ.get(name + _FILE_SUFFIX, "").strip()
-    if not path:
-        return os.environ.get(name, default)
-    try:
-        value = Path(path).read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise InsecureConfigurationError(
-            f"{name}{_FILE_SUFFIX} names {path!r}, which cannot be read: {exc.strerror}"
-        ) from exc
-    if not value:
-        raise InsecureConfigurationError(f"{name}{_FILE_SUFFIX} names an empty file")
-    return value
+def _header_name_env(name: str) -> str:
+    """Read an HTTP header name, lower-cased as ASGI presents headers."""
+    raw = os.environ.get(name, "").strip()
+    if not _HEADER_NAME.fullmatch(raw):
+        raise InsecureConfigurationError(f"{name} is not a header name: {raw!r}")
+    return raw.lower()
 
 
 def _database_url() -> str:
@@ -243,12 +234,16 @@ def _database_url() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
-def load_settings() -> Settings:
+def load_settings(*, secrets_held: frozenset[str] = EVERY_SECRET) -> Settings:
     """Read settings from the environment and refuse an unsafe combination.
 
     Reads ``os.environ`` directly and takes no override mapping, so a test sets
     a variable the same way a deployment does — ``monkeypatch.setenv``, which
     unsets it again afterwards. See ``tests/unit/test_config.py``.
+
+    ``secrets_held`` names the secrets this process is given, by the names in the
+    placeholder refusal. Only those are refused as placeholders; every other
+    check applies whatever the process holds (D-206).
 
     **The platform will not start with placeholder secrets on a public address.**
     D-006 argues that shipping an unauthenticated write endpoint to a public
@@ -282,8 +277,9 @@ def load_settings() -> Settings:
         # Never published outside the compose network, so nothing depends on
         # the number itself beyond Prometheus's scrape configuration agreeing.
         jobs_metrics_port=_int_env("JOBS_METRICS_PORT", 9464),
-        token_hash_pepper=_secret_env("TOKEN_HASH_PEPPER", PLACEHOLDER),
-        registration_invite_token=_secret_env("REGISTRATION_INVITE_TOKEN", PLACEHOLDER),
+        token_hash_pepper=read_secret("TOKEN_HASH_PEPPER", PLACEHOLDER),
+        token_hash_pepper_previous=read_previous_secret("TOKEN_HASH_PEPPER_PREVIOUS"),
+        registration_invite_token=read_secret("REGISTRATION_INVITE_TOKEN", PLACEHOLDER),
         # D-023: how long after registering a station may still recover a lost
         # bearer token by re-presenting its invite and registration key. One hour
         # by default, AND only while no heartbeat has arrived — both conditions.
@@ -291,77 +287,16 @@ def load_settings() -> Settings:
         # this window does not govern (D-034).
         registration_recovery_window_s=_int_env("REGISTRATION_RECOVERY_WINDOW_S", 3600),
         heartbeat_interval_s=_int_env("HEARTBEAT_INTERVAL_S", 30),
-        metrics_token=_secret_env("METRICS_TOKEN", PLACEHOLDER),
+        metrics_token=read_secret("METRICS_TOKEN", PLACEHOLDER),
         public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"),
         tunnel_hostname=os.environ.get("TUNNEL_HOSTNAME", "").strip(),
         public_mode=_bool_env("MERIDIAN_PUBLIC", False),
+        rate_limits=_bool_env("RATE_LIMITS", True),
+        client_address_header=_header_name_env("CLIENT_ADDRESS_HEADER"),
         grafana_admin_password=os.environ.get("GRAFANA_ADMIN_PASSWORD", PLACEHOLDER),
         simulator_seed=_int_env("SIMULATOR_SEED", 4471),
         simulator_station_count=_int_env("SIMULATOR_STATION_COUNT", 1),
     )
 
-    _refuse_an_interval_liveness_cannot_describe(settings.heartbeat_interval_s)
-
-    if settings.is_public:
-        _refuse_placeholder_secrets(settings)
-
+    check_settings(settings, secrets_held)
     return settings
-
-
-def _refuse_an_interval_liveness_cannot_describe(heartbeat_interval_s: int) -> None:
-    """Raise if the configured interval would make a healthy station read stale."""
-    # Checked on every start, not only a public one, unlike the placeholder
-    # refusal below. A placeholder secret on loopback exposes nothing; an
-    # interval past this ceiling produces *wrong numbers* on any deployment,
-    # and CLAUDE.md's seventh rule makes liveness load-bearing for every
-    # reliability figure in the project. A wrong figure on a laptop is the one
-    # that gets copied into a report.
-    if is_heartbeat_interval_consistent(heartbeat_interval_s):
-        return
-    raise InsecureConfigurationError(
-        f"Refusing to start: HEARTBEAT_INTERVAL_S is {heartbeat_interval_s}, and "
-        f"liveness thresholds are fixed at 60 s and 90 s by SC-5 (D-013). Above "
-        f"{MAX_HEARTBEAT_INTERVAL_S} s a station heartbeating exactly on time "
-        "spends part of every cycle reading 'stale'. Use 30, which is what "
-        "D-030 fixes for all of MSP 0.x."
-    )
-
-
-def _refuse_placeholder_secrets(settings: Settings) -> None:
-    """Raise if any secret is still ``change-me`` on a publicly reachable deployment."""
-    # The database password is read back out of the URL the process will
-    # actually connect with, not from POSTGRES_PASSWORD. Compose embeds the
-    # password inside DATABASE_URL and never passes the separate variable to
-    # the API, so a check against the variable passed a deployment carrying
-    # `change-me` in the URL it was about to use.
-    #
-    # GRAFANA_ADMIN_PASSWORD is checked even though Grafana runs only under
-    # `--profile metrics` and this process cannot see which profiles are up.
-    # That is deliberately over-strict: compose publishes Grafana on host
-    # :3001, `--profile public --profile metrics` with a copied .env produced a
-    # platform that started cleanly beside an admin console on `admin/change-me`,
-    # and the cost of the strict direction is a refusal with a message saying
-    # exactly which variable to set.
-    placeholders = [
-        name
-        for name, value in (
-            ("TOKEN_HASH_PEPPER", settings.token_hash_pepper),
-            ("REGISTRATION_INVITE_TOKEN", settings.registration_invite_token),
-            ("DATABASE_URL password", settings.database_password),
-            ("GRAFANA_ADMIN_PASSWORD", settings.grafana_admin_password),
-            # D-087. A placeholder here is worse than a placeholder elsewhere:
-            # the token is the only thing standing between a public hostname and
-            # the process internals, and `change-me` is the first value anyone
-            # guessing would try.
-            ("METRICS_TOKEN", settings.metrics_token),
-        )
-        if value == PLACEHOLDER
-    ]
-    if not placeholders:
-        return
-    raise InsecureConfigurationError(
-        "Refusing to start: "
-        + ", ".join(placeholders)
-        + f" still set to {PLACEHOLDER!r} while the platform is publicly "
-        "reachable. Generate each with: openssl rand -hex 32"
-    )

@@ -112,6 +112,10 @@ def platform(
     """The application, sharing this test's rolled-back connection."""
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("TOKEN_HASH_PEPPER", "fault-gate-pepper")
+    # An hour of heartbeats arrives in seconds of wall time here; D-202's
+    # switch for accelerated simulations on loopback is what keeps the rate
+    # limiter, which counts real time, from refusing them.
+    monkeypatch.setenv("RATE_LIMITS", "off")
     app = create_app()
     app.dependency_overrides[get_connection] = lambda: rollback
     with TestClient(app) as client:

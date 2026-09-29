@@ -65,6 +65,8 @@ def test_defaults_come_from_the_settings(
     assert call["port"] == 8000
     assert call["log_level"] == "warning"
     assert call["timeout_graceful_shutdown"] == GRACEFUL_SHUTDOWN_TIMEOUT_S
+    # D-203: httptools, the default with uvicorn[standard], bounds no header.
+    assert call["http"] == "h11"
 
 
 def test_several_workers_start_when_the_metrics_directory_is_set(

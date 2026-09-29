@@ -2,7 +2,8 @@
 
 Reads and writes the credential columns of ``stations``
 (``deploy/migrations/sql/0002_stations.sql``): the token hash, when it was
-issued, and when it was revoked. ``meridian.store.stations`` owns the rest of
+issued, and when it was revoked, and the registration key's hash when a pepper
+rotation moves it (D-201). ``meridian.store.stations`` owns the rest of
 the row and writes the *first* token hash as part of creating a station; every
 rotation, revocation and authentication afterwards happens here.
 
@@ -24,6 +25,8 @@ from psycopg.rows import scalar_row
 __all__ = [
     "Connection",
     "find_station_id_by_token_hash",
+    "rehash_registration_key",
+    "rehash_station_token",
     "revoke_station_token",
     "rotate_station_token",
 ]
@@ -134,3 +137,57 @@ def find_station_id_by_token_hash(conn: Connection, token_sha256: bytes) -> str 
             (token_sha256,),
         )
         return cur.fetchone()
+
+
+def rehash_station_token(
+    conn: Connection,
+    *,
+    station_id: str,
+    old_token_sha256: bytes,
+    new_token_sha256: bytes,
+) -> bool:
+    """Store the same bearer token under a new pepper's hash (D-201).
+
+    Not a rotation: the station keeps the token it holds, so ``token_issued_at``
+    is left alone. Guarded on the old hash, so a revocation or a rotation that
+    landed in between is never overwritten by a token that is no longer current.
+
+    Returns:
+        Whether the row still held ``old_token_sha256`` and was moved.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            update stations
+            set token_sha256 = %s
+            where station_id = %s
+              and token_sha256 = %s
+              and token_revoked_at is null
+              and deleted_at is null
+            """,
+            (new_token_sha256, station_id, old_token_sha256),
+        )
+        return cur.rowcount > 0
+
+
+def rehash_registration_key(
+    conn: Connection, *, station_id: str, old_sha256: bytes, new_sha256: bytes
+) -> bool:
+    """Store the same registration key under a new pepper's hash (D-201).
+
+    Guarded on the old hash for the same reason as :func:`rehash_station_token`.
+
+    Returns:
+        Whether the row still held ``old_sha256`` and was moved.
+    """
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            update stations
+            set registration_key_sha256 = %s
+            where station_id = %s
+              and registration_key_sha256 = %s
+            """,
+            (new_sha256, station_id, old_sha256),
+        )
+        return cur.rowcount > 0
