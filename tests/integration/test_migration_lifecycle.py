@@ -368,3 +368,105 @@ def test_0015_adds_reception_evidence_across_a_compressed_chunk(
                 " 'satdump', 5)",
                 (bytes(32),),
             )
+
+
+def test_0021_backfills_noise_and_products_from_a_compressed_chunk(
+    scratch_database: str, monkeypatch
+) -> None:
+    """D-173, D-176: every floor and product already held gets its row.
+
+    Stops at 0020 and stores two observations old enough to be compressed, as a
+    deployment that has run for a week holds them. The first has an assignment,
+    a floor and four `products` elements, of which only two are valid. The
+    second has a floor but no assignment row, so there is no frequency to file
+    it under, and it gets no noise row. Both are then compressed before
+    upgrading.
+    """
+    monkeypatch.setenv("DATABASE_URL", scratch_database)
+    _upgrade_to(scratch_database, "0020")
+
+    waterfall = "ab" * 32
+    frames = "CD" * 32
+    products = (
+        f'[{{"kind": "waterfall", "uri": "station:products/{waterfall}",'
+        f' "sha256": "{waterfall}", "size_bytes": 2048}},'
+        ' {"kind": "image", "uri": "x"},'
+        f' {{"kind": "frames", "sha256": "{frames}", "size_bytes": "big"}},'
+        ' "not-an-object"]'
+    )
+    with psycopg.connect(scratch_database, autocommit=True) as conn:
+        conn.execute(
+            "insert into satellites (satellite_id, name) values ('norad:1', 'T')"
+        )
+        conn.execute(INSERT_STATION, ("st-old", "Old", 77.5, TOKEN_HASH, KEY_HASH))
+        conn.execute(
+            "insert into satellite_transmitters (satellite_id, centre_freq_hz,"
+            " mode, bandwidth_hz) values ('norad:1', 137100000, 'lrpt', 120000)"
+        )
+        element_set = conn.execute(
+            "insert into element_sets (satellite_id, epoch, line1, line2, source)"
+            " values ('norad:1', now() - interval '41 days', '1 1U', '2 1', 'manual')"
+            " returning id"
+        ).fetchone()
+        assert element_set is not None
+        pass_row = conn.execute(
+            "insert into passes (satellite_id, station_id, aos, los,"
+            " max_elevation_deg, max_elevation_at, aos_azimuth_deg,"
+            " los_azimuth_deg, element_set_id, min_elevation_deg)"
+            " values ('norad:1', 'st-old', now() - interval '40 days',"
+            " now() - interval '40 days' + interval '10 minutes', 40,"
+            " now() - interval '40 days' + interval '5 minutes', 10, 200, %s, 10)"
+            " returning id",
+            (element_set[0],),
+        ).fetchone()
+        assert pass_row is not None
+        conn.execute(
+            "insert into assignments (assignment_id, pass_id, station_id, start_at,"
+            " end_at, centre_freq_hz, mode, timing_uncertainty_s, reason)"
+            " values ('as-old', %s, 'st-old', now() - interval '40 days',"
+            " now() - interval '40 days' + interval '12 minutes', 137100000,"
+            " 'lrpt', 0.5, 'test')",
+            (pass_row[0],),
+        )
+        for assignment_id, products_json in (("as-old", products), ("as-orphan", "[]")):
+            conn.execute(
+                "insert into observations (assignment_id, revision, started_at,"
+                " ended_at, station_id, satellite_id, outcome, content_sha256,"
+                " noise_floor_dbfs, receiver_gain_db, products_json, simulated)"
+                " values (%s, 1, now() - interval '40 days',"
+                " now() - interval '40 days' + interval '12 minutes', 'st-old',"
+                " 'norad:1', 'no_signal', %s, -52.3, 32.8, %s::jsonb, true)",
+                (assignment_id, bytes(32), products_json),
+            )
+        for (chunk,) in conn.execute(
+            "select show_chunks('observations', older_than => interval '7 days')"
+        ).fetchall():
+            conn.execute("select compress_chunk(%s)", (chunk,))
+
+    _upgrade_to_head(scratch_database)
+
+    with psycopg.connect(scratch_database, autocommit=True) as conn:
+        noise = conn.execute(
+            "select assignment_id, revision, source, centre_freq_hz, bandwidth_hz,"
+            " azimuth_deg, noise_floor_dbfs, receiver_gain_db, simulated"
+            " from noise_measurements"
+        ).fetchall()
+        assert noise == [
+            ("as-old", 1, "observation", 137100000, 120000, None, -52.3, 32.8, True)
+        ]
+
+        stored = conn.execute(
+            "select element_index, kind, encode(sha256, 'hex'), size_bytes, uri,"
+            " simulated from products order by element_index"
+        ).fetchall()
+        assert stored == [
+            (0, "waterfall", waterfall, 2048, f"station:products/{waterfall}", True),
+            (2, "frames", frames.lower(), None, None, True),
+        ]
+
+        # products_json is still the verbatim record, invalid elements included.
+        kept = conn.execute(
+            "select jsonb_array_length(products_json) from observations"
+            " where assignment_id = 'as-old'"
+        ).fetchone()
+        assert kept == (4,)

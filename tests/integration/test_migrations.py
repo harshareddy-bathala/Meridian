@@ -109,24 +109,23 @@ def test_all_expected_tables_exist(conn) -> None:
         "archive_observations",
         # Stage 20's record of every classified pass (0020, D-182).
         "pass_classifications",
-    }
-    assert expected <= tables
-
-    # Deferred, and their absence is deliberate — see D-018.
-    deferred = {
-        "products",
+        # Stage 18's scheduler runs (0018, D-170).
+        "schedule_runs",
+        # D-018's four deferred tables, built at Stage 19 once each had a
+        # producer and a consumer (0021, D-173, D-174, D-176).
         "noise_measurements",
         "horizon_profiles",
         "interference_profiles",
+        "products",
     }
-    assert not (deferred & tables)
+    assert expected <= tables
 
 
 def test_observations_and_heartbeats_are_hypertables(conn) -> None:
     with conn.cursor() as cur:
         cur.execute("select hypertable_name from timescaledb_information.hypertables")
         hypertables = {r[0] for r in cur.fetchall()}
-    assert {"observations", "heartbeats"} <= hypertables
+    assert {"observations", "heartbeats", "noise_measurements"} <= hypertables
 
 
 def test_heartbeats_partitions_on_platform_clock(scalar) -> None:
@@ -172,6 +171,10 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:
         "observations",
         "heartbeats",
         "pass_classifications",
+        "noise_measurements",
+        "horizon_profiles",
+        "interference_profiles",
+        "products",
     } <= carrying
     # D-049: element_sets is the deliberate exception. Its provenance lives in
     # `source`, which distinguishes celestrak from spacetrack from manual as
@@ -1117,3 +1120,226 @@ def test_a_classification_is_held_once_per_method_and_configuration(
             " satellite_id, window_start, window_end, 'station_unavailable',"
             " evidence, method, config_sha256, simulated from pass_classifications"
         )
+
+
+# --- 0021, the deferred tables ------------------------------------------------
+
+
+def _insert_observation(execute: Any, assignment_id: str = "as_stored") -> Any:
+    """One observation of the fixture station, returning its started_at.
+
+    `observations` has no foreign key to `assignments`, so none is needed here.
+    """
+    rows = execute(
+        "insert into observations (assignment_id, revision, started_at, ended_at,"
+        " station_id, satellite_id, outcome, content_sha256)"
+        " values (%s, 1, now() - interval '1 hour', now() - interval '50 minutes',"
+        " 'st_fixture', 'norad:99999', 'no_signal', %s)"
+        " returning started_at",
+        assignment_id,
+        ZERO_HASH,
+    )
+    return rows[0][0]
+
+
+def _insert_noise(execute: Any, **overrides: object) -> None:
+    """One noise row: an observation's floor unless ``overrides`` say otherwise."""
+    row: dict[str, object] = {
+        "source": "observation",
+        "assignment_id": "as_noise",
+        "revision": 1,
+        "azimuth_deg": None,
+        "noise_floor_dbfs": -52.3,
+    }
+    row.update(overrides)
+    execute(
+        "insert into noise_measurements (station_id, measured_at, source,"
+        " assignment_id, revision, centre_freq_hz, azimuth_deg, noise_floor_dbfs,"
+        " receiver_gain_db, simulated)"
+        " values ('st_fixture', now(), %s, %s, %s, 137100000, %s, %s, 32.8, false)",
+        row["source"],
+        row["assignment_id"],
+        row["revision"],
+        row["azimuth_deg"],
+        row["noise_floor_dbfs"],
+    )
+
+
+def test_an_observation_floor_names_its_reception(fixtures) -> None:
+    """D-173: an observation's row names the reception; a sweep's names none."""
+    _insert_noise(fixtures)
+    _insert_noise(fixtures, source="survey", assignment_id=None, revision=None)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_noise(fixtures, assignment_id=None, revision=None)
+
+
+def test_a_sweep_cannot_claim_a_reception(fixtures) -> None:
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_noise(fixtures, source="survey")
+
+
+def test_an_observation_floor_claims_no_direction(fixtures) -> None:
+    """D-173: one floor covers a whole pass, so it was pointed nowhere."""
+    _insert_noise(
+        fixtures, source="survey", assignment_id=None, revision=None, azimuth_deg=90.0
+    )
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_noise(fixtures, azimuth_deg=90.0)
+
+
+def test_an_infinite_floor_is_refused(fixtures) -> None:
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_noise(fixtures, noise_floor_dbfs=float("-inf"))
+
+
+def _insert_horizon(execute: Any, **overrides: object) -> None:
+    """One learned bin unless ``overrides`` say otherwise."""
+    row: dict[str, object] = {
+        "source": "learned",
+        "capability_id": None,
+        "dataset_sha256": ZERO_HASH,
+        "trained_from": "2026-08-01T00:00:00Z",
+        "trained_until": "2026-09-01T00:00:00Z",
+        "sample_count": 4,
+        "azimuth_deg": 0.0,
+    }
+    row.update(overrides)
+    execute(
+        "insert into horizon_profiles (station_id, source, method, capability_id,"
+        " dataset_sha256, trained_from, trained_until, azimuth_deg,"
+        " azimuth_width_deg, min_elevation_deg, sample_count, simulated)"
+        " values ('st_fixture', %s, 'test-1', %s, %s, %s, %s, %s, 10, 6.5, %s,"
+        " false)",
+        row["source"],
+        row["capability_id"],
+        row["dataset_sha256"],
+        row["trained_from"],
+        row["trained_until"],
+        row["azimuth_deg"],
+        row["sample_count"],
+    )
+
+
+def _insert_capability(execute: Any) -> Any:
+    rows = execute(
+        "insert into station_capabilities (station_id, band, freq_min_hz,"
+        " freq_max_hz, modes, polarisation, min_elevation_deg)"
+        " values ('st_fixture', 'vhf', 136000000, 138000000, '{lrpt}', 'rhcp', 10)"
+        " returning id"
+    )
+    return rows[0][0]
+
+
+def test_a_learned_profile_is_built_once_per_dataset(fixtures) -> None:
+    """D-174: a dataset identifies a learned profile, so a rebuild is refused."""
+    _insert_horizon(fixtures)
+    _insert_horizon(fixtures, azimuth_deg=10.0)
+    _insert_horizon(fixtures, dataset_sha256=OTHER_HASH)
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _insert_horizon(fixtures)
+
+
+def test_a_declared_bin_carries_no_learned_provenance(fixtures) -> None:
+    """D-031, D-174: declared and learned are never the same row."""
+    capability = _insert_capability(fixtures)
+    _insert_horizon(
+        fixtures,
+        source="declared",
+        capability_id=capability,
+        dataset_sha256=None,
+        trained_from=None,
+        trained_until=None,
+        sample_count=None,
+    )
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_horizon(
+            fixtures,
+            source="declared",
+            capability_id=capability,
+            trained_from=None,
+            trained_until=None,
+            sample_count=None,
+            azimuth_deg=20.0,
+        )
+
+
+def test_a_learned_bin_names_its_dataset_and_count(fixtures) -> None:
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_horizon(fixtures, sample_count=None)
+
+
+def _insert_interference(
+    execute: Any, sample_count: int, gains: tuple[float | None, float | None]
+) -> None:
+    execute(
+        "insert into interference_profiles (station_id, method, dataset_sha256,"
+        " trained_from, trained_until, azimuth_deg, azimuth_width_deg, hour_start,"
+        " hour_width, noise_lift_db, station_median_dbfs, sample_count,"
+        " gain_min_db, gain_max_db, simulated)"
+        " values ('st_fixture', 'test-1', %s, '2026-08-01Z', '2026-09-01Z',"
+        " 45, 45, %s, 4, 1.5, -52.0, %s, %s, %s, false)",
+        ZERO_HASH,
+        4 * sample_count % 24,
+        sample_count,
+        gains[0],
+        gains[1],
+    )
+
+
+def test_an_interference_cell_states_the_gains_behind_it(fixtures) -> None:
+    """D-174: Stage 27 compares at the same gain, so a cell says which."""
+    _insert_interference(fixtures, 0, (None, None))
+    _insert_interference(fixtures, 3, (20.0, 32.8))
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_interference(fixtures, 2, (None, None))
+
+
+def test_an_empty_interference_cell_states_no_gain(fixtures) -> None:
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_interference(fixtures, 0, (32.8, 32.8))
+
+
+def _insert_product(execute: Any, started_at: Any, index: int = 0) -> None:
+    execute(
+        "insert into products (assignment_id, revision, observation_started_at,"
+        " station_id, element_index, kind, sha256, size_bytes, simulated)"
+        " values ('as_stored', 1, %s, 'st_fixture', %s, 'waterfall', %s, 1024,"
+        " false)",
+        started_at,
+        index,
+        ZERO_HASH,
+    )
+
+
+def test_a_product_belongs_to_a_stored_observation(fixtures) -> None:
+    """D-176: the foreign key into the hypertable holds."""
+    started_at = _insert_observation(fixtures)
+    _insert_product(fixtures, started_at)
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        _insert_product(fixtures, "2020-01-01T00:00:00Z", index=1)
+
+
+def test_one_row_per_submitted_element(fixtures) -> None:
+    started_at = _insert_observation(fixtures)
+    _insert_product(fixtures, started_at)
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _insert_product(fixtures, started_at)
+
+
+def test_no_deferred_table_has_a_retention_policy(conn) -> None:
+    """D-178: nothing that holds evidence is dropped on a timer."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "select hypertable_name from timescaledb_information.jobs"
+            " where proc_name = 'policy_retention'"
+        )
+        retained = {r[0] for r in cur.fetchall()}
+    assert not retained
+
+
+def test_the_profiles_and_products_are_plain_tables(conn) -> None:
+    """Their volume is profiles built and receptions, not heartbeats."""
+    with conn.cursor() as cur:
+        cur.execute("select hypertable_name from timescaledb_information.hypertables")
+        hypertables = {r[0] for r in cur.fetchall()}
+    assert not ({"horizon_profiles", "interference_profiles", "products"} & hypertables)
