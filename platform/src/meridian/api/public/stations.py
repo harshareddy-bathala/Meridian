@@ -1,7 +1,8 @@
 """``/api/v1/stations`` — the directory, and what is known about one station.
 
-Five read endpoints: the paged list, one station, the hardware it declared, its
-liveness on its own, and the heartbeats it has sent. Every one of them is thin by
+Six read endpoints: the paged list, one station, the hardware it declared, its
+liveness on its own, the heartbeats it has sent, and its horizon and
+interference profiles (D-174). Every one of them is thin by
 rule — it reads through ``meridian.store``, hands the rows to a model in
 ``meridian.api.public.models``, and returns. No decision about what a station
 *is* is made here.
@@ -11,7 +12,7 @@ classified against the same instant (D-054). Paging is keyset: the route asks fo
 one row more than the page needs and trims, which is how "is there another page"
 is answered by evidence rather than by guessing from a full page (D-085).
 
-Reference: docs/DECISIONS.md D-082, D-083, D-084, D-085; docs/PROJECT.md §13.
+Reference: docs/DECISIONS.md D-082, D-083, D-084, D-085, D-174; docs/PROJECT.md §13.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from meridian.api.public.models import (
     PublicHeartbeat,
     PublicStation,
 )
+from meridian.api.public.models.profiles import PublicStationProfiles
 from meridian.api.public.models.stations import StationLiveness
 from meridian.api.public.pagination import (
     PageRequest,
@@ -37,6 +39,7 @@ from meridian.api.public.pagination import (
     trim_overfetch,
 )
 from meridian.store.heartbeats import find_heartbeats_before
+from meridian.store.profiles import find_station_profiles
 from meridian.store.station_capabilities import find_capabilities_for_station
 from meridian.store.station_directory import (
     DirectoryStation,
@@ -157,6 +160,29 @@ def get_station_capabilities(
         PublicCapability.from_row(row)
         for row in find_capabilities_for_station(conn, station_id)
     ]
+
+
+@router.get("/stations/{station_id}/profiles")
+def get_station_profiles(
+    station_id: str, conn: Connection = Depends(get_connection, scope="function")
+) -> PublicStationProfiles:
+    """The station's declared and learned horizon, and its interference.
+
+    Args:
+        station_id: The station to look up.
+        conn: A pooled connection, injected.
+
+    Returns:
+        The newest of each, with null for a learned profile not yet built and
+        an empty list when no capability declares a mask.
+
+    Raises:
+        PublicError: ``not_found`` when there is no such station.
+    """
+    station = _station_or_404(conn, station_id)
+    return PublicStationProfiles.from_row(
+        station.station_id, station.simulated, find_station_profiles(conn, station_id)
+    )
 
 
 @router.get("/stations/{station_id}/liveness")

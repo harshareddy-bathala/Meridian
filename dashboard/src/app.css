@@ -192,3 +192,40 @@ tr.selected {
 .badge-skipped {
   color: var(--dim);
 }
+
+/* The sky plot. Neutral tokens only: the signal colours mean above and below
+   horizon for a pass, and a horizon profile is not a pass. */
+.horizon {
+  margin: 1rem 0;
+  max-width: 18rem;
+}
+
+.horizon svg {
+  width: 100%;
+  height: auto;
+}
+
+.horizon-ring {
+  fill: none;
+  stroke: var(--rule);
+  stroke-width: 0.6;
+}
+
+.horizon-learned {
+  fill: var(--dim);
+  fill-opacity: 0.25;
+  stroke: var(--dim);
+  stroke-width: 0.8;
+}
+
+.horizon-declared {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 3;
+}
+
+.horizon-label {
+  fill: var(--dim);
+  font-size: 9px;
+}

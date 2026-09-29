@@ -1,4 +1,6 @@
 import { formatAge, formatFrequency, formatWindow } from "./format";
+import { HorizonPlot } from "./HorizonPlot";
+import type { StationProfiles } from "./profiles";
 import { describeValue, type Assignment, type LatestHeartbeat } from "./schedule";
 import type { Station } from "./stations";
 import { useStationDetail } from "./useStationDetail";
@@ -84,13 +86,25 @@ function Assignments({ assignments, showStation }: { assignments: Assignment[]; 
   );
 }
 
+function StationHorizon({ profiles }: { profiles: StationProfiles | null }) {
+  if (profiles === null) {
+    return null;
+  }
+  return (
+    <>
+      <h3>Horizon</h3>
+      <HorizonPlot profiles={profiles} />
+    </>
+  );
+}
+
 interface DetailProps {
   station: Station | null;
   onClear: () => void;
 }
 
 export function StationDetail({ station, onClear }: DetailProps) {
-  const { heartbeat, assignments, error } = useStationDetail(station?.stationId ?? null);
+  const { heartbeat, assignments, profiles, error } = useStationDetail(station?.stationId ?? null);
   return (
     <section aria-labelledby="detail-heading" className="station-detail">
       <h2 id="detail-heading">
@@ -110,6 +124,7 @@ export function StationDetail({ station, onClear }: DetailProps) {
       ) : (
         <Assignments assignments={assignments} showStation={station === null} />
       )}
+      <StationHorizon profiles={profiles} />
     </section>
   );
 }
