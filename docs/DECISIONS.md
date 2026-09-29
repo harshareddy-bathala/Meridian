@@ -4035,6 +4035,127 @@ A figure the platform cannot give is never a zero or a bare null (D-086).
 
 ---
 
+## D-220 — Stage 31's sources: one provider per class, registered off, asked about places from settings
+
+**2026-09-29 · accepted** · *`ingest/src/meridian_ingest/adapters/public/`, `ATTRIBUTION.md`, Stage 31*
+
+D-132 names classes, not vendors. Stage 31 has to name one provider per class to write an adapter against, and says here which and why, so the choice can change without re-deciding the class.
+
+| Class | Source id | Provider and product | Access |
+|---|---|---|---|
+| Geomagnetic and solar indices | `noaa_swpc_kp` | NOAA SWPC estimated planetary K index, rolling week, JSON | none |
+| Local atmospheric conditions | `open_meteo_cloud` | Open-Meteo forecast API, hourly `cloud_cover` | none, limits per client |
+| Imagery tiles (display only) | `nasa_gibs` | NASA GIBS WMTS true colour, EPSG:4326, JPEG | none |
+| Active fires | `nasa_firms` | NASA FIRMS area API, VIIRS S-NPP NRT, CSV | key, counted |
+| Vegetation | `ornl_modis_ndvi` | ORNL DAAC MODIS/VIIRS subsets, MOD13Q1 NDVI | none |
+| Precipitation | `nasa_power_precipitation` | NASA POWER daily point, `PRECTOTCORR` | none |
+| Aerosol | `open_meteo_aerosol` | Open-Meteo air-quality API (CAMS), `aerosol_optical_depth` | none, the same limits |
+| Night-time lights | `nasa_black_marble` | NASA Black Marble VNP46A3 from LAADS, HDF-EOS5 | registration (Earthdata token) |
+| Indian geoportal (display only) | `isro_bhuvan` | ISRO Bhuvan WMS map images, PNG | none for viewing |
+
+**Chosen for the format as much as the data.** Every data product here is JSON or CSV except night-time lights, which is published in HDF5 only (D-226). A provider whose only format needs a GIS stack we do not carry was passed over for one that publishes the same class in a format the standard library reads. Several of the roadmap's "registration for downloads" classes turned out to have a no-key path to an equivalent product; the adapter records the access it actually uses.
+
+**Bhuvan is display only, because its terms say so.** Bhuvan's terms, as we could read them, provide its image data, map data and related content *for viewing purposes only*, with no other use unless NRSC permits it. So its adapter obtains map images as tiles, and its normaliser refuses even an artefact mislabelled as data: what may be derived is decided by the source's terms, not by a label an adapter could get wrong. An Indian regional *data* product is a separate source, adopted when its terms permit derivation.
+
+**Every real source is registered disabled.** With no settings file, `meridian-ingest fetch` still reaches only the reference archive; a real source is fetched when an operator enables or names it. Places — `points`, `bbox`, imagery `layers` — come from the settings file, never from an adapter's literal.
+
+**A point is rounded before it is sent**, to two decimals of a degree (about a kilometre), and POWER's to one, since its grid is half a degree. A point is often a station, and D-082 lets an owner publish a station's position less precisely than we hold it; sending it exactly to a third party would publish it in their logs.
+
+**The terms were read from quotations.** The build environment's network policy refused every provider's host, so each licence and terms entry in `ATTRIBUTION.md` was written from the provider's published statement as a search index quoted it, with the page named. An operator re-reads each page before the first live fetch of its source. The fixtures are synthetic and ours (D-142), so nothing here has yet been retrieved.
+
+*Rejected: a vendor per class written into this decision.* Changing provider would then change a decision, which is the coupling D-132 exists to avoid; the table above is a record of what was built, and the adapters are where it changes.
+
+---
+
+## D-221 — Published values are `environment_samples`, and a missing value is a row that says so
+
+**2026-09-29 · accepted** · *migration 0030, `meridian.store.environment_samples`, `meridian_ingest.normalise.samples`, `DATA-MODEL.md`*
+
+`DATA-MODEL.md` planned `environment_samples` as the one normalised table the features read. It is built as planned, with four changes of detail:
+
+- **`series_key`, `transformation_version` and `content_sha256`**, keyed `(record_id, series_key, transformation_version)` — the same append-only discipline as `archive_observations` (D-140), and the same refusal of a normaliser that disagrees with itself (D-142).
+- **`observed_from` and `observed_to`**, not `observed_at`: a Kp interval is three hours and a composite sixteen days, and the pre-pass rule needs both ends (D-222).
+- **Location as `lat_deg`, `lon_deg` and `footprint_m`**, not `area_id`. Stage 31 stores what the source published about a point or a pixel; which area of interest a value falls in is Stage 32's computation, over these rows, not a column Stage 31 could fill.
+- **`product`**, the source's product name and version, and `quality`, its own flag, verbatim — what a series cites beside every point.
+
+**A missing value is a row with `value` null and a `missing_reason`**, never a zero and never an absent row; a CHECK makes exactly one of the two present. "The source published a gap for this hour" and "we never asked about this hour" are different facts, and the pre-pass rule must not fall back to an older value across a published gap — which it could not avoid if gaps were simply absent.
+
+**A tile never becomes a row.** The loader skips a tile before a normaliser runs, and a display-only source's normaliser refuses anyway (D-133, D-220).
+
+**A detection source records what it covered.** A FIRMS artefact carries its day in `valid_from`/`valid_to` and its box in `spatial_extent`, so "no fires on a covered day" can be told from "no fetch" from the provenance alone.
+
+*Rejected: one table per quantity.* Every quantity has the same shape and the same rules; nine tables would be nine places for the pre-pass rule to be implemented slightly differently.
+
+---
+
+## D-222 — When a value was published, and which value a pass may read
+
+**2026-09-29 · accepted** · *`meridian_ingest.normalise.samples`, `meridian.prediction.conditions`, `meridian.store.snapshot_reads`*
+
+D-131 says a feature value is the one published before the pass. That needs a publication time, and most sources do not state one.
+
+**`published_at` is never later than our own retrieval.** Where the artefact declares when it was produced — an NDVI composite's `proc_date`, a Black Marble granule's production time — and that precedes our fetch, the declaration is used and `published_basis` is `source_declared`. Otherwise `published_at` is `retrieved_at`, basis `retrieved`: the value existed, as far as we can prove, when we fetched it. A declaration *after* our fetch is a clock that is wrong, and the earlier instant is the only defensible one. Consequence, stated rather than hidden: a value backfilled after a pass is never that pass's feature, however likely it is the source had it earlier. Features accumulate going forward from when ingest starts following a source (D-225).
+
+**A revision is a row.** Every fetch that differs is a new artefact (D-141), so a revised interval gets a second row with a later `published_at`; nothing is updated.
+
+**The rule** (`value_before`): candidates are the rows of the quantity published strictly before the pass began, describing an interval begun by then, and near enough the station for a local quantity. Among them the nearest wins, then the latest interval, then the latest revision published before the pass. The chosen row gives no value if it does not describe the pass — a forecast that does not cover the pass's hour, an index older than its rule allows — or if it is a published gap. Kp takes the latest interval begun, up to six hours old; cloud cover takes the hour containing the pass, from a cell within 25 km.
+
+**A snapshot carries only what was published before its `as_of`**, and values describing time from a week before its `since`, with the artefacts they cite and those artefacts' terms in the manifest.
+
+---
+
+## D-223 — A key is presented only at the socket, and a published limit is honoured before it is reached
+
+**2026-09-29 · accepted** · *`meridian_ingest.retrieval`, `http_retriever`, `rate_ledger`, Stage 31*
+
+**Keys.** FIRMS takes its key in the URL path; LAADS in an `Authorization` header. An adapter plans `{key}` where the key goes, and the HTTP retriever substitutes it from the environment at the moment of the request. The key is never on a planned artefact, a manifest, a row or a ledger, and every message the retriever raises has it replaced — including a transport error that quotes the URL it failed on. A planned artefact that needs a key, with none supplied, stops before any request. The variable a key is read from defaults per source (`FIRMS_MAP_KEY`, `EARTHDATA_TOKEN`) and may be renamed in the settings file; `<NAME>_FILE` wins, as D-114 established.
+
+**Limits.** A source's own published limits — FIRMS's 5 000 transactions per ten minutes, Open-Meteo's 600 a minute, 5 000 an hour and 10 000 a day — are declared on its registration and enforced by a ledger of request instants under the raw root, which survives between runs because the source counts across them. We allow ourselves 90% of each window, since the source also counts requests we cannot see. A request that would cross a window waits if the slot reopens within the retry policy's longest delay, and otherwise stops the fetch with the time to come back. The per-fetch request budget (D-134) still applies to every source, limits or not. `meridian-ingest sources` prints each window with what remains.
+
+Two sources sharing one allowance — Open-Meteo's two endpoints are limited per client — share one ledger.
+
+*Rejected: discovering the limit by being refused.* A 429 costs a request the source counted, and a key that is refused repeatedly can be revoked.
+
+---
+
+## D-224 — The conditions feature group: Kp and cloud cover, from snapshots only, missing as an indicator
+
+**2026-09-29 · accepted** · *`meridian.prediction.conditions`, `features.py`, `EVALUATION.md` §3. Fills the group D-160 named.*
+
+**Four features in the `conditions` group**: `kp_index`, `kp_known`, `cloud_cover_pct`, `cloud_cover_known`, chosen by D-222's rule. Only configuration D reads the group, so A, B and C are unchanged, and SC-1 is still D − B. `EVALUATION.md` §3 said the group joins C and D; D-160 has since fixed C as our features only, so §3 is amended to say D.
+
+**Read from snapshots, never live.** The features are computed from a raw snapshot's `environment_samples.jsonl`, as every other feature is from its snapshot (D-157). Live scoring reads the newest labelled dataset's snapshot, so a live pass reads the latest value that snapshot holds — often too old to be a value, which is honest. Nothing on the scheduling path opens a connection to a source, and no pass is skipped because of any value (D-131).
+
+**Missing is `(0, known = 0)`.** A model needs a number. With the indicator beside it, a linear model's fill constant is absorbed by the indicator's coefficient, so the 0 is not a claim about the sky. The value and its reason stay in the snapshot for anyone asking why a pass read nothing.
+
+**Not built:** D-131's leave-one-group-out run, D without this group, reported beside the four configurations. It needs a configuration key and a model of real data; there is no model of real data yet (Stage 17), and the key is owed with the first fit that could use it.
+
+---
+
+## D-225 — Near real time is `meridian-ingest follow`, on the ingest machine, never in the jobs service
+
+**2026-09-29 · accepted** · *`meridian_ingest.cli_follow`, `docs/OPERATIONS.md`*
+
+Each registered source declares a cadence and a lookback. `meridian-ingest follow` runs rounds: every enabled source whose newest retrieval is older than its cadence is asked for `[now − lookback, now)`, and what arrived is loaded. `--once` is one round, for cron; without it, rounds repeat. A source that fails does not stop the round.
+
+**It runs where `meridian-ingest` is installed**, which is never the platform image (D-138). The jobs service schedules passes; a source that hangs must not delay a schedule, and one that is down must not change one. What `follow` loads, the next snapshot carries.
+
+Cadences: Kp and cloud cover hourly, aerosol and fires every three hours, the daily and composite products daily, Bhuvan weekly. Lookbacks cover a missed run — two days for fires, 48 for NDVI composites, 62 for monthly lights.
+
+---
+
+## D-226 — HDF5 through an optional extra, and night-time lights as 0.1° block means
+
+**2026-09-29 · accepted** · *`meridian-ingest[hdf5]`, `adapters/public/black_marble*.py`*
+
+Black Marble is published in HDF-EOS5 only. `h5py` (BSD-3-Clause, with NumPy) is an **optional extra**, `meridian-ingest[hdf5]`, imported by one module; without it the normaliser refuses by name. The dev group installs it so the tests run.
+
+**Resampling is stated, not hidden.** A 10° tile is 5.76 million pixels and no area is watched at that grain, so each stored value is the mean of the valid pixels in a 0.1° block, with the pixel count in `quality`; a block with fewer than half its pixels valid is stored as missing with the count in its reason. The method is in `product`, so a series drawn from it cites it.
+
+**Granules are named from a stored listing.** A granule's name carries its production time, so the adapter plans the month's directory listing, stores it like any artefact, and names granules from it — the listing is provenance for which granules were asked for.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
