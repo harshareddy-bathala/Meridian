@@ -62,15 +62,21 @@ class AreaArrival:
 
     area_id: int
     written: bool
+    active: bool = True
+    """False when the shape was already held by an area since retired."""
 
 
 @dataclass(frozen=True, slots=True)
 class _AreaId:
     area_id: int
+    active: bool = True
 
 
 def insert_area(conn: Connection, area: NewAreaRow) -> AreaArrival:
     """Register an area, or return the one already holding this exact shape.
+
+    A retired area keeps its shape: re-adding it returns the retired area and
+    says so, rather than a new id for ground whose series already exist.
 
     Args:
         conn: An open connection.
@@ -100,14 +106,14 @@ def insert_area(conn: Connection, area: NewAreaRow) -> AreaArrival:
         if inserted is not None:
             return AreaArrival(inserted.area_id, written=True)
         cur.execute(
-            "select area_id from areas_of_interest where geometry_sha256 = %s",
+            "select area_id, active from areas_of_interest where geometry_sha256 = %s",
             (area.geometry_sha256,),
         )
         held = cur.fetchone()
     if held is None:  # pragma: no cover — the conflict proves the row
         message = "insert conflicted but the conflicting area is not readable"
         raise RuntimeError(message)
-    return AreaArrival(held.area_id, written=False)
+    return AreaArrival(held.area_id, written=False, active=held.active)
 
 
 def list_areas(conn: Connection) -> list[StoredArea]:

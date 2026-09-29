@@ -6,6 +6,7 @@ Reference: docs/DECISIONS.md D-227, D-229, D-232.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -25,6 +26,7 @@ from meridian.store.areas_of_interest import (  # noqa: E402
 from meridian.store.region_alerts import (  # noqa: E402
     NewRegionAlert,
     find_deliveries,
+    insert_region_alert,
 )
 from meridian.store.snapshot_reads import (  # noqa: E402
     SNAPSHOT_TABLES,
@@ -112,6 +114,7 @@ def test_an_alert_is_recorded_once_and_delivered_once(rollback: Any) -> None:
     first = record_alerts(rollback, [alert], RecordOnlyDelivery())
     again = record_alerts(rollback, [alert], RecordOnlyDelivery())
     assert (first.written, again.written) == (1, 0)
+    assert (first.delivered, again.delivered) == (1, 0)
     deliveries = find_deliveries(rollback, alert.alert_id)
     assert [(one.channel, one.outcome) for one in deliveries] == [
         ("record_only", "recorded")
@@ -119,7 +122,7 @@ def test_an_alert_is_recorded_once_and_delivered_once(rollback: Any) -> None:
     assert "Stage 29" in deliveries[0].detail
 
 
-def test_an_alert_whose_interval_excludes_its_change_is_refused(rollback: Any) -> None:
+def test_an_alert_whose_interval_is_out_of_order_is_refused(rollback: Any) -> None:
     area_id = insert_area(rollback, area_row()).area_id
     bad = an_alert(area_id)
     with pytest.raises(psycopg.errors.CheckViolation), rollback.transaction():
@@ -128,7 +131,7 @@ def test_an_alert_whose_interval_excludes_its_change_is_refused(rollback: Any) -
             " baseline_from, baseline_until, current_from, current_until,"
             " baseline_value, current_value, change, change_low, change_high,"
             " threshold, report_sha256, summary) values"
-            " (%s, %s, 'ndvi', 'relative', %s, %s, %s, %s, 1, 1, 0.5, -0.1, 0.1,"
+            " (%s, %s, 'ndvi', 'relative', %s, %s, %s, %s, 1, 1, 0.5, 0.1, -0.1,"
             " 0.2, %s, 's')",
             (
                 bad.alert_id,
@@ -140,6 +143,35 @@ def test_an_alert_whose_interval_excludes_its_change_is_refused(rollback: Any) -
                 bad.report_sha256,
             ),
         )
+
+
+def test_an_alert_whose_change_lies_outside_its_interval_is_recorded(
+    rollback: Any,
+) -> None:
+    """A percentile bootstrap does not promise to hold its own point estimate."""
+    area_id = insert_area(rollback, area_row()).area_id
+    skewed = replace(an_alert(area_id), change=-0.36)
+    assert record_alerts(rollback, [skewed], RecordOnlyDelivery()).written == 1
+
+
+def test_an_alert_left_without_a_delivery_is_delivered_by_the_next_run(
+    rollback: Any,
+) -> None:
+    area_id = insert_area(rollback, area_row()).area_id
+    alert = an_alert(area_id)
+    assert insert_region_alert(rollback, alert), "recorded, then the run stopped"
+    resumed = record_alerts(rollback, [alert], RecordOnlyDelivery())
+    assert (resumed.written, resumed.delivered) == (0, 1)
+    assert len(find_deliveries(rollback, alert.alert_id)) == 1
+    again = record_alerts(rollback, [alert], RecordOnlyDelivery())
+    assert again.delivered == 0
+
+
+def test_re_adding_a_retired_shape_says_it_is_retired(rollback: Any) -> None:
+    area_id = insert_area(rollback, area_row()).area_id
+    retire_area(rollback, area_id)
+    again = insert_area(rollback, area_row())
+    assert (again.area_id, again.written, again.active) == (area_id, False, False)
 
 
 def test_a_snapshot_carries_areas_without_their_notes(rollback: Any) -> None:

@@ -133,7 +133,13 @@ def _add(conn: Connection, _args: argparse.Namespace, area: NewArea | None) -> i
             notes=area.notes,
         ),
     )
-    held = "registered" if arrival.written else "already registered with this shape"
+    held = (
+        "registered"
+        if arrival.written
+        else "already registered with this shape"
+        if arrival.active
+        else "already registered with this shape, and retired"
+    )
     _say(f"area {arrival.area_id} {held}: {area.label} ({area.area_km2:.1f} km²)")
     return 0
 
@@ -160,8 +166,9 @@ def _record(conn: Connection, args: argparse.Namespace, _area: NewArea | None) -
     recorded = record_alerts(conn, alerts, RecordOnlyDelivery())
     _say(
         f"{recorded.written} of {recorded.alerts} alerts recorded; "
-        f"{recorded.alerts - recorded.written} were already held. Delivery is "
-        "record-only until Stage 29."
+        f"{recorded.alerts - recorded.written} were already held; "
+        f"{recorded.delivered} handed to delivery, which is record-only until "
+        "Stage 29."
     )
     return 0
 

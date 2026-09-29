@@ -33,6 +33,7 @@ from meridian.datasets.manifest import content_sha256
 from meridian.datasets.publish import read_directory
 from meridian.store.region_alerts import (
     NewRegionAlert,
+    find_deliveries,
     insert_delivery,
     insert_region_alert,
 )
@@ -88,6 +89,9 @@ class RecordingReport:
 
     alerts: int
     written: int
+    delivered: int
+    """Alerts handed to the delivery this time: every new one, and any held
+    one that no attempt was ever recorded for."""
 
 
 def read_alerts(report_dir: Path) -> list[NewRegionAlert]:
@@ -112,20 +116,25 @@ def read_alerts(report_dir: Path) -> list[NewRegionAlert]:
 def record_alerts(
     conn: Connection, alerts: list[NewRegionAlert], delivery: AlertDelivery
 ) -> RecordingReport:
-    """Record each alert and hand each new one to ``delivery``.
+    """Record each alert and hand each undelivered one to ``delivery``.
 
-    An alert already recorded is neither written nor delivered again.
+    An alert is written once. It is delivered once too, judged by its recorded
+    attempts rather than by whether this call wrote it: a run that stopped
+    between recording an alert and recording its delivery leaves an alert with
+    no attempt, and the next run delivers it instead of passing it by.
     """
-    written = 0
+    written = delivered = 0
     for alert in alerts:
-        if not insert_region_alert(conn, alert):
+        if insert_region_alert(conn, alert):
+            written += 1
+        elif find_deliveries(conn, alert.alert_id):
             continue
-        written += 1
+        delivered += 1
         outcome = delivery.deliver(alert)
         insert_delivery(
             conn, alert.alert_id, outcome.channel, outcome.outcome, outcome.detail
         )
-    return RecordingReport(alerts=len(alerts), written=written)
+    return RecordingReport(alerts=len(alerts), written=written, delivered=delivered)
 
 
 def _alert(row: dict[str, object], report_sha: bytes) -> NewRegionAlert:
