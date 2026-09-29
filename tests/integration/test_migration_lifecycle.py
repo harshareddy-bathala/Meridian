@@ -63,7 +63,10 @@ def scratch_database(database_url: str) -> Iterator[str]:
                 "where datname = %s",
                 (name,),
             )
-            cur.execute(f'drop database if exists "{name}"')
+            # `with (force)` as well as the terminate above: TimescaleDB's
+            # background worker can connect again in between, and the drop
+            # then fails the test on a race that has nothing to do with it.
+            cur.execute(f'drop database if exists "{name}" with (force)')
 
 
 def _upgrade_to_head(url: str) -> None:
