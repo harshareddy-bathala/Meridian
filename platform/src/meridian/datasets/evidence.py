@@ -25,7 +25,11 @@ same time, and marks the rest indeterminate. This module is that look.
 * otherwise → **indeterminate**. With one physical station and sparse archives
   this will be common, and the manifest says how common.
 
-Reference: docs/DECISIONS.md D-145, D-147; docs/EVALUATION.md §5.
+This module gathers and counts the evidence from a snapshot; the conclusion is
+:func:`meridian.reliability.satellite_silence.judge_satellite`'s, which the live
+accounting reaches from the database too (D-180).
+
+Reference: docs/DECISIONS.md D-145, D-147, D-180; docs/EVALUATION.md §5.
 """
 
 from __future__ import annotations
@@ -34,9 +38,14 @@ from bisect import bisect_left, bisect_right
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Literal, TypeVar
+from typing import TypeVar
 
 from meridian.datasets.snapshot_rows import ArchiveReception, PassRow
+from meridian.reliability.satellite_silence import (
+    SIGNAL,
+    SatelliteState,
+    judge_satellite,
+)
 
 __all__ = [
     "SIGNAL",
@@ -45,11 +54,6 @@ __all__ = [
     "SatelliteState",
     "satellite_state",
 ]
-
-SIGNAL = frozenset(("decoded", "signal_no_decode"))
-"""Outcomes that prove a transmitter was on. The two vocabularies agree here."""
-
-SatelliteState = Literal["transmitting", "silent", "indeterminate"]
 
 T = TypeVar("T")
 
@@ -149,12 +153,11 @@ def satellite_state(
     end = target.los + timedelta(seconds=window_s)
     own = _own_evidence(target, index, simulated, start, end)
     archive = (0, 0) if simulated else _archive_evidence(target, index, start, end)
-    signals, silences = own[0] + archive[0], own[1] + archive[1]
-    if signals:
-        return "transmitting"
-    if silences >= min_silent_attempts:
-        return "silent"
-    return "indeterminate"
+    return judge_satellite(
+        signals=own[0] + archive[0],
+        silences=own[1] + archive[1],
+        min_silent_attempts=min_silent_attempts,
+    )
 
 
 def _own_evidence(

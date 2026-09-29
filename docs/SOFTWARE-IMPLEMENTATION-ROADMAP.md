@@ -48,7 +48,32 @@ flowchart TD
 
 *Snapshot taken 2026-09-28. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stage 18's software is built.** Its decisions are D-165 through D-172, and `docs/OPERATIONS.md` § Scheduling is its runbook. **Stage 19 is next.**
+**Stage 20's software is built** (2026-09-28), ahead of Stage 19, which it does not need: it classifies whatever was scheduled. **Stage 19 is next.** Its decisions are D-180 through D-187, and `docs/OPERATIONS.md` § Alerts, *LossBudgetThresholdReached* and *Reliability figures*, is its runbook.
+- **The completion gate passes, and is demonstrable at a prompt.** Every reliability number can be traced back to assignments, observations and heartbeat evidence:
+  - `meridian reliability classify`, then `report`, then `explain <assignment id>` prints the evidence behind any pass a figure counted;
+  - `tests/integration/test_reliability_gate.py` checks every stored evidence against the source tables, recounts every figure in SQL, compares the public body, and removes one listening heartbeat as its positive control.
+- **A miss is defined once** (D-180, D-181). `reliability/classification.py`, imported by nothing outside the standard library, holds the rules that `datasets/labels.py` used to hold, and both the labeller and the live accounting call it. A heartbeat is now looked for before a decline is read, so a pass given to an absent station is `station_unavailable`, not `assignment_declined`; labels are `labels-3`. Stage 18's revocations (D-171) are rules of the same classification, so a revoked assignment is never a miss in a report either.
+- **Every settled pass is classified once, with its evidence** (D-182). Migration 0020 adds `pass_classifications`, append-only and keyed by method and configuration hash. A pass settles a day after its window. The jobs service classifies every round, and D-067's owed sweep now expires untaken work on a timer (D-183).
+- **The indicators and the budget are counts over counts** (D-184, D-185):
+  - capture rate (SC-4), confirmed miss rate, availability, completion, execution and report delay;
+  - the loss budget SC-4 sets, spent one pass per debit with the pass's class as its reason. An outage spends it; only `confirmed_miss` is a miss;
+  - targets in `deploy/reliability.toml.example`. SC-4's and SC-5's are the claims, and the rest are proposed, to agree with the team.
+
+  `meridian snapshot reliability` counts the same figures from a dataset, and says which two a snapshot cannot give.
+- **Where they are seen** (D-186, D-187):
+  - `meridian_passes_classified` and `meridian_loss_budget_remaining_ratio`, absent until something has settled;
+  - `LossBudgetThresholdReached`, with its promtool tests and runbook;
+  - `/api/v1/reliability`, now `computed`, with debits counted by reason and never listed.
+- **Not built:**
+  - failure detection latency (SC-5), defined and printed as not measured until Stage 21 records injected failures;
+  - Grafana panels for the two new series;
+  - the capture rule for a decode below the partial threshold, which is Stage 27's;
+  - a cache for `/api/v1/reliability`, owed if Stage 21 finds it slow at fifty stations.
+- **Known limits, each stated rather than hidden:**
+  - the live record judges a satellite on our own receptions only, so it can call a measured silence indeterminate where a snapshot, which also reads archives, calls it a miss (D-182);
+  - a snapshot cannot give availability or report delay, because the export keeps heartbeats only inside assignment windows and does not keep arrival times.
+
+**Stage 18's software is built.** Its decisions are D-165 through D-172, and `docs/OPERATIONS.md` § Scheduling is its runbook.
 - **The completion gate passes, and is demonstrable at a prompt.** Every schedule is checked against the constraints before it is written, including when the solver fails or gives a wrong answer. Every stored decision names its run and explains itself. `meridian schedule evaluate`, run twice, prints the same bytes.
 
   `tests/unit/test_scheduler_gate.py` asserts each clause through the commands. `tests/integration/test_scheduler_gate.py` asserts the database half. Every claim has a positive control.

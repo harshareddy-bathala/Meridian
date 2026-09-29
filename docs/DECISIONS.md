@@ -1487,6 +1487,8 @@ Wiring MSP §4.2's reconciliation into the heartbeat endpoint surfaced two defec
 
 *The cost, stated plainly:* a station that stops heartbeating altogether never has its overdue rows swept, because the only sweep is the one its own heartbeat triggers. D-026 accepted per-heartbeat reconciliation and Phase 1 has no periodic job; the alternative is a background sweeper, which is a scheduled process to maintain and a second writer on the hot table, to correct rows nothing reads until the reliability layer exists. **A periodic sweep is owed by the reliability stage**, which is also the first consumer that would notice the difference. Recording it because a station stuck at `held` forever is a real state a reader will find.
 
+*Settled by D-183:* a timed sweep now expires `issued` work nobody took. A station stuck at `held` stays there, deliberately, because only its own heartbeat can say it let the work go.
+
 **An assignment in `in_progress` must still be delivered.** The delivery predicate was `state in ('issued', 'held')`, which was correct until reconciliation could produce a third state. The moment a station reports a `listening` block, its row leaves `held` — and the assignment disappears from its own heartbeat response, mid-pass. A station that reboots while receiving is then told it has nothing to do.
 
 This is precisely the failure D-035 fixed by moving the lower bound from `start_at` to `end_at`, arriving a second time through a different column. MSP §4.2's prose is the arbiter and was already right: a station sees an assignment *"on every heartbeat until it is reported or its `end_at` has passed"* — and executing it is neither. The literal predicate printed two paragraphs later was the thing that was wrong.
@@ -2399,6 +2401,8 @@ No station, satellite, assignment or token identifier is ever a label (Stage 3).
 
 **Not published until Stage 20: confirmed misses, indeterminate outcomes and loss budget remaining.** The roadmap lists all three under Stage 12, and none of them can be computed yet. Only `platform/reliability` decides a miss, and it is still a docstring. A series held at zero would say "no misses" where the truth is "not measured", which D-086 already refuses for the public API. The loss-budget alert waits with them, and the rules file marks where it goes.
 
+*Settled by D-186:* all three are published now, as `meridian_passes_classified` by class and `meridian_loss_budget_remaining_ratio`, with `LossBudgetThresholdReached` watching the second.
+
 **The "observation queue growing" alert watches what the platform can see.** A station's upload queue is on the station, and MSP 0.2 heartbeats do not report its depth. The platform can see an assignment that is still `held` or `in_progress` when its window ended more than `OVERDUE_AFTER_S` ago. `meridian_assignments_overdue` counts those.
 
 This counts reports that have not arrived; it does not count misses, and nothing is classified from it. A queue-depth field in the heartbeat would be a separate `spec(msp)` change under Rule 9.
@@ -3149,6 +3153,8 @@ Rule 7 makes `Registry.was_listening()` the only authority on whether a station 
 | 8 | No signal or no observation, heartbeats exist, and listening is not confirmed | `station_not_confirmed_listening` |
 | 9 | No signal or no observation, and listening is confirmed | `confirmed_miss`, `satellite_silent` or `satellite_state_indeterminate`, by D-147 |
 
+*Amended by D-181:* rule 7 is now read before rule 3, so an expired, unreported pass with no heartbeat in its window is `station_unavailable`, not `assignment_declined`. The rules 3 to 9 now live in `meridian.reliability.classification` (D-180).
+
 `satellite_silent` and `satellite_state_indeterminate` are also excluded from yield scoring, with the reason `satellite_silent` or `satellite_state_indeterminate`, and counted apart (`EVALUATION.md` §5).
 
 **The settle margin is 24 hours by default** and is set in the labelling configuration, which the manifest hashes. A station holds unsent observations in a durable queue across an outage; without a margin, a report still on its way would be labelled as absence.
@@ -3753,6 +3759,8 @@ A skip decided again while the assignment it named still blocks it is **not writ
 
 Neither is a yield label (D-149), so neither reaches a model as a negative. A report on a revoked assignment is still a reception, and still counts. A live reissue decides its own label, and a revoked sibling does not make it look declined. Snapshots export `revision` and `revoked_reason`. A snapshot from before migration 0019 has neither and holds no revoked row, so its labels are unchanged, and the labelling version is not bumped.
 
+*Amended by D-181:* these two rules now live in `meridian.reliability.classification`, first in its table, so the live accounting (D-182) reads a revoked pass exactly as the labeller does, and never as a miss.
+
 This amends D-022, D-026 and MSP §4.2's reconciliation table. The wire protocol is unchanged: no message is added, and a station that never declines sees no difference.
 
 ---
@@ -3798,6 +3806,232 @@ Where some resample gives the second scheduler no frames, the relative interval 
 - **One problem per station over the whole span.** Midnight would cost nothing, but the oracle would bound only each station's total, not each day. The day is also the unit completeness and the bootstrap are both counted in.
 - **Imputing unattempted passes from the model.** Every number would then rest on the model it is meant to judge.
 - **Priority-weighted frames as the metric.** SC-1 is stated in frames, and B and D are judged on frames like the rest.
+
+---
+
+## D-180 — A miss is defined once, in `meridian.reliability`, and the labeller calls it
+
+**2026-09-28 · accepted** · *`meridian/reliability/{classification,satellite_silence}.py`; `meridian/datasets/{labels,evidence}.py`, Stage 20*
+
+The roadmap asks for miss classification to be centralised in `meridian.reliability`, and `ARCHITECTURE.md` rule 3 already says only that module decides a miss. Until now it was decided in `meridian.datasets.labels`, as a table of lambdas inside the snapshot labeller. Stage 20 needs the same decision on live rows from the database, which the labeller may never read (D-143). A second copy of the table would be the thing rule 3 exists to prevent: two definitions of a miss, disagreeing the first time either one is edited.
+
+**The rules move and the evidence stays.** What is decided and what it is decided from are separated:
+- `classification.classify(PassEvidence, satellite_state)` holds D-146's rules 3 to 9 as a first-match table. `PassEvidence` is four plain fields: the report's outcome, the scheduled assignments' states, whether the station was heard in the window, and the registry's listening answer.
+- `satellite_silence.judge_satellite(signals, silences, min_silent_attempts)` holds D-147's conclusion. Which receptions count, and how they are found, stays with each caller.
+- The labeller gathers its evidence from a snapshot, as it always did, and calls both. The live accounting will gather from the database and call the same two functions.
+
+**The satellite's state is asked for lazily.** `classify` takes a function rather than a value, and calls it only when the station was confirmed listening and heard nothing. Gathering that evidence reads other passes, and most passes never reach that rule.
+
+**Both modules import the standard library and nothing else.** The labelling path may not reach a database. `tests/unit/test_datasets_boundaries.py` checks that one datasets file at a time, so it would not notice a datasets file importing a reliability module that imported the store. `tests/unit/test_reliability_boundaries.py` closes that gap from the other side:
+- the two shared modules import only the standard library;
+- `meridian/reliability/__init__.py` imports nothing, because it runs whenever either module is imported;
+- nothing in the package imports `meridian.datasets`.
+
+Each has a positive control.
+
+**The labels are unchanged by the move.** The labels change only through D-181, and only in the one case it names. Every unit test of the labeller, the completeness gate and the prediction gate passes, and none of them was edited except the decline case D-181 changes.
+
+*Rejected: leaving the table in `datasets` and having the live path import it.* The datasets boundary allows only the snapshot and model commands, and prediction's fitting side, to import the package, so a runtime path cannot read a snapshot and present it as the present (D-143). Moving the rules keeps that line where it is.
+
+---
+
+## D-181 — A heartbeat is looked for before a decline is read, and labels become `labels-3`
+
+**2026-09-28 · accepted** · *`meridian/reliability/classification.py`; `TRANSFORMATION_VERSION` in `meridian/datasets/labels.py`, Stage 20. Amends D-146 and D-171.*
+
+D-146 read an assignment that expired unreported as a decline, before looking at anything else. `expired` means the station never took the work (D-008), and the only thing that expires an assignment today is the station's own heartbeat. It sweeps rows it no longer names, even when they are overdue (D-067). So a station that is off during a window and comes back afterwards has that window's assignment expired by its first heartbeat, and the pass is labelled `assignment_declined`. What actually happened is `station_unavailable`: the station was not there to refuse anything.
+
+The periodic sweep D-067 owes to this stage makes the case common rather than occasional. A station that never comes back would have every issued assignment expired on a timer, and every one of them read as a decline.
+
+**The rule order is now:**
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | No report, every assignment revoked, one as declined (D-171) | `assignment_declined` |
+| 2 | No report, every assignment revoked (D-171) | `station_unavailable` |
+| 3 | The report is `decoded` | `successful_reception` |
+| 4 | The report is `signal_no_decode` | `signal_no_decode` |
+| 5 | The report is `aborted` or `not_attempted` | `station_unavailable` |
+| 6 | No heartbeat at all overlaps any scheduled window | `station_unavailable` |
+| 7 | No report, and every scheduled assignment is `expired` | `assignment_declined` |
+| 8 | Listening is not confirmed | `station_not_confirmed_listening` |
+| 9 | Listening is confirmed | `confirmed_miss`, `satellite_silent` or `satellite_state_indeterminate`, by D-147 |
+
+D-146's two exclusions still come first, unchanged. Rules 1 and 2 are Stage 18's (D-171), read first as it wrote them, and rules 6 to 9 read only the assignments left with the station. Moving the heartbeat rule changes exactly one case: an expired, unreported pass with no heartbeat in its window. That goes from `assignment_declined` to `station_unavailable`. Every other pass gets the label it had, because rules 1 to 3 and the old rule 3 never matched the same pass.
+
+**A station heard during the window that did not take the work still declined it.** Its heartbeats named its held assignments and left this one out, and that is a refusal.
+
+**`TRANSFORMATION_VERSION` becomes `labels-3`.** D-144 requires a changed rule to change the hash, so a dataset labelled before this entry can never be mistaken for one labelled after it.
+
+*Rejected: leaving the order alone and making the sweep mark what it expired.* A column saying who expired a row would separate the sweep's expiries from the heartbeat's. It would still leave the station that came back mislabelled, and that case exists without any sweep.
+
+---
+
+## D-182 — Every settled pass is classified once, and the row keeps its evidence
+
+**2026-09-28 · accepted** · *migration 0020; `meridian/reliability/{accounting,config}.py`; `meridian/store/{pass_classifications,reliability_evidence}.py`, Stage 20*
+
+The roadmap's Stage 20 gate is that every reliability number can be traced back to assignments, observations and heartbeat evidence. The Stage 15 labeller already classifies passes, but only from a snapshot and only when someone exports one. A live figure needs a live record, and the record is what makes the trace possible.
+
+**`pass_classifications` holds one row per settled physical pass per station.**
+- A pass is **settled** once its window has closed plus the settle margin: 24 hours by default, the labeller's own (D-146). A station queues reports through an outage, and without a margin a report still on its way would be read as absence.
+- The unit is the **physical pass**, as D-148 made it for the labeller. Scheduled assignments of one station and satellite whose windows overlap are pooled into one row: their reports ranked by `OUTCOME_ORDER`, and listening confirmed if any was. `assignment_ids` lists them and the lowest is the key. From D-165 on a rise has one scheduled assignment per station, so pooling matters only for older history.
+- **Settlement is the pooled pass's, never one assignment's.** A pass settles when the last of its assignments' windows has closed by the margin. Settled one assignment at a time, a run between two overlapping windows' ends would store the first alone, and a later run the second alone: one reception counted twice.
+- Only `scheduled` decisions are read, because a skip was never delivered (D-165).
+- **Untaken work is swept before a pass is read,** in the classification's own transaction (D-183). A row is written once, so a pass must not be classified while an assignment nobody took is still `issued`. That would store a decline as `station_not_confirmed_listening` for good, whether the timed sweep failed, ran late, or was never run before `meridian reliability classify`.
+- **A run can be bounded.** The jobs service classifies at most 500 passes a round, those that closed first, so the first round over a long history is many short transactions instead of one that holds the round up. `meridian reliability classify` is unbounded, for an operator draining a backlog by hand.
+
+**The row stores what was read, not only what was decided.** `evidence` holds:
+- each assignment, with its state, its window, its `revoked_reason` and the registry's listening answer for it. An assignment revoked before its window (D-171) is not asked about, and its answer is null: it was never the station's work, and its window's heartbeats are not read either;
+- the report and its revision;
+- whether any heartbeat arrived in the window;
+- when the satellite had to be judged, the ids of the receptions counted as signals and as confirmed silences.
+
+A figure counted from these rows can be followed back to each assignment and observation behind it without re-running anything.
+
+**Listening is asked of `Registry.was_listening` for every pooled assignment,** including the other stations' silences D-147 counts. The accounting never reads a heartbeat's listening block itself, so the registry stays the only definition of "was listening" (rule 7).
+
+**Another station's reception counts once per physical pass,** as the labeller counts it: by its most informative report, and as a confirmed silence if the station was confirmed listening for any of its assignments. Two configurations' assignments of one rise are one attempt, not two, and cannot call a satellite silent between them.
+
+**The satellite is judged on our own receptions only.** The labeller also counts archive receptions for measured passes (D-147). The live accounting does not, because an archive is training input and never a runtime dependency (CLAUDE.md's independence test, D-102). The two can therefore differ on one question: whether a measured pass confirmed silent was a `confirmed_miss` or `satellite_state_indeterminate`, when only an archive heard the satellite. The labeller has more evidence, and the live record uses only what Meridian holds.
+
+**Append-only, versioned twice.**
+- `method` names the rules: `classification-1`, from `meridian.reliability.classification.METHOD`, bumped when a rule changes.
+- `config_sha256` names the parameters: the settle margin and D-147's window and count, hashed from `ClassificationConfig`.
+
+The unique key `(assignment_id, method, config_sha256)` means a re-run writes nothing, and a changed rule or parameter writes new rows beside the old, never over them. A figure published under one configuration therefore stays reproducible from the rows it was counted from.
+
+**`assignment_ids` has a GIN index.** Every round asks which settled assignments no row holds yet, and `explain` asks which row holds one. Both are written as `assignment_ids @> array[…]`, which the index serves, so a round's cost does not grow with the product of assignments and classifications.
+
+**Whether a class counts as captured, or spends the loss budget, is not a column.** It is a rule, read from the class in one place in code. A stored boolean would be a second copy of the rule, and could disagree with it.
+
+*Rejected: computing classifications at query time, with no table.* Each pass's evidence needs several queries and a registry call per assignment. At scrape time every fifteen seconds, over a 30-day window, that is the wrong cost. It would also make each figure depend on when it was read: an assignment expired by D-183's sweep would change its pass's evidence after the fact, while the stored row keeps what was true when the pass settled.
+
+---
+
+## D-183 — A timed sweep expires work nobody took, and only that
+
+**2026-09-28 · accepted** · *`meridian/store/assignment_expiry.py`, Stage 20. Settles what D-067 owed.*
+
+D-067 left an assignment of a station that stops heartbeating unswept, because the only sweep ran inside that station's own heartbeat. It recorded a periodic sweep as owed by the reliability stage, "the first consumer that would notice the difference".
+
+**`expire_untaken_assignments(now)` moves `issued → expired` for every `scheduled` assignment whose window has closed.** It is narrower than the heartbeat's sweep, deliberately:
+- **It never touches `held` or `in_progress`.** Those are work a station took. Its report may still be in the station's queue, and only its own heartbeat can say it let one go (D-067). Such a row stays overdue, counted by `meridian_assignments_overdue`, and is classified from whatever report arrives.
+- **It never touches a skip.** Nothing was delivered, so nothing was declined (D-165).
+- **`now` is passed in**, so a sweep can be stated exactly and tested without a clock.
+
+**Expiring late loses nothing.** An observation that arrives for an `expired` assignment is still stored, and only the state stays where it is (D-071). Classification reads the report before it reads the state (D-181). So a sweep that runs before a slow report arrives changes no pass's class.
+
+**An expiry is not a decline by itself.** The sweep expires the assignments of a station that was off. D-181 is what stops those reading as refusals: a pass is declined only if the station was heard during its window.
+
+The sweep runs as a task of the jobs service. That wiring, and its failure alert, arrive with the other job task in Stage 20's surfaces.
+
+**The classification runs the same sweep first, in its own transaction** (D-182). The timed task keeps assignment states current for the dashboard between classifications. The classification does not depend on it having run.
+
+---
+
+## D-184 — The service level indicators, counted as counts over counts, and their targets
+
+**2026-09-28 · accepted** · *`meridian/reliability/{slis,report,live,config}.py`; `meridian/store/reliability_reads.py`; `meridian/datasets/reliability_rows.py`; `meridian snapshot reliability`; `deploy/reliability.toml.example`, Stage 20*
+
+The roadmap names seven indicators and no definitions. `EVALUATION.md` gives SC-4 as "≥ 90% pass capture rate over 30 days" and never says what a pass capture rate is, and `DATA-MODEL.md` planned a `sli_current` view of "the four service level indicators" without naming them. These are the definitions. Each is written once, as a pure function of classified passes.
+
+| Indicator | Numerator | Denominator |
+|---|---|---|
+| **Pass capture rate** (SC-4) | `successful_reception` | every classified pass except `satellite_silent` and `satellite_state_indeterminate` |
+| **Confirmed miss rate** | `confirmed_miss` | the same passes, where listening was confirmed |
+| **Assignment completion rate** | passes with any report | every classified pass |
+| **Schedule execution rate** | passes with a report other than `not_attempted` | every classified pass |
+| **Station availability** | seconds a heartbeat vouches for | seconds since the later of the window's start and registration |
+| **Observation submission delay** | p50 and p95, nearest rank, of first arrival minus window end | reports in the window |
+| **Failure detection latency** (SC-5) | not measured until Stage 21 | — |
+
+**The capture rate leaves out only what the satellite decided.** A silent or indeterminate satellite says nothing about the station (`EVALUATION.md` §5). Every other pass counts: a station that was off, or did not confirm it was listening, or declined, failed to capture that pass. SC-4 is a claim about the station, not only its receiver. Only a decode counts as captured until Stage 27 writes the capture rule for a decode below the partial threshold (D-102).
+
+**A heartbeat vouches for the station until the next one, or for 90 seconds, whichever comes first.** 90 seconds is `OFFLINE_AFTER_S`, the registry's own threshold, which SC-5 sets. Availability therefore agrees with what `derive_liveness` would have said at every instant, and is not a second definition of being up.
+
+**Failure detection latency is defined and not measured.** It is the time from a failure to its detection. From heartbeats alone the failure's instant is unknowable, and the figure would only return the 90-second threshold that computed it. Stage 21 injects failures at recorded instants, and measures this there. Until then every report prints "not measured" and why, never a number (D-086).
+
+**Every figure is a count over a count,** printed with its Wilson 95% interval. A reader can check any of them by counting rows, which is the Stage 20 gate. Where nothing was counted there is no rate, and the report says so.
+
+**Two sources, one assembly.**
+- `meridian reliability report` counts from `pass_classifications` (D-182).
+- `meridian snapshot reliability <dataset>` counts from an evaluation dataset's `labels.jsonl`, the same classification (D-180), through the same `build_report`. That is what makes the figures regenerable from a snapshot and a configuration (rule 8).
+- A snapshot cannot give two figures, and says so instead of guessing. Availability is missing because the export keeps heartbeats only inside assignment windows (Stage 17's known limit). Submission delay is missing because the dataset keeps each report's outcome, not when it arrived.
+- The two sources can also differ on one classification: D-182's, where only an archive heard the satellite.
+
+**Measured and simulated are separate reports,** each with its own figures, budget and stations, and never a pooled number (rule 5).
+
+**The targets are configuration,** in `[slo]` of `deploy/reliability.toml`, beside the classification margins of D-182. They are not hashed with those margins, because a target changes no classification.
+- SC-4's 90% over 30 days and SC-5's 90 s are the project's claims.
+- Every other target is **proposed, to agree with the team**, as `EVALUATION.md` marks SC-7 to SC-10. Every report prints "(proposed)" or the claim beside each verdict.
+
+*Rejected: `sli_current` as a database view.* The indicators read the classification's consequences, captured or lost, and those are rules in code (D-182). A view would restate them in SQL, and a snapshot could not run it.
+
+---
+
+## D-185 — The loss budget is spent by passes, one debit per lost pass, and only one reason is a miss
+
+**2026-09-28 · accepted** · *`meridian/reliability/budget.py`, Stage 20*
+
+The roadmap asks for an irrecoverable loss budget, with every debit recorded by pass, station, reason, evidence, simulation status, timestamp and budget impact. A satellite pass cannot be retried, so the budget is counted in passes, not in time or in requests.
+
+**SC-4 sets the budget.** At a capture target of 90%, a tenth of the passes a station could have captured may be lost inside the window: `allowed = (1 − target) × eligible`, rounded to nine decimal places, because in floating point `0.1 × 10` is `0.9999999999999998` and losing exactly the pass the target permits would otherwise read as exhausted. The budget is exhausted when more have been lost than that, and the report says so. The alert that watches it is Stage 20's surfaces.
+
+**Every eligible pass not captured is a debit, and it carries its class as its reason:** `confirmed_miss`, `signal_no_decode`, `station_unavailable`, `station_not_confirmed_listening` or `assignment_declined`. Each debit also names its pass (the representative assignment, or `pass:<id>` from a snapshot), its station, its window's end and its population. It spends one pass. Its evidence is the classification row it came from (D-182).
+
+**A station that was off spends the budget, and has not missed anything.** This follows the team's decision on 2026-09-28. SC-4 asks whether our station is reliable, and a pass lost to an outage is lost as completely as one lost to a deaf receiver. But rule 7 is about what is called a miss, and the budget does not relabel anything: an outage's debit is `station_unavailable`, a miss's is `confirmed_miss`, and the report lists them separately. A reader can therefore see how much of a spent budget was the receiver and how much was the station not being there.
+
+**A pass the satellite decided spends nothing,** because it was neither the station's to capture nor to lose.
+
+**Measured and simulated have separate budgets,** and so does each station.
+
+*Rejected: spending the budget only on confirmed misses.* The budget would then read full through a week-long outage that lost every pass, which is the event a loss budget exists to show.
+
+---
+
+## D-186 — What Prometheus sees of reliability, and when it alerts
+
+**2026-09-28 · accepted** · *`meridian/api/domain_collector.py`; `meridian/jobs/{reliability_round,job_metrics}.py`; `meridian/cli_jobs.py`; `deploy/prometheus/rules/meridian.yml`, Stage 20. Amends D-111.*
+
+D-111 left three series unpublished until a miss could be decided: confirmed misses, indeterminate outcomes and loss budget remaining. It also left the alert on the budget unwritten. They exist now.
+
+**Two families, read at scrape time from `pass_classifications` over the SLO window,** by the same collector as the rest (D-109). They are read in a second borrow of the pool, counted by class in SQL. If that read fails — a pending migration has not created the table yet, say — only these two families are left out. The database still reads as reachable, and `meridian_schema_up_to_date` still says the migration is pending:
+- `meridian_passes_classified{classification, simulated}` counts each class. Confirmed misses are its `confirmed_miss` series, and indeterminate outcomes its `satellite_state_indeterminate` series. One family with a class label replaces the two names D-111 listed. A reader then sees a miss beside the seven other things that can happen to a pass, and cannot mistake a count of misses for a count of losses.
+- `meridian_loss_budget_remaining_ratio{simulated}` is the share of D-185's budget left. It is negative once the target is broken.
+
+Both are counted by `meridian.reliability`'s own arithmetic: the budget from the class counts by `remaining_ratio_of`, the function `LossBudget.remaining_ratio` also uses. A scrape and `meridian reliability report` over the same window therefore agree, and a scrape never carries a month of rows.
+
+**`classification` joins D-111's bounded labels.** It has eight values, fixed by migration 0020's check. `task` gains two values, `expiry_sweep` and `reliability`.
+
+**A population with nothing classified publishes nothing,** neither zeros nor a ratio (D-086). A pass settles a day after its window, so a new deployment has no series for a day. The alert is silent through that, instead of firing on a budget it cannot yet know.
+
+**Only the scrape-cheap figures are metrics.** Availability needs every heartbeat in a 30-day window. That is a query for a report, not for every fifteen-second scrape, so it is printed by `meridian reliability report` and served by `/api/v1/reliability`, and it is not a series.
+
+**`LossBudgetThresholdReached`** fires when less than a quarter of a population's budget has been left for an hour. It is a warning, because a budget moves one settled pass at a time and nothing about it is urgent within minutes. Its runbook starts from the debits' reasons, because a spent budget made of outages needs different work from one made of misses. It has a firing test and a silent test, as D-112 requires, and a simulated fleet's healthy budget in the same test does not silence a measured one's.
+
+**The jobs service runs the sweep and the classification after scheduling, every round** (D-110). Each is timed and supervised like the scheduling tasks, and each has its own `ScheduledTaskNeverSucceeded` rule. The service reads the reliability file named by `MERIDIAN_RELIABILITY_CONFIG`, or takes the defaults. The API reads the same file, because it finds the rows the jobs service wrote by the hash of their `[classification]` table.
+
+---
+
+## D-187 — `/api/v1/reliability` publishes the report, with debits counted and never listed
+
+**2026-09-28 · accepted** · *`meridian/api/public/{reliability,models/reliability}.py`, Stage 20. Settles D-086's placeholder for this path.*
+
+The path has existed since Stage 11 and answered `not_yet_computed` (D-086). It now answers `"status": "computed"` with the body `meridian reliability report` prints:
+- measured and simulated as two objects, each with `simulated` stated;
+- every figure as a numerator, a denominator, an estimate and a Wilson interval;
+- each target with its verdict, and `SC-4`, `SC-5` or null for a proposed one;
+- each station's capture, budget and availability;
+- `failure_detection` as `{"status": "not_measured", "reason": …}`.
+
+A figure the platform cannot give is never a zero or a bare null (D-086).
+
+**The budget's debits are counted by reason and not listed.** A debit names a pass and the exact instant its window closed. D-093 widens every published window to whole minutes, so that a public schedule cannot be turned back into a station's position, and a list of exact debits would undo that. An operator reads them through `meridian reliability report` and `explain`.
+
+**The reliability file is read once per process** and kept, as the collector reads it. A request costs no file read, and an edit takes effect when the API and the jobs service restart together, not in one while the other classifies under the old file. A file that is refused is a `server_error` naming the configuration, with the reason in the platform's log.
+
+**Counted on each request, with no cache.** Availability reads every heartbeat in the window, which for one station is tens of thousands of rows. Stage 21 measures API latency at fifty stations. If this endpoint is slow there, a short cache here is the remedy, and Stage 23's per-endpoint rate limits cover it meanwhile.
 
 ---
 
@@ -4024,6 +4258,21 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-172 the retrospective comparison and the oracle | `meridian/prediction/{replay,replay_models}.py`; `meridian/scheduler/{replay,oracle,comparison,comparison_config,comparison_report}.py`; `meridian schedule evaluate`; `deploy/schedule-evaluation.toml.example`; `EVALUATION.md` §3 |
 | — the amended entries | D-022, D-026, D-065, D-066, D-110 and D-160, each with a note naming its amendment |
 | — the completion gate, and how to run it by hand | `tests/unit/test_scheduler_gate.py`; `tests/integration/test_scheduler_gate.py`; `OPERATIONS.md` § Scheduling |
+
+**Landed 2026-09-29**, building reliability and loss accounting and Stage 20's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-180 a miss is defined once, in reliability | `meridian/reliability/{classification,satellite_silence}.py`; `meridian/datasets/{labels,evidence}.py`; `tests/unit/test_reliability_boundaries.py` |
+| D-181 a heartbeat before a decline, `labels-3` | `meridian/reliability/classification.py`; `meridian/datasets/labels.py` |
+| D-182 every settled pass classified once, with its evidence | migration 0020; `meridian/reliability/{accounting,config}.py`; `meridian/store/{pass_classifications,reliability_evidence}.py`; `DATA-MODEL.md` |
+| D-183 a timed sweep expires only untaken work | `meridian/store/assignment_expiry.py` |
+| D-184 the indicators and their targets | `meridian/reliability/{slis,report,live,config}.py`; `meridian/store/reliability_reads.py`; `meridian/datasets/reliability_rows.py`; `meridian snapshot reliability`; `deploy/reliability.toml.example` |
+| D-185 the loss budget, spent by passes | `meridian/reliability/budget.py` |
+| D-186 reliability metrics, the budget alert, the jobs tasks | `meridian/api/domain_collector.py`; `meridian/jobs/{reliability_round,job_metrics}.py`; `meridian/cli_jobs.py`; `deploy/prometheus/`; `OPERATIONS.md` § LossBudgetThresholdReached |
+| D-187 the public reliability body | `meridian/api/public/{reliability,models/reliability}.py`; `meridian/cli_reliability.py` |
+| — the amended entries | D-067, D-111, D-146 and D-171, each with a note naming its amendment |
+| — the completion gate, and how to run it by hand | `tests/integration/test_reliability_gate.py`; `OPERATIONS.md` § Reliability figures |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

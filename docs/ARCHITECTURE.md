@@ -48,7 +48,7 @@ The sections below describe each module's responsibility in the finished system.
 | `platform/scheduler` | The two baselines that exist to be beaten (Stage 7), and the constrained optimiser (Stage 18): one set of constraints checked before anything is written, a mixed-integer programme solved by HiGHS, yield × frames × priority, an explanation on every decision, reissue of declined and offline work, and the retrospective comparison against the baselines and an oracle. |
 | `platform/prediction` | The yield model (Stage 17): point-in-time features, configurations A–D, the cold-start route, temporal splits, a calibrated logistic regression fitted with the `fit` extra and scored in plain Python, and the calibration report. The reception verdict is a later stage. |
 | `platform/observations` | Ingest and the canonical body a revision is compared against (Stage 9). |
-| `platform/reliability` | Its interface and nothing else — Stage 20. |
+| `platform/reliability` | Miss classification, the live record of every settled pass with its evidence, the service level indicators, the loss budget and their targets (Stage 20). Failure injection is Stage 21; loss diagnosis and the health watch are Stages 27 and 28. |
 | `client`, `simulator` | A station that registers, holds work, executes it and delivers observations from a durable queue, and a deterministic fleet of virtual ones that drives it over real MSP (Stage 10). The receiver and decoder behind the client's execution seam are Stage 13. |
 | `dashboard`, `ingest` | No directory yet — Stages 11 and 14. Ingest widens to environmental and space-weather sources at Stage 31 (D-132). |
 | `platform/regions` | No directory yet — Stage 32, regional monitoring (module 19). |
@@ -96,6 +96,8 @@ Records are immutable once written; corrections are additive. Every record carri
 SLI computation, SLO evaluation, irrecoverable-loss budget, failure injection.
 
 **Absence is not a miss.** A pass counts as missed only when the registry confirms the station was listening on the right frequency for the right target. Encode this in one place, here, and never duplicate the logic.
+
+It is encoded in `reliability/classification.py`, which imports the standard library alone. The snapshot labeller calls it on a snapshot's rows, and the live accounting calls it on the database's (D-180). The accounting stores every settled pass's class in `pass_classifications` with the evidence it read (D-182), and every indicator, the loss budget, the metrics and `/api/v1/reliability` are counted from those rows (D-184 to D-187).
 
 **Loss diagnosis** (module 14) builds on that classification rather than restating it. For every failed or partial reception, and every held assignment that produced no observation, it names the most likely cause from evidence — satellite silent, station not listening, obstruction in that direction, interference, or a timing or clock fault — and says **undetermined** when the evidence does not support one. A declined (`expired`) assignment is not a reception and is not diagnosed. Evidence is Meridian's own: heartbeats, the network's contemporaneous receptions, the catalogue's transmitter status, and the horizon and interference profiles. Archive data is not consulted at runtime (D-102), and a simulated reception is never evidence about a measured one.
 

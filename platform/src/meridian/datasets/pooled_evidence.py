@@ -21,11 +21,9 @@ from dataclasses import dataclass
 
 from meridian.datasets.physical_passes import PhysicalPass
 from meridian.datasets.snapshot_rows import AssignmentRow, ObservationRow, SnapshotRows
+from meridian.reliability.classification import OUTCOME_ORDER
 
 __all__ = ["OUTCOME_ORDER", "PooledEvidence", "pool_evidence"]
-
-OUTCOME_ORDER = ("decoded", "signal_no_decode", "no_signal", "aborted", "not_attempted")
-"""Most informative first: where two assignments of one pass both reported."""
 
 
 @dataclass(frozen=True, slots=True)

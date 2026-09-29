@@ -87,9 +87,13 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Fit a model on a dataset | `uv run meridian model fit <dataset dir> --config model.toml` — needs the `fit` extra; § Models |
 | Judge a model | `uv run meridian model evaluate <model dir>` — § Models |
 | Compare the schedulers and the oracle | `uv run meridian schedule evaluate <dataset dir> --config schedule-evaluation.toml` — needs no database; prints frames per station-hour and SC-1 (D-172); see `deploy/schedule-evaluation.toml.example` |
+| Reliability now | `compose exec api meridian reliability report` — § Reliability figures |
+| Why a pass counted as it did | `compose exec api meridian reliability explain <assignment id>` |
+| Classify settled passes now | `compose exec api meridian reliability classify` — the `jobs` service does this every round |
+| Reliability from a dataset | `uv run meridian snapshot reliability <dataset dir>` — needs no database |
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
-**Scheduling needs no command.** The `jobs` service generates passes and schedules them under `SCHEDULE_CONFIG` (configuration A on the elevation proxy when it is unset, D-170) every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
+**Scheduling needs no command.** The `jobs` service generates passes and schedules them under `SCHEDULE_CONFIG` (configuration A on the elevation proxy when it is unset, D-170) every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). Each round then expires work nobody took and classifies every pass that has settled (D-182, D-183). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
 
 ---
 
@@ -778,7 +782,7 @@ Prometheus and Alertmanager are not published on the host. Grafana is, so its ad
 - **API panels:** `meridian_http_*` comes from every API worker.
 - **Pool panel:** reflects whichever worker answered the scrape.
 - **Scheduling panels:** `meridian_job_*`, `meridian_passes_computed`, `meridian_scheduler_candidates`, `meridian_scheduler_runs_total{status}`, `meridian_scheduler_solver_seconds` and `meridian_scheduler_history_age_seconds` come from the jobs process alone. A rising `status="fallback"` count means the schedule is greedy's; the history age is how long the model's history has gone unrefreshed (D-170).
-- **Not published until Stage 20:** confirmed misses, indeterminate outcomes and loss budget remaining. A zero there would mean "not measured" (D-086, D-111).
+- **Reliability series (no Grafana panel yet):** `meridian_passes_classified` (by class, so confirmed misses and indeterminate satellites are two of its series) and `meridian_loss_budget_remaining_ratio`, read by the API from `pass_classifications` over the SLO window (D-186). A population with nothing classified yet publishes neither, rather than zeros that would mean "not measured" (D-086). Passes settle a day after their window, so a fresh deployment shows nothing here for its first day.
 
 ### Delivering alerts
 
@@ -862,7 +866,7 @@ If every station was switched off on purpose, this is expected.
 
 ### ScheduledTaskStalled
 
-**Critical.** A task (`task` label: `schedule` or `pass_generation`) has not completed in over 15 minutes, which is three rounds at the default interval. One failed round is logged and retried; three in a row is a problem.
+**Critical.** A task (`task` label: `pass_generation`, `schedule`, `expiry_sweep` or `reliability`) has not completed in over 15 minutes, which is three rounds at the default interval. One failed round is logged and retried; three in a row is a problem.
 
 1. `compose logs --since 30m jobs`. Each failed round logs `<task> failed; the next round will try again` with the exception.
 2. The *Task failures per hour* panel shows whether it fails every round or only some.
@@ -876,5 +880,34 @@ The first checks are the same as `ScheduledTaskStalled`. A failure on every roun
 
 An empty catalogue is not a failure: rounds complete with zero passes, and `meridian_passes_computed` reads 0.
 
-<!-- Stage 20 adds LossBudgetThresholdReached here, with confirmed misses and
-     indeterminate outcomes, once platform/reliability decides what a miss is. -->
+A failing `reliability` task stops new passes being classified, and so freezes every reliability figure where it was. It reads the file `MERIDIAN_RELIABILITY_CONFIG` names, and refuses to start on one it cannot obey; the log says which setting.
+
+### LossBudgetThresholdReached
+
+**Warning.** Less than a quarter of a population's loss budget is left, and has been for an hour. SC-4's capture target of 90% allows a tenth of the passes a station could have captured to be lost inside the 30-day window (D-185), and three quarters of that is gone. The `simulated` label says which population; the two are never pooled.
+
+A lost pass is not the same as a miss. Every debit carries its reason, and only `confirmed_miss` means the station was confirmed listening and heard nothing (CLAUDE.md rule 7).
+
+1. `meridian reliability report` prints the budget, its debits by reason, and each station's share. The reason says where to look:
+   - `station_unavailable`: the station was off or not heartbeating during its passes. Check `StationOffline`'s history and the host.
+   - `station_not_confirmed_listening`: it heartbeated but never confirmed it was tuned to the pass. Check its client log and its declared capabilities.
+   - `assignment_declined`: it was up and did not take the work. Check the client's queue and clock.
+   - `signal_no_decode` or `confirmed_miss`: it listened. The receive chain, the antenna or the decoder is the suspect.
+2. `meridian reliability explain <assignment id>` prints one debit's evidence: the assignment's state, the report, the heartbeats and the registry's listening answer.
+3. Nothing is retried. A lost pass stays lost, and the budget recovers only as the window moves past it.
+
+### Reliability figures
+
+`meridian reliability report` prints each figure as a count over a count, with its 95% interval, for measured and simulated stations apart:
+- pass capture rate (SC-4);
+- confirmed miss rate;
+- station availability;
+- assignment completion and execution rates;
+- report delay;
+- the loss budget.
+
+Each target is marked as SC-4's, SC-5's, or proposed (D-184). `GET /api/v1/reliability` serves the same report.
+
+`meridian snapshot reliability <dataset>` counts the same figures from an evaluation dataset. It cannot give availability or report delay, and says why rather than printing a number.
+
+The settings are `deploy/reliability.toml.example`. Point `MERIDIAN_RELIABILITY_CONFIG` at a copy to change them, for the jobs service and the API alike: the API finds the classifications the jobs service wrote by the hash of the `[classification]` table.

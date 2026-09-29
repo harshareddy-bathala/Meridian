@@ -117,10 +117,22 @@ groups:
           summary: "{{ $value }} assignment(s) have had no report for 45 minutes after their window (simulated={{ $labels.simulated }})."
           runbook: docs/OPERATIONS.md#observationsoverdue
 
-      # Stage 20 adds LossBudgetThresholdReached here, with confirmed misses and
-      # indeterminate outcomes. Until platform/reliability decides what a miss
-      # is, there is no series to alert on, and a stand-in would publish a zero
-      # that means "not measured" (D-086, D-111).
+      - alert: LossBudgetThresholdReached
+        # D-186. SC-4's capture target leaves a budget of lost passes inside
+        # the SLO window (D-185); this fires once three quarters of it is
+        # spent, and stays firing past exhaustion, where the ratio goes
+        # negative. For an hour, because a pass settles a day after its window
+        # and a budget moves only as passes do. The series is absent while a
+        # population has nothing classified, so an idle deployment is silent
+        # rather than alarmed. Every debit's reason is in
+        # `meridian reliability report`; only confirmed_miss is a miss.
+        expr: min by (simulated) (meridian_loss_budget_remaining_ratio) < 0.25
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of the loss budget is left (simulated={{ $labels.simulated }})."
+          runbook: docs/OPERATIONS.md#lossbudgetthresholdreached
 
   - name: meridian-scheduling
     rules:
@@ -169,4 +181,28 @@ groups:
           task: pass_generation
         annotations:
           summary: The pass_generation task has not completed once since the jobs process started.
+          runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+      - alert: ScheduledTaskNeverSucceeded
+        expr: >-
+          time() - process_start_time_seconds{job="meridian-jobs"} > 900
+          unless on(job, instance)
+          meridian_job_last_success_timestamp_seconds{task="expiry_sweep"}
+        labels:
+          severity: critical
+          task: expiry_sweep
+        annotations:
+          summary: The expiry_sweep task has not completed once since the jobs process started.
+          runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+      - alert: ScheduledTaskNeverSucceeded
+        expr: >-
+          time() - process_start_time_seconds{job="meridian-jobs"} > 900
+          unless on(job, instance)
+          meridian_job_last_success_timestamp_seconds{task="reliability"}
+        labels:
+          severity: critical
+          task: reliability
+        annotations:
+          summary: The reliability task has not completed once since the jobs process started.
           runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded

@@ -1,6 +1,6 @@
 """``meridian snapshot`` — export a raw snapshot, label it, and check either.
 
-Four verbs, and the line between the first two is Stage 15's argument (D-143):
+Five verbs, and the line between the first two is Stage 15's argument (D-143):
 
 * ``export --since …`` is the only one that opens a database. It reads every
   table inside one repeatable-read, read-only transaction, asks the registry
@@ -12,6 +12,10 @@ Four verbs, and the line between the first two is Stage 15's argument (D-143):
 * ``completeness <dataset> [--threshold …]`` prints each population's
   completeness and weight diagnostics, at the dataset's threshold or another
   (D-151, D-153). It reads the dataset and nothing else.
+* ``reliability <dataset> [--config …]`` counts the reliability indicators and
+  the loss budget from the dataset's labels, as ``meridian reliability report``
+  counts them from the live record (D-184). It reads the dataset and nothing
+  else.
 * ``verify <directory>`` checks a snapshot or dataset against its manifest,
   and exits :data:`EXIT_CORRUPT` when it does not match — the same code, for
   the same reason, as ``meridian-ingest verify``.
@@ -20,7 +24,8 @@ Everything goes under one datasets root: ``--root``, else
 ``MERIDIAN_DATASETS_ROOT``, else ``data/datasets`` — gitignored, and outside
 the database backup, which says so (D-144).
 
-Reference: docs/DECISIONS.md D-143, D-144, D-145, D-146, D-147, D-151, D-153.
+Reference: docs/DECISIONS.md D-143, D-144, D-145, D-146, D-147, D-151, D-153,
+D-184.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
@@ -43,15 +48,28 @@ from meridian.datasets.export import (
     snapshot_transaction,
 )
 from meridian.datasets.label_config import LabelConfigError, load_label_config
+from meridian.datasets.label_rows import read_labels
 from meridian.datasets.manifest import MalformedManifestError, Manifest, content_sha256
 from meridian.datasets.publish import (
     DamagedSnapshotError,
     PublishedDirectory,
+    SnapshotDirectory,
     read_directory,
+)
+from meridian.datasets.reliability_rows import (
+    NO_AVAILABILITY,
+    NO_SUBMISSION_DELAY,
+    passes_in_window,
 )
 from meridian.datasets.result_reader import NoSelectionError, read_results
 from meridian.datasets.snapshot_rows import MalformedSnapshotError
 from meridian.registry.psycopg_registry import PsycopgRegistry
+from meridian.reliability.config import (
+    ReliabilityConfigError,
+    load_reliability_config,
+)
+from meridian.reliability.report import NotMeasured, build_report
+from meridian.reliability.report import report_lines as reliability_lines
 from meridian.store.pool import DatabaseUnreachableError, connect_once
 
 __all__ = [
@@ -79,7 +97,7 @@ written", as ``meridian-ingest verify`` does."""
 def add_snapshot_parser(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """Wire ``meridian snapshot`` and its four actions."""
+    """Wire ``meridian snapshot`` and its five actions."""
     snapshot = subcommands.add_parser(
         "snapshot",
         help="export, label and verify dataset snapshots",
@@ -128,6 +146,17 @@ def add_snapshot_parser(
         default=None,
         help="judge station-days at this completeness instead of the dataset's",
     )
+    reliability = actions.add_parser(
+        "reliability",
+        help="count reliability indicators and the loss budget from a dataset",
+    )
+    reliability.add_argument("dataset", type=Path, help="an evaluation dataset")
+    reliability.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="window and targets; see deploy/reliability.toml.example",
+    )
     verify = actions.add_parser(
         "verify", help="check a snapshot or dataset against its manifest"
     )
@@ -140,6 +169,7 @@ def run_snapshot(args: argparse.Namespace) -> int:
         "export": _export,
         "label": _label,
         "completeness": _completeness,
+        "reliability": _reliability,
         "verify": _verify,
     }
     return actions[args.action](args)
@@ -251,6 +281,49 @@ def _completeness(args: argparse.Namespace) -> int:
     for line in report_lines(results):
         _say(line)
     return 0
+
+
+def _reliability(args: argparse.Namespace) -> int:
+    """``meridian snapshot reliability``."""
+    if not Path(args.dataset).is_dir():
+        return _refuse("reliability", f"{args.dataset} is not a directory")
+    try:
+        config = load_reliability_config(args.config)
+        dataset = _evaluation_dataset(Path(args.dataset))
+        labelled = read_labels(dataset.files)
+    except DamagedSnapshotError as exc:
+        _refuse("reliability", str(exc))
+        return EXIT_CORRUPT
+    except (ReliabilityConfigError, MalformedSnapshotError, OSError) as exc:
+        return _refuse("reliability", str(exc))
+    manifest = dataset.manifest
+    as_of = manifest.as_of
+    labels_sha256 = manifest.config_sha256 or b""
+    report = build_report(
+        passes_in_window(labelled, as_of=as_of, window_days=config.slo.window_days),
+        header=(
+            f"snapshot {content_sha256(manifest).hex()}",
+            (as_of - timedelta(days=config.slo.window_days), as_of),
+            manifest.transformation_version or "unversioned",
+            labels_sha256.hex(),
+        ),
+        slo=config.slo,
+        availability=NotMeasured(NO_AVAILABILITY),
+        submission_delays=NotMeasured(NO_SUBMISSION_DELAY),
+    )
+    for line in reliability_lines(report):
+        _say(line)
+    return 0
+
+
+def _evaluation_dataset(path: Path) -> SnapshotDirectory:
+    """Read a directory, and refuse anything but an evaluation dataset."""
+    dataset = read_directory(path)
+    if dataset.manifest.kind != "evaluation_dataset":
+        kind = dataset.manifest.kind.replace("_", " ")
+        message = f"{path} is a {kind}; label it first"
+        raise MalformedSnapshotError(message)
+    return dataset
 
 
 def _verify(args: argparse.Namespace) -> int:

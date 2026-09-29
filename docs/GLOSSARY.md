@@ -120,6 +120,14 @@ Where silent bugs live. These are not interchangeable, and converting between th
 
 **Absence is not a miss** — a station that reported nothing counts as having missed a pass only if its heartbeat confirms it was listening, on the right frequency, for the right target. Load-bearing for every reliability metric in the system.
 
+**Confirmed miss** — the one class of pass that is a miss: the station was confirmed listening, heard nothing, and the satellite was heard elsewhere at about the same time. Every other lost pass has a different name (D-180).
+
+**Settled pass** — a scheduled pass whose window closed more than the settle margin ago, 24 hours by default, so a report still in a station's queue has had time to arrive. Only settled passes are classified (D-182).
+
+**Pass capture rate** — SC-4's indicator: decoded passes over every settled, scheduled pass except those judged by the satellite (silent or indeterminate). An offline station's passes count against it (D-184).
+
+**Debit** — one pass lost against the loss budget, with its class as its reason. Only a debit whose reason is `confirmed_miss` is a miss (D-185).
+
 ---
 
 ## After reception
