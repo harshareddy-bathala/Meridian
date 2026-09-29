@@ -104,13 +104,15 @@ def test_the_reference_source_is_registered_under_its_own_declared_id() -> None:
     A disagreement would publish artefacts into one source's directory in the
     raw store and record them against another's row.
     """
-    assert set(REGISTRY) == {SOURCE}
-    assert adapter_for(SOURCE).descriptor.source_id == SOURCE
-    assert registered_sources() == (REFERENCE_SOURCE,)
+    assert SOURCE in REGISTRY
+    for source_id, registration in REGISTRY.items():
+        assert registration.adapter.descriptor.source_id == source_id
+    assert REFERENCE_SOURCE in registered_sources()
+    assert [one.source_id for one in registered_sources()] == sorted(REGISTRY)
 
 
 def test_an_unregistered_source_is_refused_by_name() -> None:
-    with pytest.raises(UnknownSourceError, match="registered: reference_archive"):
+    with pytest.raises(UnknownSourceError, match=r"registered: .*reference_archive"):
         adapter_for("some_real_archive")
 
 

@@ -29,17 +29,17 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
-from meridian.config import load_settings as load_platform_settings
 from meridian.store.archive_observations import NormalisationDisagreementError
-from meridian.store.pool import DatabaseUnreachableError, connect_once
 from meridian_ingest import __version__
 from meridian_ingest.adapters import REGISTRY, UnknownSourceError, normaliser_for
 from meridian_ingest.cli_fetch import run_fetch
+from meridian_ingest.cli_follow import add_follow, describe_limits, run_follow
+from meridian_ingest.cli_load import run_load
 from meridian_ingest.config import ConfigurationError, IngestSettings, load_settings
 from meridian_ingest.console import refuse as _refuse
 from meridian_ingest.console import say as _say
 from meridian_ingest.console import warn as _warn
-from meridian_ingest.load import TermsChangedError, load_source
+from meridian_ingest.load import TermsChangedError
 from meridian_ingest.normalise.records import NormalisationError
 from meridian_ingest.raw_store import RawStore, RawStoreError
 
@@ -104,6 +104,7 @@ def _dispatch(args: argparse.Namespace, settings: IngestSettings) -> int:
         "normalise": _run_normalise,
         "verify": _run_verify,
         "load": _run_load,
+        "follow": run_follow,
     }
     return verbs[args.command](args, settings)
 
@@ -128,12 +129,14 @@ def _run_sources(args: argparse.Namespace, settings: IngestSettings) -> int:
             continue
         descriptor = REGISTRY[source_id].adapter.descriptor
         source = settings.for_source(source_id)
-        state = "enabled" if source.enabled else "disabled"
+        state = "enabled" if source.is_enabled else "disabled"
         _say(f"{source_id}  [{state}, budget {source.request_budget}]")
         _say(f"    {descriptor.name} — {descriptor.source_class}")
         _say(f"    licence: {descriptor.licence}")
         _say(f"    terms:   {descriptor.terms_url}")
         _say(f"    credited as: {descriptor.attribution_entry}")
+        for line in describe_limits(settings, source_id):
+            _say(f"    {line}")
     return 0
 
 
@@ -155,14 +158,18 @@ def _run_normalise(args: argparse.Namespace, settings: IngestSettings) -> int:
             batch = normaliser.normalise(artefact)
             _say(
                 f"{raw_path}  {len(batch.stations)} stations, "
-                f"{len(batch.receptions)} receptions, "
+                f"{len(batch.receptions)} receptions, {len(batch.samples)} samples, "
                 f"version {batch.transformation_version}"
             )
-            for reception in batch.receptions:
-                _say(
-                    f"    {reception.source_observation_id}  "
-                    f"{reception.content_sha256.hex()[:16]}"
-                )
+            digests = [
+                *(
+                    (one.source_observation_id, one.content_sha256)
+                    for one in batch.receptions
+                ),
+                *((one.series_key, one.content_sha256) for one in batch.samples),
+            ]
+            for key, digest in digests:
+                _say(f"    {key}  {digest.hex()[:16]}")
     return 0
 
 
@@ -192,43 +199,8 @@ def _run_verify(args: argparse.Namespace, settings: IngestSettings) -> int:
 
 
 def _run_load(args: argparse.Namespace, settings: IngestSettings) -> int:
-    """Load every stored artefact into the archive tables."""
-    store = RawStore(settings.raw_root)
-    try:
-        conn = connect_once(load_platform_settings())
-    except DatabaseUnreachableError as exc:
-        return _refuse(f"meridian-ingest load: {exc}")
-    # Autocommit, so each artefact's `conn.transaction()` in `load_artefact` is
-    # a real transaction that commits when it closes. Without it the first
-    # statement opens one run-wide transaction, every artefact becomes a
-    # savepoint inside it, and a failure in the last artefact rolls back all
-    # the ones that had finished — the opposite of "resumed by running again".
-    conn.autocommit = True
-    with conn:
-        for source_id in _chosen(args, settings):
-            report = load_source(conn, store, source_id)
-            _say(
-                f"{source_id}: {report.records_written} artefacts, "
-                f"{report.stations_written} stations, "
-                f"{report.receptions_written} receptions written"
-            )
-            if report.receptions_already_held:
-                _say(
-                    f"    {report.receptions_already_held} receptions were already "
-                    "held, identically"
-                )
-            for skipped in report.skipped:
-                _say(f"    {skipped.raw_path}: {skipped.skipped}, nothing derived")
-            for reverted in report.reverted:
-                _warn(
-                    f"    {reverted.raw_path} matches record {reverted.record_id}, "
-                    f"which record {reverted.reverted_past} superseded: the source "
-                    "went back to an earlier version, and superseded_by still "
-                    "names the later one (D-141)"
-                )
-            if report.wrote_nothing():
-                _say("    nothing new — this tree was already loaded")
-    return 0
+    """Load every stored artefact into the archive and sample tables."""
+    return run_load(settings, _chosen(args, settings))
 
 
 def _chosen(args: argparse.Namespace, settings: IngestSettings) -> tuple[str, ...]:
@@ -280,6 +252,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_source(commands.add_parser("normalise", help="normalise, writing nothing"))
     _add_source(commands.add_parser("load", help="load into the archive tables"))
     _add_source(commands.add_parser("verify", help="re-hash the raw store; exits 3"))
+    add_follow(commands, _add_source)
     return parser
 
 

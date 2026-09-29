@@ -27,7 +27,7 @@ dev = [
     "meridian[fit]",
     "meridian-client",
     "meridian-sim",
-    "meridian-ingest",
+    "meridian-ingest[hdf5]",
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.11",
@@ -219,6 +219,13 @@ ignore_missing_imports = true
 # meridian.prediction.fit (D-155), which turns everything it returns into
 # floats before the numbers leave it.
 module = ["sklearn.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# h5py ships no type information. It is imported by one module, the
+# night-time lights normaliser (D-226), which turns every value it reads into
+# a float before the number leaves it.
+module = ["h5py.*"]
 ignore_missing_imports = true
 
 # There is deliberately no `tests.*` override. CI type-checks

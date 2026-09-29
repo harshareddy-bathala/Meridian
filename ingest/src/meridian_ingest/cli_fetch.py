@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from meridian_ingest.adapters import REGISTRY
+from meridian_ingest.adapters.listing import LISTING_SUFFIX, ListingAdapter
 from meridian_ingest.adapters.protocol import (
     FetchRequest,
     SourceDescriptor,
@@ -32,11 +33,17 @@ from meridian_ingest.adapters.protocol import (
 )
 from meridian_ingest.config import IngestSettings, SourceSettings
 from meridian_ingest.console import say, warn
-from meridian_ingest.credentials import read_api_key
-from meridian_ingest.http_retriever import USER_AGENT, HttpRetriever, open_client
+from meridian_ingest.credentials import MissingKeyError, read_api_key
+from meridian_ingest.http_retriever import (
+    USER_AGENT,
+    HttpRetriever,
+    SourceAccess,
+    open_client,
+)
 from meridian_ingest.politeness import BudgetExhaustedError, RequestBudget
 from meridian_ingest.provenance import Provenance
-from meridian_ingest.raw_store import RawStore
+from meridian_ingest.rate_ledger import RateLimiter, RequestLedger
+from meridian_ingest.raw_store import PublishedArtefact, RawStore
 from meridian_ingest.retrieval import (
     RemoteArtefact,
     RetrievalError,
@@ -44,9 +51,26 @@ from meridian_ingest.retrieval import (
     Retriever,
 )
 
-__all__ = ["ATTRIBUTION_NAME", "AttributionCheck", "check_attribution", "run_fetch"]
+__all__ = [
+    "ATTRIBUTION_NAME",
+    "AttributionCheck",
+    "Window",
+    "check_attribution",
+    "fetch_source",
+    "permitted",
+    "run_fetch",
+]
 
 ATTRIBUTION_NAME = "ATTRIBUTION.md"
+
+
+@dataclass(frozen=True, slots=True)
+class Window:
+    """The interval and ceiling one fetch asks for, from a command or a timer."""
+
+    since: datetime | None = None
+    until: datetime | None = None
+    limit: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,14 +139,15 @@ def run_fetch(
     store = RawStore(settings.raw_root)
     failed = False
     for source_id in sources:
-        if not _permitted(source_id):
+        if not permitted(source_id):
             failed = True
             continue
-        failed = not _fetch_one(source_id, args, settings, store) or failed
+        window = Window(args.since, args.until, args.limit)
+        failed = not fetch_source(source_id, window, settings, store) or failed
     return 1 if failed else 0
 
 
-def _permitted(source_id: str) -> bool:
+def permitted(source_id: str) -> bool:
     """Whether this source is credited where it says it is — before any socket."""
     descriptor = REGISTRY[source_id].adapter.descriptor
     check = check_attribution(descriptor)
@@ -141,57 +166,82 @@ def _permitted(source_id: str) -> bool:
     return True
 
 
-def _fetch_one(
-    source_id: str,
-    args: argparse.Namespace,
-    settings: IngestSettings,
-    store: RawStore,
+def fetch_source(
+    source_id: str, window: Window, settings: IngestSettings, store: RawStore
 ) -> bool:
-    """Fetch one source's planned artefacts. Returns whether it finished."""
-    source = settings.for_source(source_id)
-    adapter = REGISTRY[source_id].adapter
-    planned = adapter.plan(
-        FetchRequest(
-            since=args.since,
-            until=args.until,
-            limit=args.limit if args.limit is not None else source.request_budget,
-        )
-    )
-    say(f"{source_id}: {len(planned)} artefacts to retrieve")
+    """Fetch one source's planned artefacts, and any a listing names.
 
+    Args:
+        source_id: A registered source, already found credited.
+        window: The interval and the ceiling.
+        settings: For the source's places, budget and key variable.
+        store: Where the bytes go.
+
+    Returns:
+        Whether it finished.
+    """
+    source = settings.for_source(source_id)
+    registration = REGISTRY[source_id]
+    request = FetchRequest(
+        since=window.since,
+        until=window.until,
+        limit=window.limit if window.limit is not None else source.request_budget,
+        points=source.places.points,
+        bbox=source.places.bbox,
+        layers=source.places.layers,
+    )
+    try:
+        planned = registration.adapter.plan(request)
+    except ValueError as exc:
+        warn(f"meridian-ingest fetch: {exc}")
+        return False
+    say(f"{source_id}: {len(planned)} artefacts to retrieve")
     with ExitStack() as stack:
-        retriever = _retriever(stack, source_id, settings, source)
-        for remote in planned:
-            try:
-                published = _retrieve(retriever, adapter, remote, source_id, store)
-            except BudgetExhaustedError as exc:
-                warn(f"meridian-ingest fetch: {exc}")
-                return False
-            except (RetrievalError, ValueError) as exc:
-                warn(f"meridian-ingest fetch: {remote.original_identifier}: {exc}")
-                return False
-            say(f"    {published}")
+        try:
+            retriever = _retriever(stack, source_id, settings, source)
+            for remote in planned:
+                published = _retrieve(retriever, source_id, remote, store)
+                say(f"    {published.raw_path}  {_held(published.written)}")
+                for more in _expanded(source_id, store, published.raw_path, request):
+                    again = _retrieve(retriever, source_id, more, store)
+                    say(f"      {again.raw_path}  {_held(again.written)}")
+        except BudgetExhaustedError as exc:
+            warn(f"meridian-ingest fetch: {exc}")
+            return False
+        except (RetrievalError, MissingKeyError, ValueError) as exc:
+            warn(f"meridian-ingest fetch: {source_id}: {exc}")
+            return False
     return True
 
 
+def _expanded(
+    source_id: str, store: RawStore, raw_path: str, request: FetchRequest
+) -> tuple[RemoteArtefact, ...]:
+    """The granules a just-stored listing names, or nothing for anything else."""
+    adapter = REGISTRY[source_id].adapter
+    stored = store.read(raw_path)
+    if not isinstance(adapter, ListingAdapter) or not (
+        stored.manifest.provenance.original_identifier.endswith(LISTING_SUFFIX)
+    ):
+        return ()
+    return adapter.expand(stored, request)
+
+
 def _retrieve(
-    retriever: Retriever,
-    adapter: object,
-    remote: RemoteArtefact,
-    source_id: str,
-    store: RawStore,
-) -> str:
+    retriever: Retriever, source_id: str, remote: RemoteArtefact, store: RawStore
+) -> PublishedArtefact:
     """One artefact: fetch it, name its version, and publish it unchanged."""
     retrieved = retriever.retrieve(remote)
     version = require_source_version(
-        adapter.source_version(retrieved),  # type: ignore[attr-defined]
-        remote,
+        REGISTRY[source_id].adapter.source_version(retrieved), remote
     )
-    published = store.publish(
+    return store.publish(
         _provenance(source_id, remote, retrieved, version), retrieved.chunks
     )
-    held = "retrieved" if published.written else "already held"
-    return f"{published.raw_path}  {held}"
+
+
+def _held(written: bool) -> str:
+    return "retrieved" if written else "already held"
 
 
 def _retriever(
@@ -203,22 +253,29 @@ def _retriever(
     """The thing that turns a planned artefact into bytes.
 
     A source may supply its own — the reference archive serves the synthetic
-    files shipped beside it — and everything else is fetched over HTTP. The
-    choice is the *source's*, declared in the registry, rather than this
-    command deciding by looking at an id.
+    files shipped beside it — and everything else is fetched over HTTP, with
+    the source's key substituted at the socket and its published limits
+    counted in the ledger beside the raw store (D-223).
     """
-    supplied = REGISTRY[source_id].retriever
-    if supplied is not None:
-        return supplied
-    # Read only to refuse early when it is missing: a source that answers 401 to
-    # everything would otherwise spend its whole budget finding that out. *How*
-    # a key is presented — a header, a query parameter, a name of the source's
-    # choosing — belongs to the adapter that needs one, and no registered source
-    # does yet, so there is nothing here worth guessing at.
-    read_api_key(source_id, source.api_key_env)
+    registration = REGISTRY[source_id]
+    if registration.retriever is not None:
+        return registration.retriever
+    # Read before any request: a source that answers 401 to everything would
+    # otherwise spend its whole budget finding that out.
+    key = read_api_key(source_id, source.key_env)
+    limiter = RateLimiter(
+        registration.rate_limits,
+        RequestLedger.for_source(settings.raw_root, registration.ledger_id),
+        max_wait_s=settings.retry.max_delay_s,
+    )
     client = open_client(_user_agent(settings), settings.timeout_s)
     return stack.enter_context(
-        HttpRetriever(client, RequestBudget(source.request_budget), settings.retry)
+        HttpRetriever(
+            client,
+            RequestBudget(source.request_budget),
+            settings.retry,
+            SourceAccess(key=key, limiter=limiter),
+        )
     )
 
 
@@ -249,4 +306,5 @@ def _provenance(
         media_type=retrieved.media_type,
         valid_from=remote.valid_from,
         valid_to=remote.valid_to,
+        spatial_extent=remote.spatial_extent,
     )

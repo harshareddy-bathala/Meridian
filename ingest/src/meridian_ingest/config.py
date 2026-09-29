@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from meridian_ingest.adapters import REGISTRY
+from meridian_ingest.config_extent import PLACE_KEYS, SourcePlaces, parse_places
 from meridian_ingest.credentials import ENV_NAME
 from meridian_ingest.politeness import RetryPolicy
 
@@ -61,7 +62,9 @@ DEFAULT_TIMEOUT_S = 30.0
 
 _TOP_LEVEL = frozenset({"raw_root", "timeout_s", "contact", "retry", "sources"})
 _RETRY_KEYS = frozenset({"attempts", "base_delay_s", "max_delay_s"})
-_SOURCE_KEYS = frozenset({"enabled", "base_url", "request_budget", "api_key_env"})
+_SOURCE_KEYS = frozenset(
+    {"enabled", "base_url", "request_budget", "api_key_env", *PLACE_KEYS}
+)
 
 
 class ConfigurationError(ValueError):
@@ -78,9 +81,11 @@ class SourceSettings:
     """What one source is allowed, and where its key comes from."""
 
     source_id: str
-    enabled: bool = True
+    enabled: bool | None = None
     """False takes a source out of ``fetch`` without deleting its table, so the
-    terms it was registered under stay written down."""
+    terms it was registered under stay written down. None, the default, is the
+    source's own default: on for the reference archive, off for every real
+    source (D-220)."""
 
     base_url: str | None = None
     """Overrides the adapter's own root, for a mirror or a staging host. https
@@ -95,6 +100,21 @@ class SourceSettings:
     Read through :func:`read_api_key` at the moment it is needed, so it is
     never a field on a settings object that something might print.
     """
+
+    places: SourcePlaces = field(default_factory=SourcePlaces)
+    """Where the source is asked about: points, a box, imagery layers."""
+
+    @property
+    def is_enabled(self) -> bool:
+        """Whether this source is fetched when no source is named."""
+        if self.enabled is not None:
+            return self.enabled
+        return REGISTRY[self.source_id].enabled_by_default
+
+    @property
+    def key_env(self) -> str | None:
+        """The variable the key is read from: the file's, else the registry's."""
+        return self.api_key_env or REGISTRY[self.source_id].key_env
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +151,7 @@ class IngestSettings:
         return tuple(
             source_id
             for source_id in sorted(REGISTRY)
-            if self.for_source(source_id).enabled
+            if self.for_source(source_id).is_enabled
         )
 
 
@@ -279,14 +299,24 @@ def _source(source_id: str, entry: object, found: Path) -> SourceSettings:
     _only_known(entry, _SOURCE_KEYS, f"{found} [sources.{source_id}]")
     return SourceSettings(
         source_id=source_id,
-        enabled=_flag(entry.get("enabled", True), f"sources.{source_id}.enabled"),
+        enabled=None
+        if "enabled" not in entry
+        else _flag(entry["enabled"], f"sources.{source_id}.enabled"),
         base_url=_base_url(entry.get("base_url"), source_id),
         request_budget=_whole(
             entry.get("request_budget", DEFAULT_REQUEST_BUDGET),
             f"sources.{source_id}.request_budget",
         ),
         api_key_env=_api_key_env(entry.get("api_key_env"), source_id),
+        places=_places(entry, source_id),
     )
+
+
+def _places(entry: dict[str, object], source_id: str) -> SourcePlaces:
+    try:
+        return parse_places(entry, f"sources.{source_id}")
+    except ValueError as exc:
+        raise ConfigurationError(str(exc)) from exc
 
 
 def _api_key_env(value: object, source_id: str) -> str | None:
