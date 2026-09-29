@@ -4477,6 +4477,96 @@ Black Marble is published in HDF-EOS5 only. `h5py` (BSD-3-Clause, with NumPy) is
 
 ---
 
+## D-227 — Until D-137 is settled, an operator registers an area, nothing about one is published, and a label cannot name a person
+
+**2026-09-29 · accepted, interim** · *`meridian regions add`, `areas_of_interest`, Stage 32. Holds D-137's place until the team settles it; D-137 stays open.*
+
+Stage 32 needs areas to exist, and D-137 — who may register one, and whether a registration is public — is the team's question, not a document's. So the narrowest answer that lets the stage be built:
+
+- **An operator registers an area at the command line**, as stations are admitted (D-023). No endpoint, public or MSP, creates one.
+- **Nothing about an area is published.** Neither the public API nor the dashboard shows areas, series or coverage. The report is a file an operator reads.
+- **An area is a place and a label.** No owner, no contact, no address. A label or note that looks like an email address, a phone number or a street address is refused by name, because the moment an area describes a person it becomes personal data the project does not hold (`PROJECT.md` §16). Notes are never exported into a snapshot.
+- **A shape is registered once.** The polygon's digest is unique, so the same shape registered twice is the same area, and a changed shape is a new one.
+
+When D-137 is settled, publishing is an addition — an endpoint over the same report files — and nothing here has to be undone.
+
+---
+
+## D-228 — Regional monitoring is its own module, with its own commit scope
+
+**2026-09-29 · accepted** · *`platform/src/meridian/regions/`, `GIT-WORKFLOW.md` Rule 3, CI's `conventions` job*
+
+`regions` joins the scope list, and the `conventions` job's pattern with it, as each module stage's scope did. The module imports the snapshot readers of `datasets` and the store; nothing imports it except `cli_regions`, and it imports nothing from `scheduler`, `prediction`, `reliability` or `metrics`.
+
+**It shares no name with the platform's own monitoring.** Prometheus and Grafana watch Meridian; this watches places. Nothing here imports `meridian.metrics`, no metric or alert rule is named for a region, and a regional alert lives in `region_alerts`, never in Alertmanager. `tests/unit/test_regions_boundaries.py` holds all three.
+
+---
+
+## D-229 — A regional report is computed from a snapshot and published as files; series are not stored as rows
+
+**2026-09-29 · accepted** · *`meridian regions report`, `meridian.regions.report`, `DATA-MODEL.md`. Amends the planned `area_series` table.*
+
+`DATA-MODEL.md` planned `area_series` as a table. A series is a pure function of a raw snapshot, the areas in it, and a configuration — so a table of series would be a cache of that function, and one that could drift from it. **The report is published as a content-addressed directory** under `data/datasets/regions/`, as models are (D-163): its manifest names the raw snapshot it came from, the method version (`regions-1`), and the configuration's values and hash. The same snapshot and configuration name the same directory, and a second run writes nothing (rule 8).
+
+What is stored in the database is what cannot be recomputed: the areas registered, and the alerts recorded with their delivery attempts (D-232). `area_series` is not built.
+
+**Every point cites its inputs**: the sources, the product names and versions, the record ids, and when the newest artefact behind it was retrieved. **The latest revision of each value is used**, because a report describes the world as the snapshot knew it — the opposite of a feature's pre-pass rule (D-222), deliberately.
+
+**How a product is placed on an area** is stated in each point's `method`: pixels whose centre lies inside (or whose footprint reaches a small area); model cells inside, or else the nearest within `nearest_km`, as a daily mean; detections inside the area on a UTC day a fetched artefact covered the whole area, where a covered day with none is 0 and an uncovered day is absent. A point with no value is missing with its reason, never 0.
+
+**The snapshot carries what a report needs**: `areas_of_interest.jsonl` (notes excluded), the ground tracks of D-230, and every public artefact fetched about time near the scope — including those nothing was derived from, since a FIRMS day with no detections is the evidence the day was asked about, and a tile is shown behind an area. `ingest_records.jsonl` gains `spatial_extent`, which `ingest_provenance` now exposes.
+
+---
+
+## D-230 — Coverage is decoded receptions whose ground track came within half a swath, from tracks frozen at export
+
+**2026-09-29 · accepted** · *`OrbitService.ground_track`, `meridian.datasets.ground_tracks`, `meridian.regions.coverage`*
+
+Which of our receptions cover an area is a question about the ground beneath the satellite while the station received it. **The orbit service gains `ground_track`** — the WGS84 sub-satellite point, from Skyfield's `subpoint_of`, sampled over a window — and **the export freezes it** for every pass with a report, measured or simulated, as `pass_ground_tracks.jsonl` (every 30 s, three decimals of a degree). Nothing in `regions` propagates, as nothing in labelling or fitting does (D-158).
+
+**A reception covers an area** when its outcome is `decoded` and, at some sample between its start and end (one step's grace either side), the sub-satellite point lay within `swath_km / 2` of the area — 2 800 km by default, Meteor-M's imager. A pass scheduled over an area, or heard without a decode, imaged nothing and covers nothing.
+
+**Simulated receptions are excluded unless `include_simulated` is set**, and are then counted apart in the manifest and flagged on every row (rule 5).
+
+---
+
+## D-231 — A change is an interval, and an alert needs the whole interval past the threshold
+
+**2026-09-29 · accepted** · *`meridian.regions.change`, `regions.toml`*
+
+For each area and each quantity with a rule, the report compares the mean of the series in a **baseline** period with the mean in a **current** period — as an absolute difference, or relative to the baseline — and gives it a **percentile bootstrap interval**, resampling the two periods apart. The generator is seeded from the configured seed and a digest of the area and quantity, so the interval is identical every run and adding an area moves no other area's interval (rule 8).
+
+**An alert is raised only when the whole interval lies beyond the threshold**: below a negative one, above a positive one. A point estimate past the line with an interval reaching back across it is `within`, printed with both numbers. **Too few values** — fewer than `min_points` in either period, or a relative rule against a baseline mean of zero — is `insufficient`, never a change of zero.
+
+Thresholds are the operator's, in the file, and stated rather than tuned. The defaults: NDVI −15% relative, fire detections +3 a day absolute, precipitation −50%, aerosol +50%, night-time lights −30%.
+
+---
+
+## D-232 — A regional alert is a record behind a delivery interface; the only delivery records
+
+**2026-09-29 · accepted** · *`region_alerts`, `region_alert_deliveries`, `meridian.regions.alerts`*
+
+Stage 29 delivers notifications and is not built. So **`meridian regions record-alerts` stores each alert of a report** in `region_alerts` and hands it to an `AlertDelivery`. The only implementation is `RecordOnlyDelivery`, which sends nothing and appends an attempt saying so, with channel `record_only`. Email and Telegram arrive with Stage 29 as further implementations of the same protocol, and widen the channel CHECK then; nothing here changes when they do.
+
+**An alert's id is derived** from its area, quantity, rule, periods and the snapshot and configuration it came from, so recording a report twice writes nothing and delivers nothing the second time. Both tables are append-only.
+
+**No language model writes an alert or a report** (D-098): the summary and every printed line come from fixed templates over the report's rows.
+
+---
+
+## D-233 — Our receptions against the public layers: two cross-checks, each with a rate and an interval
+
+**2026-09-29 · accepted** · *`meridian.regions.crosscheck`*
+
+Stage 32 asks for our receptions to be checked against the public layers, as a check on both chains. Two checks, each reported as a rate with a Wilson interval and its counts, and neither a verdict on its own:
+
+- **The ingest against the receiving chain.** On each UTC day one of our measured decoded receptions covered an area, each daily public product — precipitation, aerosol, cloud, fire coverage — should have a value for the area. A day with our imagery and no public value is a gap in the ingest, listed by day.
+- **The receiving chain against the weather.** At 137 MHz rain does not attenuate the downlink enough for a decode to notice. So for stations inside an area, the decode rate of passes they attempted while confirmed listening (rule 7) should agree on wet days (precipitation ≥ `wet_day_mm`) and dry days. Intervals that do not overlap are reported as `differs`, which points at the station — water in a connector, a feedline that detunes when wet — not at the sky. Too few attempts either side is `insufficient`.
+
+Simulated receptions are never in either check: a simulated reception imaged nothing and its weather is invented.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -4505,7 +4595,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 |---|---|---|
 | **D-135** | Which cloud host and tier, on whose account, what happens when the credit lapses, and how long a station retains an unacknowledged reception | Stage 33 |
 | **D-136** | Whether any ingested source's terms permit its records to be republished inside the evidence dataset, which decides that dataset's own licence | Stage 30's licence entry |
-| **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Stage 32 |
+| **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Publishing anything about an area. D-227 holds its place in the meantime: operator-only, unpublished |
 
 ---
 
