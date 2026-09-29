@@ -206,10 +206,18 @@ def test_d_reads_everything() -> None:
     assert set(CONFIGURATIONS["D"].groups) == set(GROUPS)
 
 
-def test_the_public_conditions_group_is_named_and_empty() -> None:
-    """Stage 31 fills it; until then D-without-conditions is D."""
+def test_the_public_conditions_group_is_stage_31_s_four_and_only_d_reads_it() -> None:
+    """D-224: Kp and cloud cover, each with its indicator; A to C never see them."""
     assert "conditions" in GROUPS
-    assert not [one for one in FEATURES if one.group == "conditions"]
+    assert [one.name for one in FEATURES if one.group == "conditions"] == [
+        "kp_index",
+        "kp_known",
+        "cloud_cover_pct",
+        "cloud_cover_known",
+    ]
+    for name in "ABC":
+        assert "kp_index" not in CONFIGURATIONS[name].features
+    assert "kp_index" in CONFIGURATIONS["D"].features
 
 
 def test_every_feature_s_group_is_a_known_group() -> None:

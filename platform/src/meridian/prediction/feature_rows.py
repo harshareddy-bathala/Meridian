@@ -16,9 +16,10 @@ Reference: docs/DECISIONS.md D-146, D-148, D-157, D-158, D-159.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
+from meridian.datasets.environment_rows import read_environment_samples
 from meridian.datasets.row_fields import (
     MalformedSnapshotError,
     flag,
@@ -30,6 +31,7 @@ from meridian.datasets.row_fields import (
     optional_number,
     text,
 )
+from meridian.prediction.conditions import Conditions
 
 __all__ = [
     "FeatureRows",
@@ -106,6 +108,10 @@ class FeatureRows:
     readings: Mapping[int, tuple[Reading, ...]]
     """By prediction: each assignment's latest report, in assignment-id order."""
 
+    conditions: Conditions = field(default_factory=Conditions)
+    """Published values, answering for any pass by the pre-pass rule (D-224).
+    Empty for a snapshot exported before Stage 31."""
+
 
 def read_feature_rows(files: Mapping[str, bytes]) -> FeatureRows:
     """Read the geometry and bands out of a raw snapshot.
@@ -151,6 +157,10 @@ def read_feature_rows(files: Mapping[str, bytes]) -> FeatureRows:
             for one in _lines(files, "stations")
         },
         readings=_readings(files),
+        conditions=Conditions(
+            read_environment_samples(files),
+            places=_places(_lines(files, "stations")),
+        ),
     )
 
 
@@ -230,6 +240,24 @@ def _numbers(row: Mapping[str, object], name: str) -> tuple[float, ...]:
         message = f"{name} is {value!r}, not a list"
         raise MalformedSnapshotError(message)
     return tuple(number({name: one}, name) for one in value)
+
+
+def _places(
+    stations: list[Mapping[str, object]],
+) -> dict[str, tuple[float, float]]:
+    """Each station's position, for a local condition; unknown ones are left out.
+
+    A station with no stored position reads every local condition as missing,
+    which is what not knowing where it is means.
+    """
+    places = {}
+    for one in stations:
+        if one.get("lat_deg") is not None and one.get("lon_deg") is not None:
+            places[text(one, "station_id")] = (
+                number(one, "lat_deg"),
+                number(one, "lon_deg"),
+            )
+    return places
 
 
 def _lines(files: Mapping[str, bytes], name: str) -> list[Mapping[str, object]]:

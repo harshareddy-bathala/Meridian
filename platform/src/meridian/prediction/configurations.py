@@ -19,10 +19,10 @@ features (D-168, amending D-160). The scheduler's own objective, with its
 other terms, is :mod:`meridian.scheduler.objective`; a test holds the two
 tables equal.
 
-**``conditions`` is a group with no features** until Stage 31 ingests the
-public geomagnetic and weather series (``EVALUATION.md`` §3). It is named here
-so that D-without-conditions is one entry in ``exclude`` away, not a code
-change.
+**``conditions`` is the public geomagnetic and weather group** of
+``EVALUATION.md`` §3, filled by Stage 31 (D-224): what a source published
+before the pass. Only D reads it. D-131's leave-one-group-out run, D without
+this group, is not built yet: it waits on a model of real data (D-224).
 
 **Cold start is a route, not a default** (D-161). A configuration that reads
 the station's own record cannot describe a station that has none; one with
@@ -52,7 +52,7 @@ __all__ = [
 ]
 
 GROUPS = ("elevation", "geometry", "ours", "conditions")
-"""Every group a feature can belong to. ``conditions`` is empty until Stage 31."""
+"""Every group a feature can belong to. ``conditions`` is Stage 31's (D-224)."""
 
 
 @dataclass(frozen=True, slots=True)
