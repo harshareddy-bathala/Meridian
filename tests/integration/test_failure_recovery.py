@@ -138,7 +138,7 @@ def _assignments(conn: Any) -> int:
 
 
 def test_a_scheduler_that_dies_mid_round_leaves_nothing_and_recovers(
-    rollback: Any, schedule_rows: Any
+    rollback: Any, schedule_rows: Any, tmp_path: Path
 ) -> None:
     station = schedule_rows.station("st_crash_recovery", simulated=True)
     schedule_rows.satellite()
@@ -174,12 +174,19 @@ def test_a_scheduler_that_dies_mid_round_leaves_nothing_and_recovers(
     orbit = SkyfieldOrbitService()
     before = _assignments(rollback)
 
+    datasets = tmp_path / "datasets"
     crashed = run_round(
-        DatabaseRoundWork(dies_during_scheduling, orbit, lambda: None), plan, now
+        DatabaseRoundWork(dies_during_scheduling, orbit, lambda: None, datasets),
+        plan,
+        now,
     )
     after_crash = _assignments(rollback)
-    restarted = run_round(DatabaseRoundWork(healthy, orbit, lambda: None), plan, now)
-    again = run_round(DatabaseRoundWork(healthy, orbit, lambda: None), plan, now)
+    restarted = run_round(
+        DatabaseRoundWork(healthy, orbit, lambda: None, datasets), plan, now
+    )
+    again = run_round(
+        DatabaseRoundWork(healthy, orbit, lambda: None, datasets), plan, now
+    )
 
     assert crashed.generated is not None and crashed.generated.passes_stored > 0
     assert crashed.scheduled is None
