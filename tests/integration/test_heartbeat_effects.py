@@ -243,6 +243,17 @@ def _build_pass(cur: Any, station_id: str, now: datetime) -> int:
     return int(pass_id)
 
 
+def events_of(rollback: Any, assignment_id: str) -> list[tuple[str, str | None]]:
+    """The revocation history of one assignment, oldest first (D-196)."""
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select event, reason from assignment_revocations"
+            " where assignment_id = %s order by at, event_id",
+            (assignment_id,),
+        )
+        return [(event, reason) for event, reason in cur.fetchall()]
+
+
 def state_of(rollback: Any, assignment_id: str) -> str:
     """The stored state of one assignment."""
     with rollback.cursor() as cur:
@@ -367,6 +378,7 @@ def test_a_held_assignment_dropped_before_its_window_is_revoked_as_declined(
 
     assert state_of(rollback, "as_dropped") == "revoked"
     assert reason_of(rollback, "as_dropped") == "declined"
+    assert events_of(rollback, "as_dropped") == [("revoked", "declined")]
     assert body["assignments"] == []
 
 
@@ -443,6 +455,9 @@ def test_an_offline_revocation_the_returning_station_names_is_reinstated(
         "held",
         None,
     )
+    # D-196: the assignment says held again; the history keeps the return.
+    assert events_of(rollback, "as_kept") == [("reinstated", None)]
+    assert events_of(rollback, "as_forgotten") == []
     assert state_of(rollback, "as_forgotten") == "revoked"
     assert [one["assignment_id"] for one in body["assignments"]] == ["as_kept"]
 

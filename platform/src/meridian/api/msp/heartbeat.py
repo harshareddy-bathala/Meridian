@@ -212,7 +212,7 @@ def _apply_reconciliation(
             conn, station_id=station_id, assignment_id=outcome.to_start
         )
     revoke_declined(conn, station_id, still_held=named, now=now)
-    expire_overdue_assignments(conn, station_id, still_held=named)
+    expire_overdue_assignments(conn, station_id, still_held=named, now=now)
 
 
 def _assignments_due_now(
@@ -227,7 +227,9 @@ def _assignments_due_now(
     visible instead of silent; nothing enforces it yet, because nothing but a
     human creates assignments in Phase 1.
     """
-    due = find_due_assignments(conn, station_id, horizon_end=now + ASSIGNMENT_HORIZON)
+    due = find_due_assignments(
+        conn, station_id, horizon_end=now + ASSIGNMENT_HORIZON, now=now
+    )
     if len(due) > MAX_ASSIGNMENTS_PER_RESPONSE:
         _log.warning(
             "station %s has %d eligible assignments, over MSP §4.2's cap of %d;"

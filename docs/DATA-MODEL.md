@@ -198,6 +198,15 @@ What happened to each settled, scheduled pass, and the evidence it was decided f
 - **`evidence`** is everything the classification read: each assignment and its state, the report and its revision, whether the station was heard, the registry's listening answer for each assignment, and the receptions D-147 judged the satellite by.
 - **Append-only.** Unique on `(assignment_id, method, config_sha256)`, so a changed rule or parameter writes new rows beside the old, and a re-run writes nothing. See D-182.
 
+### `assignment_revocations`
+Every revocation of an assignment and every reinstatement of one (Stage 21).
+
+`(event_id, assignment_id, station_id, event, reason, at)`
+
+- **One row per event**, written by the same statement that moves the assignment, so an event and the change it records cannot disagree. `event` is `revoked` or `reinstated`; `reason` is `declined` or `offline` on a revocation and null on a reinstatement.
+- **`at` is the platform's instant for the decision**: the scheduling round's `now` for an offline revocation, the heartbeat's for a decline or a reinstatement.
+- **Append-only, and the reason it exists.** A reinstatement clears the assignment's `revoked_reason` and `revoked_at` (D-171), which is right for its state and would otherwise leave no record that the platform ever took the work back. `meridian reliability faults` reads it to show the scheduler replanned while a station was offline (D-196).
+
 ### `products`
 Artifacts from an observation — waterfalls, images, decoded frames. Content-addressed by hash, referenced here.
 
@@ -439,6 +448,7 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `heartbeats.state` (reported) | `idle`, `slewing`, `listening`, `processing`, `degraded`, `maintenance` — MSP §4.2 |
 | `assignments.state` | `issued`, `held`, `in_progress`, `reported`, `expired` — D-008 |
 | `assignments.decision` | `scheduled`, `skipped` |
+| `assignment_revocations.event` / `.reason` | `revoked`, `reinstated` / `declined`, `offline` — D-196 |
 | `pass_classifications.classification` | `successful_reception`, `signal_no_decode`, `confirmed_miss`, `satellite_silent`, `satellite_state_indeterminate`, `station_unavailable`, `station_not_confirmed_listening`, `assignment_declined` — D-180 |
 | `observations.outcome` | the five values of MSP §4.4 — D-010 |
 | `observations.provenance` | `station`, `archive`, `manual` |

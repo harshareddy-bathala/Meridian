@@ -19,7 +19,13 @@ Three transitions, each on a scheduled assignment whose window has not begun:
 ``issued`` that was never held and is absent is left alone, as in Phase 1: it
 may not have arrived yet, and redelivery is how it does (D-026).
 
-Reference: docs/DECISIONS.md D-003, D-022, D-026, D-171; docs/MSP-SPEC.md §4.2.
+**Each transition is also an event in ``assignment_revocations``**, written by
+the same statement (D-196). A reinstatement clears the assignment's
+``revoked_reason``, which is right for its state and would otherwise erase the
+only record that the platform ever took the work back.
+
+Reference: docs/DECISIONS.md D-003, D-022, D-026, D-171, D-196;
+docs/MSP-SPEC.md §4.2.
 """
 
 from __future__ import annotations
@@ -43,13 +49,20 @@ def revoke_declined(
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
-            update assignments
-            set state = 'revoked', revoked_reason = 'declined', revoked_at = %s
-            where station_id = %s
-              and decision = 'scheduled'
-              and state = 'held'
-              and start_at > %s
-              and assignment_id <> all(%s)
+            with changed as (
+                update assignments
+                set state = 'revoked', revoked_reason = 'declined', revoked_at = %s
+                where station_id = %s
+                  and decision = 'scheduled'
+                  and state = 'held'
+                  and start_at > %s
+                  and assignment_id <> all(%s)
+                returning assignment_id, station_id, revoked_at
+            )
+            insert into assignment_revocations
+                (assignment_id, station_id, event, reason, at)
+            select assignment_id, station_id, 'revoked', 'declined', revoked_at
+            from changed
             """,
             (now, station_id, now, list(still_held)),
         )
@@ -65,12 +78,19 @@ def revoke_offline(conn: Connection, station_id: str, *, now: datetime) -> int:
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
-            update assignments
-            set state = 'revoked', revoked_reason = 'offline', revoked_at = %s
-            where station_id = %s
-              and decision = 'scheduled'
-              and state in ('issued', 'held')
-              and start_at > %s
+            with changed as (
+                update assignments
+                set state = 'revoked', revoked_reason = 'offline', revoked_at = %s
+                where station_id = %s
+                  and decision = 'scheduled'
+                  and state in ('issued', 'held')
+                  and start_at > %s
+                returning assignment_id, station_id, revoked_at
+            )
+            insert into assignment_revocations
+                (assignment_id, station_id, event, reason, at)
+            select assignment_id, station_id, 'revoked', 'offline', revoked_at
+            from changed
             """,
             (now, station_id, now),
         )
@@ -95,28 +115,35 @@ def reinstate_named(
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
-            update assignments a
-            set state = 'held', revoked_reason = null, revoked_at = null
-            where a.station_id = %s
-              and a.state = 'revoked'
-              and a.end_at > %s
-              and a.assignment_id = any(%s)
-              and not exists (
-                select 1 from assignments later
-                where later.pass_id = a.pass_id
-                  and later.model_config = a.model_config
-                  and later.revision > a.revision
-              )
-              and not exists (
-                select 1 from assignments other
-                where other.station_id = a.station_id
-                  and other.assignment_id <> a.assignment_id
-                  and other.decision = 'scheduled'
-                  and other.state in ('issued', 'held', 'in_progress')
-                  and other.start_at < a.end_at
-                  and a.start_at < other.end_at
-              )
+            with changed as (
+                update assignments a
+                set state = 'held', revoked_reason = null, revoked_at = null
+                where a.station_id = %s
+                  and a.state = 'revoked'
+                  and a.end_at > %s
+                  and a.assignment_id = any(%s)
+                  and not exists (
+                    select 1 from assignments later
+                    where later.pass_id = a.pass_id
+                      and later.model_config = a.model_config
+                      and later.revision > a.revision
+                  )
+                  and not exists (
+                    select 1 from assignments other
+                    where other.station_id = a.station_id
+                      and other.assignment_id <> a.assignment_id
+                      and other.decision = 'scheduled'
+                      and other.state in ('issued', 'held', 'in_progress')
+                      and other.start_at < a.end_at
+                      and a.start_at < other.end_at
+                  )
+                returning a.assignment_id, a.station_id
+            )
+            insert into assignment_revocations
+                (assignment_id, station_id, event, reason, at)
+            select assignment_id, station_id, 'reinstated', null, %s
+            from changed
             """,
-            (station_id, now, list(named)),
+            (station_id, now, list(named), now),
         )
         return cur.rowcount

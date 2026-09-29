@@ -109,6 +109,8 @@ def test_all_expected_tables_exist(conn) -> None:
         "archive_observations",
         # Stage 20's record of every classified pass (0020, D-182).
         "pass_classifications",
+        # Stage 21's record of every revocation and reinstatement (0021, D-196).
+        "assignment_revocations",
     }
     assert expected <= tables
 

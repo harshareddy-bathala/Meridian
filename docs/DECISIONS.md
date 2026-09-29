@@ -3761,6 +3761,8 @@ Neither is a yield label (D-149), so neither reaches a model as a negative. A re
 
 *Amended by D-181:* these two rules now live in `meridian.reliability.classification`, first in its table, so the live accounting (D-182) reads a revoked pass exactly as the labeller does, and never as a miss.
 
+*Amended by D-196:* every revocation and reinstatement is also written to `assignment_revocations` (migration 0021), because a reinstatement clears the assignment's `revoked_reason` and would otherwise leave no record that the work was ever taken back.
+
 This amends D-022, D-026 and MSP §4.2's reconciliation table. The wire protocol is unchanged: no message is added, and a station that never declines sees no difference.
 
 ---
@@ -4054,7 +4056,7 @@ Stage 10's five faults already cover four of the roadmap's list: station disconn
 
 **A partition belongs to the fleet.** Its members are drawn from the master seed and the station count, and every member is cut off on the same ticks. The point is correlated loss that the scheduler has to route around. Independent outages that happened to coincide would test that only by accident. Its members depend on the count; station 1's own schedule still does not.
 
-**A decline is a release, not a message.** MSP has no decline message (D-003). A station declines by no longer naming work in `held_assignments`, so the reference client gains `AssignmentRecord.release`, written to disk before it returns, like `accept`. A real station may use it too. Drawing from the station's seed and the assignment's id means a restarted station declines the same work.
+**A decline is a release, not a message.** MSP has no decline message (D-003). A station declines by no longer naming work in `held_assignments`, so the reference client gains `AssignmentRecord.release`, written to disk before it returns, like `accept`. A real station may use it too. Drawing from the station's seed and the assignment's id means a restarted station declines the same work. **Only work a heartbeat has already named can be declined:** MSP §4.2 reads work that was delivered and never named as not yet arrived, and offers it again, so releasing it is not a decline and the ledger must not record it as one. Stage 21's gate found the simulator doing exactly that.
 
 **`chaos` is every recurring fault, and `faulty` is unchanged.** Like `faulty`, `chaos` leaves out `token_revoked`, because a fleet that dies of old age tests nothing after the first hour. It is the scenario the long run injects.
 
@@ -4165,10 +4167,10 @@ For slow API, 20 s is past the client's 10 s read timeout and short of `stale`.
 | `held` | faults that stop heartbeats | no heartbeat was stored inside the window: the silence the ledger claims is the one the platform saw |
 | `detected` | faults that stop heartbeats | a silence of ninety seconds or more read `offline` within SC-5's ninety seconds of the fault; a shorter one correctly never did (D-190) |
 | `no_new_work` | a station that went offline | nothing was decided for it between going offline and being heard again (D-166) |
-| `replanned` | a station offline while a round ran | every piece of work decided before it went offline, and starting after that round, was revoked as `offline` (D-171). The verdict reports how many passes were decided again |
-| `no_false_miss` | faults that remove listening evidence, withhold a report or decline work | no pass the fault touched is classified `confirmed_miss` (CLAUDE.md rule 7) |
-| `declines_honoured` | `declines` | each assignment the ledger says was let go of was revoked as `declined` |
-| `recovered` | a closed fault | a heartbeat within ninety seconds of the close. For the platform's faults, a heartbeat from any station; for the scheduler, a round within fifteen minutes (`ScheduledTaskStalled`'s own threshold) |
+| `replanned` | a station offline while a recorded round ran | every piece of work decided before it went offline, and starting after that round, was revoked as `offline` inside *this* outage (D-171), read from the revocation history (D-196). The verdict reports how many passes were decided again. For a station that was silent but never offline, it fails if anything of its was revoked as offline in the gap |
+| `no_false_miss` | faults that remove listening evidence, withhold a report or decline work | no pass the fault touched is a *false* `confirmed_miss`: one the ledger says the station never listened to (a dead receiver, a decline), or one the platform holds a report of (CLAUDE.md rule 7). A pass the station listened to and never reported, lost to a restart or an unsent queue, was missed, and saying so is true |
+| `declines_honoured` | `declines` | each assignment let go of was revoked as `declined`, where the platform heard the station again before the work's window opened. Later than that, MSP §4.2 makes it `expired`, which is also honoured |
+| `recovered` | faults that stop heartbeats, once closed | a heartbeat within ninety seconds of the end of every silencing fault overlapping this one on the station. For the platform's faults, a heartbeat from any station; for the scheduler, a round within fifteen minutes (`ScheduledTaskStalled`'s own threshold) |
 | `alerted` | with `--prometheus`, a station that went offline | `StationOffline` fired, and how long after the fault |
 
 **A check that does not apply is `None`, not a pass.** A verdict passes when no check failed. The output marks the inapplicable checks with a dash, so a run is never reported as having passed a question it was not asked.
@@ -4179,19 +4181,41 @@ For slow API, 20 s is past the client's 10 s read timeout and short of `stale`.
 
 **A decision's instant is its run's `decided_at`**, the `now` the scheduler judged liveness at (D-170), and only a decision with no run falls back to `issued_at`. A pass classified under several configurations reads as a miss if any one of them says so.
 
+**A round is on the record when it left one:** a run, because it decided something (D-170), or an offline revocation (D-196). A round that did neither wrote nothing, and the verdict cannot hold the platform to a round it cannot see, so `replanned` does not apply to an outage with no recorded round. A revocation at the very instant a heartbeat arrived belongs to the gap before that heartbeat: the round judged liveness first, when the station had been silent ninety seconds.
+
 *Rejected:* storing the verdicts in a table, which would put ground truth's shadow in the database D-189 keeps it out of; the verdict is printed and optionally written as JSON beside the ledger. Also rejected: judging detection from the dashboard's liveness at the moment of reading, which answers "is it offline now", not "when did it become so".
 
 ---
 
 ## D-195 — One heartbeat has one time: the handler's
 
-**2026-09-29 · accepted** · *`meridian/api/msp/heartbeat.py`; `meridian/store/heartbeats.py`, Stage 21. Amends the reasoning in `insert_heartbeat`'s docstring.*
+**2026-09-29 · accepted** · *`meridian/api/msp/heartbeat.py`; `meridian/store/{heartbeats,assignments}.py`, Stage 21. Amends the reasoning in `insert_heartbeat`'s docstring.*
 
 The heartbeat handler reads the platform's clock once (`platform_clock.utc_now()`) and reconciles held work, revocations and reinstatements at that instant. Until now it stored the heartbeat row, and bumped `stations.last_heartbeat_at`, with the database's `now()` — the transaction's start. Two clocks for one event, a few milliseconds apart in production, and, in a test running inside one transaction, the same frozen instant for every heartbeat.
 
-Both are now stamped with the handler's instant. `insert_heartbeat` and `touch_last_heartbeat` take it as an optional argument, and without one they fall back to `now()`, as before. The column is still the platform's clock and never the station's `sent_at`, which was the reason the original docstring gave for leaving it to the default.
+Both are now stamped with the handler's instant, and so are the two decisions the heartbeat makes from the clock: which overdue work expires, and which work is due for delivery. `insert_heartbeat`, `touch_last_heartbeat`, `expire_overdue_assignments` and `find_due_assignments` take it as an optional argument, and without one they fall back to `now()`, as before. The gate found the last two: on a stated clock, every assignment read as long past and was never delivered. The column is still the platform's clock and never the station's `sent_at`, which was the reason the original docstring gave for leaving it to the default.
 
 **Why Stage 21 needed it.** Its gate drives a fleet through real MSP on a stated clock, so that a ninety-second silence can be judged without waiting ninety seconds. That is only possible if the time the platform stores is the time it was told, and it is the same substitution `platform_clock` was written to allow. A conformance test stamps a heartbeat at a stated instant and requires the row, the station's last-seen instant and the response to carry it. It fails if the handler stops passing its instant.
+
+---
+
+## D-196 — Every revocation and reinstatement is kept, in `assignment_revocations`
+
+**2026-09-29 · accepted** · *`deploy/migrations/sql/0021_assignment_revocations.sql`; `meridian/store/revocations.py`, Stage 21. Extends D-171.*
+
+D-171's reinstatement gives a revoked assignment back to a station that still names it, and clears the assignment's `revoked_reason` and `revoked_at`. That is right for the assignment's state. It also erases the only record that the platform ever took the work back. Stage 21's gate showed the cost: across one run, sixty offline revocations happened, all sixty were reinstated when their stations returned still holding the work, and the stored record could show none of them. "The scheduler replans" could not be proven from the database, and the platform could not say how often it revoked an offline station's work at all.
+
+**Migration 0021 adds `assignment_revocations`**, append-only, with one row per event:
+- `revoked`, with its reason (`declined` or `offline`), when the work was taken back;
+- `reinstated`, when it was given back.
+
+Each row is written by the statement that moves the assignment — an `update … returning` feeding an `insert` — so an event and the change it records cannot disagree. `at` is the platform's instant for the decision: the round's `now` for an offline revocation, the heartbeat's for a decline or a reinstatement.
+
+**How the verdict uses it.** `replanned` judges each outage by the revocations inside it. A revocation from an earlier outage, since given back, does not count for this one. The unit tests pin that, and the gate's positive control removes one revocation from the history and requires the verdict to fail.
+
+**Numbering.** Migrations are linear and gapless (`tests/unit/test_migration_history.py`), so this is **0021**, on 0020. Stage 19, on another branch, also writes a 0021. Whichever of the two merges second renumbers its migration to 0022 and chains it on the other before merging, as GIT-WORKFLOW's migration rule already requires of a branch behind main.
+
+*Rejected:* keeping `revoked_reason` through a reinstatement, which would make an assignment's columns describe its past rather than its state, and break 0019's check that a revocation is whole. Also rejected: a log line per revocation, which no verdict can read back.
 
 ---
 
@@ -4445,7 +4469,10 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-192 a fault judged from the platform's own records | `meridian/reliability/{faults,fault_check}.py`; `meridian/store/fault_evidence.py`; `meridian/cli_reliability.py` (`faults`); `tests/unit/test_reliability_faults.py` |
 | D-193 the pool checks a connection as it lends it | `meridian/store/pool.py`; `tests/integration/test_pool.py` |
 | D-194 platform faults from the host | `deploy/tools/chaos.py`; `pyproject.toml` (its lint set); `.github/workflows/ci.yml` (the compose job's fault step); `tests/msp_conformance/test_platform_restart.py`; `tests/unit/{test_chaos_tool,test_jobs_rounds}.py` |
-| D-195 one heartbeat, one time | `meridian/api/msp/heartbeat.py`; `meridian/store/heartbeats.py`; `DATA-MODEL.md` (heartbeats); `tests/msp_conformance/test_heartbeat_endpoint.py` |
+| D-195 one heartbeat, one time | `meridian/api/msp/heartbeat.py`; `meridian/store/{heartbeats,assignments}.py`; `DATA-MODEL.md` (heartbeats); `tests/msp_conformance/test_heartbeat_endpoint.py` |
+| D-196 the revocation history | migration 0021; `meridian/store/{revocations,fault_evidence}.py`; `DATA-MODEL.md`; `tests/integration/{test_heartbeat_effects,test_schedule_run,test_migrations,test_migration_lifecycle}.py` |
+| — the completion gate | `tests/integration/test_fault_gate.py`: five stations under `chaos` through real MSP on a stated clock, judged, with two positive controls |
+| — the amended entry | D-171, whose revocations are now kept (D-196) |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

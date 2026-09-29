@@ -63,18 +63,26 @@ def work(  # noqa: PLR0913 — one stored assignment's fields
     revoked_reason: str | None = None,
     revoked: float | None = None,
     redecided: float | None = None,
+    given_back: bool = False,
 ) -> StationWork:
-    """One scheduled assignment of station 1."""
+    """One scheduled assignment of station 1.
+
+    ``given_back`` is D-171's reinstatement: the assignment's own columns say
+    held again, and only the revocation history remembers (D-196).
+    """
+    at = None if revoked is None else s(revoked)
     return StationWork(
         assignment_id=assignment_id,
         pass_id=1,
         decided_at=s(decided),
         start_at=s(start),
         end_at=s(start + length),
-        state="revoked" if revoked_reason else "issued",
-        revoked_reason=revoked_reason,
-        revoked_at=None if revoked is None else s(revoked),
+        state="held" if given_back else "revoked" if revoked_reason else "issued",
+        revoked_reason=None if given_back else revoked_reason,
+        revoked_at=None if given_back else at,
         redecided_at=None if redecided is None else s(redecided),
+        offline_revocations=(at,) if revoked_reason == "offline" and at else (),
+        declined_at=at if revoked_reason == "declined" else None,
     )
 
 
@@ -85,6 +93,7 @@ def evidence(**changes: object) -> StationEvidence:
         work=(),
         rounds=(),
         classifications={},
+        reported=frozenset(),
         as_of=s(3600),
     )
     return replace(base, **changes)  # type: ignore[arg-type]
@@ -150,6 +159,41 @@ def test_unbegun_work_revoked_by_a_round_while_offline_is_replanned() -> None:
     assert "1 revoked 30 s after going offline; 1 decided again" in detail
 
 
+def test_a_revocation_given_back_since_still_counts() -> None:
+    """D-196: the station came back holding it, and the history still says so."""
+    given_back = evidence(
+        work=(work(revoked_reason="offline", revoked=120, given_back=True),),
+        rounds=(s(120),),
+    )
+
+    assert check(judge_station_fault(fault(), given_back), "replanned")[0] is True
+
+
+def test_a_revocation_from_an_earlier_outage_does_not_count_for_this_one() -> None:
+    """Each outage is judged by the revocations inside it."""
+    earlier = evidence(
+        work=(work(revoked_reason="offline", revoked=-600, given_back=True),),
+        rounds=(s(120),),
+    )
+
+    assert check(judge_station_fault(fault(), earlier), "replanned")[0] is False
+
+
+def test_work_revoked_as_offline_in_a_short_gap_fails() -> None:
+    """D-190: a heartbeat delay short of ninety seconds costs the station nothing."""
+    short = beats(-120, 0) + beats(60, 300)
+    revoked = evidence(
+        heartbeats=short, work=(work(revoked_reason="offline", revoked=30),)
+    )
+    at_the_heartbeat = evidence(
+        heartbeats=short, work=(work(revoked_reason="offline", revoked=0),)
+    )
+    delay = fault("heartbeat_delayed", closed=60)
+
+    assert check(judge_station_fault(delay, revoked), "replanned")[0] is False
+    assert check(judge_station_fault(delay, at_the_heartbeat), "replanned")[0] is None
+
+
 def test_unbegun_work_left_to_an_offline_station_fails() -> None:
     """A round ran while it was offline and left its work in place."""
     kept = evidence(work=(work(),), rounds=(s(120),))
@@ -164,16 +208,35 @@ def test_with_no_round_while_offline_replanning_is_not_asked() -> None:
     assert check(judge_station_fault(fault(), quiet), "replanned")[0] is None
 
 
-def test_a_pass_lost_to_a_fault_must_not_be_a_confirmed_miss() -> None:
-    """CLAUDE.md rule 7, at the moment it matters most."""
+def test_a_reported_pass_classified_a_miss_is_a_false_miss() -> None:
+    """CLAUDE.md rule 7: a pass the platform holds a report of was not missed."""
     during = work(start=30, length=120)
-    missed = evidence(work=(during,), classifications={"as_1": "confirmed_miss"})
-    unavailable = evidence(
-        work=(during,), classifications={"as_1": "station_unavailable"}
+    missed = evidence(
+        work=(during,),
+        classifications={"as_1": "confirmed_miss"},
+        reported=frozenset({"as_1"}),
     )
 
     assert check(judge_station_fault(fault(), missed), "no_false_miss")[0] is False
-    assert check(judge_station_fault(fault(), unavailable), "no_false_miss")[0] is True
+
+
+def test_a_pass_the_station_never_began_is_not_a_miss() -> None:
+    """The ledger says the receiver was down: the station did not listen."""
+    dead = replace(fault("receiver_down"), assignment_ids=("as_1",))
+    missed = evidence(
+        work=(work(start=30, length=120),), classifications={"as_1": "confirmed_miss"}
+    )
+
+    assert check(judge_station_fault(dead, missed), "no_false_miss")[0] is False
+
+
+def test_a_pass_listened_to_and_never_reported_is_a_true_miss() -> None:
+    """Heard listening, no report ever: the station missed it, and that is true."""
+    lost = evidence(
+        work=(work(start=30, length=120),), classifications={"as_1": "confirmed_miss"}
+    )
+
+    assert check(judge_station_fault(fault(), lost), "no_false_miss")[0] is True
 
 
 def test_a_decoder_fault_does_not_ask_about_misses() -> None:
@@ -193,6 +256,45 @@ def test_declined_work_must_be_revoked_as_declined() -> None:
     assert (
         check(judge_station_fault(declining, ignored), "declines_honoured")[0] is False
     )
+
+
+def test_a_decline_heard_only_after_the_window_opened_is_not_owed_a_revocation() -> (
+    None
+):
+    """MSP §4.2: absent once the window has passed is expired, not revoked."""
+    late = replace(fault("declines"), assignment_ids=("as_1",), acted_at={"as_1": s(1)})
+    unheard_until_it_began = evidence(
+        heartbeats=beats(-120, 0) + beats(700, 900), work=(work(start=600),)
+    )
+    heard_in_time = evidence(work=(work(start=600),))
+
+    assert check(
+        judge_station_fault(late, unheard_until_it_began), "declines_honoured"
+    )[0]
+    assert (
+        check(judge_station_fault(late, heard_in_time), "declines_honoured")[0] is False
+    )
+
+
+def test_recovery_waits_for_an_overlapping_outage_to_end() -> None:
+    """A heartbeat delay ending inside a network outage is not owed a heartbeat."""
+    delay = fault("heartbeat_delayed", closed=61)
+    outage = replace(fault("network_down", closed=181), opened_at=s(31))
+    heard_after_outage = evidence()
+
+    assert check(
+        judge_station_fault(delay, heard_after_outage, (outage,)), "recovered"
+    ) == (True, "first heartbeat 0 s after it ended")
+    assert (
+        check(judge_station_fault(delay, heard_after_outage), "recovered")[0] is False
+    )
+
+
+def test_a_fault_that_leaves_the_station_reachable_is_not_asked_to_recover() -> None:
+    """A decoder or a clock fault stops no heartbeat, so recovery is not a question."""
+    verdict = judge_station_fault(fault("decoder_degraded"), evidence())
+
+    assert check(verdict, "recovered")[0] is None
 
 
 def test_a_station_must_be_heard_again_after_its_fault() -> None:
@@ -267,8 +369,8 @@ def test_a_stopped_scheduler_must_run_a_round_again() -> None:
     assert not judge_platform_fault(platform_fault("scheduler_down"), stalled).passed
 
 
-def test_no_pass_during_a_platform_fault_may_be_a_confirmed_miss() -> None:
-    """Stations could not be heard, so none can have been confirmed listening."""
+def test_no_reported_pass_during_a_platform_fault_may_be_a_miss() -> None:
+    """A miss the platform holds a report of is a miss it made wrongly."""
     missed = PlatformEvidence(s(70), None, ("as_9",), s(3600))
 
     assert not judge_platform_fault(platform_fault("database_restart"), missed).passed

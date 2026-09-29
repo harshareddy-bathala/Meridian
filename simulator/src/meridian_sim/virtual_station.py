@@ -158,10 +158,19 @@ class VirtualStation:
         self._loop = loop
         self._transport = transport
         self._parts = parts
+        self._named: frozenset[str] = frozenset()
 
     def tick(self, now: datetime) -> TickOutcome:
-        """Run one heartbeat cycle. The loop's own, unmodified."""
-        return self._loop.tick(now)
+        """Run one heartbeat cycle. The loop's own, unmodified.
+
+        Notes which held work the platform has now been told about, which is
+        the only work a decline can apply to (:meth:`decline`).
+        """
+        holding = frozenset(self._parts.record.held_ids())
+        outcome = self._loop.tick(now)
+        if outcome.heartbeat_sent:
+            self._named = holding
+        return outcome
 
     def decline(self, now: datetime) -> tuple[str, ...]:
         """Let go of some held work whose window has not opened yet.
@@ -171,6 +180,11 @@ class VirtualStation:
         own record, so the next heartbeat's ``held_assignments`` simply stops
         naming them — the only way MSP has to decline (D-003).
 
+        Only work a heartbeat has already named is eligible. MSP §4.2 reads
+        work that was delivered and never named as not yet arrived, and offers
+        it again: letting go of it is not a decline, and a ledger recording it
+        as one would be recording something that did not happen.
+
         Returns:
             The ids released, for the run's fault ledger.
         """
@@ -178,7 +192,8 @@ class VirtualStation:
         chosen = {
             one.assignment_id
             for one in self._parts.record.held()
-            if one.start_at > now
+            if one.assignment_id in self._named
+            and one.start_at > now
             and (executing is None or one.assignment_id != executing.assignment_id)
             and declines_assignment(self.seed, one.assignment_id)
         }

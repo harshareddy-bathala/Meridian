@@ -26,11 +26,12 @@ from meridian.reliability.faults import (
     judge_station_fault,
 )
 from meridian.store.fault_evidence import (
-    find_confirmed_misses_between,
     find_first_heartbeat_after,
     find_first_round_after,
     find_heartbeat_times,
     find_pass_classes,
+    find_reported,
+    find_reported_misses_between,
     find_rounds_between,
     find_station_work,
 )
@@ -72,9 +73,22 @@ def check_faults(
     return tuple(
         _judge_platform(conn, one, now)
         if one.on_platform
-        else _judge_station(conn, one, now, alerts)
+        else _judge_station(conn, one, now, alerts, _same_target(one, faults))
         for one in faults
         if one.on_platform or one.station_id is not None
+    )
+
+
+def _same_target(
+    fault: InjectedFault, faults: Sequence[InjectedFault]
+) -> tuple[InjectedFault, ...]:
+    """The other faults of the same run on the same station."""
+    return tuple(
+        one
+        for one in faults
+        if one is not fault
+        and one.run_id == fault.run_id
+        and one.target == fault.target
     )
 
 
@@ -83,6 +97,7 @@ def _judge_station(
     fault: InjectedFault,
     now: datetime,
     alerts: AlertLookup | None,
+    alongside: tuple[InjectedFault, ...],
 ) -> FaultVerdict:
     station_id = fault.station_id or ""
     start = fault.opened_at - MARGIN
@@ -98,6 +113,8 @@ def _judge_station(
             revoked_reason=one.revoked_reason,
             revoked_at=one.revoked_at,
             redecided_at=one.redecided_at,
+            offline_revocations=tuple(one.offline_revocations),
+            declined_at=one.declined_at,
         )
         for one in find_station_work(conn, station_id, start=start, end=end)
     )
@@ -107,13 +124,14 @@ def _judge_station(
         work=work,
         rounds=find_rounds_between(conn, start=start, end=end),
         classifications=find_pass_classes(conn, touched),
+        reported=find_reported(conn, touched),
         as_of=now,
         alert_fired_at=None
         if alerts is None
         else alerts(STATION_OFFLINE_ALERT, fault.opened_at, end),
         alert_asked=alerts is not None,
     )
-    return judge_station_fault(fault, evidence)
+    return judge_station_fault(fault, evidence, alongside)
 
 
 def _judge_platform(
@@ -127,7 +145,7 @@ def _judge_platform(
         first_round_after=None
         if closed is None
         else find_first_round_after(conn, closed),
-        confirmed_misses=find_confirmed_misses_between(
+        reported_misses=find_reported_misses_between(
             conn, start=fault.opened_at, end=closed or now
         ),
         as_of=now,

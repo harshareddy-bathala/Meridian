@@ -1,6 +1,6 @@
 """The rows a fault verdict is judged from — what the platform itself stored.
 
-Seven reads, each deciding nothing. What a fault was is the run's ledger's, and
+Eight reads, each deciding nothing. What a fault was is the run's ledger's, and
 never enters the database (D-189); what the platform did about it is here:
 
 * when a station's heartbeats arrived, over a window;
@@ -8,14 +8,15 @@ never enters the database (D-189); what the platform did about it is here:
   was decided again;
 * when each scheduling round judged liveness;
 * how each touched assignment's pass was classified;
+* which of them have a stored report;
 * and, for a fault done to the platform, the first heartbeat and the first
-  round after it, and the confirmed misses whose windows met it.
+  round after it, and any pass it met classified a miss although reported.
 
 A decision's instant is its run's ``decided_at`` — the ``now`` the scheduler
 judged liveness at (D-170) — and only a decision no run recorded falls back to
 ``issued_at``.
 
-Reference: docs/DECISIONS.md D-170, D-171, D-182, D-192.
+Reference: docs/DECISIONS.md D-170, D-171, D-182, D-192, D-196.
 """
 
 from __future__ import annotations
@@ -30,11 +31,12 @@ from meridian.store.stations import Connection
 
 __all__ = [
     "FaultWork",
-    "find_confirmed_misses_between",
     "find_first_heartbeat_after",
     "find_first_round_after",
     "find_heartbeat_times",
     "find_pass_classes",
+    "find_reported",
+    "find_reported_misses_between",
     "find_rounds_between",
     "find_station_work",
 ]
@@ -53,6 +55,12 @@ class FaultWork:
     revoked_reason: str | None
     revoked_at: datetime | None
     redecided_at: datetime | None
+    offline_revocations: list[datetime]
+    """Every time it was revoked because its station was offline, oldest first,
+    from ``assignment_revocations``: a reinstatement does not erase one (D-196)."""
+
+    declined_at: datetime | None
+    """The first time it was revoked as declined, from the same history."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +71,11 @@ class _Instant:
 @dataclass(frozen=True, slots=True)
 class _MaybeInstant:
     at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class _Id:
+    assignment_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +119,13 @@ def find_station_work(
                      where b.pass_id = a.pass_id
                        and b.model_config is not distinct from a.model_config
                        and b.revision > a.revision
-                       and b.decision = 'scheduled') as redecided_at
+                       and b.decision = 'scheduled') as redecided_at,
+                   array(select e.at from assignment_revocations e
+                     where e.assignment_id = a.assignment_id and e.event = 'revoked'
+                       and e.reason = 'offline' order by e.at) as offline_revocations,
+                   (select min(e.at) from assignment_revocations e
+                     where e.assignment_id = a.assignment_id and e.event = 'revoked'
+                       and e.reason = 'declined') as declined_at
             from assignments a
             left join schedule_runs r on r.run_id = a.schedule_run_id
             where a.station_id = %s and a.decision = 'scheduled'
@@ -121,12 +140,23 @@ def find_station_work(
 def find_rounds_between(
     conn: Connection, *, start: datetime, end: datetime
 ) -> tuple[datetime, ...]:
-    """When each scheduling round in ``[start, end)`` judged liveness."""
+    """When each recorded scheduling round in ``[start, end)`` judged liveness.
+
+    A round leaves a record when it decides something — a run (D-170) — or when
+    it revokes an offline station's work (D-196). A round that did neither
+    wrote nothing, and a verdict cannot hold the platform to a round it cannot
+    see.
+    """
     with conn.cursor(row_factory=class_row(_Instant)) as cur:
         cur.execute(
             """
-            select decided_at as at from schedule_runs
-            where decided_at >= %s and decided_at < %s order by decided_at
+            select at from (
+                select decided_at as at from schedule_runs
+                union
+                select at from assignment_revocations
+                where event = 'revoked' and reason = 'offline'
+            ) rounds
+            where at >= %s and at < %s order by at
             """,
             (start, end),
         )
@@ -160,6 +190,19 @@ def find_pass_classes(
         return {one.assignment_id: one.classification for one in cur.fetchall()}
 
 
+def find_reported(conn: Connection, assignment_ids: Sequence[str]) -> frozenset[str]:
+    """Which of the named assignments have a stored report."""
+    if not assignment_ids:
+        return frozenset()
+    with conn.cursor(row_factory=class_row(_Id)) as cur:
+        cur.execute(
+            "select distinct assignment_id from observations"
+            " where assignment_id = any(%s::text[])",
+            (list(assignment_ids),),
+        )
+        return frozenset(one.assignment_id for one in cur.fetchall())
+
+
 def find_first_heartbeat_after(conn: Connection, at: datetime) -> datetime | None:
     """The first heartbeat from any station received at or after ``at``."""
     with conn.cursor(row_factory=class_row(_MaybeInstant)) as cur:
@@ -182,17 +225,25 @@ def find_first_round_after(conn: Connection, at: datetime) -> datetime | None:
         return None if row is None else row.at
 
 
-def find_confirmed_misses_between(
+def find_reported_misses_between(
     conn: Connection, *, start: datetime, end: datetime
 ) -> tuple[str, ...]:
-    """Assignments classified ``confirmed_miss`` whose window met ``[start, end)``."""
+    """Passes classified ``confirmed_miss`` although a report of them is stored.
+
+    Only those whose window met ``[start, end)``. A miss with a report is a
+    miss the classification made wrongly, whatever else happened.
+    """
     with conn.cursor(row_factory=class_row(_PassClass)) as cur:
         cur.execute(
             """
-            select assignment_id, classification from pass_classifications
-            where classification = 'confirmed_miss'
-              and window_start < %s and window_end > %s
-            order by assignment_id
+            select c.assignment_id, c.classification from pass_classifications c
+            where c.classification = 'confirmed_miss'
+              and c.window_start < %s and c.window_end > %s
+              and exists (
+                select 1 from observations o
+                where o.assignment_id = any(c.assignment_ids)
+              )
+            order by c.assignment_id
             """,
             (end, start),
         )

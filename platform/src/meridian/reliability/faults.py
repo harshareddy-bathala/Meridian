@@ -46,7 +46,7 @@ docs/PROJECT.md §9 SC-5.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
@@ -98,6 +98,9 @@ station did listen and heard what it heard, and what the classification makes
 of that is Stages 25 and 27's question.
 """
 
+NOT_LISTENED = frozenset({"receiver_down", "declines"})
+"""Faults whose ledger ``act`` lines name passes the station did not listen to."""
+
 PLATFORM_KINDS = frozenset(
     {"platform_restart", "database_restart", "scheduler_down", "api_paused"}
 )
@@ -133,6 +136,9 @@ class InjectedFault:
     closed_at: datetime | None = None
     station_id: str | None = None
     assignment_ids: tuple[str, ...] = ()
+    acted_at: Mapping[str, datetime] = field(default_factory=dict)
+    """When the fault first acted on each of :attr:`assignment_ids`."""
+
     detail: Mapping[str, object] = field(default_factory=dict)
 
     @property
@@ -156,6 +162,17 @@ class StationWork:
     redecided_at: datetime | None
     """When a later revision of the same pass was decided, if one was."""
 
+    offline_revocations: tuple[datetime, ...] = ()
+    """Every instant it was revoked because its station was offline (D-196).
+
+    From the revocation history, so a reinstatement since does not erase one.
+    Each outage is judged by the revocations inside it: work revoked in an
+    earlier outage and given back has not been revoked in this one.
+    """
+
+    declined_at: datetime | None = None
+    """When it was first revoked as declined, from the same history."""
+
 
 @dataclass(frozen=True, slots=True)
 class StationEvidence:
@@ -170,6 +187,9 @@ class StationEvidence:
 
     classifications: Mapping[str, str]
     """Stored class of each classified assignment, by assignment id."""
+
+    reported: frozenset[str]
+    """The touched assignments of which a report is stored."""
 
     as_of: datetime
     """When the evidence was read: nothing after it can have been stored."""
@@ -188,8 +208,9 @@ class PlatformEvidence:
     first_round_after: datetime | None
     """The first scheduling round at or after the fault closed."""
 
-    confirmed_misses: tuple[str, ...]
-    """Assignments classified ``confirmed_miss`` whose window met the fault."""
+    reported_misses: tuple[str, ...]
+    """Passes whose window met the fault classified ``confirmed_miss`` although a
+    report of them is stored."""
 
     as_of: datetime
 
@@ -264,10 +285,12 @@ class _Folding:
                 self.faults[index] = replace(self.faults[index], closed_at=at)
                 del self._open[key]
             else:
+                current = self.faults[index]
+                ids = _ids(line, number)
                 self.faults[index] = replace(
-                    self.faults[index],
-                    assignment_ids=self.faults[index].assignment_ids
-                    + _ids(line, number),
+                    current,
+                    assignment_ids=current.assignment_ids + ids,
+                    acted_at={**{one: at for one in ids}, **current.acted_at},
                 )
         else:
             raise FaultLedgerError(f"line {number}: unknown event {event!r}")
@@ -305,9 +328,19 @@ def _ids(line: Mapping[str, object], number: int) -> tuple[str, ...]:
 
 
 def judge_station_fault(
-    fault: InjectedFault, evidence: StationEvidence
+    fault: InjectedFault,
+    evidence: StationEvidence,
+    alongside: Sequence[InjectedFault] = (),
 ) -> FaultVerdict:
-    """Answer every question that applies to a fault done to one station."""
+    """Answer every question that applies to a fault done to one station.
+
+    Args:
+        fault: The fault being judged.
+        evidence: What the platform stored about its station.
+        alongside: The other faults on the same station. Only recovery reads
+            them: a station is not owed a heartbeat when its fault closes if
+            another fault is still silencing it.
+    """
     silence = _Silence.around(fault.opened_at, evidence.heartbeats)
     checks = [
         _held(fault, evidence),
@@ -316,7 +349,7 @@ def judge_station_fault(
         _replanned(silence, evidence),
         _no_false_miss(fault, evidence),
         _declines_honoured(fault, evidence),
-        _recovered(fault, evidence),
+        _recovered(fault, evidence, alongside),
     ]
     if evidence.alert_asked:
         checks.append(_alerted(fault, silence, evidence))
@@ -346,13 +379,13 @@ def judge_platform_fault(
             RECOVERY_WITHIN,
             evidence.as_of,
         )
-    misses = evidence.confirmed_misses
+    misses = evidence.reported_misses
     no_false_miss = Check(
         "no_false_miss",
         not misses,
-        "no pass during it is a confirmed miss"
+        "no reported pass during it is a confirmed miss"
         if not misses
-        else f"confirmed misses during it: {', '.join(misses)}",
+        else f"reported, and classified confirmed misses: {', '.join(misses)}",
     )
     return FaultVerdict(fault, (no_false_miss, recovered))
 
@@ -451,10 +484,15 @@ def _no_new_work(silence: _Silence, evidence: StationEvidence) -> Check:
 
 
 def _replanned(silence: _Silence, evidence: StationEvidence) -> Check:
-    """A round that ran while it was offline revoked the work it had not begun."""
+    """A round that ran while it was offline revoked the work it had not begun.
+
+    And, for a station that never went offline, that nothing of its was revoked
+    as offline in the gap: a heartbeat delay short of ninety seconds must cost
+    the station nothing it holds (D-190).
+    """
     span = _offline_span(silence)
     if span is None:
-        return Check("replanned", None, "the station was never offline")
+        return _nothing_revoked_in(silence, evidence)
     start, end = span
     during = [
         one for one in evidence.rounds if start <= one and (end is None or one < end)
@@ -465,85 +503,174 @@ def _replanned(silence: _Silence, evidence: StationEvidence) -> Check:
     owed = tuple(
         one
         for one in evidence.work
-        if one.decided_at < start and one.start_at > first_round
+        if one.decided_at < start
+        and one.start_at > first_round
+        and not (one.declined_at is not None and one.declined_at <= first_round)
     )
-    return _revocations_of(owed, start)
+    return _revocations_of(owed, start, end)
 
 
-def _revocations_of(owed: tuple[StationWork, ...], offline_at: datetime) -> Check:
-    """Whether every piece of owed work was revoked because the station was offline."""
-    kept = [
+def _nothing_revoked_in(silence: _Silence, evidence: StationEvidence) -> Check:
+    """For a gap short of offline: no work was revoked as offline inside it."""
+    if silence.last is None or silence.next is None:
+        return Check("replanned", None, "the station was never offline")
+    last, heard = silence.last, silence.next
+    # Open at both ends. A round at the instant a heartbeat arrived may have
+    # judged liveness before it, when the station had been silent ninety
+    # seconds — offline, correctly, in the gap before this one.
+    early = [
         one.assignment_id
-        for one in owed
-        if not (one.revoked_reason == "offline" and one.revoked_at is not None)
+        for one in evidence.work
+        if any(last < at < heard for at in one.offline_revocations)
     ]
+    if early:
+        return Check(
+            "replanned", False, f"revoked as offline, never offline: {', '.join(early)}"
+        )
+    return Check("replanned", None, "never offline, and nothing revoked as offline")
+
+
+def _revocations_of(
+    owed: tuple[StationWork, ...], offline_at: datetime, heard_at: datetime | None
+) -> Check:
+    """Whether every piece of owed work was revoked as offline inside this outage."""
+    revoked_at = {
+        one.assignment_id: min(
+            (
+                at
+                for at in one.offline_revocations
+                if offline_at <= at and (heard_at is None or at < heard_at)
+            ),
+            default=None,
+        )
+        for one in owed
+    }
+    kept = [name for name, at in revoked_at.items() if at is None]
     if kept:
         return Check(
             "replanned", False, f"not revoked while offline: {', '.join(kept)}"
         )
     if not owed:
         return Check("replanned", True, "it held no unbegun work to revoke")
-    revoked_at = min(one.revoked_at for one in owed if one.revoked_at is not None)
+    first = min(at for at in revoked_at.values() if at is not None)
     decided_again = sum(one.redecided_at is not None for one in owed)
     return Check(
         "replanned",
         True,
-        f"{len(owed)} revoked {(revoked_at - offline_at).total_seconds():.0f} s after "
+        f"{len(owed)} revoked {(first - offline_at).total_seconds():.0f} s after "
         f"going offline; {decided_again} decided again",
     )
 
 
 def _no_false_miss(fault: InjectedFault, evidence: StationEvidence) -> Check:
-    """No pass the fault touched is a confirmed miss (CLAUDE.md rule 7)."""
+    """No pass the fault touched is a *false* confirmed miss (CLAUDE.md rule 7).
+
+    A confirmed miss is false when the ground truth contradicts it: the ledger
+    says the station did not listen — a dead receiver never began the pass, a
+    declining station let it go — or the platform holds a report of the pass
+    after all. A station that listened and lost its result, to a restart or a
+    queue it never drained, did miss the pass, and saying so is not false.
+    """
     if fault.kind not in MISS_SENSITIVE:
         return Check("no_false_miss", None, f"{fault.kind} leaves listening intact")
     end = fault.closed_at or evidence.as_of
+    not_listened = set(fault.assignment_ids) if fault.kind in NOT_LISTENED else set()
     touched = {
         one.assignment_id
         for one in evidence.work
         if one.start_at < end and one.end_at > fault.opened_at
     } | set(fault.assignment_ids)
-    misses = sorted(
-        one for one in touched if evidence.classifications.get(one) == "confirmed_miss"
+    false = sorted(
+        one
+        for one in touched
+        if evidence.classifications.get(one) == "confirmed_miss"
+        and (one in not_listened or one in evidence.reported)
     )
     classified = sum(one in evidence.classifications for one in touched)
     return Check(
         "no_false_miss",
-        not misses,
-        f"{classified} of {len(touched)} touched passes classified, none a miss"
-        if not misses
-        else f"confirmed misses: {', '.join(misses)}",
+        not false,
+        f"{classified} of {len(touched)} touched passes classified, no false miss"
+        if not false
+        else f"confirmed misses the station did not miss: {', '.join(false)}",
     )
 
 
 def _declines_honoured(fault: InjectedFault, evidence: StationEvidence) -> Check:
-    """Each assignment a declining station let go of was revoked as declined."""
+    """Each assignment a declining station let go of was revoked as declined.
+
+    Owed only when the platform heard the station again before the work's
+    window opened. A decline the platform first learns of after the window
+    has begun is MSP §4.2's "absent, window has passed" — ``expired``, not
+    ``revoked`` — and is honoured by never being counted as a miss.
+    """
     if fault.kind != "declines":
         return Check("declines_honoured", None, "not a decline")
     if not fault.assignment_ids:
         return Check("declines_honoured", None, "it let go of nothing")
     by_id = {one.assignment_id: one for one in evidence.work}
-    wrong = [
-        one
+    owed = [
+        by_id[one]
         for one in fault.assignment_ids
-        if one in by_id and by_id[one].revoked_reason != "declined"
+        if one in by_id and _heard_before_window(fault, by_id[one], evidence)
     ]
+    wrong = [one.assignment_id for one in owed if one.declined_at is None]
     return Check(
         "declines_honoured",
         not wrong,
-        f"{len(fault.assignment_ids)} declined and revoked as declined"
+        f"{len(owed)} of {len(fault.assignment_ids)} declined in time, each "
+        "revoked as declined"
         if not wrong
         else f"let go of and not revoked as declined: {', '.join(wrong)}",
     )
 
 
-def _recovered(fault: InjectedFault, evidence: StationEvidence) -> Check:
-    """Heard again once the fault ended."""
-    closed = fault.closed_at
-    if closed is None:
-        return Check("recovered", None, "the fault never closed")
-    after = min((one for one in evidence.heartbeats if one >= closed), default=None)
-    return _within("heartbeat", closed, after, RECOVERY_WITHIN, evidence.as_of)
+def _heard_before_window(
+    fault: InjectedFault, work: StationWork, evidence: StationEvidence
+) -> bool:
+    """Whether a heartbeat after the release reached the platform in time."""
+    released = fault.acted_at.get(work.assignment_id, fault.opened_at)
+    heard = min((one for one in evidence.heartbeats if one > released), default=None)
+    return heard is not None and heard < work.start_at
+
+
+def _recovered(
+    fault: InjectedFault,
+    evidence: StationEvidence,
+    alongside: Sequence[InjectedFault],
+) -> Check:
+    """Heard again once the station was no longer silenced.
+
+    Measured from the end of every silencing fault overlapping this one, not
+    from this one's close alone: a heartbeat delay that ends inside a network
+    outage is not owed a heartbeat until the outage ends too.
+    """
+    if fault.kind not in SILENCING:
+        return Check("recovered", None, f"{fault.kind} leaves the station reachable")
+    quiet_until = _silenced_until(fault, alongside)
+    if quiet_until is None:
+        return Check("recovered", None, "the station was still silenced at the end")
+    after = min(
+        (one for one in evidence.heartbeats if one >= quiet_until), default=None
+    )
+    return _within("heartbeat", quiet_until, after, RECOVERY_WITHIN, evidence.as_of)
+
+
+def _silenced_until(
+    fault: InjectedFault, alongside: Sequence[InjectedFault]
+) -> datetime | None:
+    """When the last silencing fault overlapping ``fault`` ended, or ``None``."""
+    end = fault.closed_at
+    others = [one for one in alongside if one.kind in SILENCING and one is not fault]
+    grew = True
+    while grew and end is not None:
+        grew = False
+        for one in others:
+            if one.opened_at <= end and (one.closed_at is None or one.closed_at > end):
+                if one.closed_at is None:
+                    return None
+                end, grew = one.closed_at, True
+    return end
 
 
 def _alerted(
