@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from meridian.reliability.budget import DEBIT_REASONS, loss_budget
+from meridian.reliability.budget import DEBIT_REASONS, loss_budget, remaining_ratio_of
 from meridian.reliability.slis import (
     PassRecord,
     Proportion,
@@ -158,3 +158,32 @@ def test_nothing_eligible_is_no_budget_at_all() -> None:
         None,
         False,
     )
+
+
+@pytest.mark.parametrize("eligible", [10, 20, 30, 100, 1000])
+def test_losing_exactly_what_the_target_allows_is_not_exhausted(eligible: int) -> None:
+    """``0.1 × 10`` is ``0.9999999999999998`` in floating point; the budget is not
+    spent past it by the one pass SC-4 permits, while the target reads as met."""
+    lost = eligible // 10
+    passes = [
+        record("successful_reception", outcome="decoded", n=n)
+        for n in range(eligible - lost)
+    ] + [record("confirmed_miss", n=n) for n in range(eligible - lost, eligible)]
+
+    budget = loss_budget(passes, capture_target=0.9)
+
+    assert budget.allowed == lost
+    assert budget.remaining_ratio == 0.0
+    assert not budget.exhausted
+    assert (capture_rate(passes).estimate or 0.0) >= 0.9
+
+
+def test_the_ratio_from_counts_is_the_ratio_from_passes() -> None:
+    counts = dict.fromkeys({one.classification for one in FLEET}, 0)
+    for one in FLEET:
+        counts[one.classification] += 1
+    for target in (0.5, 0.9, 0.95):
+        assert remaining_ratio_of(counts, capture_target=target) == (
+            loss_budget(FLEET, capture_target=target).remaining_ratio
+        )
+    assert remaining_ratio_of({"satellite_silent": 3}, capture_target=0.9) is None

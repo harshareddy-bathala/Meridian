@@ -169,7 +169,7 @@ What happened to each settled, scheduled pass, and the evidence it was decided f
 
 `(classification_id, assignment_id, assignment_ids, pass_id, station_id, satellite_id, window_start, window_end, classification, evidence, method, config_sha256, classified_at, simulated)`
 
-- **One row per physical pass per station**, once its window has closed plus the settle margin. `assignment_ids` lists every scheduled assignment pooled into the pass, and `assignment_id` is the first of them.
+- **One row per physical pass per station**, once its pooled window has closed plus the settle margin. `assignment_ids` lists every scheduled assignment pooled into the pass, and `assignment_id` is the first of them. A GIN index serves `assignment_ids @> array[…]`, the question which row holds an assignment.
 - **`classification`** is one of the eight classes of `meridian.reliability.classification` (D-180, D-181). Whether a class counts as captured, or spends the loss budget, is decided in code from the class, and deliberately not stored as a second column that could disagree with it.
 - **`evidence`** is everything the classification read: each assignment and its state, the report and its revision, whether the station was heard, the registry's listening answer for each assignment, and the receptions D-147 judged the satellite by.
 - **Append-only.** Unique on `(assignment_id, method, config_sha256)`, so a changed rule or parameter writes new rows beside the old, and a re-run writes nothing. See D-182.

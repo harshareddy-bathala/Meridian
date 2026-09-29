@@ -3562,7 +3562,10 @@ The roadmap's Stage 20 gate is that every reliability number can be traced back 
 **`pass_classifications` holds one row per settled physical pass per station.**
 - A pass is **settled** once its window has closed plus the settle margin: 24 hours by default, the labeller's own (D-146). A station queues reports through an outage, and without a margin a report still on its way would be read as absence.
 - The unit is the **physical pass**, as D-148 made it for the labeller. Scheduled assignments of one station and satellite whose windows overlap are pooled into one row: their reports ranked by `OUTCOME_ORDER`, and listening confirmed if any was. `assignment_ids` lists them and the lowest is the key. From D-165 on a rise has one scheduled assignment per station, so pooling matters only for older history.
+- **Settlement is the pooled pass's, never one assignment's.** A pass settles when the last of its assignments' windows has closed by the margin. Settled one assignment at a time, a run between two overlapping windows' ends would store the first alone, and a later run the second alone: one reception counted twice.
 - Only `scheduled` decisions are read, because a skip was never delivered (D-165).
+- **Untaken work is swept before a pass is read,** in the classification's own transaction (D-183). A row is written once, so a pass must not be classified while an assignment nobody took is still `issued`. That would store a decline as `station_not_confirmed_listening` for good, whether the timed sweep failed, ran late, or was never run before `meridian reliability classify`.
+- **A run can be bounded.** The jobs service classifies at most 500 passes a round, those that closed first, so the first round over a long history is many short transactions instead of one that holds the round up. `meridian reliability classify` is unbounded, for an operator draining a backlog by hand.
 
 **The row stores what was read, not only what was decided.** `evidence` holds:
 - each assignment, with its state, its window and the registry's listening answer for it;
@@ -3574,6 +3577,8 @@ A figure counted from these rows can be followed back to each assignment and obs
 
 **Listening is asked of `Registry.was_listening` for every pooled assignment,** including the other stations' silences D-147 counts. The accounting never reads a heartbeat's listening block itself, so the registry stays the only definition of "was listening" (rule 7).
 
+**Another station's reception counts once per physical pass,** as the labeller counts it: by its most informative report, and as a confirmed silence if the station was confirmed listening for any of its assignments. Two configurations' assignments of one rise are one attempt, not two, and cannot call a satellite silent between them.
+
 **The satellite is judged on our own receptions only.** The labeller also counts archive receptions for measured passes (D-147). The live accounting does not, because an archive is training input and never a runtime dependency (CLAUDE.md's independence test, D-102). The two can therefore differ on one question: whether a measured pass confirmed silent was a `confirmed_miss` or `satellite_state_indeterminate`, when only an archive heard the satellite. The labeller has more evidence, and the live record uses only what Meridian holds.
 
 **Append-only, versioned twice.**
@@ -3581,6 +3586,8 @@ A figure counted from these rows can be followed back to each assignment and obs
 - `config_sha256` names the parameters: the settle margin and D-147's window and count, hashed from `ClassificationConfig`.
 
 The unique key `(assignment_id, method, config_sha256)` means a re-run writes nothing, and a changed rule or parameter writes new rows beside the old, never over them. A figure published under one configuration therefore stays reproducible from the rows it was counted from.
+
+**`assignment_ids` has a GIN index.** Every round asks which settled assignments no row holds yet, and `explain` asks which row holds one. Both are written as `assignment_ids @> array[…]`, which the index serves, so a round's cost does not grow with the product of assignments and classifications.
 
 **Whether a class counts as captured, or spends the loss budget, is not a column.** It is a rule, read from the class in one place in code. A stored boolean would be a second copy of the rule, and could disagree with it.
 
@@ -3604,6 +3611,8 @@ D-067 left an assignment of a station that stops heartbeating unswept, because t
 **An expiry is not a decline by itself.** The sweep expires the assignments of a station that was off. D-181 is what stops those reading as refusals: a pass is declined only if the station was heard during its window.
 
 The sweep runs as a task of the jobs service. That wiring, and its failure alert, arrive with the other job task in Stage 20's surfaces.
+
+**The classification runs the same sweep first, in its own transaction** (D-182). The timed task keeps assignment states current for the dashboard between classifications. The classification does not depend on it having run.
 
 ---
 
@@ -3653,7 +3662,7 @@ The roadmap names seven indicators and no definitions. `EVALUATION.md` gives SC-
 
 The roadmap asks for an irrecoverable loss budget, with every debit recorded by pass, station, reason, evidence, simulation status, timestamp and budget impact. A satellite pass cannot be retried, so the budget is counted in passes, not in time or in requests.
 
-**SC-4 sets the budget.** At a capture target of 90%, a tenth of the passes a station could have captured may be lost inside the window: `allowed = (1 − target) × eligible`. The budget is exhausted when more have been lost than that, and the report says so. The alert that watches it is Stage 20's surfaces.
+**SC-4 sets the budget.** At a capture target of 90%, a tenth of the passes a station could have captured may be lost inside the window: `allowed = (1 − target) × eligible`, rounded to nine decimal places, because in floating point `0.1 × 10` is `0.9999999999999998` and losing exactly the pass the target permits would otherwise read as exhausted. The budget is exhausted when more have been lost than that, and the report says so. The alert that watches it is Stage 20's surfaces.
 
 **Every eligible pass not captured is a debit, and it carries its class as its reason:** `confirmed_miss`, `signal_no_decode`, `station_unavailable`, `station_not_confirmed_listening` or `assignment_declined`. Each debit also names its pass (the representative assignment, or `pass:<id>` from a snapshot), its station, its window's end and its population. It spends one pass. Its evidence is the classification row it came from (D-182).
 
@@ -3673,11 +3682,11 @@ The roadmap asks for an irrecoverable loss budget, with every debit recorded by 
 
 D-111 left three series unpublished until a miss could be decided: confirmed misses, indeterminate outcomes and loss budget remaining. It also left the alert on the budget unwritten. They exist now.
 
-**Two families, read at scrape time from `pass_classifications` over the SLO window,** by the same collector and in the same transaction as the rest (D-109):
+**Two families, read at scrape time from `pass_classifications` over the SLO window,** by the same collector as the rest (D-109). They are read in a second borrow of the pool, counted by class in SQL. If that read fails — a pending migration has not created the table yet, say — only these two families are left out. The database still reads as reachable, and `meridian_schema_up_to_date` still says the migration is pending:
 - `meridian_passes_classified{classification, simulated}` counts each class. Confirmed misses are its `confirmed_miss` series, and indeterminate outcomes its `satellite_state_indeterminate` series. One family with a class label replaces the two names D-111 listed. A reader then sees a miss beside the seven other things that can happen to a pass, and cannot mistake a count of misses for a count of losses.
 - `meridian_loss_budget_remaining_ratio{simulated}` is the share of D-185's budget left. It is negative once the target is broken.
 
-Both are counted by `meridian.reliability`'s own functions, so a scrape and `meridian reliability report` over the same window agree.
+Both are counted by `meridian.reliability`'s own arithmetic: the budget from the class counts by `remaining_ratio_of`, the function `LossBudget.remaining_ratio` also uses. A scrape and `meridian reliability report` over the same window therefore agree, and a scrape never carries a month of rows.
 
 **`classification` joins D-111's bounded labels.** It has eight values, fixed by migration 0017's check. `task` gains two values, `expiry_sweep` and `reliability`.
 
@@ -3705,6 +3714,8 @@ The path has existed since Stage 11 and answered `not_yet_computed` (D-086). It 
 A figure the platform cannot give is never a zero or a bare null (D-086).
 
 **The budget's debits are counted by reason and not listed.** A debit names a pass and the exact instant its window closed. D-093 widens every published window to whole minutes, so that a public schedule cannot be turned back into a station's position, and a list of exact debits would undo that. An operator reads them through `meridian reliability report` and `explain`.
+
+**The reliability file is read once per process** and kept, as the collector reads it. A request costs no file read, and an edit takes effect when the API and the jobs service restart together, not in one while the other classifies under the old file. A file that is refused is a `server_error` naming the configuration, with the reason in the platform's log.
 
 **Counted on each request, with no cache.** Availability reads every heartbeat in the window, which for one station is tens of thousands of rows. Stage 21 measures API latency at fifty stations. If this endpoint is slow there, a short cache here is the remedy, and Stage 23's per-endpoint rate limits cover it meanwhile.
 

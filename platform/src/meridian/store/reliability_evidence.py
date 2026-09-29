@@ -87,12 +87,18 @@ class NearbyReception:
 def find_unclassified_settled(
     conn: Connection, *, settled_by: datetime, method: str, config_sha256: bytes
 ) -> list[SettledAssignment]:
-    """Scheduled assignments settled by ``settled_by`` and not yet classified.
+    """Unclassified scheduled assignments that began before ``settled_by``.
+
+    A pass settles when its window, pooled over all of its assignments, closed
+    before ``settled_by``. That is the caller's decision, made after pooling:
+    an assignment that ended in time may share its rise with one that has not,
+    and the two must be classified together or the one reception counts twice.
+    Every assignment that could belong to a settled pass began before it
+    closed, so this returns those and the caller keeps the pools that closed.
 
     Args:
         conn: An open connection. Read-only.
-        settled_by: An assignment whose window ended at or before this instant
-            has settled: its report, if one is coming, has had the margin.
+        settled_by: The instant a pass's window must have closed before.
         method: The classification method being run.
         config_sha256: The configuration being run.
 
@@ -103,7 +109,8 @@ def find_unclassified_settled(
     Note:
         An assignment is classified if it is among any stored classification's
         ``assignment_ids`` under this method and configuration, not only if it
-        is the representative. Pooled assignments are classified together.
+        is the representative. The containment test ``@>`` is what the GIN
+        index on ``assignment_ids`` serves; ``= any(...)`` would scan.
     """
     with conn.cursor(row_factory=class_row(SettledAssignment)) as cur:
         cur.execute(
@@ -114,13 +121,13 @@ def find_unclassified_settled(
             from assignments a
             join passes p on p.id = a.pass_id
             where a.decision = 'scheduled'
-              and a.end_at <= %(settled_by)s
+              and a.start_at < %(settled_by)s
               and not exists (
                   select 1
                   from pass_classifications c
                   where c.method = %(method)s
                     and c.config_sha256 = %(config)s
-                    and a.assignment_id = any(c.assignment_ids)
+                    and c.assignment_ids @> array[a.assignment_id]
               )
             order by a.station_id, p.satellite_id, a.start_at, a.assignment_id
             """,

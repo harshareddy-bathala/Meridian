@@ -21,7 +21,7 @@ Reference: docs/DECISIONS.md D-180, D-184, D-185.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -32,12 +32,37 @@ from meridian.reliability.classification import (
 )
 from meridian.reliability.slis import PassRecord, eligible
 
-__all__ = ["DEBIT_REASONS", "Debit", "LossBudget", "loss_budget"]
+__all__ = [
+    "DEBIT_REASONS",
+    "Debit",
+    "LossBudget",
+    "allowed_losses",
+    "loss_budget",
+    "remaining_ratio_of",
+]
 
 DEBIT_REASONS: tuple[str, ...] = tuple(
     one for one in PASS_CLASSES if one not in CAPTURED | SATELLITE_CLASSES
 )
 """Every class that spends the budget, in the classification's order."""
+
+_ALLOWED_PLACES = 9
+"""Decimal places ``allowed`` is rounded to: far below one pass, far above the
+error of one multiplication."""
+
+
+def allowed_losses(eligible: int, capture_target: float) -> float:
+    """Passes that may be lost with the target still met: ``(1 − target) × eligible``.
+
+    Rounded, because the product is floating point: at a target of 0.90,
+    ``0.1 × 10`` is ``0.9999999999999998``, and losing exactly the one pass the
+    target permits would read as an exhausted budget beside a met target.
+    """
+    return round((1 - capture_target) * eligible, _ALLOWED_PLACES)
+
+
+def _ratio(allowed: float, spent: int) -> float | None:
+    return (allowed - spent) / allowed if allowed > 0 else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +106,7 @@ class LossBudget:
     @property
     def remaining_ratio(self) -> float | None:
         """What share of the budget is left; None where nothing was eligible."""
-        return self.remaining / self.allowed if self.allowed > 0 else None
+        return _ratio(self.allowed, self.spent)
 
     @property
     def exhausted(self) -> bool:
@@ -122,6 +147,26 @@ def loss_budget(passes: Iterable[PassRecord], *, capture_target: float) -> LossB
     return LossBudget(
         capture_target=capture_target,
         eligible=len(held),
-        allowed=(1 - capture_target) * len(held),
+        allowed=allowed_losses(len(held), capture_target),
         debits=debits,
     )
+
+
+def remaining_ratio_of(
+    counts: Mapping[str, int], *, capture_target: float
+) -> float | None:
+    """What :attr:`LossBudget.remaining_ratio` gives, from passes counted by class.
+
+    For a reader that has counts and not passes, such as a metrics scrape: the
+    same arithmetic, so the two cannot disagree.
+
+    Args:
+        counts: Passes of one population inside the window, per class.
+        capture_target: The capture-rate target.
+
+    Returns:
+        The share of the budget left, or None where nothing was eligible.
+    """
+    held = {name: n for name, n in counts.items() if name not in SATELLITE_CLASSES}
+    spent = sum(n for name, n in held.items() if name not in CAPTURED)
+    return _ratio(allowed_losses(sum(held.values()), capture_target), spent)

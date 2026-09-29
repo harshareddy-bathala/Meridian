@@ -42,8 +42,13 @@ from meridian.api.dependencies import get_connection  # noqa: E402
 from meridian.registry import ListeningQuery  # noqa: E402
 from meridian.registry.psycopg_registry import PsycopgRegistry  # noqa: E402
 from meridian.reliability.accounting import classify_settled  # noqa: E402
+from meridian.reliability.classification import METHOD  # noqa: E402
 from meridian.reliability.config import ReliabilityConfig  # noqa: E402
 from meridian.reliability.live import read_live_report  # noqa: E402
+from meridian.store.reliability_reads import (  # noqa: E402
+    count_classified_between,
+    find_classified_between,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -246,6 +251,28 @@ def test_every_number_in_the_report_is_a_count_of_stored_rows(
     assert population.budget.spent == counted["eligible"] - counted["captured"]
     references = {one.reference for one in population.budget.debits}
     assert references <= {one["assignment_id"] for one in stored(schedule_rows.conn)}
+
+
+def test_the_scrape_counts_what_the_report_reads(schedule_rows: Any) -> None:
+    """The metrics read counts in SQL the rows the report reads one by one."""
+    fleet(schedule_rows)
+    under = (METHOD, CONFIG.classification.sha256())
+    window = (NOW - timedelta(days=30), NOW)
+    rows = find_classified_between(
+        schedule_rows.conn, classified_under=under, window=window
+    )
+    tallied: dict[tuple[str, bool], int] = {}
+    for one in rows:
+        key = (one.classification, one.simulated)
+        tallied[key] = tallied.get(key, 0) + 1
+
+    assert rows
+    assert (
+        count_classified_between(
+            schedule_rows.conn, classified_under=under, window=window
+        )
+        == tallied
+    )
 
 
 def test_the_fleet_is_what_was_built(schedule_rows: Any) -> None:

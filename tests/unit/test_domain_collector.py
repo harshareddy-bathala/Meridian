@@ -32,7 +32,6 @@ from meridian.store.monitoring import (
     MonitoringSnapshot,
     StationHeartbeat,
 )
-from meridian.store.reliability_reads import ClassifiedRow
 
 NOW = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
 
@@ -70,29 +69,17 @@ def _snapshot() -> MonitoringSnapshot:
     )
 
 
+Counts = dict[tuple[str, bool], int]
+
+
 @pytest.fixture(autouse=True)
-def classified(monkeypatch: pytest.MonkeyPatch) -> list[ClassifiedRow]:
-    """The classifications the fake database holds; empty unless a test adds."""
-    held: list[ClassifiedRow] = []
+def classified(monkeypatch: pytest.MonkeyPatch) -> Counts:
+    """Classifications the fake database holds, by class and population."""
+    held: Counts = {}
     monkeypatch.setattr(
-        domain_collector, "find_classified_between", lambda *_, **__: held
+        domain_collector, "count_classified_between", lambda *_, **__: held
     )
     return held
-
-
-def _classified(
-    n: int, classification: str, *, simulated: bool = False
-) -> ClassifiedRow:
-    return ClassifiedRow(
-        classification_id=n,
-        assignment_id=f"as_{n}",
-        station_id="st_a",
-        window_end=NOW - timedelta(days=2),
-        classification=classification,
-        listening_confirmed=True,
-        outcome=None,
-        simulated=simulated,
-    )
 
 
 def _families(collector: DomainCollector) -> dict[str, Metric]:
@@ -227,11 +214,11 @@ def test_nothing_classified_publishes_no_reliability_series(
 
 
 def test_a_population_with_passes_reports_every_class_and_its_budget(
-    reachable: DomainCollector, classified: list[ClassifiedRow]
+    reachable: DomainCollector, classified: Counts
 ) -> None:
     """Nineteen captures and one miss: one pass lost of two allowed."""
-    classified.extend(_classified(n, "successful_reception") for n in range(19))
-    classified.append(_classified(19, "confirmed_miss"))
+    classified[("successful_reception", False)] = 19
+    classified[("confirmed_miss", False)] = 1
 
     families = _families(reachable)
 
@@ -251,13 +238,13 @@ def test_a_population_with_passes_reports_every_class_and_its_budget(
 
 
 def test_a_refused_reliability_file_leaves_the_series_out(
-    monkeypatch: pytest.MonkeyPatch, classified: list[ClassifiedRow]
+    monkeypatch: pytest.MonkeyPatch, classified: Counts
 ) -> None:
     monkeypatch.setattr(
         domain_collector, "read_monitoring_snapshot", lambda *_, **__: _snapshot()
     )
     monkeypatch.setattr(domain_collector, "find_current_revision", lambda _: "0014")
-    classified.append(_classified(1, "confirmed_miss"))
+    classified[("confirmed_miss", False)] = 1
     pool = _Pool(reachable=True)
 
     def refused() -> None:
@@ -274,3 +261,25 @@ def test_a_refused_reliability_file_leaves_the_series_out(
 
     assert "meridian_passes_classified" not in families
     assert _value(families["meridian_database_reachable"], {}) == 1.0
+
+
+def test_a_failed_reliability_read_loses_only_the_reliability_series(
+    reachable: DomainCollector, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A migration not yet applied leaves no ``pass_classifications`` table.
+
+    The database answered, so it is reachable, and the schema series is what
+    says the migration is pending; neither may go with the reliability read.
+    """
+
+    def missing(*_: object, **__: object) -> Counts:
+        raise psycopg.errors.UndefinedTable('relation "pass_classifications"')
+
+    monkeypatch.setattr(domain_collector, "count_classified_between", missing)
+
+    families = _families(reachable)
+
+    assert _value(families["meridian_database_reachable"], {}) == 1.0
+    assert "meridian_schema_up_to_date" in families
+    assert "meridian_stations" in families
+    assert "meridian_passes_classified" not in families

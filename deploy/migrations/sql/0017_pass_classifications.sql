@@ -86,6 +86,10 @@ create index pass_classifications_window_idx
     on pass_classifications (method, config_sha256, window_end);
 create index pass_classifications_station_idx
     on pass_classifications (station_id, window_end);
+-- Every round asks which settled assignments no row holds yet, and `explain`
+-- asks which rows hold one: both are `assignment_ids @> array[...]`.
+create index pass_classifications_assignment_ids_idx
+    on pass_classifications using gin (assignment_ids);
 
 comment on table pass_classifications is
     'What happened to each settled, scheduled pass, and the evidence it was '

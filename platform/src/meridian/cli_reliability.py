@@ -142,8 +142,9 @@ def _classify(
     )
     report = classify_settled(conn, registry, now=now, config=config.classification)
     _say(
-        f"classified {report.classified} passes settled by "
-        f"{report.settled_by.isoformat()}; {report.written} rows written"
+        f"expired {report.expired} untaken assignments; classified "
+        f"{report.classified} passes settled by {report.settled_by.isoformat()}; "
+        f"{report.written} rows written"
     )
     for name, count in report.by_class.items():
         if count:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -121,3 +122,46 @@ def test_nothing_classified_is_empty_populations_not_zero_rates(
     capture = body["measured"]["capture_rate"]
     assert (capture["denominator"], capture["estimate"]) == (0, None)
     assert body["measured"]["loss_budget"]["remaining_ratio"] is None
+
+
+@pytest.fixture
+def configured_client(
+    rollback: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[tuple[TestClient, Path]]:
+    """A client whose deployment names a reliability file, which a test writes."""
+    path = tmp_path / "reliability.toml"
+    monkeypatch.setattr(platform_clock, "utc_now", lambda: NOW)
+    monkeypatch.setenv("MERIDIAN_RELIABILITY_CONFIG", str(path))
+    app = create_app()
+    app.dependency_overrides[get_connection] = lambda: rollback
+    with TestClient(app, raise_server_exceptions=False) as started:
+        yield started, path
+
+
+def test_a_refused_file_is_a_named_error_not_a_crash(
+    configured_client: tuple[TestClient, Path],
+) -> None:
+    client, path = configured_client
+    path.write_text("[slo]\ncapture_rate_min = 1.5\n")
+
+    response = client.get("/api/v1/reliability")
+
+    assert response.status_code == 500
+    assert "server_error" in response.text
+    assert "reliability configuration" in response.text
+    assert "1.5" not in response.text
+
+
+def test_the_file_is_read_once_and_kept(
+    configured_client: tuple[TestClient, Path],
+) -> None:
+    """An edit waits for a restart, as it does in the jobs service (D-182)."""
+    client, path = configured_client
+    path.write_text("[slo]\nwindow_days = 7\n")
+    first = client.get("/api/v1/reliability")
+    path.write_text("[slo]\ncapture_rate_min = 1.5\n")
+
+    second = client.get("/api/v1/reliability")
+
+    assert (first.status_code, second.status_code) == (200, 200)
+    assert second.json()["window_start"] == "2026-08-28T10:00:00Z"

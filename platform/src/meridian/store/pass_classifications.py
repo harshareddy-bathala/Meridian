@@ -125,7 +125,7 @@ def find_classifications_of(
                    satellite_id, window_start, window_end, classification,
                    evidence, method, config_sha256, classified_at, simulated
             from pass_classifications
-            where %s = any(assignment_ids)
+            where assignment_ids @> array[%s]::text[]
             order by classified_at, classification_id
             """,
             (assignment_id,),

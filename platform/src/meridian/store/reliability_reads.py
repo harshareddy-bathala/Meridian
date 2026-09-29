@@ -1,8 +1,9 @@
 """The rows a live reliability report is counted from.
 
-Three reads, each deciding nothing: which passes were classified inside a
-window, how many seconds each station's heartbeats vouch for, and how long
-each report took to arrive. The indicators are ``meridian.reliability``'s.
+Four reads, each deciding nothing: which passes were classified inside a
+window, how many of each class there were, how many seconds each station's
+heartbeats vouch for, and how long each report took to arrive. The
+indicators are ``meridian.reliability``'s.
 
 Reference: docs/DECISIONS.md D-182, D-184.
 """
@@ -20,6 +21,7 @@ __all__ = [
     "ClassifiedRow",
     "StationOnline",
     "SubmissionDelay",
+    "count_classified_between",
     "find_classified_between",
     "find_station_online_seconds",
     "find_submission_delays",
@@ -38,6 +40,13 @@ class ClassifiedRow:
     listening_confirmed: bool
     outcome: str | None
     simulated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _ClassCount:
+    classification: str
+    simulated: bool
+    n: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +102,42 @@ def find_classified_between(
             (method, config_sha256, start, end),
         )
         return cur.fetchall()
+
+
+def count_classified_between(
+    conn: Connection,
+    *,
+    classified_under: tuple[str, bytes],
+    window: tuple[datetime, datetime],
+) -> dict[tuple[str, bool], int]:
+    """How many classifications of each class and population closed in a window.
+
+    What :func:`find_classified_between` returns, counted in the database, for a
+    reader that needs the counts only: a metrics scrape reads this on every
+    scrape, and must not carry a month of rows to count them.
+
+    Args:
+        conn: An open connection. Read-only.
+        classified_under: The method and the configuration hash to read.
+        window: The half-open interval of window ends.
+
+    Returns:
+        ``{(classification, simulated): count}`` for every pair with a row.
+    """
+    method, config_sha256 = classified_under
+    start, end = window
+    with conn.cursor(row_factory=class_row(_ClassCount)) as cur:
+        cur.execute(
+            """
+            select classification, simulated, count(*)::int as n
+            from pass_classifications
+            where method = %s and config_sha256 = %s
+              and window_end >= %s and window_end < %s
+            group by classification, simulated
+            """,
+            (method, config_sha256, start, end),
+        )
+        return {(one.classification, one.simulated): one.n for one in cur.fetchall()}
 
 
 def find_station_online_seconds(

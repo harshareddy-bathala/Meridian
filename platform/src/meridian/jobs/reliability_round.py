@@ -6,9 +6,12 @@ registry and the reliability configuration, which scheduling does not.
 
 * **The sweep** expires every ``issued`` assignment whose window closed untaken,
   whatever its station did or did not send (D-183).
-* **The classification** classifies every scheduled pass that has settled and
-  stores it with its evidence (D-182). A pass settles a day after its window, so
-  most rounds find nothing new; a round that finds nothing still succeeds.
+* **The classification** classifies scheduled passes that have settled and
+  stores each with its evidence (D-182), at most :data:`CLASSIFY_BATCH` a round,
+  oldest first, so the first round over a long history is many short
+  transactions rather than one long one. A pass settles a day after its
+  window, so most rounds find nothing new; a round that finds nothing still
+  succeeds.
 
 Each is supervised as the scheduling tasks are: timed, and a failure logged and
 counted, never fatal to the loop.
@@ -34,6 +37,7 @@ from meridian.store.assignment_expiry import expire_untaken_assignments
 from meridian.store.stations import Connection
 
 __all__ = [
+    "CLASSIFY_BATCH",
     "DatabaseReliabilityWork",
     "ReliabilityOutcome",
     "ReliabilityWork",
@@ -41,6 +45,11 @@ __all__ = [
 ]
 
 _log = logging.getLogger(__name__)
+
+CLASSIFY_BATCH = 500
+"""Passes one round classifies at most. Fifty stations at about six passes a
+day settle some three hundred a day, so a round keeps up with a margin while
+a backlog drains over successive rounds."""
 
 
 class ReliabilityWork(Protocol):
@@ -84,7 +93,11 @@ class DatabaseReliabilityWork:
         """Run the accounting exactly as ``meridian reliability classify`` does."""
         with self._connect() as conn:
             return classify_settled(
-                conn, self._registry_for(conn, now), now=now, config=self._config
+                conn,
+                self._registry_for(conn, now),
+                now=now,
+                config=self._config,
+                limit=CLASSIFY_BATCH,
             )
 
 
@@ -99,9 +112,9 @@ class ReliabilityOutcome:
 def run_reliability_round(work: ReliabilityWork, now: datetime) -> ReliabilityOutcome:
     """Sweep, then classify; a failure of either is recorded and survived.
 
-    The classification runs even if the sweep failed: a pass whose assignment
-    was not expired is still classified from its report and its heartbeats, and
-    reads the same (D-181).
+    The classification runs even if the sweep failed, because it sweeps
+    first itself, in its own transaction: a pass is never classified while an
+    assignment nobody took is still ``issued`` (D-183).
     """
     expired = _timed(EXPIRY_SWEEP, lambda: work.sweep(now))
     if expired is not None:
@@ -109,8 +122,9 @@ def run_reliability_round(work: ReliabilityWork, now: datetime) -> ReliabilityOu
     classified = _timed(RELIABILITY, lambda: work.classify(now))
     if classified is not None:
         _log.info(
-            "classified %d settled passes, %d rows written",
+            "classified %d settled passes, %d rows written, %d left for later",
             classified.classified,
             classified.written,
+            classified.deferred,
         )
     return ReliabilityOutcome(expired=expired, classified=classified)

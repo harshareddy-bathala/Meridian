@@ -320,3 +320,98 @@ def test_a_changed_parameter_classifies_again_beside_the_old_row(rows: Any) -> N
     )
 
     assert len(stored(rows.conn)) == 2
+
+
+def window_end(conn: Any, assignment_id: str) -> datetime:
+    with conn.cursor() as cur:
+        cur.execute(
+            "select end_at from assignments where assignment_id = %s", (assignment_id,)
+        )
+        return cur.fetchone()[0]
+
+
+def test_a_pass_settles_whole_never_one_assignment_at_a_time(
+    rows: Any, element_set: int
+) -> None:
+    """Two predictions of one rise, whose windows close two minutes apart.
+
+    Settled one assignment at a time, a run between the two closes would store
+    the first alone and a later run the second alone: one reception, two rows.
+    """
+    rows.station("st_a", simulated=False)
+    early = rows.pass_("st_a", AOS, element_set_id=element_set)
+    late = rows.pass_("st_a", AOS + timedelta(minutes=2), element_set_id=element_set)
+    rows.assignment("as_1", early, model_config="A", state="expired")
+    rows.assignment("as_2", late, model_config="B")
+    rows.observation("as_2", outcome="decoded")
+    between = window_end(rows.conn, "as_1") + timedelta(days=1, minutes=1)
+    assert between - timedelta(days=1) < window_end(rows.conn, "as_2")
+
+    first = run(rows.conn, now=between)
+    second = run(rows.conn)
+
+    assert (first.classified, second.classified) == (0, 1)
+    assert only(rows.conn)["assignment_ids"] == ["as_1", "as_2"]
+
+
+def test_untaken_work_is_expired_before_its_pass_is_classified(rows: Any) -> None:
+    """With no sweep before it, an ``issued`` row heard is still a decline (D-183).
+
+    Classified while still ``issued``, it would be stored for good as a pass
+    the station was not listening for.
+    """
+    rows.station("st_a", simulated=False)
+    scheduled_pass(rows, "st_a", "as_1", state="issued")
+    heartbeat(rows.conn, "st_a", AOS + timedelta(minutes=2))
+
+    report = run(rows.conn)
+
+    row = only(rows.conn)
+    assert report.expired == 1
+    assert row["classification"] == "assignment_declined"
+    assert row["evidence"]["assignments"][0]["state"] == "expired"
+
+
+def test_a_bounded_run_takes_the_oldest_and_leaves_the_rest(rows: Any) -> None:
+    rows.station("st_a", simulated=False)
+    for n in range(3):
+        scheduled_pass(rows, "st_a", f"as_{n}", aos=AOS + timedelta(hours=2 * n))
+        rows.observation(f"as_{n}", outcome="decoded")
+    registry = PsycopgRegistry(
+        rows.conn, pepper="test-pepper", recovery_window_s=3600, now_utc=LATER
+    )
+
+    first = classify_settled(
+        rows.conn, registry, now=LATER, config=ClassificationConfig(), limit=2
+    )
+
+    assert (first.classified, first.deferred) == (2, 1)
+    assert [one["assignment_id"] for one in stored(rows.conn)] == ["as_0", "as_1"]
+    assert run(rows.conn).classified == 1
+
+
+def test_another_station_counts_once_however_many_assignments_it_held(
+    rows: Any, element_set: int
+) -> None:
+    """Two configurations' assignments of one rise over st_b are one attempt.
+
+    Counted per assignment they would reach ``silent_min_attempts`` alone and
+    call the satellite silent; the snapshot labeller counts them once.
+    """
+    rows.station("st_a", simulated=False)
+    rows.station("st_b", simulated=False)
+    scheduled_pass(rows, "st_a", "as_1")
+    rows.observation("as_1", outcome="no_signal")
+    listened(rows.conn, "st_a", "as_1")
+    aos = AOS + timedelta(hours=1)
+    other = rows.pass_("st_b", aos, element_set_id=element_set)
+    for assignment, config in (("as_2", "A"), ("as_3", "B")):
+        rows.assignment(assignment, other, model_config=config, state="reported")
+        rows.observation(assignment, outcome="no_signal")
+    listened(rows.conn, "st_b", "as_2", aos)
+
+    run(rows.conn)
+
+    row = next(one for one in stored(rows.conn) if one["assignment_id"] == "as_1")
+    assert row["classification"] == "satellite_state_indeterminate"
+    assert row["evidence"]["satellite"]["silence_assignment_ids"] == ["as_2"]

@@ -1,14 +1,18 @@
 """The network's state as Prometheus sees it, read when Prometheus asks.
 
-A custom collector registered on the API's scrape (D-109). Each scrape borrows one
+A custom collector registered on the API's scrape (D-109). Each scrape borrows a
 pooled connection and reads, in one transaction:
 
 - stations by liveness and provenance, classified by ``meridian.registry``;
 - scheduled assignments by state and provenance;
 - assignments whose report is overdue;
 - whether the database's migration revision is the one this code expects;
-- passes classified inside the SLO window, by class, and what is left of each
-  population's loss budget (Stage 20, D-186).
+
+and then, in a second borrow of its own, passes classified inside the SLO window,
+counted by class, and what is left of each population's loss budget (Stage 20,
+D-186). That read is apart so that its failure — a table a pending migration has
+not created yet, say — loses the reliability series and nothing else: the
+schema series above is what says the migration is pending.
 
 It also reports the answering process's connection pool, and whether the database
 answered at all.
@@ -45,16 +49,15 @@ from psycopg_pool import ConnectionPool
 
 from meridian.api import platform_clock
 from meridian.registry.liveness_counts import count_by_liveness
-from meridian.reliability.budget import loss_budget
+from meridian.reliability.budget import remaining_ratio_of
 from meridian.reliability.classification import METHOD, PASS_CLASSES
 from meridian.reliability.config import (
     ReliabilityConfig,
     ReliabilityConfigError,
     load_deployed_reliability_config,
 )
-from meridian.reliability.slis import PassRecord
 from meridian.store.monitoring import MonitoringSnapshot, read_monitoring_snapshot
-from meridian.store.reliability_reads import ClassifiedRow, find_classified_between
+from meridian.store.reliability_reads import count_classified_between
 from meridian.store.schema_revision import find_current_revision, find_head_revision
 
 __all__ = ["OVERDUE_AFTER_S", "SCRAPE_CONNECTION_TIMEOUT_S", "DomainCollector"]
@@ -93,12 +96,10 @@ _POOL_STATISTICS = {
 
 @dataclass(frozen=True, slots=True)
 class _Reading:
-    """One scrape's database read, taken in one transaction."""
+    """One scrape's monitoring read, taken in one transaction."""
 
     snapshot: MonitoringSnapshot
     current_revision: str | None
-    classified: list[ClassifiedRow] | None
-    """Passes classified inside the SLO window; None without a configuration."""
 
 
 def _simulated_label(simulated: bool) -> str:
@@ -150,7 +151,7 @@ class DomainCollector(Collector):
         yield _pool_family(pool)
         now = self._now()
         reliability = self._reliability_config()
-        reading = _read(pool, now, reliability)
+        reading = _read(pool, now)
         yield _reachable_family(reachable=reading is not None)
         if reading is None:
             return
@@ -160,8 +161,10 @@ class DomainCollector(Collector):
         schema = self._schema_family(reading.current_revision)
         if schema is not None:
             yield schema
-        if reliability is not None and reading.classified is not None:
-            yield from _reliability_families(reading.classified, reliability)
+        if reliability is not None:
+            classified = _read_classified(pool, now, reliability)
+            if classified is not None:
+                yield from _reliability_families(classified, reliability)
 
     def _reliability_config(self) -> ReliabilityConfig | None:
         """The deployment's reliability configuration, read once."""
@@ -194,28 +197,39 @@ class DomainCollector(Collector):
         return family
 
 
-def _read(
-    pool: Pool, now: datetime, reliability: ReliabilityConfig | None
-) -> _Reading | None:
-    """Everything the database contributes to one scrape, or ``None`` if silent."""
+def _read(pool: Pool, now: datetime) -> _Reading | None:
+    """One scrape's monitoring figures, or ``None`` if the database is silent."""
     try:
         with pool.connection(timeout=SCRAPE_CONNECTION_TIMEOUT_S) as conn:
             snapshot = read_monitoring_snapshot(
                 conn, overdue_ended_before=now - timedelta(seconds=OVERDUE_AFTER_S)
             )
-            classified = None
-            if reliability is not None:
-                classified = find_classified_between(
-                    conn,
-                    classified_under=(METHOD, reliability.classification.sha256()),
-                    window=(now - timedelta(days=reliability.slo.window_days), now),
-                )
-            return _Reading(snapshot, find_current_revision(conn), classified)
+            return _Reading(snapshot, find_current_revision(conn))
     except (psycopg.Error, OSError):
         # The same narrow pair `is_database_reachable` catches, for its reason:
         # psycopg.Error already covers pool exhaustion and a closed pool, and a
         # bug in this module must not be reported as an outage.
         _log.warning("scrape-time database read failed", exc_info=True)
+        return None
+
+
+def _read_classified(
+    pool: Pool, now: datetime, reliability: ReliabilityConfig
+) -> dict[tuple[str, bool], int] | None:
+    """Classifications in the SLO window by class and population, or ``None``.
+
+    A failure here is logged and leaves the reliability series out; the
+    database has already answered this scrape, so it is not an outage.
+    """
+    try:
+        with pool.connection(timeout=SCRAPE_CONNECTION_TIMEOUT_S) as conn:
+            return count_classified_between(
+                conn,
+                classified_under=(METHOD, reliability.classification.sha256()),
+                window=(now - timedelta(days=reliability.slo.window_days), now),
+            )
+    except (psycopg.Error, OSError):
+        _log.warning("scrape-time reliability read failed", exc_info=True)
         return None
 
 
@@ -278,26 +292,14 @@ def _overdue_family(snapshot: MonitoringSnapshot) -> Metric:
 
 
 def _reliability_families(
-    classified: list[ClassifiedRow], config: ReliabilityConfig
+    classified: dict[tuple[str, bool], int], config: ReliabilityConfig
 ) -> Iterator[Metric]:
     """Passes by class, and the budget left, for each population that has any.
 
-    Counted by ``meridian.reliability``'s own functions from the stored
-    classifications, so a scrape and ``meridian reliability report`` over the
-    same window agree (D-186).
+    The budget is ``meridian.reliability``'s arithmetic over the same counts
+    ``meridian reliability report`` counts its passes into, so a scrape and the
+    report over the same window agree (D-186).
     """
-    passes = [
-        PassRecord(
-            reference=row.assignment_id,
-            station_id=row.station_id,
-            window_end=row.window_end,
-            classification=row.classification,
-            listening_confirmed=row.listening_confirmed,
-            outcome=row.outcome,
-            simulated=row.simulated,
-        )
-        for row in classified
-    ]
     counts = GaugeMetricFamily(
         "meridian_passes_classified",
         "Settled passes classified inside the SLO window, by class and whether "
@@ -311,15 +313,16 @@ def _reliability_families(
         labels=["simulated"],
     )
     for simulated in (False, True):
-        mine = [one for one in passes if one.simulated == simulated]
-        if not mine:
+        mine: dict[str, int] = {
+            name: classified.get((name, simulated), 0) for name in PASS_CLASSES
+        }
+        if not any(mine.values()):
             continue
         label = _simulated_label(simulated)
-        for name in PASS_CLASSES:
-            count = sum(1 for one in mine if one.classification == name)
+        for name, count in mine.items():
             counts.add_metric([name, label], float(count))
-        budget = loss_budget(mine, capture_target=config.slo.capture_rate_min)
-        if budget.remaining_ratio is not None:
-            remaining.add_metric([label], budget.remaining_ratio)
+        ratio = remaining_ratio_of(mine, capture_target=config.slo.capture_rate_min)
+        if ratio is not None:
+            remaining.add_metric([label], ratio)
     yield counts
     yield remaining
