@@ -107,6 +107,8 @@ def test_all_expected_tables_exist(conn) -> None:
         "ingest_records",
         "archive_stations",
         "archive_observations",
+        # Stage 20's record of every classified pass (0020, D-182).
+        "pass_classifications",
     }
     assert expected <= tables
 
@@ -169,6 +171,7 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:
         "assignments",
         "observations",
         "heartbeats",
+        "pass_classifications",
     } <= carrying
     # D-049: element_sets is the deliberate exception. Its provenance lives in
     # `source`, which distinguishes celestrak from spacetrack from manual as
@@ -1050,3 +1053,67 @@ def test_the_ingest_tables_are_plain_tables(conn) -> None:
         }
         & hypertables
     )
+
+
+def _classification(fixtures: Callable[..., Any], **columns: object) -> None:
+    """One ``pass_classifications`` row over a fresh pass and assignment."""
+    fixtures(
+        "insert into element_sets (satellite_id, epoch, line1, line2, source)"
+        " values ('norad:99999', now(), 'l1', 'l2', 'manual')"
+    )
+    fixtures(
+        "insert into passes (satellite_id, station_id, aos, los, max_elevation_deg,"
+        " max_elevation_at, aos_azimuth_deg, los_azimuth_deg, element_set_id,"
+        " min_elevation_deg) select 'norad:99999', 'st_fixture', now(),"
+        " now() + interval '10 minutes', 40, now() + interval '5 minutes', 10, 200,"
+        " max(id), 10 from element_sets"
+    )
+    fixtures(
+        "insert into assignments (assignment_id, pass_id, station_id, start_at,"
+        " end_at, centre_freq_hz, mode, timing_uncertainty_s, reason)"
+        " select 'as_fixture', max(id), 'st_fixture', now(),"
+        " now() + interval '10 minutes', 137900000, 'lrpt', 4, 'test' from passes"
+    )
+    values = {
+        "assignment_ids": ["as_fixture"],
+        "classification": "confirmed_miss",
+        "evidence": "{}",
+        "config_sha256": ZERO_HASH,
+    } | columns
+    fixtures(
+        "insert into pass_classifications (assignment_id, assignment_ids, pass_id,"
+        " station_id, satellite_id, window_start, window_end, classification,"
+        " evidence, method, config_sha256, simulated)"
+        " select 'as_fixture', %s, max(id), 'st_fixture', 'norad:99999', now(),"
+        " now() + interval '10 minutes', %s, %s::jsonb, 'classification-1', %s,"
+        " false from passes",
+        values["assignment_ids"],
+        values["classification"],
+        values["evidence"],
+        values["config_sha256"],
+    )
+
+
+def test_a_classification_outside_the_eight_is_refused(fixtures) -> None:
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _classification(fixtures, classification="missed")
+
+
+def test_the_representative_is_the_first_pooled_assignment(fixtures) -> None:
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _classification(fixtures, assignment_ids=["as_other", "as_fixture"])
+
+
+def test_a_classification_is_held_once_per_method_and_configuration(
+    fixtures,
+) -> None:
+    _classification(fixtures)
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        fixtures(
+            "insert into pass_classifications (assignment_id, assignment_ids,"
+            " pass_id, station_id, satellite_id, window_start, window_end,"
+            " classification, evidence, method, config_sha256, simulated)"
+            " select assignment_id, assignment_ids, pass_id, station_id,"
+            " satellite_id, window_start, window_end, 'station_unavailable',"
+            " evidence, method, config_sha256, simulated from pass_classifications"
+        )

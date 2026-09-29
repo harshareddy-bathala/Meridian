@@ -17,10 +17,12 @@ from __future__ import annotations
 from prometheus_client import Counter, Gauge, Histogram
 
 __all__ = [
+    "EXPIRY_SWEEP",
     "HISTORY_AGE",
     "LAST_SUCCESS",
     "PASSES_COMPUTED",
     "PASS_GENERATION",
+    "RELIABILITY",
     "SCHEDULE",
     "SCHEDULER_CANDIDATES",
     "SCHEDULE_RUNS",
@@ -32,8 +34,12 @@ __all__ = [
 
 PASS_GENERATION = "pass_generation"
 SCHEDULE = "schedule"
-TASKS = (PASS_GENERATION, SCHEDULE)
-"""The two tasks a round runs, in order, and the only values ``task`` takes."""
+EXPIRY_SWEEP = "expiry_sweep"
+RELIABILITY = "reliability"
+TASKS = (PASS_GENERATION, SCHEDULE, EXPIRY_SWEEP, RELIABILITY)
+"""The four tasks a round runs, in order, and the only values ``task`` takes.
+The last two are Stage 20's: expiring work nobody took (D-183), then classifying
+every pass that has settled (D-182)."""
 
 TASK_DURATION = Histogram(
     "meridian_job_duration_seconds",

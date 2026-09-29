@@ -25,6 +25,8 @@ from prometheus_client.metrics_core import Metric
 from meridian.api import domain_collector
 from meridian.api.domain_collector import DomainCollector
 from meridian.registry.liveness_counts import count_by_liveness
+from meridian.reliability.classification import PASS_CLASSES
+from meridian.reliability.config import ReliabilityConfigError
 from meridian.store.monitoring import (
     ASSIGNMENT_STATES,
     MonitoringSnapshot,
@@ -65,6 +67,19 @@ def _snapshot() -> MonitoringSnapshot:
         },
         overdue={False: 1, True: 0},
     )
+
+
+Counts = dict[tuple[str, bool], int]
+
+
+@pytest.fixture(autouse=True)
+def classified(monkeypatch: pytest.MonkeyPatch) -> Counts:
+    """Classifications the fake database holds, by class and population."""
+    held: Counts = {}
+    monkeypatch.setattr(
+        domain_collector, "count_classified_between", lambda *_, **__: held
+    )
+    return held
 
 
 def _families(collector: DomainCollector) -> dict[str, Metric]:
@@ -186,3 +201,85 @@ def test_missing_migration_scripts_omit_the_schema_series(
     )
 
     assert "meridian_schema_up_to_date" not in _families(collector)
+
+
+def test_nothing_classified_publishes_no_reliability_series(
+    reachable: DomainCollector,
+) -> None:
+    """No passes settled yet is "not measured", not "no misses" (D-086)."""
+    families = _families(reachable)
+
+    assert families["meridian_passes_classified"].samples == []
+    assert families["meridian_loss_budget_remaining_ratio"].samples == []
+
+
+def test_a_population_with_passes_reports_every_class_and_its_budget(
+    reachable: DomainCollector, classified: Counts
+) -> None:
+    """Nineteen captures and one miss: one pass lost of two allowed."""
+    classified[("successful_reception", False)] = 19
+    classified[("confirmed_miss", False)] = 1
+
+    families = _families(reachable)
+
+    counts = families["meridian_passes_classified"]
+    assert len(counts.samples) == len(PASS_CLASSES)
+    assert (
+        _value(counts, {"classification": "confirmed_miss", "simulated": "false"})
+        == 1.0
+    )
+    assert (
+        _value(counts, {"classification": "station_unavailable", "simulated": "false"})
+        == 0.0
+    )
+    remaining = families["meridian_loss_budget_remaining_ratio"]
+    assert _value(remaining, {"simulated": "false"}) == pytest.approx(0.5)
+    assert _value(remaining, {"simulated": "true"}) is None
+
+
+def test_a_refused_reliability_file_leaves_the_series_out(
+    monkeypatch: pytest.MonkeyPatch, classified: Counts
+) -> None:
+    monkeypatch.setattr(
+        domain_collector, "read_monitoring_snapshot", lambda *_, **__: _snapshot()
+    )
+    monkeypatch.setattr(domain_collector, "find_current_revision", lambda _: "0014")
+    classified[("confirmed_miss", False)] = 1
+    pool = _Pool(reachable=True)
+
+    def refused() -> None:
+        raise ReliabilityConfigError("capture_rate_min must be between 0 and 1")
+
+    collector = DomainCollector(
+        lambda: pool,  # type: ignore[arg-type, return-value]
+        now=lambda: NOW,
+        head_revision_of=lambda: "0014",
+        reliability_of=refused,  # type: ignore[arg-type]
+    )
+
+    families = _families(collector)
+
+    assert "meridian_passes_classified" not in families
+    assert _value(families["meridian_database_reachable"], {}) == 1.0
+
+
+def test_a_failed_reliability_read_loses_only_the_reliability_series(
+    reachable: DomainCollector, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A migration not yet applied leaves no ``pass_classifications`` table.
+
+    The database answered, so it is reachable, and the schema series is what
+    says the migration is pending; neither may go with the reliability read.
+    """
+
+    def missing(*_: object, **__: object) -> Counts:
+        raise psycopg.errors.UndefinedTable('relation "pass_classifications"')
+
+    monkeypatch.setattr(domain_collector, "count_classified_between", missing)
+
+    families = _families(reachable)
+
+    assert _value(families["meridian_database_reachable"], {}) == 1.0
+    assert "meridian_schema_up_to_date" in families
+    assert "meridian_stations" in families
+    assert "meridian_passes_classified" not in families

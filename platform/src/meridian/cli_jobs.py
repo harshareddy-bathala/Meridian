@@ -1,14 +1,15 @@
-"""``meridian jobs run`` — pass generation and scheduling, kept running.
+"""``meridian jobs run`` — generation, scheduling and reliability, kept running.
 
 The process the ``jobs`` service runs in every deployment (D-110). Each round
 generates passes over the next ``SCHEDULE_HORIZON_S`` and schedules them under
 the ``schedule.toml`` named by ``SCHEDULE_CONFIG`` — configuration A on the
-elevation proxy when none is (D-168, D-170) — then waits
-``SCHEDULE_INTERVAL_S``; SIGTERM or SIGINT ends the
-wait and the process exits after the task in hand. Its metrics are served on
-``JOBS_METRICS_PORT`` behind the same token as the API's (D-109).
+elevation proxy when none is (D-168, D-170) — then expires work nobody took and
+classifies every pass that has settled (D-182, D-183), then waits
+``SCHEDULE_INTERVAL_S``; SIGTERM or SIGINT ends the wait and the process exits
+after the task in hand. Its metrics are served on ``JOBS_METRICS_PORT`` behind
+the same token as the API's (D-109).
 
-``--once`` runs a single round with no listener and exits — non-zero if either
+``--once`` runs a single round with no listener and exits — non-zero if any
 task failed — which is what an operator uses to fill a horizon by hand and what
 the tests use to exercise the real wiring.
 
@@ -21,7 +22,7 @@ metrics directory then published ``meridian_passes_computed 0`` once per worker
 ``tests/unit/test_cli_jobs.py`` pins that importing the command tree loads none
 of them.
 
-Reference: docs/DECISIONS.md D-066, D-109, D-110.
+Reference: docs/DECISIONS.md D-066, D-109, D-110, D-182, D-183.
 """
 
 from __future__ import annotations
@@ -54,6 +55,7 @@ from meridian.scheduler.scoring import ScorerSource
 from meridian.store.pool import CONNECT_TIMEOUT_S
 
 if TYPE_CHECKING:
+    from meridian.jobs.reliability_round import DatabaseReliabilityWork
     from meridian.jobs.rounds import DatabaseRoundWork
 
 __all__ = ["JOBS_SECRETS", "add_jobs_parser", "run_jobs"]
@@ -143,15 +145,43 @@ def _rounds(settings: Settings, scorers: ScorerSource) -> DatabaseRoundWork:
     )
 
 
+def _reliability(settings: Settings) -> DatabaseReliabilityWork:
+    """The sweep and the classification, under the deployment's configuration."""
+    # Inside the function: see the module docstring.
+    from meridian.jobs.reliability_round import (  # noqa: PLC0415
+        DatabaseReliabilityWork,
+    )
+    from meridian.registry.psycopg_registry import PsycopgRegistry  # noqa: PLC0415
+    from meridian.reliability.config import (  # noqa: PLC0415
+        load_deployed_reliability_config,
+    )
+
+    url = settings.psycopg_url
+    return DatabaseReliabilityWork(
+        lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
+        lambda conn, now: PsycopgRegistry(
+            conn,
+            pepper=settings.token_hash_pepper,
+            recovery_window_s=settings.registration_recovery_window_s,
+            now_utc=now,
+        ),
+        load_deployed_reliability_config().classification,
+    )
+
+
 def run_jobs(args: argparse.Namespace) -> int:
     """Handle ``meridian jobs run``."""
     # Inside the function: see the module docstring.
     from meridian.jobs.metrics_listener import start_metrics_listener  # noqa: PLC0415
+    from meridian.jobs.reliability_round import (  # noqa: PLC0415
+        run_reliability_round,
+    )
     from meridian.jobs.rounds import (  # noqa: PLC0415
         RoundPlan,
         run_round,
         run_until_stopped,
     )
+    from meridian.reliability.config import ReliabilityConfigError  # noqa: PLC0415
 
     # The jobs process is given the database and the metrics token and nothing
     # else, so only those are refused as placeholders (D-206).
@@ -163,9 +193,10 @@ def run_jobs(args: argparse.Namespace) -> int:
 
     try:
         config, scorers = _schedule(settings)
-    except (ScheduleConfigError, LiveScoringError) as exc:
-        # Refused before any round: a schedule that cannot be made as
-        # configured must not quietly become another one (D-168).
+        reliability = _reliability(settings)
+    except (ScheduleConfigError, LiveScoringError, ReliabilityConfigError) as exc:
+        # Refused before any round: a schedule or a classification that cannot
+        # be made as configured must not quietly become another one (D-168).
         print(f"meridian jobs run: {exc}", file=sys.stderr)  # noqa: T201
         return _EXIT_FAILED
 
@@ -177,10 +208,20 @@ def run_jobs(args: argparse.Namespace) -> int:
         horizon=timedelta(seconds=settings.schedule_horizon_s), config=config
     )
 
+    def round_once() -> bool:
+        """One whole round; True if every task in it completed."""
+        now = datetime.now(UTC)
+        outcome = run_round(work, plan, now)
+        checked = run_reliability_round(reliability, now)
+        return None not in (
+            outcome.generated,
+            outcome.scheduled,
+            checked.expired,
+            checked.classified,
+        )
+
     if args.once:
-        outcome = run_round(work, plan, datetime.now(UTC))
-        completed = outcome.generated is not None and outcome.scheduled is not None
-        return 0 if completed else _EXIT_FAILED
+        return 0 if round_once() else _EXIT_FAILED
 
     start_metrics_listener(
         args.metrics_host, settings.jobs_metrics_port, settings.metrics_token
@@ -188,9 +229,5 @@ def run_jobs(args: argparse.Namespace) -> int:
     stop = threading.Event()
     for received in (signal.SIGTERM, signal.SIGINT):
         signal.signal(received, lambda _signal, _frame: stop.set())
-    run_until_stopped(
-        lambda: run_round(work, plan, datetime.now(UTC)),
-        settings.schedule_interval_s,
-        stop,
-    )
+    run_until_stopped(round_once, settings.schedule_interval_s, stop)
     return 0

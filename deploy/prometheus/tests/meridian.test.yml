@@ -48,6 +48,12 @@ tests:
         values: "0+15x100"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
         values: "0+15x100"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
+        values: "0+15x100"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
+        values: "0+15x100"
+      - series: 'meridian_loss_budget_remaining_ratio{job="meridian", instance="api:8000", simulated="false"}'
+        values: "0.8x100"
     alert_rule_test:
       - {eval_time: 20m, alertname: ApiUnavailable, exp_alerts: []}
       - {eval_time: 20m, alertname: DatabaseUnavailable, exp_alerts: []}
@@ -59,6 +65,7 @@ tests:
       - {eval_time: 20m, alertname: SchedulerUnavailable, exp_alerts: []}
       - {eval_time: 20m, alertname: ScheduledTaskStalled, exp_alerts: []}
       - {eval_time: 20m, alertname: ScheduledTaskNeverSucceeded, exp_alerts: []}
+      - {eval_time: 20m, alertname: LossBudgetThresholdReached, exp_alerts: []}
 
   # --- Platform ------------------------------------------------------------
   - name: the api stops answering
@@ -229,6 +236,10 @@ tests:
         values: "0x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
         values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
+        values: "0+60x30"
     alert_rule_test:
       - eval_time: 14m
         alertname: ScheduledTaskStalled
@@ -254,6 +265,10 @@ tests:
         values: "0x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
         values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
+        values: "0+60x30"
     alert_rule_test:
       - eval_time: 14m
         alertname: ScheduledTaskNeverSucceeded
@@ -264,4 +279,46 @@ tests:
           - exp_labels: {severity: critical, job: meridian-jobs, instance: "jobs:9464", task: schedule}
             exp_annotations:
               summary: The schedule task has not completed once since the jobs process started.
+              runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+  # --- Reliability ---------------------------------------------------------
+  - name: three quarters of the measured loss budget is spent
+    interval: 1m
+    input_series:
+      # A tenth of the budget left: one pass more than 90% of it is lost.
+      - series: 'meridian_loss_budget_remaining_ratio{job="meridian", instance="api:8000", simulated="false"}'
+        values: "0.1x120"
+      # The simulated fleet's budget is healthy, and says nothing about ours.
+      - series: 'meridian_loss_budget_remaining_ratio{job="meridian", instance="api:8000", simulated="true"}'
+        values: "0.9x120"
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: LossBudgetThresholdReached
+        exp_alerts: []
+      - eval_time: 61m
+        alertname: LossBudgetThresholdReached
+        exp_alerts:
+          - exp_labels: {severity: warning, simulated: "false"}
+            exp_annotations:
+              summary: "10% of the loss budget is left (simulated=false)."
+              runbook: docs/OPERATIONS.md#lossbudgetthresholdreached
+
+  - name: the reliability task has failed every round since the process started
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="meridian-jobs", instance="jobs:9464"}'
+        values: "0x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="schedule"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
+        values: "0+60x30"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ScheduledTaskNeverSucceeded
+        exp_alerts:
+          - exp_labels: {severity: critical, job: meridian-jobs, instance: "jobs:9464", task: reliability}
+            exp_annotations:
+              summary: The reliability task has not completed once since the jobs process started.
               runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded

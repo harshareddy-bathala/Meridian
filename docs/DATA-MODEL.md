@@ -188,6 +188,16 @@ Partitioned on `received_at`, the platform's clock, not the station's `sent_at` 
 
 Retention: full resolution 90 days, then downsampled. **The retention policy is not created in Phase 1** — dropping chunks before the continuous aggregate that downsamples them exists is just data loss on a timer. It lands in Phase 3 with the aggregate.
 
+### `pass_classifications`
+What happened to each settled, scheduled pass, and the evidence it was decided from. Every reliability figure is counted from these rows (Stage 20).
+
+`(classification_id, assignment_id, assignment_ids, pass_id, station_id, satellite_id, window_start, window_end, classification, evidence, method, config_sha256, classified_at, simulated)`
+
+- **One row per physical pass per station**, once its pooled window has closed plus the settle margin. `assignment_ids` lists every scheduled assignment pooled into the pass, and `assignment_id` is the first of them. A GIN index serves `assignment_ids @> array[…]`, the question which row holds an assignment.
+- **`classification`** is one of the eight classes of `meridian.reliability.classification` (D-180, D-181). Whether a class counts as captured, or spends the loss budget, is decided in code from the class, and deliberately not stored as a second column that could disagree with it.
+- **`evidence`** is everything the classification read: each assignment and its state, the report and its revision, whether the station was heard, the registry's listening answer for each assignment, and the receptions D-147 judged the satellite by.
+- **Append-only.** Unique on `(assignment_id, method, config_sha256)`, so a changed rule or parameter writes new rows beside the old, and a re-run writes nothing. See D-182.
+
 ### `products`
 Artifacts from an observation — waterfalls, images, decoded frames. Content-addressed by hash, referenced here.
 
@@ -429,6 +439,7 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `heartbeats.state` (reported) | `idle`, `slewing`, `listening`, `processing`, `degraded`, `maintenance` — MSP §4.2 |
 | `assignments.state` | `issued`, `held`, `in_progress`, `reported`, `expired` — D-008 |
 | `assignments.decision` | `scheduled`, `skipped` |
+| `pass_classifications.classification` | `successful_reception`, `signal_no_decode`, `confirmed_miss`, `satellite_silent`, `satellite_state_indeterminate`, `station_unavailable`, `station_not_confirmed_listening`, `assignment_declined` — D-180 |
 | `observations.outcome` | the five values of MSP §4.4 — D-010 |
 | `observations.provenance` | `station`, `archive`, `manual` |
 | `element_sets.source` | `celestrak`, `spacetrack`, `manual`, `simulator` |
@@ -451,9 +462,10 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 
 `pass_completeness` is not a view. Completeness is `station_days.jsonl` in every evaluation dataset (D-149, D-154): a view over live tables would give a different answer each time it was read, and the ratio must be regenerable from a snapshot (rule 8).
 
+`sli_current` is not a view either. The service level indicators are counted in `meridian.reliability` from `pass_classifications` (D-184), because whether a class counts as captured or lost is a rule in code (D-182), and a snapshot must be able to count the same figures without a database.
+
 The rest wait on data Phase 1 does not yet produce:
 
 - `timing_error` — first detection minus predicted AOS, joined to element-set age.
-- `sli_current` — the four service level indicators over a rolling window.
 
 Views, not materialised tables, until profiling proves otherwise.
