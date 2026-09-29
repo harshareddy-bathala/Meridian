@@ -64,6 +64,7 @@ class _Work:
             skipped=2,
             rows_written=7,
             passes_without_a_usable_transmitter=(),
+            passes_below_the_declared_horizon=(),
             already_decided=0,
             stations_unavailable=(),
             passes_deferred=0,

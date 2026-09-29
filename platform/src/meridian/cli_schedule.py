@@ -159,10 +159,20 @@ def print_schedule_report(report: ScheduleReport) -> None:
         )
         if solver.detail is not None:
             _say(f"  fell back because:   {solver.detail}")
+    _print_left_out(report)
+
+
+def _print_left_out(report: ScheduleReport) -> None:
+    """The passes this run did not decide, and why each group was left."""
     if report.stations_unavailable:
         _say(
             f"  offline, left undecided: {', '.join(report.stations_unavailable)}"
             f" ({report.passes_deferred} passes)"
+        )
+    if report.passes_below_the_declared_horizon:
+        _say(
+            f"  below the declared horizon, left undecided: "
+            f"{len(report.passes_below_the_declared_horizon)} passes"
         )
     if report.passes_without_a_usable_transmitter:
         # Normally empty — pass generation applies the same capability test. It

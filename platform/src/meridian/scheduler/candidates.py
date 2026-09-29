@@ -5,7 +5,8 @@ For each station the run needs three things from the database:
 * the passes rising in the horizon that are open under this configuration —
   never decided, skipped, or revoked while their station was offline (D-171)
   — as candidates, each with the downlink and the timing uncertainty its row
-  will carry, and the revision its decision will be written as;
+  will carry, and the revision its decision will be written as. A pass whose
+  track never clears the station's declared horizon is not a candidate (D-175);
 * how many are closed, so a report can say why a repeat wrote nothing; and
 * the assignments the station is already committed to near those passes, which
   no decision of this run may overlap (D-165).
@@ -13,7 +14,7 @@ For each station the run needs three things from the database:
 Split out of ``run`` so that module holds the run and this one holds the reads.
 Nothing here decides anything.
 
-Reference: docs/DECISIONS.md D-021, D-060, D-064, D-066, D-165.
+Reference: docs/DECISIONS.md D-021, D-060, D-064, D-066, D-165, D-175.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from meridian.orbit.service import OrbitService
-from meridian.orbit.types import ElementSet
+from meridian.orbit.types import ElementSet, GroundSite
 from meridian.registry.capability_match import (
     ReceiveCapability,
     covers_transmission,
@@ -32,6 +33,8 @@ from meridian.registry.liveness import derive_liveness
 from meridian.scheduler import Candidate, Commitment
 from meridian.scheduler.assignment_records import PassFacts
 from meridian.scheduler.constraints import DELIVERY_LEAD, window
+from meridian.scheduler.declared_horizon import DeclaredMask, clears_any
+from meridian.scheduler.live_inputs import TRACK_STEP_S
 from meridian.scheduler.priority_baseline import NEUTRAL_PRIORITY
 from meridian.scheduler.reissue import next_revision, reopens
 from meridian.scheduler.schedule_config import ScheduleConfig
@@ -118,6 +121,9 @@ class StationWork:
     candidates: list[Candidate]
     facts_by_pass_id: dict[int, PassFacts]
     passes_without_a_usable_transmitter: list[int]
+    passes_below_the_declared_horizon: list[int]
+    """Left undecided rather than skipped: a skip is final (D-165), and a mask
+    an operator corrects should give these passes back (D-175)."""
     already_decided: int
     """Passes in the horizon this configuration has closed: held, done or
     declined (D-171)."""
@@ -137,17 +143,51 @@ class StationWork:
     not: a candidate's rise is read from them (D-148, D-169)."""
 
 
-def _load_capabilities(conn: Connection, station_id: str) -> list[ReceiveCapability]:
-    """One station's declared receiving chains, in the matcher's shape."""
+def _load_capabilities(
+    conn: Connection, station_id: str
+) -> list[tuple[ReceiveCapability, DeclaredMask]]:
+    """One station's declared receiving chains, each with its declared mask."""
     return [
-        ReceiveCapability(
-            freq_min_hz=stored.freq_min_hz,
-            freq_max_hz=stored.freq_max_hz,
-            modes=tuple(stored.modes),
-            min_elevation_deg=stored.min_elevation_deg,
+        (
+            ReceiveCapability(
+                freq_min_hz=stored.freq_min_hz,
+                freq_max_hz=stored.freq_max_hz,
+                modes=tuple(stored.modes),
+                min_elevation_deg=stored.min_elevation_deg,
+            ),
+            DeclaredMask.from_stored(stored.horizon_mask),
         )
         for stored in find_capabilities_for_station(conn, station_id)
     ]
+
+
+def _clears_declared_horizon(  # noqa: PLR0913 — each is one fact the test needs
+    orbit: OrbitService,
+    *,
+    element_set: ElementSet,
+    site: GroundSite,
+    stored: StoredPass,
+    transmitter: StoredTransmitter,
+    chains: Sequence[tuple[ReceiveCapability, DeclaredMask]],
+) -> bool:
+    """Whether a chain that can receive this downlink sees the pass over its mask.
+
+    The track is sampled as live scoring samples it (D-169). It is computed only
+    when every covering chain declares a mask, so a station that declares none
+    propagates nothing more than it did before (D-175).
+    """
+    masks = [
+        mask
+        for capability, mask in chains
+        if covers_transmission(capability, transmitter.centre_freq_hz, transmitter.mode)
+    ]
+    if not masks or any(mask.empty for mask in masks):
+        return True
+    angles = orbit.look_angles(
+        element_set, site, stored.aos, stored.los, step_s=TRACK_STEP_S
+    )
+    track = [(one.azimuth_deg % 360.0, one.elevation_deg) for one in angles]
+    return clears_any(masks, track)
 
 
 def _first_receivable_transmitter(
@@ -315,7 +355,11 @@ def work_for_station(
     request: ScheduleRequest,
 ) -> StationWork:
     """Gather one station's open candidates over the horizon, with their ties."""
-    capabilities = _load_capabilities(conn, station.station_id)
+    chains = _load_capabilities(conn, station.station_id)
+    capabilities = [capability for capability, _ in chains]
+    site = GroundSite(
+        lat_deg=station.lat_deg, lon_deg=station.lon_deg, alt_m=station.alt_m
+    )
     stored_passes = find_passes_in_horizon(
         conn, station.station_id, request.start, request.end
     )
@@ -326,6 +370,7 @@ def work_for_station(
     candidates: list[Candidate] = []
     facts_by_pass_id: dict[int, PassFacts] = {}
     unusable: list[int] = []
+    masked: list[int] = []
 
     for stored in stored_passes:
         if stored.id in closed:
@@ -339,6 +384,16 @@ def work_for_station(
             continue
 
         element_set = element_set_for(conn, stored.element_set_id)
+        if not _clears_declared_horizon(
+            orbit,
+            element_set=element_set,
+            site=site,
+            stored=stored,
+            transmitter=transmitter,
+            chains=chains,
+        ):
+            masked.append(stored.id)
+            continue
         margin_s = _timing_uncertainty_s(orbit, stored, element_set)
         candidates.append(
             _candidate_from(
@@ -353,6 +408,7 @@ def work_for_station(
         candidates=candidates,
         facts_by_pass_id=facts_by_pass_id,
         passes_without_a_usable_transmitter=unusable,
+        passes_below_the_declared_horizon=masked,
         already_decided=len(closed),
         revisions={
             one.pass_id: next_revision(latest.get(one.pass_id)) for one in candidates

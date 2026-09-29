@@ -4624,13 +4624,19 @@ Building twice from one dataset writes nothing the second time. A prediction is 
 
 **2026-09-29 · accepted** · *Amends D-031 · `scheduler/constraints.py`, `scheduler/candidates.py`, `meridian_client` registration, Stage 19*
 
-D-031 said the scheduler takes `max(declared, learned)` per azimuth bin. **Half of that is adopted.** A declared mask is a hard constraint: a pass whose track clears the declared floor at no point is not a candidate, and is skipped with that reason. The check is part of D-166's rules, so `violations` refuses a schedule that breaks it, whichever scheduler wrote it.
+D-031 said the scheduler takes `max(declared, learned)` per azimuth bin. **Half of that is adopted.** A declared mask is a hard constraint: a pass whose track clears the declared floor at no point is not a candidate. It is applied where the downlink rule is (D-166), when passes become candidates, so every scheduler of a live run sees the same set.
+
+**A masked pass is left undecided, not skipped.** A skip is final (D-165), and a mask is something an operator corrects. Left undecided, the pass is decided by the first run after the correction. The run's report counts masked passes, as it counts passes with no usable downlink.
+
+**Which mask applies.** The masks of the capabilities that can receive the pass's downlink. A pass is kept if it clears any one of them, so a station with two antennas is constrained only where both are blocked.
 
 **The learned floor is not a constraint.** A sector the scheduler stops sending work to is a sector the station never hears, so its learned floor could never come down again. That is a feedback loop, and it would remove from the history the very passes that could correct it. The learned horizon already reaches scheduling as a feature, `horizon_clear_share`, where a sparse or wrong sector costs expected value rather than eligibility. The model learns how far to trust it (D-159, D-161).
 
 **How a mask is read.** The list is a step function: each point's floor holds from its azimuth to the next point's, clockwise, wrapping at 360°. A pass clears the mask if any sample of its track is above the floor at that sample's azimuth. The track is the one the scheduler already computes for live scoring (D-169). An empty mask, the default, constrains nothing, and a station that declares none schedules exactly as before.
 
-**The reference client's mask never reached the platform, and that is fixed first.** The client sent `horizon_mask` at the top level of the registration body. MSP §4.1 places it inside each capability, and the platform's registration model ignored the unknown key. Every mask a station declared was dropped without a word. The client now sends it inside each capability, and a conformance test finds it in `station_capabilities.horizon_mask_json`.
+**The reference client's mask never reached the platform, and that is fixed first.** The client sent `horizon_mask` at the top level of the registration body. MSP §4.1 places it inside each capability, and the platform's registration model ignored the unknown key. Every mask a station declared was dropped without a word. The client now sends it inside each capability, and a conformance test finds it in `station_capabilities.horizon_mask_json`. Because a mask now constrains scheduling, an entry must be a direction in the sky: `az_deg` in `[0, 360)` and `min_el_deg` in `[-90, 90]`, or the registration is `malformed`.
+
+**Not applied by the retrospective comparison** (D-172). Its candidates are the completeness denominator, and no live run applied a mask before this entry, so the replay keeps the rules the history was made under.
 
 ---
 

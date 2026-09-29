@@ -977,3 +977,95 @@ def test_an_offline_station_s_work_is_revoked_and_decided_again_on_return(
         limit=10,
     )
     assert [(one.pass_id, one.revision) for one in listed] == [(pass_id, 1)]
+
+
+# --- the declared horizon (D-175) ---------------------------------------------
+
+
+def _declare(conn: Any, floor_deg: float) -> None:
+    """Give the station's chain a mask that holds ``floor_deg`` all the way round.
+
+    90° blocks every pass whatever its geometry, since no sample is above it,
+    and -90° blocks none. So these tests do not depend on where a pass inserted
+    at a chosen time happens to put the satellite.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "update station_capabilities set horizon_mask_json = %s::jsonb"
+            " where station_id = %s",
+            (f'[{{"az_deg": 0, "min_el_deg": {floor_deg}}}]', STATION),
+        )
+
+
+def test_a_pass_behind_the_declared_horizon_is_left_undecided(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """Not a candidate, and not a skip: a skip is final, and masks change."""
+    with rollback.cursor() as cur:
+        blocked = _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
+        )
+    _declare(rollback, 90.0)
+
+    report = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    assert report.passes_below_the_declared_horizon == (blocked,)
+    assert report.candidates_considered == 0
+    assert _decisions(rollback) == []
+
+
+def test_a_pass_over_the_declared_horizon_is_scheduled(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """The positive control: the same pass, a mask it clears."""
+    with rollback.cursor() as cur:
+        _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
+        )
+    _declare(rollback, -90.0)
+
+    report = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    assert report.passes_below_the_declared_horizon == ()
+    assert [row[1] for row in _decisions(rollback)] == ["scheduled"]
+
+
+def test_a_corrected_mask_gives_the_pass_back(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """Left undecided, the pass is decided by the first run after the fix."""
+    with rollback.cursor() as cur:
+        _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
+        )
+    _declare(rollback, 90.0)
+    run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    _declare(rollback, -90.0)
+    report = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    assert report.scheduled == 1
+    assert [row[1] for row in _decisions(rollback)] == ["scheduled"]
+
+
+def test_a_mask_on_a_chain_that_cannot_receive_the_pass_is_ignored(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """Only a chain that could receive the downlink can be in its way."""
+    with rollback.cursor() as cur:
+        _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
+        )
+        cur.execute(
+            "insert into station_capabilities (station_id, band, freq_min_hz,"
+            " freq_max_hz, modes, polarisation, min_elevation_deg,"
+            " horizon_mask_json)"
+            " values (%s, 'uhf', 435000000, 438000000, '{fsk}', 'rhcp', 10,"
+            " '[{\"az_deg\": 0, \"min_el_deg\": 90}]'::jsonb)",
+            (STATION,),
+        )
+
+    report = run_schedule(rollback, SkyfieldOrbitService(), a_request())
+
+    assert report.passes_below_the_declared_horizon == ()
+    assert report.scheduled == 1
