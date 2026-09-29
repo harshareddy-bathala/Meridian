@@ -11,10 +11,10 @@ a station *did* reaches a schedule only as a model's probability, which reads a
 labelled dataset (D-169, ``docs/ARCHITECTURE.md``).
 
 Running it twice over one horizon writes nothing the second time: a pass this
-configuration has closed is not a candidate again, a skip decided again for the
-same reason is not written again (D-165, D-171), and each decision's id is
-derived from its pass, its configuration and its revision, so a race between
-two runs still collapses onto ``assignment_decision_unique`` (D-066). A pass new
+configuration has closed is not a candidate again, and a skip still blocked by
+the assignment it named is not written again (D-165, D-171). Two runs never
+overlap: each holds an advisory lock from its first read to its commit, so the
+second reads what the first wrote (:data:`SCHEDULER_LOCK`). A pass new
 to a later run is decided around the assignments already made, never on top of
 one. An offline station's work not yet begun is revoked, and decided again
 when it returns (D-171).
@@ -51,7 +51,7 @@ from meridian.scheduler.optimiser import (
     SolverSettings,
     optimise,
 )
-from meridian.scheduler.reissue import unchanged
+from meridian.scheduler.reissue import changed
 from meridian.scheduler.schedule_config import check_model, schedule_config_sha256
 from meridian.scheduler.scoring import yields_of
 from meridian.store.receiving_stations import find_receiving_stations
@@ -68,6 +68,11 @@ __all__ = [
 ]
 
 RUN_ID_PREFIX = "sr_"
+
+SCHEDULER_LOCK = 0x6D65726964_5348
+"""The advisory lock one scheduler run holds at a time: the jobs round and a
+``meridian schedule`` typed beside it wait for each other. A fixed number,
+since two processes must agree on it without sharing anything else."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,15 +173,19 @@ def _gather(
 
     for station in find_receiving_stations(conn):
         gathered.stations += 1
-        work = work_for_station(conn, orbit, station, catalogue, request)
-        gathered.unusable.extend(work.passes_without_a_usable_transmitter)
-        gathered.already_decided += work.already_decided
-        if not is_available(conn, station.station_id, request.now):
-            gathered.unavailable.append(station.station_id)
-            gathered.deferred += len(work.candidates)
+        available = is_available(conn, station.station_id, request.now)
+        if not available:
+            # First, so the work read next counts what was taken back as
+            # deferred rather than as decided (D-171).
             gathered.revoked += revoke_offline(
                 conn, station.station_id, now=request.now
             )
+        work = work_for_station(conn, orbit, station, catalogue, request)
+        gathered.unusable.extend(work.passes_without_a_usable_transmitter)
+        gathered.already_decided += work.already_decided
+        if not available:
+            gathered.unavailable.append(station.station_id)
+            gathered.deferred += len(work.candidates)
             continue
         gathered.candidates.extend(work.candidates)
         gathered.commitments.extend(work.commitments)
@@ -237,6 +246,12 @@ def run_schedule(
     if scorer is not None:
         check_model(config, scorer.model.configuration)
 
+    with conn.cursor() as cur:
+        # One run at a time, from its first read to its commit: two runs that
+        # each read the other's horizon before either wrote could each keep
+        # half of two different schedules. Held until the caller's
+        # transaction ends, which for every caller is the run's.
+        cur.execute("select pg_advisory_xact_lock(%s)", (SCHEDULER_LOCK,))
     gathered = _gather(conn, orbit, request, scorer)
     report = ScheduleReport(
         model_config=config.configuration,
@@ -251,18 +266,20 @@ def run_schedule(
         passes_deferred=gathered.deferred,
         revoked=gathered.revoked,
         yield_source=ELEVATION_PROXY if scorer is None else MODEL,
-        history_as_of=None
-        if scorer is None or scorer.past is None
-        else scorer.past.as_of,
+        history_as_of=_history_as_of(scorer),
     )
     if not gathered.candidates:
         return report
     optimised, stamp = _decide(request, gathered, scorer)
     outcome = optimised.outcome
     decided = to_assignment_rows(outcome, gathered.facts, config.configuration, stamp)
-    rows = [
-        row for row in decided if not unchanged(gathered.previous.get(row.pass_id), row)
-    ]
+    rows = changed(
+        decided,
+        gathered.previous,
+        outcome,
+        gathered.commitments,
+        request.turnaround_s,
+    )
     report = replace(
         report,
         scheduled=len(outcome.selected),
@@ -308,7 +325,7 @@ def _decide(
     found = violations(problem, optimised.outcome)
     if found:
         raise ScheduleInvalidError(found)
-    history_as_of = None if scorer is None or scorer.past is None else scorer.past.as_of
+    history_as_of = _history_as_of(scorer)
     stamp = Stamp(
         run_id=f"{RUN_ID_PREFIX}{uuid.uuid4().hex[:12]}",
         model_sha256=None if scorer is None else scorer.model_sha256,
@@ -325,6 +342,11 @@ def _decide(
         revisions=gathered.revisions,
     )
     return optimised, stamp
+
+
+def _history_as_of(scorer: LiveScorer | None) -> datetime | None:
+    """How old the history the model read is; ``None`` for one that reads none."""
+    return None if scorer is None or scorer.past is None else scorer.past.as_of
 
 
 def _run_row(

@@ -215,7 +215,7 @@ All four of its fields are stored, `mode` included: a station tuned to the right
 | Issued, and present in the list | The station holds it — state `held` |
 | Issued, never held, absent, window still ahead | It may not have arrived. It stays `issued`, is offered again on the next heartbeat, and expires after `end_at` if it is never taken (D-026) |
 | Held, then absent, window still ahead | A decline. The platform marks it `revoked` and never delivers it again, and its time may be given to another pass (D-171) |
-| Revoked while the station was offline, present on its return | The station still holds it and will execute it: `held` again (D-171) |
+| Revoked, and present | The station still holds it and will execute it: `held` again, while its window is open and nothing newer — a later decision about the pass, or another live assignment over the same window — claims it. Otherwise it stays `revoked`, and the platform logs that the station holds it (D-171) |
 | Absent, window has passed | `expired` — the station never took the work |
 | **Present**, window has passed | **Not `expired`.** The station took the work and is finishing with it; its observation may still arrive. Overdue alone is not the test (D-067) |
 | Present, but never issued to this station | Protocol error. Log and ignore; do not act on it |

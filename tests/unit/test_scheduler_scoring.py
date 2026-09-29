@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -37,21 +39,32 @@ def a_scorer() -> LiveScorer:
     )
 
 
+def a_history_scorer() -> Any:
+    """What the source reads of a scorer over history: that it reads history."""
+    return SimpleNamespace(model=SimpleNamespace(reads_history=True))
+
+
 class Loads:
     """Stands in for loading a scorer, counting how often it is asked."""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         self.count = 0
+        self.looked = 0
         self.fail = False
+        self.history = True
         self.newest: Path | None = tmp_path / "evaluation" / "one"
         monkeypatch.setattr(scoring, "load_scorer", self.load)
-        monkeypatch.setattr(scoring, "newest_dataset_path", lambda _root: self.newest)
+        monkeypatch.setattr(scoring, "newest_dataset_path", self.newest_path)
 
-    def load(self, _config: ScheduleConfig, _root: Path) -> LiveScorer:
+    def newest_path(self, _root: Path) -> Path | None:
+        self.looked += 1
+        return self.newest
+
+    def load(self, _config: ScheduleConfig, _root: Path) -> Any:
         self.count += 1
         if self.fail:
             raise LiveScoringError("the newest dataset is damaged")
-        return a_scorer()
+        return a_history_scorer() if self.history else a_scorer()
 
 
 @pytest.fixture
@@ -87,6 +100,21 @@ def test_a_newer_labelled_dataset_is_loaded_when_it_appears(
 
     assert second is not first
     assert loads.count == 2
+
+
+def test_a_model_reading_no_history_is_loaded_once_and_never_looks_again(
+    loads: Loads, tmp_path: Path
+) -> None:
+    """A new dataset changes nothing it reads, and a damaged one cannot stop it."""
+    loads.history = False
+    source = ScorerSource(ScheduleConfig(configuration="A", model="models/a"), tmp_path)
+    first = source.current()
+    loads.newest = tmp_path / "evaluation" / "two"
+
+    again = source.current()
+
+    assert again is first
+    assert (loads.count, loads.looked) == (1, 1)
 
 
 def test_a_failed_load_keeps_nothing_and_is_tried_again(

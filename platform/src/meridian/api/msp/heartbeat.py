@@ -156,12 +156,13 @@ def _apply_reconciliation(
         Expiry runs last and is told what the station still names, so an
         assignment held past its window survives to be reported (D-067).
 
-        **Revocation brackets the rest** (D-171). First, an assignment revoked
-        while the station was offline and named by it now is reinstated: it
-        holds the work and will execute it. Then, after holding and starting,
-        a held assignment the station no longer names, whose window has not
-        begun, is revoked as declined, so the next round can give its time to
-        another pass.
+        **Revocation brackets the rest** (D-171). First, a revoked assignment
+        the station names now is reinstated while nothing newer claims its
+        window: it holds the work and will execute it. One that cannot be is
+        logged, since the station will execute it anyway. Then, after holding
+        and starting, a held assignment the station no longer names, whose
+        window has not begun, is revoked as declined, so the next round can
+        give its time to another pass.
     """
     named = sorted(body.held_assignments)
     reinstate_named(conn, station_id, named=named, now=now)
@@ -175,6 +176,17 @@ def _apply_reconciliation(
         already_held=frozenset(by_state["held"]),
     )
     outcome = reconcile(live, _reported_holdings(body))
+    kept_revoked = sorted(set(named) & set(by_state["revoked"]))
+    if kept_revoked:
+        # MSP cannot take work back, so the station will execute these beside
+        # whatever newer work claimed their windows (D-171).
+        _log.warning(
+            "station %s holds %d revoked assignment(s) whose windows were given"
+            " away: %s",
+            station_id,
+            len(kept_revoked),
+            ", ".join(kept_revoked),
+        )
 
     if outcome.foreign_ids:
         # MSP §4.2: "Present, but never issued to this station. Log and ignore;

@@ -137,8 +137,8 @@ def insert_assignments(conn: Connection, decisions: Sequence[NewAssignment]) -> 
 
     Note:
         **A decision already made is left as it was**, under
-        ``assignment_decision_unique``: a second run racing the first over one
-        horizon writes nothing twice (D-066).
+        ``assignment_decision_unique`` (D-066). Runs do not race: the scheduler
+        run holds an advisory lock for its whole transaction.
     """
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany(

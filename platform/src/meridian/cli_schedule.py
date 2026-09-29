@@ -244,10 +244,12 @@ def _run_horizon(args: argparse.Namespace) -> int:
     try:
         with conn:
             report = run_schedule(conn, SkyfieldOrbitService(), request, scorer)
-    except ScheduleInvalidError as exc:
-        # A defect, not an operator's mistake: the run refused to write a
-        # schedule that breaks its own constraints, and says which (D-166).
-        return _refuse(str(exc))
+    except (ScheduleInvalidError, LiveScoringError, LookupError, ValueError) as exc:
+        # Nothing was written: the run's transaction rolled back. Either the
+        # run refused a schedule that breaks its own constraints, which is a
+        # defect and says which (D-166), or the model could not score a pass,
+        # or a pass names an element set that is gone.
+        return _refuse(f"the run stopped before writing anything: {exc}")
 
     _say(
         f"Scheduled [{start.isoformat()}, {end.isoformat()}) "

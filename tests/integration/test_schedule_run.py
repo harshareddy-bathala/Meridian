@@ -30,6 +30,7 @@ from meridian.scheduler import run as run_module  # noqa: E402
 from meridian.scheduler.assignment_records import assignment_id_for  # noqa: E402
 from meridian.scheduler.optimiser import Optimised, SolverRun  # noqa: E402
 from meridian.scheduler.run import (  # noqa: E402
+    SCHEDULER_LOCK,
     ScheduleInvalidError,
     ScheduleRequest,
     run_schedule,
@@ -783,6 +784,30 @@ def test_a_schedule_that_breaks_a_constraint_is_never_written(
     assert _decisions(rollback) == []
 
 
+def test_a_run_holds_the_scheduler_s_lock_until_its_transaction_ends(
+    rollback: Any, network: dict[str, int], database_url: str
+) -> None:
+    """Another session cannot take the lock while a run's transaction is open,
+    and could before the run began (D-165): two runs never overlap."""
+    with rollback.cursor() as cur:
+        _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
+        )
+
+    def free_elsewhere() -> bool:
+        with psycopg.connect(database_url, autocommit=True) as other:
+            (taken,) = other.execute(
+                "select pg_try_advisory_xact_lock(%s)", (SCHEDULER_LOCK,)
+            ).fetchone()
+            return bool(taken)
+
+    before = free_elsewhere()
+    run_schedule(rollback, SkyfieldOrbitService(), a_request())
+    during = free_elsewhere()
+
+    assert (before, during) == (True, False)
+
+
 # --- reissue (D-171) ------------------------------------------------------------
 
 BEFORE = HORIZON_START - timedelta(hours=1)
@@ -836,6 +861,44 @@ def test_a_skip_decided_again_for_the_same_reason_writes_nothing(
     with rollback.cursor() as cur:
         cur.execute("select count(*) from schedule_runs")
         assert cur.fetchone() == (runs + 1,)
+
+
+def test_a_skip_between_two_assignments_is_unchanged_whichever_one_is_named(
+    rollback: Any, network: dict[str, int]
+) -> None:
+    """One high pass overlapping two that do not overlap each other.
+
+    The first round takes the two and names the better of them on the skip.
+    The second finds them both as commitments and names the earlier first; the
+    one the skip named still blocks it, so nothing new is said, or written.
+    """
+    with rollback.cursor() as cur:
+        earlier = _insert_pass(
+            cur, network[METEOR], satellite_id=METEOR, at_minute=0, max_elevation_deg=40
+        )
+        better = _insert_pass(
+            cur,
+            network[METEOR],
+            satellite_id=METEOR,
+            at_minute=16,
+            max_elevation_deg=60,
+        )
+        between = _insert_pass(
+            cur,
+            network[CUBESAT],
+            satellite_id=CUBESAT,
+            at_minute=8,
+            max_elevation_deg=80,
+        )
+
+    run_schedule(rollback, SkyfieldOrbitService(), a_request(now=BEFORE))
+    again = run_schedule(rollback, SkyfieldOrbitService(), a_request(now=BEFORE))
+
+    decisions = {row[0]: (row[1], row[3]) for row in _decisions(rollback)}
+    assert decisions[between] == ("skipped", assignment_id_for(better, "A"))
+    assert decisions[earlier][0] == decisions[better][0] == "scheduled"
+    assert (again.unchanged, again.rows_written, again.run_id) == (1, 0, None)
+    assert len(_rows_for(rollback, between)) == 1
 
 
 def test_a_declined_pass_frees_its_slot_for_the_pass_it_displaced(

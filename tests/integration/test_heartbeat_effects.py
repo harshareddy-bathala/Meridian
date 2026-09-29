@@ -447,10 +447,11 @@ def test_an_offline_revocation_the_returning_station_names_is_reinstated(
     assert [one["assignment_id"] for one in body["assignments"]] == ["as_kept"]
 
 
-def test_a_declined_assignment_named_again_stays_revoked(
+def test_a_declined_assignment_named_again_is_reinstated_while_its_window_is_free(
     client: TestClient, rollback: Any
 ) -> None:
-    """The station let it go; naming it later does not take the slot back."""
+    """A station naming an assignment will execute it, whatever it did before:
+    one that dropped it for a heartbeat and names it again gets it back."""
     station = register(client, rollback, simulated=False)
     issue_assignment(
         rollback,
@@ -465,8 +466,30 @@ def test_a_declined_assignment_named_again_stays_revoked(
 
     body = send_heartbeat(client, station, holding=["as_let_go"])
 
-    assert state_of(rollback, "as_let_go") == "revoked"
-    assert body["assignments"] == []
+    assert state_of(rollback, "as_let_go") == "held"
+    assert [one["assignment_id"] for one in body["assignments"]] == ["as_let_go"]
+
+
+def test_a_revoked_assignment_whose_window_was_given_away_stays_revoked(
+    client: TestClient, rollback: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Newer work over the same window stands, and the station holding the
+    old work anyway is logged: MSP cannot take it back (D-171)."""
+    station = register(client, rollback, simulated=False)
+    for one in (
+        Issued(
+            "as_old", state="revoked", starts_in_minutes=30, revoked_reason="declined"
+        ),
+        Issued("as_given", starts_in_minutes=30),
+    ):
+        issue_assignment(rollback, station["station_id"], one)
+
+    with caplog.at_level("WARNING"):
+        send_heartbeat(client, station, holding=["as_old"])
+
+    assert state_of(rollback, "as_old") == "revoked"
+    assert state_of(rollback, "as_given") == "issued"
+    assert "whose windows were given away: as_old" in caplog.text
 
 
 def reason_of(rollback: Any, assignment_id: str) -> str | None:

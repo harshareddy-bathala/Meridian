@@ -70,12 +70,16 @@ class ScorerSource:
         """The scorer, over the newest history there is.
 
         Raises:
-            As :func:`load_scorer`. A failed load leaves the newer dataset
-            unrecorded, so the next round tries again rather than scoring with
-            the history it had.
+            As :func:`load_scorer`, and LiveScoringError for a dataset
+            manifest that cannot be read. A failed load leaves the newer
+            dataset unrecorded, so the next round tries again rather than
+            scoring with the history it had.
         """
         if self._config.model is None:
             return None
+        if self._scorer is not None and not self._scorer.model.reads_history:
+            # A model that reads no history has nothing a new dataset changes.
+            return self._scorer
         newest = newest_dataset_path(self._root)
         if self._loaded and newest == self._dataset:
             return self._scorer

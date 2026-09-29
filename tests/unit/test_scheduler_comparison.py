@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from meridian.prediction import replay as prediction_replay
 from meridian.scheduler import Candidate
 from meridian.scheduler.comparison import paired_gain, totals
 from meridian.scheduler.comparison_config import (
@@ -28,6 +29,7 @@ from meridian.scheduler.constraints import Rules
 from meridian.scheduler.elevation_baseline import rank_by_elevation
 from meridian.scheduler.optimiser import SolverSettings
 from meridian.scheduler.oracle import oracle_scores, schedule_oracle
+from meridian.scheduler.priority_baseline import NEUTRAL_PRIORITY
 from meridian.scheduler.replay import DayResult
 from meridian.scheduler.schedule_config import ScheduleConfigError
 
@@ -216,3 +218,9 @@ def test_the_oracle_takes_what_decoded_where_elevation_would_not() -> None:
     assert found.run.status == "optimal"
     assert sorted(one.candidate.pass_id for one in found.outcome.selected) == [2, 3]
     assert [one.candidate.pass_id for one in greedy.selected] == [1]
+
+
+def test_the_replay_and_the_live_run_give_an_unknown_satellite_one_priority() -> None:
+    """Two constants, since prediction may not import the scheduler; if they
+    drifted, B and D would be replayed under priorities no live run used."""
+    assert prediction_replay.NEUTRAL_PRIORITY == NEUTRAL_PRIORITY

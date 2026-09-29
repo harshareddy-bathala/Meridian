@@ -3525,6 +3525,8 @@ Two defects in how Stage 7's schedule reached a station, both found by reading t
 
 **The public API publishes a skip's `state` as null**, and the dashboard shows a dash. A skip was never delivered, so it has no state to report. Publishing `issued` would claim the platform had handed it to a station.
 
+**One run at a time** (found in review). Commitments bind only if the round reading them sees every earlier round's writes. Two runs at once — the jobs round and a `meridian schedule` typed beside it — could each read before the other wrote. Each would then keep half of a different schedule, and one antenna could hold two overlapping passes, since `on conflict do nothing` keeps whichever row landed first. So every run takes `pg_advisory_xact_lock` on one fixed key before its first read, and holds it until its transaction commits. The second run waits, then reads what the first wrote.
+
 *Rejected: re-deciding every pass in the horizon each round and replacing what changed.* It would move assignments a station may already hold, and turn a schedule into something that changes under the station every five minutes. Re-opening a decision is kept for a withdrawn reason (D-171), not for every round.
 
 ---
@@ -3731,8 +3733,9 @@ D-022 deferred reissue to the scheduler, with `revoked` as "the obvious candidat
 
 **MSP cannot take work back from a station, and this shaped the rest.** There is no revoke message, and a station that still holds an assignment will execute it. So:
 
-- An offline revocation that the returning station names on its first heartbeat goes back to `held`. The reconciliation that does this runs in the same transaction that makes the station live again, so no round can re-decide the pass first. It happens only while no later decision about the pass exists.
-- A declined assignment the station names again stays `revoked`. The station let it go, and its time may already be someone else's.
+- A revoked assignment the station names goes back to `held`, offline or declined alike. For an offline one, the reconciliation runs in the same transaction that makes the station live again, so no round can re-decide the pass first. For a declined one, it covers a station that dropped the assignment for a heartbeat and names it again.
+- Only while nothing newer claims the window: no later decision about the pass, and no live assignment of the station whose window overlaps it. Either means the window was given away, and the newer work stands. The station will execute the old one anyway, so the heartbeat logs it.
+- *Found in review:* the first version reinstated offline revocations only, and checked only for a later decision about the same pass. A declined assignment named again stayed revoked while the station still ran it, and a reinstated one could land beside newer work of another pass.
 - Nothing is reissued "to another station". A pass here belongs to one station, and each station's antenna is its own constraint set (D-166). The time a decline frees is that station's, and it goes to another of that station's passes. Another station's pass of the same rise is its own candidate, decided on its own merits already, and the objective has no cross-station coverage term (D-168) that would change it.
 
 **A pass can be decided again, as a new revision.** `(pass_id, model_config, revision)` is unique. Revision 0's id is digested as before (`pass_id:model_config`), so no stored id changes; later revisions add `:revision`. A round considers every pass in its horizon that is **open**:
@@ -3742,7 +3745,7 @@ D-022 deferred reissue to the scheduler, with `revoked` as "the obvious candidat
 
 Work held or done, and a declined assignment, are **closed**. Offering a station the pass it just let go would ask it to decline again.
 
-A skip decided again for the same blocking assignment is **not written**. Without that rule, every round would copy every skip in its horizon every five minutes. Anything else is a new row: a skip now taken, a skip now blocked by something else, or a revoked pass decided at all. A run that writes no row records no run. The public list shows each pass's current decision only, and earlier revisions stay reachable by their id.
+A skip decided again while the assignment it named still blocks it is **not written**. A skip names the best selection in its way when it is made. A later round, where that selection is a commitment among others, may name another of them first, so the test is that the named one still blocks, not that it is named again (found in review). Without that rule, every round would copy every skip in its horizon every five minutes. Anything else is a new row: a skip now taken, a skip now blocked by something else, or a revoked pass decided at all. A run that writes no row records no run. The public list shows each pass's current decision only, and earlier revisions stay reachable by their id.
 
 **Labelling never reads a revoked assignment as a miss** (`CLAUDE.md` rule 7, D-146). Pooled evidence keeps revoked assignments apart from the station's work. A pass whose assignments were all revoked, with no report, is labelled:
 - `assignment_declined` if one was declined;

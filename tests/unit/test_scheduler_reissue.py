@@ -7,14 +7,20 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from meridian.scheduler import Candidate, Rejection, ScheduleOutcome, ScoredCandidate
+from meridian.scheduler import (
+    Candidate,
+    Commitment,
+    Rejection,
+    ScheduleOutcome,
+    ScoredCandidate,
+)
 from meridian.scheduler.assignment_records import (
     PassFacts,
     Stamp,
     assignment_id_for,
     to_assignment_rows,
 )
-from meridian.scheduler.reissue import next_revision, reopens, unchanged
+from meridian.scheduler.reissue import blocking, next_revision, reopens, unchanged
 from meridian.store.schedule_reads import LatestDecision
 from meridian.store.schedule_writes import NewAssignment
 
@@ -90,6 +96,36 @@ def test_only_a_skip_skipped_again_for_the_same_assignment_is_unchanged() -> Non
         latest("scheduled", "revoked", "offline", None), row("scheduled", None)
     )
     assert not unchanged(None, row("skipped", "as_x"))
+
+
+def test_a_skip_whose_named_blocker_still_blocks_it_is_unchanged() -> None:
+    """A later round may name another of the assignments in its way; the one
+    the stored skip named being among them is the same decision."""
+    assert unchanged(
+        latest(blocker="as_x"), row("skipped", "as_y"), frozenset({"as_x"})
+    )
+    assert not unchanged(
+        latest(blocker="as_x"), row("skipped", "as_y"), frozenset({"as_y", "as_z"})
+    )
+    assert not unchanged(
+        latest(blocker="as_x"), row("scheduled", None), frozenset({"as_x"})
+    )
+
+
+def test_every_commitment_and_selection_in_a_skip_s_way_is_blocking_it() -> None:
+    """One skip spanning an earlier commitment and a later selection; a third
+    assignment an hour away is in nobody's way."""
+    skip = ScoredCandidate(a_pass(3, 8), 5.0)
+    selected = ScoredCandidate(a_pass(2, 16), 3.0)
+    far = ScoredCandidate(a_pass(4, 60), 3.0)
+    outcome = ScheduleOutcome(
+        selected=[selected, far], rejected=[Rejection(skip, "overlap", 2)]
+    )
+    committed = [Commitment(a_pass(1, 0), "as_committed")]
+
+    found = blocking(outcome, committed, {2: "as_two", 4: "as_four"}, 0.0)
+
+    assert found == {3: frozenset({"as_committed", "as_two"})}
 
 
 # --- ids by revision ----------------------------------------------------------

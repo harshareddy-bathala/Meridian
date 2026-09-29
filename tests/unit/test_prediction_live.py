@@ -533,3 +533,15 @@ def test_the_newest_dataset_is_the_latest_as_of_then_the_latest_labelled(
 
 def test_no_dataset_is_none(datasets_root: Path) -> None:
     assert newest_dataset(datasets_root) is None
+
+
+def test_a_manifest_that_cannot_be_read_is_a_scoring_refusal(
+    datasets_root: Path,
+) -> None:
+    """One error the scheduler handles, not the dataset layer's own."""
+    broken = datasets_root / "evaluation" / "broken"
+    broken.mkdir(parents=True)
+    (broken / "manifest.json").write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(LiveScoringError, match="broken"):
+        newest_dataset(datasets_root)

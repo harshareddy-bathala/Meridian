@@ -227,7 +227,9 @@ def newest_dataset_path(root: Path) -> Path | None:
     can ask every round whether a newer one has appeared.
 
     Raises:
-        MalformedManifestError: A dataset's manifest cannot be read.
+        LiveScoringError: A dataset's manifest cannot be read. Named, and
+            one error, so a round refuses rather than failing on the dataset
+            layer's own.
     """
     under = root / EVALUATION
     if not under.is_dir():
@@ -236,7 +238,11 @@ def newest_dataset_path(root: Path) -> Path | None:
     for path in sorted(under.iterdir()):
         if not (path / MANIFEST_NAME).is_file():
             continue
-        manifest = parse_manifest((path / MANIFEST_NAME).read_bytes())
+        try:
+            manifest = parse_manifest((path / MANIFEST_NAME).read_bytes())
+        except (MalformedManifestError, OSError) as exc:
+            message = f"the manifest of {path} cannot be read: {exc}"
+            raise LiveScoringError(message) from exc
         if manifest.kind == "evaluation_dataset":
             ranked.append(((manifest.as_of, manifest.created_at, path.name), path))
     return max(ranked)[1] if ranked else None
@@ -252,7 +258,7 @@ def newest_dataset(root: Path) -> SnapshotDirectory | None:
         DamagedSnapshotError: The newest is not what its manifest says. An
             older one is not taken instead: a history quietly older than the
             operator thinks is worse than a refusal.
-        MalformedManifestError: A dataset's manifest cannot be read.
+        LiveScoringError: A dataset's manifest cannot be read.
     """
     path = newest_dataset_path(root)
     return None if path is None else read_directory(path)
