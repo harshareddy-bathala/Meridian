@@ -1,0 +1,27 @@
+# Nightly backup of the deployment's database, with retention (D-209).
+#
+# Install on the host that runs the stack, after editing WorkingDirectory to the
+# checkout's path and User to the account that runs docker compose there:
+#
+#   sudo cp deploy/systemd/meridian-*.service deploy/systemd/meridian-*.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now meridian-backup.timer meridian-restore-drill.timer
+#
+# docs/OPERATIONS.md § Backup and restore is the runbook.
+
+[Unit]
+Description=Meridian database backup and retention
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=meridian
+WorkingDirectory=/opt/meridian
+# Add --compose-file, --project-name or --env-file here if the stack was started
+# with them; the tool addresses the compose project named in the compose file.
+ExecStart=/usr/bin/python3 deploy/tools/scheduled_backup.py --dir backups
+# The dumps hold every token hash and invite (OPERATIONS.md): nobody else reads them.
+UMask=0077
+Nice=10
+IOSchedulingClass=idle

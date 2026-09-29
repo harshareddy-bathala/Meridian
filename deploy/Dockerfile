@@ -65,6 +65,21 @@ RUN uv sync --frozen --no-dev --no-editable --all-packages --no-install-package 
 
 FROM python:3.11.15-slim-bookworm@sha256:d29f48a31a8b408ed19272ca1e7b10ebae13b240a27e862d3d4217c528e2e0c3 AS runtime
 
+# Debian's security updates, applied when the image is built (D-205). The base
+# image is pinned by digest and so never picks up a fix on its own; a Trivy scan
+# of it found three HIGH advisories in pcre2 already fixed in bookworm. This
+# layer is the one part of the build that depends on the day it runs, which is
+# the price of shipping the fix, and the SBOM CI publishes records the result.
+RUN apt-get update \
+    && apt-get -y upgrade --no-install-recommends \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# The base image's own pip, setuptools and wheel. The platform runs from
+# /app/.venv, which uv built without them, so nothing here uses the system
+# copies, and their vendored packages carried two more HIGH advisories.
+RUN python -m pip uninstall --yes --no-cache-dir pip setuptools wheel
+
 # Never run as root. The platform is publicly reachable by design.
 RUN useradd --create-home --uid 10001 meridian
 

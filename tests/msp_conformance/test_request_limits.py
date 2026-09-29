@@ -163,3 +163,44 @@ def test_the_time_endpoint_still_answers_without_a_content_length(
 
     assert response.status_code == 200
     assert list(response.json()) == ["server_time"]
+
+
+# D-203: the public read API. Written out for the same reason as above.
+PUBLIC_QUERY_LIMIT_BYTES = 2 * 1024
+PUBLIC_PATH = "/api/v1/stations"
+
+
+def test_a_public_query_string_over_2_kib_is_refused(client: TestClient) -> None:
+    """Refused before routing, so no database is needed to see the 400."""
+    response = client.get(PUBLIC_PATH, params={"q": "x" * PUBLIC_QUERY_LIMIT_BYTES})
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "invalid_query",
+        "message": "Query string must be at most 2048 bytes.",
+    }
+
+
+def test_a_public_request_with_a_body_is_refused(client: TestClient) -> None:
+    response = client.request("GET", PUBLIC_PATH, content=b'{"x": 1}')
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "invalid_query",
+        "message": "The public API takes no request body.",
+    }
+
+
+def test_a_chunked_public_request_is_refused(client: TestClient) -> None:
+    response = client.request("GET", PUBLIC_PATH, content=iter([b"{}"]))
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_query"
+
+
+def test_a_public_refusal_is_never_in_msp_words(client: TestClient) -> None:
+    """A POST to `/api/v1` without a length was once MSP's `malformed` (D-084)."""
+    response = client.post(PUBLIC_PATH, content=iter([b"{}"]))
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_query"

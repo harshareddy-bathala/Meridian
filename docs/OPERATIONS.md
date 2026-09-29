@@ -8,7 +8,7 @@ Every command runs from the repository root. `compose` below is shorthand for:
 docker compose -f deploy/docker-compose.yml
 ```
 
-Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, D-143 to D-154 for dataset snapshots, D-155 to D-164 for models, and D-165 to D-172 for scheduling. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, D-143 to D-154 for dataset snapshots, D-155 to D-164 for models, D-165 to D-172 for scheduling, and D-200 onwards for Stage 23's hardening. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
 
 ---
 
@@ -27,9 +27,16 @@ cp deploy/prometheus/metrics_token.example deploy/prometheus/metrics_token
 - `POSTGRES_PASSWORD`, `TOKEN_HASH_PEPPER`, `REGISTRATION_INVITE_TOKEN`, `METRICS_TOKEN` and `GRAFANA_ADMIN_PASSWORD` in `deploy/.env`;
 - the same `METRICS_TOKEN` value in `deploy/prometheus/metrics_token`.
 
-The platform refuses to start in public mode while any of them is still `change-me`. Setting `CLOUDFLARE_TUNNEL_TOKEN` or `TUNNEL_HOSTNAME`, or a non-loopback `PUBLIC_BASE_URL`, puts it in public mode.
+The platform refuses to start in public mode while any of them is still `change-me`. Running with `deploy/docker-compose.public.yml`, setting `TUNNEL_HOSTNAME`, or a non-loopback `PUBLIC_BASE_URL` puts it in public mode.
 
-`TOKEN_HASH_PEPPER`, `REGISTRATION_INVITE_TOKEN` and `METRICS_TOKEN` can instead be read from files with `*_FILE` variables. The file must be mounted into the containers by an override file.
+**On a real deployment, keep the secrets in files instead** (D-201). `deploy/tools/rotate_secret.py init` writes them into `deploy/secrets/`, carrying over any value already set in `deploy/.env`, and `deploy/docker-compose.secrets.yml` mounts them. Add that file to every command:
+
+```bash
+python deploy/tools/rotate_secret.py init
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml up -d
+```
+
+§ Rotating secrets below is how each one is replaced.
 
 ### Pull or build
 
@@ -48,14 +55,48 @@ The platform image is `ghcr.io/harshareddy-bathala/meridian:main`, published for
 |---|---|---|
 | *(default)* | `db`, `migrate`, `api` on `:8000`, `jobs` | `deploy/.env` |
 | `metrics` | Prometheus, Alertmanager, Grafana on `:3001` | `deploy/prometheus/metrics_token` |
-| `public` | the Cloudflare tunnel | `CLOUDFLARE_TUNNEL_TOKEN` and real secrets |
 | `sim` | catalogue and invite seeding, a simulated fleet | nothing more |
 
 ```bash
-compose --profile metrics --profile public up -d
+compose --profile metrics up -d
 compose ps                      # every service with a healthcheck says (healthy)
 curl http://localhost:8000/healthz
 ```
+
+### Going public
+
+The public deployment is an override file, `deploy/docker-compose.public.yml`, not a profile (D-206). It adds the Cloudflare tunnel, tells the API to trust the edge's `CF-Connecting-IP` for rate limits, and **removes the API's port from the host**, because a profile can add a service but cannot take a port away. It needs Docker Compose 2.24.4 or later.
+
+```bash
+python deploy/tools/rotate_secret.py init                    # once, § Rotating secrets
+python deploy/tools/rotate_secret.py set tunnel_token < token.txt
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml \
+  -f deploy/docker-compose.public.yml --profile metrics up -d
+```
+
+With it, `curl http://localhost:8000` on the host is refused, as intended. Reach the API through the hostname, or inside the network:
+
+```bash
+compose exec api python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/healthz').read())"
+```
+
+`compose` in the commands elsewhere on this page then means all three files.
+
+**Keep Cloudflare's Rocket Loader, e-mail obfuscation and Web Analytics off for the tunnel hostname.** Each injects a script, and the dashboard's content-security policy refuses anything not served by the platform itself (D-208), so the page would load without them and log a violation in the browser's console.
+
+### Database roles
+
+The API, the jobs process and the CLI inside them connect as `meridian_api`, which may read and write rows and cannot change the schema; `meridian_reader` may only read; only `migrate` uses the owner (D-207). `migrate` runs `meridian db roles` after every migration, so the roles, their grants and their passwords are put right by every `up`.
+
+- **A query by hand, read-only:** `compose exec db psql -U meridian_reader -d meridian`. Inside the database container the local socket needs no password; from another container, use `READER_DATABASE_PASSWORD`.
+- **"permission denied" from the API after a manual schema change:** a table created other than by `migrate` has no grants yet. `compose run --rm migrate` grants it.
+
+### Container hardening
+
+Every service drops all Linux capabilities, runs with `no-new-privileges`, and has a read-only root filesystem (D-206). What each writes is a named volume or a tmpfs listed beside it in the compose file. The database runs as its own user, uid 70, from the start.
+
+- **A service that fails with "Read-only file system"** is writing somewhere new. Give it a tmpfs, or a volume if the data must survive a restart, in the compose file, and say why beside it.
+- **`compose run` for a command that writes files,** such as `meridian snapshot export`, needs a volume for its output, which § Dataset snapshots already mounts.
 
 Bringing the whole stack up on a clean machine takes under ten minutes. CI measures it on every pull request, for the default and `metrics` profiles together.
 
@@ -72,9 +113,11 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | List invites | `compose exec api meridian invite list` |
 | Recover a station that got 401 | `compose exec api meridian invite create --label <who> --for-station <station_id>` (D-034) |
 | Shut a station out | `compose exec api meridian station revoke --station-id <station_id>` |
+| Rotate a platform secret | `python deploy/tools/rotate_secret.py rotate <name>` — § Rotating secrets |
 | Load satellites | `compose exec api meridian catalogue load --file deploy/catalogue/development.json` |
 | Migration status | `compose exec api meridian db status` — exit 0 only when at head |
-| Apply migrations | `compose run --rm migrate` |
+| Apply migrations, and re-grant the database roles | `compose run --rm migrate` |
+| Check that the newest backup restores | `python deploy/tools/restore_drill.py --latest backups` |
 | Generate passes now | `compose exec api meridian passes generate --from <ISO-8601 Z> --to <ISO-8601 Z>` |
 | Schedule now | `compose exec jobs meridian schedule --from <ISO-8601 Z> --to <ISO-8601 Z> [--config /datasets/schedule.toml]` — A on the elevation proxy without `--config` (D-168) |
 | One scheduling round now | `compose exec jobs meridian jobs run --once` |
@@ -763,6 +806,125 @@ diff one.txt two.txt                                                          # 
 
 ---
 
+## Rate limits
+
+The API limits request rates itself (D-202), beside the edge rule on the tunnel hostname (D-088). A refused request gets `429` with `rate_limited` and a `Retry-After` header.
+
+| Bucket | Keyed by | Burst | Refill |
+|---|---|---|---|
+| MSP heartbeat | the station's bearer token | 6 | 1 per 10 s |
+| MSP observations | the station's bearer token | 20 | 1 per 6 s |
+| every MSP request | the caller's address | 300 | 10 per s |
+| `/api/v1` | the caller's address | 50 | 5 per s |
+
+- **Per worker.** Each API worker keeps its own buckets, and a restart refills them, so with `API_WORKERS=2` a caller can get up to twice these figures.
+- **A limited station loses nothing.** The reference client retries a 429 with backoff and keeps an unsent observation queued.
+- **Many stations behind one address** share only the per-address bucket, which a 50-station simulated fleet on one host does not reach.
+- **Seeing it:** the MSP error panel counts `rate_limited`, and the API panels count 4xx by route.
+- **Turning it off:** `RATE_LIMITS=off` in `deploy/.env`, for accelerated simulations on a laptop. The platform refuses to start with it on a public deployment.
+
+The public API also takes no request body and caps its query string at 2 KiB (D-203).
+
+---
+
+## Rotating secrets
+
+Each platform secret is read once, when its process starts (D-201). Rotating one means writing a new file and recreating the services that read it. `deploy/tools/rotate_secret.py` does the first and prints the second. With the secrets override, `compose` in this section means:
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml
+```
+
+On a public deployment, add `-f deploy/docker-compose.public.yml` to it as well. If you leave it out, the recreated `api` publishes its port on the host and loses `MERIDIAN_PUBLIC` and `CLIENT_ADDRESS_HEADER`, while the tunnel keeps forwarding to it (D-206). The tool adds the file to the command it prints whenever `deploy/secrets/tunnel_token` exists.
+
+**Why the tool and not an editor.** It writes each file `0444` inside a `0700` directory, which is the combination a container's uid can read and another user on the host cannot. It replaces a file by renaming a new one into place, which a bind mount does not follow, so the change reaches a container only when that container is recreated. That is why every step below ends with `--force-recreate`.
+
+### The pepper
+
+**Never replace `TOKEN_HASH_PEPPER` outright.** Every bearer token and every registration key stops matching, so every station gets 401 and none can be recovered through a bound invite, which needs its registration key. Rotate it instead:
+
+```bash
+python deploy/tools/rotate_secret.py rotate token_hash_pepper
+compose up -d --force-recreate api
+```
+
+The old pepper moves to `token_hash_pepper_previous`. The platform accepts it for verification only, and re-hashes each credential under the new pepper as it is used:
+- **bearer tokens** move on the station's next heartbeat, so every online station has moved within 30 s. Each move is logged once: `bearer token re-hashed under the new pepper`;
+- **registration keys** move only when a station next recovers.
+
+**When to retire the old pepper.** Once every station you expect back has heartbeated since the restart (the dashboard shows each station's last heartbeat), tokens are done:
+
+```bash
+python deploy/tools/rotate_secret.py retire token_hash_pepper
+compose up -d --force-recreate api
+```
+
+Retiring also ends recovery through a bound invite for every station that has not recovered since the rotation, because its registration key is still under the old pepper. There is no hurry to retire: both secrets are 256-bit random values, so keeping an old pepper for verification exposes nothing (`THREAT-MODEL.md` §6). A second pepper rotation is refused until the first is retired.
+
+**Checked on a local stack, 2026-09-28**, with one simulated station: after `rotate` and the recreate, the station's stored token hash changed on its next heartbeat and it stayed online; after `retire` and another recreate it kept heartbeating, and its log held no 401.
+
+### The metrics token
+
+```bash
+python deploy/tools/rotate_secret.py rotate metrics_token
+compose --profile metrics up -d --force-recreate api jobs prometheus
+```
+
+The API, the jobs process and Prometheus read the same file, so they cannot disagree. Scrapes fail for the seconds the API takes to restart; `ApiUnavailable` waits a minute before firing.
+
+Without the secrets override, set the same new value in `METRICS_TOKEN` in `deploy/.env` and in `deploy/prometheus/metrics_token`, then run the same `up` command.
+
+### The bootstrap invite
+
+`REGISTRATION_INVITE_TOKEN` seeds one invite into an empty database and does nothing afterwards (D-020). If it leaked before a station used it, withdraw it:
+
+```bash
+compose exec api meridian invite revoke --label "environment bootstrap"
+```
+
+`rotate registration_invite_token` changes the file for the next empty database, such as a fresh deployment. It has no effect on this one.
+
+### The tunnel token
+
+Rotate it in the Cloudflare dashboard (*Zero Trust* → *Networks* → *Tunnels* → the tunnel → *Refresh token*), which ends the old token's connections. Store the new value with `python deploy/tools/rotate_secret.py set tunnel_token < token.txt`, then run the command it prints, which recreates the tunnel with the public file. The dashboard is unreachable from outside between the two steps; stations queue their reports and send them when it returns.
+
+### Database passwords
+
+`API_DATABASE_PASSWORD` and `READER_DATABASE_PASSWORD` in `deploy/.env` are set on the roles by `migrate` (D-207). Change one, then:
+
+```bash
+compose up -d
+```
+
+`migrate` runs again and sets the new password, and compose recreates every service whose `DATABASE_URL` changed. Connections open with the old password stay open until those services restart, which the same command does.
+
+The owner's `POSTGRES_PASSWORD` is set once, when the database volume is created. To change it: `compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "alter role meridian password '<new>'"`, then put the same value in `deploy/.env` and `compose up -d migrate`.
+
+### Station tokens
+
+A station's own token is rotated through a bound invite, and withdrawn with `meridian station revoke` (§ Everyday commands, D-034).
+
+---
+
+## Security scanning
+
+`.github/workflows/security.yml` scans the Python lock, the dashboard lock and the built image on every pull request, on `main`, and every Monday (D-205). Each run keeps three CycloneDX SBOMs as artefacts: `sbom-python`, `sbom-dashboard` and `sbom-image`.
+
+**When the Monday run fails** with no code changed, an advisory was published against something already pinned:
+- **Python or npm:** raise the pin in `uv.lock` (`uv lock --upgrade-package <name>`) or `package-lock.json`, and let CI prove the rest still works.
+- **The image:** a Debian package is fixed by rebuilding, since the runtime stage applies Debian's updates; a base image is fixed by moving its digest in `deploy/Dockerfile`.
+- **Nothing can be done yet:** add the advisory to `.trivyignore` at the repository root, with a comment giving the reason and an `exp:YYYY-MM-DD` after which it fails again.
+
+To scan a local build the same way:
+
+```bash
+docker build -f deploy/Dockerfile -t meridian:scan .
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.74.0 \
+  image --severity HIGH,CRITICAL --ignore-unfixed meridian:scan
+```
+
+---
+
 ## Backup and restore
 
 Host tools, standard library only (D-115). They reach the database through `compose exec db`, so no password appears on the host's command line.
@@ -802,14 +964,75 @@ It then:
 1. stops `api` and `jobs`;
 2. recreates the database;
 3. runs TimescaleDB's pre-restore step, `pg_restore`, then the post-restore step;
-4. runs `migrate`, so a dump from an older release reaches this code's head;
+4. runs `migrate`, so a dump from an older release reaches this code's head and the roles' grants, which `pg_restore --no-acl` left out, are applied again (D-207);
 5. starts whichever of `api` and `jobs` was running, and waits for `/healthz`.
 
 If a step after the database is dropped fails, `api` and `jobs` stay stopped on purpose. Fix the cause and run the restore again.
 
 Afterwards, check with `compose exec api meridian db status`.
 
-A backup schedule, retention and a restore drill on the real deployment are Stage 23's. CI already performs the round trip on every pull request.
+### Every night, automatically
+
+`deploy/systemd/` holds two timers for the host that runs the stack (D-209):
+
+| Unit | When | Does |
+|---|---|---|
+| `meridian-backup.timer` | nightly, 02:47 | `scheduled_backup.py`: a dump named for its UTC time, checked against its manifest, then retention |
+| `meridian-restore-drill.timer` | Sundays, 03:47 | `restore_drill.py --latest backups`: the newest dump restored into a scratch database and checked |
+
+Install them once. Edit `WorkingDirectory` to the checkout's path and `User` to the account that runs `docker compose` in both `.service` files, then:
+
+```bash
+sudo cp deploy/systemd/meridian-* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now meridian-backup.timer meridian-restore-drill.timer
+systemctl list-timers 'meridian-*'
+```
+
+**Retention** keeps every dump from the last 7 days, the newest of each of the last 4 weeks, and the newest of each of the last 6 months: 17 at most. The newest is never deleted. A dump you took by hand under another name, such as `backups/meridian-before-upgrade.dump`, is never deleted either. Change the policy with `--keep-daily`, `--keep-weekly` and `--keep-monthly` in the service's `ExecStart`.
+
+**Copy `backups/` off the host.** A dump on the disk that holds the database does not survive that disk. The timers do not do this for you:
+
+```bash
+rsync -a --chmod=F600 backups/ you@elsewhere:meridian-backups/
+```
+
+### The restore drill
+
+```bash
+python deploy/tools/restore_drill.py --latest backups       # or a named dump
+```
+
+It restores into `meridian_restore_drill` beside the live database, never into it, checks the migration and reads every table, prints each table's row count, and drops the scratch database whatever happened. It needs free disk for one more copy of the database while it runs. Exit 0 means the dump would restore. **When it fails:** `journalctl -u meridian-restore-drill` says which step; a checksum failure means the file changed after it was written, so take a fresh backup now and check the disk.
+
+CI also performs the full round trip, back up, restore and compare row counts, on every pull request, and `tests/integration/test_restore_drill.py` runs the drill against the test database.
+
+---
+
+## Failure recovery
+
+What happens by itself when each part fails, what to do, and the test that proves the recovery works (D-211). A station's own state lives in its state directory: `credentials.json`, `registration_key`, `held.json`, `outbox/` and `captures/`.
+
+| Failure | What happens by itself | What to do | Proven by |
+|---|---|---|---|
+| **The database is lost or damaged** | The API answers 503 on `/healthz`; `DatabaseUnavailable` fires. Stations keep executing what they hold and queue their reports. | Restore the newest dump that passed the drill, below. | CI's backup-and-restore round trip; `test_restore_drill.py`; `test_backup_tools.py` |
+| **A station lost `credentials.json`**, and kept `registration_key` | It stops and says so; it does not re-register on its own (D-024). | Within an hour of registering and before its first heartbeat, run it with the same invite again. Otherwise `meridian invite create --for-station <id>` and give it that invite: same `station_id`, new token (D-034). | `test_psycopg_registry.py` recovery rows; `test_client_registration.py`; `test_a_revoked_station_is_readmitted_by_a_bound_invite` |
+| **A station lost `registration_key` too** | Nothing can prove it is the same station. | `meridian station revoke --station-id <old>`, then register it with a fresh invite. Its history stays under the old id. | — by design; nothing may mint a token for a station without its key |
+| **A damaged file in a station's state** | A damaged `credentials.json` or `held.json` stops the client rather than being read as empty; a damaged queued observation is moved to `outbox/failed/` and the rest still send (D-073). | Look at the file the log names. A damaged observation in `outbox/failed/` is lost; it is kept for inspection. | `test_credentials.py`, `test_held_assignments.py`, `test_observation_queue.py`, `test_capture_folder.py` |
+| **An observation upload interrupted** | The report stays queued until acknowledged and is sent again. The platform keys it on the assignment, so a second copy of the same report is answered as the first was and stored once (D-015, D-071). | Nothing. | `test_a_lost_acknowledgement_does_not_produce_a_second_observation`; `test_an_identical_resubmission_returns_the_identical_acknowledgement` |
+| **A migration fails** | The upgrade is one transaction, so the database stays at the revision it had; `migrate` exits non-zero and `api` and `jobs` do not start. | `compose logs migrate`. Run the previous image (`MERIDIAN_IMAGE=…:sha-<previous>`) while the migration is fixed, then `compose up -d`. | `test_failure_recovery.py`, with a revision that fails half way |
+| **The jobs process dies mid-round** | Compose restarts it. Each task commits only when it finishes, so nothing half-written survives, and the next round schedules what the lost one would have. Assignments already delivered stand. | Nothing, unless `ScheduledTaskStalled` fires; then § Alerts. | `test_failure_recovery.py`, dying after the scheduler wrote; `test_jobs_rounds.py` |
+| **The platform restarts during a pass** | The station keeps executing what it holds, records, queues the result, and sends it when the platform is back. Its heartbeats fail meanwhile, so it may read `stale` for a minute; a missing heartbeat is not a miss (rule 7). | Nothing. | `test_reception_continues_while_the_platform_is_unreachable`; `test_a_station_receives_holds_executes_and_survives_an_outage`; `test_a_station_restarted_before_delivery_still_delivers` |
+
+### After a restore
+
+A restore returns the database to the moment of the dump. What happened after it is gone, and the network notices in three ways:
+
+- **A station registered since the dump** is unknown. Its token is refused with 401 and it stops. Issue it a fresh invite; a bound invite cannot name a station the database does not have.
+- **A station whose token was rotated since the dump** holds a token the restored database has never seen. It gets 401 and stops. Issue a bound invite, and it recovers onto the same `station_id` with its `registration_key`.
+- **Reports for assignments issued since the dump** are refused as `unknown_assignment` and set aside in the station's `outbox/failed/`. The observations are lost to the record; the files remain.
+
+Run the restore drill first if there is time, so you restore a dump that is known to restore.
 
 ---
 
@@ -823,10 +1046,12 @@ A backup schedule, retention and a restore drill on the real deployment are Stag
 | Firing alerts | the table at the bottom of that dashboard |
 | Alertmanager's view, silences | `compose exec alertmanager amtool alert query --alertmanager.url=http://127.0.0.1:9093` |
 | Prometheus targets | `compose exec prometheus wget -qO- http://127.0.0.1:9090/api/v1/targets` |
-| Logs | `compose logs --since 30m <service>` — each service keeps three 10 MB files (D-114) |
+| Logs | `compose logs --since 30m <service>` — each service keeps three 10 MB files (D-114), and the platform's lines are redacted before they are written (D-204) |
 | Raw metrics | `curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8000/metrics` |
 
 Prometheus and Alertmanager are not published on the host. Grafana is, so its admin password must not be `change-me` on a network you share.
+
+**`[redacted]` in a log line** is the platform removing a secret before writing it (D-204): a bearer token, a value whose field names it as a token, key, password, pepper or secret, a password inside a URL, or any secret it loaded at start-up. A malformed request's log line still names the field that failed and why.
 
 **Reading the numbers:**
 - **`simulated`:** every station series carries it. Measured and simulated stations are never summed into one figure.

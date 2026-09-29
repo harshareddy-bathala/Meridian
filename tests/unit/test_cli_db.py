@@ -66,3 +66,20 @@ def test_the_scripts_know_their_own_head(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_no_configuration_means_no_known_revisions(tmp_path: Path) -> None:
     assert find_known_revisions(tmp_path / "missing.ini") == frozenset()
+
+
+def test_roles_refuses_a_placeholder_password_on_a_public_deployment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D-207: refused before connecting, so no database is needed to see it."""
+    from meridian.cli_db import run_db_roles
+
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://meridian:0a1b2c3d4e5f6071@127.0.0.1:1/x"
+    )
+    monkeypatch.setenv("MERIDIAN_PUBLIC", "1")
+    monkeypatch.setenv("API_DATABASE_PASSWORD", "change-me")
+    monkeypatch.setenv("READER_DATABASE_PASSWORD", "5ae65ae65ae65ae6")
+
+    assert run_db_roles() == 1
+    assert "API_DATABASE_PASSWORD" in capsys.readouterr().err

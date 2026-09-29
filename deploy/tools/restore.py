@@ -61,7 +61,12 @@ PRE_RESTORE_SQL = (
     "create extension if not exists timescaledb;\nselect timescaledb_pre_restore();\n"
 )
 POST_RESTORE_SQL = "select timescaledb_post_restore();\n"
-RESTORE_SCRIPT = 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --exit-on-error'
+# --no-acl: the dump's grants name roles that a fresh server does not have yet,
+# and --exit-on-error would stop on the first of them. `meridian db roles`, which
+# the migrate step below runs, grants them again (D-207).
+RESTORE_SCRIPT = (
+    'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --exit-on-error --no-acl'
+)
 
 
 def judge_restore(manifest: Manifest, sha256: str, available: str) -> str | None:

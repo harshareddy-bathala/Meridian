@@ -48,8 +48,12 @@ MANAGED = (
     "METRICS_TOKEN",
     "METRICS_TOKEN_FILE",
     "TOKEN_HASH_PEPPER_FILE",
+    "TOKEN_HASH_PEPPER_PREVIOUS",
+    "TOKEN_HASH_PEPPER_PREVIOUS_FILE",
     "REGISTRATION_INVITE_TOKEN_FILE",
     "API_WORKERS",
+    "RATE_LIMITS",
+    "CLIENT_ADDRESS_HEADER",
 )
 
 
@@ -368,3 +372,121 @@ def test_the_worker_count_defaults_to_one(monkeypatch: pytest.MonkeyPatch) -> No
     """One worker needs no multiprocess directory, so it is the safe default."""
     assert _load(monkeypatch).api_workers == 1
     assert _load(monkeypatch, API_WORKERS="3").api_workers == 3
+
+
+def test_there_is_no_previous_pepper_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _load(monkeypatch).token_hash_pepper_previous == ""
+
+
+def test_the_previous_pepper_is_read_from_its_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """D-201: the old pepper is kept for verification while stations move."""
+    previous = tmp_path / "token_hash_pepper_previous"
+    previous.write_text("an-old-pepper\n", encoding="utf-8")
+
+    settings = _load(monkeypatch, TOKEN_HASH_PEPPER_PREVIOUS_FILE=str(previous))
+
+    assert settings.token_hash_pepper_previous == "an-old-pepper"
+
+
+def test_an_empty_previous_pepper_file_means_no_rotation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The one empty secret file that starts: it accepts less, not more (D-201).
+
+    An empty *current* pepper file is still refused, which shows the previous
+    one is the exception rather than the rule.
+    """
+    previous = tmp_path / "token_hash_pepper_previous"
+    previous.write_text("", encoding="utf-8")
+
+    settings = _load(monkeypatch, TOKEN_HASH_PEPPER_PREVIOUS_FILE=str(previous))
+
+    assert settings.token_hash_pepper_previous == ""
+    empty_current = tmp_path / "token_hash_pepper"
+    empty_current.write_text("", encoding="utf-8")
+    with pytest.raises(InsecureConfigurationError, match="empty file"):
+        _load(monkeypatch, TOKEN_HASH_PEPPER_FILE=str(empty_current))
+
+
+def test_a_missing_previous_pepper_file_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with pytest.raises(InsecureConfigurationError, match="PREVIOUS_FILE"):
+        _load(
+            monkeypatch,
+            TOKEN_HASH_PEPPER_PREVIOUS_FILE=str(tmp_path / "not-there"),
+        )
+
+
+def test_a_previous_pepper_equal_to_the_current_one_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The step that writes the new pepper was skipped (D-201)."""
+    with pytest.raises(InsecureConfigurationError, match="rotation has not happened"):
+        _load(
+            monkeypatch,
+            TOKEN_HASH_PEPPER=REAL_PEPPER,
+            TOKEN_HASH_PEPPER_PREVIOUS=REAL_PEPPER,
+        )
+
+
+def test_rate_limits_are_on_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _load(monkeypatch)
+    assert settings.rate_limits is True
+    assert settings.client_address_header == ""
+
+
+def test_rate_limits_off_is_refused_on_a_public_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-202: `off` is for simulations on loopback, where it is accepted."""
+    assert _load(monkeypatch, RATE_LIMITS="off").rate_limits is False
+    with pytest.raises(InsecureConfigurationError, match="RATE_LIMITS"):
+        _load(
+            monkeypatch,
+            **_secure(RATE_LIMITS="off", PUBLIC_BASE_URL="https://meridian.example"),
+        )
+
+
+def test_the_client_address_header_is_lower_cased(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ASGI presents header names lower-cased, so the setting is compared so."""
+    settings = _load(monkeypatch, CLIENT_ADDRESS_HEADER="CF-Connecting-IP")
+    assert settings.client_address_header == "cf-connecting-ip"
+
+
+def test_a_client_address_header_that_is_not_a_name_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(InsecureConfigurationError, match="CLIENT_ADDRESS_HEADER"):
+        _load(monkeypatch, CLIENT_ADDRESS_HEADER="X-Real-IP: 1.2.3.4")
+
+
+def test_a_process_answers_only_for_the_secrets_it_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-206: the jobs process is given no pepper, invite or Grafana password.
+
+    Checking them there refused every public start of it; the API still refuses
+    all five, which is the control.
+    """
+    held_by_jobs = frozenset({"DATABASE_URL password", "METRICS_TOKEN"})
+    jobs_env = {
+        "DATABASE_URL": f"postgresql://meridian:{REAL_PASSWORD}@db:5432/meridian",
+        "METRICS_TOKEN": REAL_METRICS_TOKEN,
+        "MERIDIAN_PUBLIC": "1",
+    }
+    for key, value in {**BASE_ENV, **jobs_env}.items():
+        monkeypatch.setenv(key, value)
+
+    assert load_settings(secrets_held=held_by_jobs).is_public
+    with pytest.raises(InsecureConfigurationError, match="TOKEN_HASH_PEPPER"):
+        load_settings()
+    monkeypatch.setenv("METRICS_TOKEN", "change-me")
+    with pytest.raises(InsecureConfigurationError, match="METRICS_TOKEN"):
+        load_settings(secrets_held=held_by_jobs)

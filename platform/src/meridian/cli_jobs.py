@@ -42,6 +42,7 @@ import psycopg
 from meridian.cli_serve import LOG_LEVELS, logging_configuration
 from meridian.cli_snapshot import datasets_root
 from meridian.config import Settings, load_settings
+from meridian.config_checks import DATABASE_PASSWORD, METRICS_TOKEN
 from meridian.metrics.exposition import MULTIPROCESS_DIRECTORY_VARIABLE
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.prediction.live import LiveScoringError
@@ -57,7 +58,10 @@ if TYPE_CHECKING:
     from meridian.jobs.reliability_round import DatabaseReliabilityWork
     from meridian.jobs.rounds import DatabaseRoundWork
 
-__all__ = ["add_jobs_parser", "run_jobs"]
+__all__ = ["JOBS_SECRETS", "add_jobs_parser", "run_jobs"]
+
+JOBS_SECRETS = frozenset({DATABASE_PASSWORD, METRICS_TOKEN})
+"""The secrets compose gives the jobs process, and so the only ones it answers for."""
 
 _EXIT_FAILED = 1
 
@@ -179,7 +183,9 @@ def run_jobs(args: argparse.Namespace) -> int:
     )
     from meridian.reliability.config import ReliabilityConfigError  # noqa: PLC0415
 
-    settings = load_settings()
+    # The jobs process is given the database and the metrics token and nothing
+    # else, so only those are refused as placeholders (D-206).
+    settings = load_settings(secrets_held=JOBS_SECRETS)
     refusal = _refusal(settings)
     if refusal is not None:
         print(f"meridian jobs run: {refusal}", file=sys.stderr)  # noqa: T201

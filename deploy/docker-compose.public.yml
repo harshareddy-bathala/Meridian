@@ -1,0 +1,83 @@
+# The public deployment: the Cloudflare tunnel, and no other way in (D-206).
+#
+#   python deploy/tools/rotate_secret.py set tunnel_token < the-token-cloudflare-gave-you
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml \
+#     -f deploy/docker-compose.public.yml up -d
+#
+# This was the `public` profile. A profile can add a service but cannot take a
+# port away, and taking the API's port off the host is the point: with it
+# published, a request that never crossed Cloudflare could put any address in
+# CF-Connecting-IP, which is the header the rate limits key on (D-051, D-202).
+# So the tunnel, the unpublished port and the trusted header are one file, and
+# none of them can be had without the others.
+#
+# Needs Docker Compose 2.24.4 or later, for `!reset`.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  api:
+    # Reachable inside the compose network only: from the tunnel, the
+    # healthcheck, Prometheus and the simulator. An operator on the host uses
+    # `compose exec api …`.
+    ports: !reset []
+    environment:
+      MERIDIAN_PUBLIC: "1"
+      # Cloudflare writes it on every request it forwards, replacing any value
+      # the caller sent, and with no port published nothing else can reach the
+      # API to send one.
+      CLIENT_ADDRESS_HEADER: CF-Connecting-IP
+
+  jobs:
+    environment:
+      MERIDIAN_PUBLIC: "1"
+
+  migrate:
+    # So the owner's password and the two it sets are refused as placeholders.
+    environment:
+      MERIDIAN_PUBLIC: "1"
+
+  tunnel:
+    # Outbound-only over 443: no static IP, no inbound port, and no firewall
+    # exception to request from college IT — which is the actual constraint SC-6
+    # runs into. TLS terminates at the edge, so the origin stays plain HTTP
+    # inside this network, which MSP §3 already anticipates.
+    image: cloudflare/cloudflared:2026.7.3
+    restart: unless-stopped
+    logging: *logging
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      # From a file, not the environment, where `docker inspect` shows it, and
+      # not `--token`, where `ps` shows it to every user on the host (D-114).
+      # rotate_secret.py writes the file.
+      TUNNEL_TOKEN_FILE: /run/secrets/meridian/tunnel_token
+      # A fixed address for the readiness endpoint the healthcheck calls.
+      # Loopback: the tunnel's metrics are nobody else's business.
+      TUNNEL_METRICS: 127.0.0.1:20241
+    volumes:
+      - type: bind
+        source: ./secrets/tunnel_token
+        target: /run/secrets/meridian/tunnel_token
+        read_only: true
+        bind:
+          create_host_path: false
+    command: ["tunnel", "--no-autoupdate", "run"]
+    # Ready means at least one connection to the Cloudflare edge is registered.
+    # The image has no shell, so the check is cloudflared asking itself.
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s

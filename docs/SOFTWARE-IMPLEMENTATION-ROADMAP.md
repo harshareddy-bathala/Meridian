@@ -65,6 +65,33 @@ flowchart TD
   - a backfill never supplies features for passes already flown, because a value we fetched after a pass cannot be shown to have existed before it;
   - the terms in `ATTRIBUTION.md` were read from quotations of the providers' pages, because the build environment could not reach them.
 
+**Stage 23's software is built, ahead of its turn; Stage 19 is still next.** It was built beside Stages 18 and 20, both merged first, and touches none of their files. Its decisions are D-200 through D-211, `docs/THREAT-MODEL.md` is its threat model, and `docs/OPERATIONS.md` § Rate limits, § Rotating secrets, § Security scanning, § Backup and restore and § Failure recovery are its runbook. It added no migration.
+- **The completion gate passes, clause by clause:**
+  - **A documented threat model.** Assets, actors, five trust boundaries and the supply chain, one row per threat naming the code or decision behind its mitigation, and a public API privacy review whose fields a test pins (D-200, D-210).
+  - **A tested restore procedure.** A weekly drill restores the newest nightly dump into a scratch database and checks it, and `tests/integration/test_restore_drill.py` runs that drill against the test database, requiring every table's row count to match (D-209). CI's round trip still runs.
+  - **A safe credential lifecycle.** Station tokens, invites and now the platform's secrets can each be replaced without stranding anything: the pepper overlaps with its predecessor and re-hashes credentials as they are used, shown on a live stack with a simulated station that never saw a 401 (D-201).
+  - **Bounded inputs.** Rate limits in the process, by station token for MSP and by client for everything, answering `rate_limited`; the public API takes no body and caps its query; the request head is bounded by h11 (D-202, D-203).
+  - **No secret leakage.** A redacting filter on every log line, with a test that drives the platform and searches what it wrote, and a control that finds the leak without the filter (D-204). No secret reaches an image layer (D-201), a log or an error body.
+- **The deployment is hardened** (D-205 to D-208):
+  - every container drops all capabilities, runs with `no-new-privileges` and a read-only root; the database runs as its own uid;
+  - the public deployment is an override file that takes the API's port off the host, which is what makes `CF-Connecting-IP` trustworthy;
+  - the API connects as `meridian_api`, which cannot change the schema; only `migrate` holds the owner;
+  - a strict content-security policy and no CORS, checked in Chromium;
+  - dependencies and the image are scanned on every change and weekly, with three SBOMs.
+- **Found on the way, each fixed:**
+  - every image built with `up --build` carried `deploy/.env` and the metrics token in a layer (D-201);
+  - replacing the pepper could not be recovered from, because the registration key is peppered too, which `.env.example` said the opposite of (D-201);
+  - the jobs process refused every public start, asking for secrets compose never gave it (D-206);
+  - uvicorn's default HTTP parser accepted a 1 MB header (D-203);
+  - D-088's burst check would have passed on the platform's own 429 with no edge rule at all (D-202);
+  - `pg_restore --exit-on-error` would have stopped on the first grant naming a role a fresh server lacks (D-207).
+- **Not built, or not yet shown:**
+  - the Debian security updates the image now applies were not checked here, because `deb.debian.org` is not reachable from where this was written; the first run of `security.yml` is their test;
+  - copying backups off the host, which is the operator's step until Stage 33;
+  - the platform's database passwords from files, which need a change to how `DATABASE_URL` is read (D-207);
+  - the altitude a station publishes is to the metre, which the privacy review leaves open for the team (D-210), and MSP §4.1 owes a sentence saying `name` and `operator` are public;
+  - the database owner remains a superuser, which TimescaleDB requires.
+
 **Stage 20's software is built** (2026-09-28), ahead of Stage 19, which it does not need: it classifies whatever was scheduled. **Stage 19 is next.** Its decisions are D-180 through D-187, and `docs/OPERATIONS.md` § Alerts, *LossBudgetThresholdReached* and *Reliability figures*, is its runbook.
 - **The completion gate passes, and is demonstrable at a prompt.** Every reliability number can be traced back to assignments, observations and heartbeat evidence:
   - `meridian reliability classify`, then `report`, then `explain <assignment id>` prints the evidence behind any pass a figure counted;

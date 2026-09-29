@@ -82,9 +82,25 @@ def test_the_burst_is_not_fired_unless_asked(verifier: ModuleType) -> None:
     assert outcome == verifier.SKIP
 
 
-def test_any_429_in_a_burst_passes(verifier: ModuleType) -> None:
-    assert verifier.judge_burst([530, 429, 0])[0] == verifier.PASS
+EDGE_PAGE = "<html><title>Rate limited</title></html>"
+OUR_REFUSAL = '{"error":"rate_limited","message":"Too many requests; retry after 1 s."}'
+
+
+def test_any_edge_429_in_a_burst_passes(verifier: ModuleType) -> None:
+    assert verifier.judge_burst([(530, ""), (429, EDGE_PAGE), (0, "")])[0] == (
+        verifier.PASS
+    )
 
 
 def test_a_burst_with_no_429_fails(verifier: ModuleType) -> None:
-    assert verifier.judge_burst([200, 200, 0])[0] == verifier.FAIL
+    assert verifier.judge_burst([(200, "{}"), (200, "{}"), (0, "")])[0] == verifier.FAIL
+
+
+def test_the_platforms_own_429_does_not_prove_the_edge_rule(
+    verifier: ModuleType,
+) -> None:
+    """D-202: the in-process limiter answers 429 too, in the two-field body."""
+    outcome, detail = verifier.judge_burst([(429, OUR_REFUSAL)] * 3)
+
+    assert outcome == verifier.FAIL
+    assert "3 by the platform" in detail

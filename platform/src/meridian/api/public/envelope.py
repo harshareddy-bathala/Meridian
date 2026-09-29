@@ -29,6 +29,7 @@ __all__ = [
     "INVALID_QUERY",
     "METHOD_NOT_ALLOWED",
     "NOT_FOUND",
+    "RATE_LIMITED",
     "SERVER_ERROR",
     "STATUS_FOR_PUBLIC_CODE",
     "PublicError",
@@ -46,6 +47,7 @@ spellings of one prefix is how a mount silently swallows an endpoint.
 NOT_FOUND = "not_found"
 INVALID_QUERY = "invalid_query"
 METHOD_NOT_ALLOWED = "method_not_allowed"
+RATE_LIMITED = "rate_limited"
 SERVER_ERROR = "server_error"
 
 STATUS_FOR_PUBLIC_CODE = {
@@ -55,6 +57,9 @@ STATUS_FOR_PUBLIC_CODE = {
     # says where to look.
     INVALID_QUERY: HTTPStatus.BAD_REQUEST,
     METHOD_NOT_ALLOWED: HTTPStatus.METHOD_NOT_ALLOWED,
+    # Spelled as MSP spells it, served from this table for the reason
+    # `server_error` is: each surface looks its statuses up in its own (D-202).
+    RATE_LIMITED: HTTPStatus.TOO_MANY_REQUESTS,
     SERVER_ERROR: HTTPStatus.INTERNAL_SERVER_ERROR,
 }
 """Every code the public API may send, and the status it is served at.
