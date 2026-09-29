@@ -22,6 +22,7 @@ Reference: docs/DECISIONS.md D-019, D-063, D-066, D-110, D-211.
 
 from __future__ import annotations
 
+import logging.config
 import shutil
 import uuid
 from collections.abc import Iterator
@@ -38,6 +39,7 @@ from alembic.script import ScriptDirectory
 
 from meridian.jobs.rounds import DatabaseRoundWork, RoundPlan, run_round
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
+from meridian.scheduler.schedule_config import ScheduleConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = REPO_ROOT / "deploy" / "migrations"
@@ -104,6 +106,9 @@ def test_a_failed_migration_leaves_the_revision_it_started_from(
     scratch_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DATABASE_URL", scratch_database)
+    # env.py applies alembic.ini's logging, whose fileConfig disables every
+    # logger that already exists, so later tests' caplog would see nothing.
+    monkeypatch.setattr(logging.config, "fileConfig", lambda *_, **__: None)
     command.upgrade(_config(scratch_database), "head")
     head = ScriptDirectory.from_config(_config(scratch_database)).get_current_head()
     broken = tmp_path / "migrations"
@@ -149,7 +154,7 @@ def test_a_scheduler_that_dies_mid_round_leaves_nothing_and_recovers(
         " values ('norad:99970', 137100000, 'lrpt')"
     )
     now = datetime.now(UTC)
-    plan = RoundPlan(horizon=timedelta(hours=24), model_config="A", turnaround_s=0.0)
+    plan = RoundPlan(horizon=timedelta(hours=24), config=ScheduleConfig())
     opened = {"count": 0}
 
     @contextmanager
@@ -169,10 +174,12 @@ def test_a_scheduler_that_dies_mid_round_leaves_nothing_and_recovers(
     orbit = SkyfieldOrbitService()
     before = _assignments(rollback)
 
-    crashed = run_round(DatabaseRoundWork(dies_during_scheduling, orbit), plan, now)
+    crashed = run_round(
+        DatabaseRoundWork(dies_during_scheduling, orbit, lambda: None), plan, now
+    )
     after_crash = _assignments(rollback)
-    restarted = run_round(DatabaseRoundWork(healthy, orbit), plan, now)
-    again = run_round(DatabaseRoundWork(healthy, orbit), plan, now)
+    restarted = run_round(DatabaseRoundWork(healthy, orbit, lambda: None), plan, now)
+    again = run_round(DatabaseRoundWork(healthy, orbit, lambda: None), plan, now)
 
     assert crashed.generated is not None and crashed.generated.passes_stored > 0
     assert crashed.scheduled is None

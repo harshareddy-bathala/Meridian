@@ -48,7 +48,6 @@ def decisions(schedule_rows: Any) -> None:
         decision="skipped",
         reason="overlaps a higher-scoring pass",
         conflicts_with_assignment_id="as_l_2",
-        state="expired",
     )
     rows.assignment(
         "as_l_old",

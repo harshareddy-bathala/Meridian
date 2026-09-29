@@ -21,14 +21,16 @@ window), D-060 (the timing prior), D-065, D-066.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
-from meridian.scheduler import ScheduleOutcome, ScoredCandidate
-from meridian.store.assignments import NewAssignment
+from meridian.scheduler import Rejection, ScheduleOutcome, ScoredCandidate
+from meridian.store.schedule_writes import NewAssignment
 
 __all__ = [
     "PassFacts",
+    "Stamp",
     "assignment_id_for",
     "to_assignment_rows",
     "widened_window",
@@ -64,13 +66,35 @@ class PassFacts:
     """The platform's stated 1σ confidence in those two boundaries (D-060)."""
 
 
-def assignment_id_for(pass_id: int, model_config: str) -> str:
+@dataclass(frozen=True, slots=True)
+class Stamp:
+    """What a recorded run adds to each decision it makes (D-170)."""
+
+    run_id: str
+    model_sha256: bytes | None
+    """The model that gave the yields; ``None`` under the elevation proxy."""
+
+    explanations: Mapping[int, Mapping[str, object]]
+    """By pass id, every decision's."""
+
+    predicted_yields: Mapping[int, float]
+    """By pass id, a model's probability; empty under the elevation proxy,
+    which is not a prediction and is never written as one."""
+
+    revisions: Mapping[int, int] = field(default_factory=dict)
+    """By pass id, the revision its decision is written as; 0 when absent,
+    the first decision about a pass (D-171)."""
+
+
+def assignment_id_for(pass_id: int, model_config: str, revision: int = 0) -> str:
     """The id for the decision this configuration makes about this pass.
 
     Args:
         pass_id: The prediction being decided about.
-        model_config: Which configuration is deciding — ``A``, ``B``, and later
-            ``C`` and ``D``.
+        model_config: Which configuration is deciding — ``A`` to ``D``.
+        revision: Which decision about the pass this is (D-171). Revision 0
+            is digested as it always was, so no id minted before revisions
+            existed changes.
 
     Returns:
         ``as_`` followed by twelve hex characters.
@@ -88,7 +112,10 @@ def assignment_id_for(pass_id: int, model_config: str) -> str:
         requires. Keyed on the pass alone, A and B would collide and the second
         run would silently write nothing.
     """
-    digest = hashlib.sha256(f"{pass_id}:{model_config}".encode()).hexdigest()
+    key = f"{pass_id}:{model_config}"
+    if revision:
+        key = f"{key}:{revision}"
+    digest = hashlib.sha256(key.encode()).hexdigest()
     return f"{ASSIGNMENT_ID_PREFIX}{digest[:ASSIGNMENT_ID_HEX_LENGTH]}"
 
 
@@ -119,13 +146,13 @@ def widened_window(facts: PassFacts) -> tuple[datetime, datetime]:
 
 
 def _selection_row(
-    scored: ScoredCandidate, facts: PassFacts, model_config: str
+    scored: ScoredCandidate, facts: PassFacts, model_config: str, ids: Mapping[int, str]
 ) -> NewAssignment:
     """One taken pass, as a row."""
     start_at, end_at = widened_window(facts)
     candidate = scored.candidate
     return NewAssignment(
-        assignment_id=assignment_id_for(candidate.pass_id, model_config),
+        assignment_id=ids[candidate.pass_id],
         pass_id=candidate.pass_id,
         station_id=candidate.station_id,
         start_at=start_at,
@@ -147,14 +174,48 @@ def _selection_row(
     )
 
 
+def _blocker_id(rejection: Rejection, ids: Mapping[int, str]) -> str | None:
+    """The assignment that displaced this candidate, or None if none did alone.
+
+    A commitment's id already exists and may be another configuration's; a
+    selection of this run has the id this run mints for it.
+    """
+    if rejection.committed_assignment_id is not None:
+        return rejection.committed_assignment_id
+    if rejection.conflicts_with_pass_id is None:
+        return None
+    return ids[rejection.conflicts_with_pass_id]
+
+
+def _rejection_reason(
+    rejection: Rejection, model_config: str, winner_id: str | None
+) -> str:
+    """The sentence a dashboard shows for a skip, by the rule that caused it."""
+    opening = (
+        f"skipped under configuration {model_config}; score "
+        f"{rejection.scored.score:.1f}, and "
+    )
+    if winner_id is None:
+        # Only the delivery cap rejects without a single assignment to name.
+        return opening + (
+            "the station already holds as many assignments as one heartbeat "
+            "delivers over this window (D-035)"
+        )
+    return opening + (
+        f"the station is already committed to {winner_id} over this window"
+    )
+
+
 def _rejection_row(
-    scored: ScoredCandidate, facts: PassFacts, model_config: str, winner_id: str
+    rejection: Rejection, facts: PassFacts, model_config: str, ids: Mapping[int, str]
 ) -> NewAssignment:
     """One displaced pass, as a row naming what displaced it."""
     start_at, end_at = widened_window(facts)
+    scored = rejection.scored
     candidate = scored.candidate
+    winner_id = _blocker_id(rejection, ids)
     return NewAssignment(
-        assignment_id=assignment_id_for(candidate.pass_id, model_config),
+        assignment_id=ids[candidate.pass_id],
         pass_id=candidate.pass_id,
         station_id=candidate.station_id,
         start_at=start_at,
@@ -163,11 +224,7 @@ def _rejection_row(
         mode=facts.mode,
         timing_uncertainty_s=facts.timing_uncertainty_s,
         decision="skipped",
-        reason=(
-            f"skipped under configuration {model_config}; score "
-            f"{scored.score:.1f}, and the station is already committed to "
-            f"{winner_id} over this window"
-        ),
+        reason=_rejection_reason(rejection, model_config, winner_id),
         model_config=model_config,
         score=scored.score,
         conflicts_with_assignment_id=winner_id,
@@ -180,6 +237,7 @@ def to_assignment_rows(
     outcome: ScheduleOutcome,
     facts_by_pass_id: dict[int, PassFacts],
     model_config: str,
+    stamp: Stamp | None = None,
 ) -> list[NewAssignment]:
     """Every decision in one outcome, as rows ready to insert.
 
@@ -188,6 +246,9 @@ def to_assignment_rows(
         facts_by_pass_id: The transmitter and timing facts for every candidate
             in ``outcome``, keyed by ``pass_id``.
         model_config: The configuration that produced the outcome.
+        stamp: The run that made it, its model and every decision's
+            explanation. ``None`` only where no run is recorded, as for a
+            baseline's schedule compared by replay.
 
     Returns:
         Selections first, then rejections.
@@ -204,19 +265,40 @@ def to_assignment_rows(
         that wrote rejections first would fail on a row referencing an
         assignment that does not exist yet.
     """
+    revisions = {} if stamp is None else stamp.revisions
+    decided = [one.candidate.pass_id for one in outcome.selected] + [
+        one.scored.candidate.pass_id for one in outcome.rejected
+    ]
+    ids = {
+        pass_id: assignment_id_for(pass_id, model_config, revisions.get(pass_id, 0))
+        for pass_id in decided
+    }
     rows = [
-        _selection_row(scored, facts_by_pass_id[scored.candidate.pass_id], model_config)
+        _selection_row(
+            scored, facts_by_pass_id[scored.candidate.pass_id], model_config, ids
+        )
         for scored in outcome.selected
     ]
 
     rows.extend(
         _rejection_row(
-            rejection.scored,
+            rejection,
             facts_by_pass_id[rejection.scored.candidate.pass_id],
             model_config,
-            assignment_id_for(rejection.conflicts_with_pass_id, model_config),
+            ids,
         )
         for rejection in outcome.rejected
     )
-
-    return rows
+    if stamp is None:
+        return rows
+    return [
+        replace(
+            row,
+            revision=revisions.get(row.pass_id, 0),
+            predicted_yield=stamp.predicted_yields.get(row.pass_id),
+            schedule_run_id=stamp.run_id,
+            model_sha256=stamp.model_sha256,
+            explanation=stamp.explanations[row.pass_id],
+        )
+        for row in rows
+    ]

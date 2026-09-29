@@ -20,6 +20,19 @@ from pydantic import BaseModel
 import meridian.api.public.models as public_models
 
 REVIEWED = {
+    "Explanation": {"alternative", "rule", "run", "terms", "weighed_against"},
+    "ExplanationRun": {"history_as_of", "status"},
+    "ExplanationTerms": {
+        "frames",
+        "frames_term",
+        "priority",
+        "priority_weighted",
+        "value",
+        "yield_",
+        "yield_path",
+        "yield_reason",
+        "yield_source",
+    },
     "HorizonMaskPoint": {"azimuth_deg", "min_elevation_deg"},
     "ListeningBlock": {"assignment_id", "centre_freq_hz", "mode", "satellite_id"},
     "NotYetComputed": {"available_from_stage", "reason", "status"},
@@ -30,14 +43,19 @@ REVIEWED = {
         "conflicts_with_assignment_id",
         "decision",
         "end_at",
+        "explanation",
         "issued_at",
         "mode",
+        "model_sha256",
         "pass_id",
         "predicted_yield",
         "prediction_config",
         "priority",
         "reason",
+        "revision",
+        "revoked_reason",
         "satellite_id",
+        "schedule_run_id",
         "score",
         "simulated",
         "start_at",
@@ -135,6 +153,7 @@ REVIEWED = {
     },
     "PublishedLocation": {"alt_m", "lat_deg", "lon_deg"},
     "StationLiveness": {"last_heartbeat_at", "liveness", "simulated", "station_id"},
+    "WeighedPass": {"assignment_id", "decision", "pass_id", "value"},
 }
 
 NEVER_PUBLISHED = (

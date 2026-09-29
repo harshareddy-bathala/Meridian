@@ -1,0 +1,39 @@
+# Schedule settings, read by the scheduler run.
+#
+# Every key is optional; the values below are the defaults, taken from the
+# decisions that introduced them. An unknown key is refused rather than ignored,
+# so a misspelling cannot silently keep a default you believe you changed. A
+# run's record carries the hash of these *values*, not this file's bytes.
+
+# Which configuration schedules (D-160, D-168). What each maximises:
+#   A  the probability a pass decodes        — the naive baseline
+#   B  that probability × satellite priority — what existing practice achieves
+#   C  the probability, from our features    — do our signals carry information?
+#   D  that probability × satellite priority — the shipped system
+# Each is multiplied by the frames term below.
+configuration = "A"
+
+# A published model directory (`meridian model fit` prints it), as a path under
+# the datasets root or an absolute one. A and B run without one, on peak
+# elevation over 90° as a stated stand-in for a probability; C and D refuse to.
+# A model must be its configuration's: A's for A or B (B's model is A's), C's
+# for C, D's for D. A model that reads history (C, D) takes it from the newest
+# labelled dataset under the datasets root, and the run states its as_of.
+# model = "models/0123456789ab"
+
+# "duration": a pass is worth its seconds above the horizon, since a decoded
+# pass returns frames for as long as it is received. "none": every pass is
+# worth one.
+frames = "duration"
+
+# The solver's wall-clock limit, in seconds (D-167). A run that reaches it
+# keeps the best schedule found and says so; one that finds none falls back to
+# greedy under the same constraints. Above 0, at most 3600.
+time_limit_s = 10.0
+
+# Seconds a station needs between two receptions, to slew and settle (D-066).
+# 0 for Phase 1's fixed antennas, which do not slew. At most 3600.
+turnaround_s = 0.0
+
+# Handed to the solver. 0 .. 2147483647.
+seed = 0

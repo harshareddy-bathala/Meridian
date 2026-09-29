@@ -26,6 +26,7 @@ psycopg = pytest.importorskip("psycopg")
 
 from meridian.jobs.rounds import DatabaseRoundWork, RoundPlan, run_round  # noqa: E402
 from meridian.orbit.skyfield_service import SkyfieldOrbitService  # noqa: E402
+from meridian.scheduler.schedule_config import ScheduleConfig  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -49,8 +50,8 @@ def test_a_round_completes_both_tasks_against_the_schema(
         with rollback.transaction():
             yield rollback
 
-    work = DatabaseRoundWork(connect, SkyfieldOrbitService())
-    plan = RoundPlan(horizon=timedelta(hours=6), model_config="A", turnaround_s=0.0)
+    work = DatabaseRoundWork(connect, SkyfieldOrbitService(), lambda: None)
+    plan = RoundPlan(horizon=timedelta(hours=6), config=ScheduleConfig())
 
     outcome = run_round(work, plan, datetime.now(UTC))
 

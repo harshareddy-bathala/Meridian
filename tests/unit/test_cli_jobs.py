@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -29,10 +30,11 @@ def _no_real_work(monkeypatch: pytest.MonkeyPatch) -> None:
         "SCHEDULE_HORIZON_S",
         "PROMETHEUS_MULTIPROC_DIR",
         "API_LOG_LEVEL",
+        "SCHEDULE_CONFIG",
     ):
         monkeypatch.delenv(variable, raising=False)
 
-    def refuse(_settings: object) -> None:
+    def refuse(*_args: object) -> None:
         raise AssertionError("a refused configuration must not build its tasks")
 
     monkeypatch.setattr(cli_jobs, "_rounds", refuse)
@@ -87,3 +89,42 @@ def test_a_configuration_that_would_schedule_wrongly_is_refused(
 
     assert result == 1
     assert reason in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("settings", "reason"),
+    [
+        ('configuration = "D"\n', "is a learned model: name its model"),
+        ('configuration = "A"\nmodel = "models/absent"\n', "cannot score"),
+        ("horizon = 6\n", "unknown schedule settings"),
+    ],
+)
+def test_a_schedule_that_cannot_be_made_as_configured_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    settings: str,
+    reason: str,
+) -> None:
+    """D-168: a schedule the configuration cannot make must not quietly become
+    another one, so the process refuses before its first round."""
+    config = tmp_path / "schedule.toml"
+    config.write_text(settings, encoding="utf-8")
+    monkeypatch.setenv("SCHEDULE_CONFIG", str(config))
+    monkeypatch.setenv("MERIDIAN_DATASETS_ROOT", str(tmp_path / "datasets"))
+
+    result = run_jobs(argparse.Namespace(once=True, metrics_host="127.0.0.1"))
+
+    assert result == 1
+    assert reason in capsys.readouterr().err
+
+
+def test_a_missing_schedule_file_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("SCHEDULE_CONFIG", str(tmp_path / "absent.toml"))
+
+    assert run_jobs(argparse.Namespace(once=True, metrics_host="127.0.0.1")) == 1
+    assert "cannot read the schedule configuration" in capsys.readouterr().err

@@ -1,0 +1,32 @@
+# Comparison settings, read by `meridian schedule evaluate <dataset>` (D-172).
+#
+# The comparison replays a dataset's test span under every scheduler — greedy A
+# and B, the optimiser under A to D, and the oracle — on the same station-days,
+# and reports decoded frames per station-hour and SC-1 (D − B). The same
+# dataset, these values and the seed print the same report. An unknown key is
+# refused. The report carries the hash of these *values*, the model paths left
+# out: each model is named by its own hash instead.
+
+# The model directories of A, C and D (`meridian model fit` prints each), as
+# paths under the datasets root or absolute ones. All three are required, and
+# each must be fitted on the dataset compared, with one population (own) and
+# one pair of split dates: their test span is the one replayed. B names none;
+# its model is A's (D-160).
+[models]
+A = "models/0123456789ab"
+C = "models/123456789abc"
+D = "models/23456789abcd"
+
+# The rest are schedule.toml's own keys, read by the same checks; the
+# configuration and model keys are not, since every configuration is run.
+# frames = "duration"
+# time_limit_s = 10.0      # per station-day and scheduler, the same for each
+# turnaround_s = 0.0
+# seed = 0                 # the solver's, and the bootstrap's
+
+# How many bootstrap resamples the intervals are drawn from. 100 .. 100000.
+# resamples = 2000
+
+# A completeness threshold in place of the dataset's own (D-151), to read the
+# comparison over more station-days or fewer. Above 0, at most 1.
+# threshold = 0.8

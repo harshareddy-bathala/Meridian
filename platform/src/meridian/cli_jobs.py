@@ -2,7 +2,9 @@
 
 The process the ``jobs`` service runs in every deployment (D-110). Each round
 generates passes over the next ``SCHEDULE_HORIZON_S`` and schedules them under
-configuration A, then waits ``SCHEDULE_INTERVAL_S``; SIGTERM or SIGINT ends the
+the ``schedule.toml`` named by ``SCHEDULE_CONFIG`` — configuration A on the
+elevation proxy when none is (D-168, D-170) — then waits
+``SCHEDULE_INTERVAL_S``; SIGTERM or SIGINT ends the
 wait and the process exits after the task in hand. Its metrics are served on
 ``JOBS_METRICS_PORT`` behind the same token as the API's (D-109).
 
@@ -31,32 +33,33 @@ import signal
 import sys
 import threading
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import psycopg
 
-from meridian.cli_schedule import PHASE_1_TURNAROUND_S
 from meridian.cli_serve import LOG_LEVELS, logging_configuration
+from meridian.cli_snapshot import datasets_root
 from meridian.config import Settings, load_settings
 from meridian.config_checks import DATABASE_PASSWORD, METRICS_TOKEN
 from meridian.metrics.exposition import MULTIPROCESS_DIRECTORY_VARIABLE
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
+from meridian.prediction.live import LiveScoringError
+from meridian.scheduler.schedule_config import (
+    ScheduleConfig,
+    ScheduleConfigError,
+    load_schedule_config,
+)
+from meridian.scheduler.scoring import ScorerSource
 from meridian.store.pool import CONNECT_TIMEOUT_S
 
 if TYPE_CHECKING:
     from meridian.jobs.rounds import DatabaseRoundWork
 
-__all__ = ["JOBS_MODEL_CONFIG", "add_jobs_parser", "run_jobs"]
+__all__ = ["JOBS_SECRETS", "add_jobs_parser", "run_jobs"]
 
 JOBS_SECRETS = frozenset({DATABASE_PASSWORD, METRICS_TOKEN})
 """The secrets compose gives the jobs process, and so the only ones it answers for."""
-
-JOBS_MODEL_CONFIG = "A"
-"""The configuration every round schedules under, until Stage 18.
-
-A is the elevation baseline, the one configuration that needs no trained model.
-Stage 18 supplies the constrained scheduler this changes to (D-110).
-"""
 
 _EXIT_FAILED = 1
 
@@ -112,7 +115,22 @@ def _refusal(settings: Settings) -> str | None:
     return next((reason for failed, reason in checks if failed), None)
 
 
-def _rounds(settings: Settings) -> DatabaseRoundWork:
+def _schedule(settings: Settings) -> tuple[ScheduleConfig, ScorerSource]:
+    """The schedule every round runs, with its model loaded once to prove it loads.
+
+    Raises:
+        ScheduleConfigError: The file is refused, or names another
+            configuration's model.
+        LiveScoringError: The model, or the history it reads, cannot score.
+    """
+    named = settings.schedule_config
+    config = load_schedule_config(Path(named) if named else None)
+    scorers = ScorerSource(config, datasets_root(None))
+    scorers.current()
+    return config, scorers
+
+
+def _rounds(settings: Settings, scorers: ScorerSource) -> DatabaseRoundWork:
     """The real tasks, connecting as every other ``meridian`` command does."""
     # Inside the function: see the module docstring.
     from meridian.jobs.rounds import DatabaseRoundWork  # noqa: PLC0415
@@ -121,6 +139,7 @@ def _rounds(settings: Settings) -> DatabaseRoundWork:
     return DatabaseRoundWork(
         lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
         SkyfieldOrbitService(),
+        scorers.current,
     )
 
 
@@ -142,14 +161,20 @@ def run_jobs(args: argparse.Namespace) -> int:
         print(f"meridian jobs run: {refusal}", file=sys.stderr)  # noqa: T201
         return _EXIT_FAILED
 
+    try:
+        config, scorers = _schedule(settings)
+    except (ScheduleConfigError, LiveScoringError) as exc:
+        # Refused before any round: a schedule that cannot be made as
+        # configured must not quietly become another one (D-168).
+        print(f"meridian jobs run: {exc}", file=sys.stderr)  # noqa: T201
+        return _EXIT_FAILED
+
     logging.config.dictConfig(
         logging_configuration(settings.api_log_level.strip().lower())
     )
-    work = _rounds(settings)
+    work = _rounds(settings, scorers)
     plan = RoundPlan(
-        horizon=timedelta(seconds=settings.schedule_horizon_s),
-        model_config=JOBS_MODEL_CONFIG,
-        turnaround_s=PHASE_1_TURNAROUND_S,
+        horizon=timedelta(seconds=settings.schedule_horizon_s), config=config
     )
 
     if args.once:

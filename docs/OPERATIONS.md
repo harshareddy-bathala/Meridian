@@ -8,7 +8,7 @@ Every command runs from the repository root. `compose` below is shorthand for:
 docker compose -f deploy/docker-compose.yml
 ```
 
-Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, D-143 to D-154 for dataset snapshots, D-155 to D-164 for models, and D-200 onwards for Stage 23's hardening. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, D-143 to D-154 for dataset snapshots, D-155 to D-164 for models, D-165 to D-172 for scheduling, and D-200 onwards for Stage 23's hardening. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
 
 ---
 
@@ -119,7 +119,7 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Apply migrations, and re-grant the database roles | `compose run --rm migrate` |
 | Check that the newest backup restores | `python deploy/tools/restore_drill.py --latest backups` |
 | Generate passes now | `compose exec api meridian passes generate --from <ISO-8601 Z> --to <ISO-8601 Z>` |
-| Schedule now | `compose exec api meridian schedule --from <ISO-8601 Z> --to <ISO-8601 Z> --config A` |
+| Schedule now | `compose exec jobs meridian schedule --from <ISO-8601 Z> --to <ISO-8601 Z> [--config /datasets/schedule.toml]` — A on the elevation proxy without `--config` (D-168) |
 | One scheduling round now | `compose exec jobs meridian jobs run --once` |
 | Run the simulator | `compose --profile sim up -d` — `SIMULATOR_*` in `deploy/.env` set count, seed and scenario |
 | Check the public surface | `python deploy/tools/verify_public_surface.py https://<hostname>` |
@@ -129,9 +129,10 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Read a dataset's completeness and weights | `uv run meridian snapshot completeness <dataset dir>` — § Completeness and weights |
 | Fit a model on a dataset | `uv run meridian model fit <dataset dir> --config model.toml` — needs the `fit` extra; § Models |
 | Judge a model | `uv run meridian model evaluate <model dir>` — § Models |
+| Compare the schedulers and the oracle | `uv run meridian schedule evaluate <dataset dir> --config schedule-evaluation.toml` — needs no database; prints frames per station-hour and SC-1 (D-172); see `deploy/schedule-evaluation.toml.example` |
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
-**Scheduling needs no command.** The `jobs` service generates passes and schedules them under configuration A every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
+**Scheduling needs no command.** The `jobs` service generates passes and schedules them under `SCHEDULE_CONFIG` (configuration A on the elevation proxy when it is unset, D-170) every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
 
 ---
 
@@ -587,7 +588,7 @@ A model's manifest names the dataset it was fitted on, and that dataset's manife
 
 Copy `deploy/model.toml.example`. Its values are the defaults, and unknown keys are refused.
 
-- `configuration` — `A`, `B`, `C` or `D` (D-160). B's model is A's: priority weights the objective, not the model.
+- `configuration` — `A`, `B`, `C` or `D` (D-160). B's model is A's: priority weights the objective, not the model. D's objective is weighted by priority too (D-168).
 - `population` — `own`, or `archive` under A only. The two are never pooled (D-156).
 - `train_until` and `validate_until` — **there are no defaults, and a fit without them is refused.** A pass rising before `train_until` trains the model, one before `validate_until` calibrates it, and the rest, up to the dataset's `as_of`, is the test span (D-162).
 - `min_station_history` — below this many settled outcomes, a station is scored by the geometry-only model (D-161).
@@ -659,6 +660,94 @@ The model's bytes are no longer the bytes that were fitted. Delete it (`chmod -R
 ### Models are not in the database backup
 
 Models, like datasets, are regenerable from what they were made from, so the raw snapshots are what needs keeping (§ Snapshots are not in the database backup). To reproduce a model's exact bytes, also keep the library versions `show` prints.
+
+---
+
+## Scheduling
+
+The `jobs` service decides, every `SCHEDULE_INTERVAL_S`, which of the next `SCHEDULE_HORIZON_S` of passes each station receives. It maximises the summed value of what it takes: **yield × frames × priority**, the last under B and D only (D-168). A mixed-integer programme solved by HiGHS finds that maximum, under one set of constraints, and the result is checked against those constraints before anything is written (D-166, D-167). Every run is a row in `schedule_runs`, and every decision carries an explanation (D-170).
+
+Decisions this section puts into practice: D-165 to D-172.
+
+### Settings
+
+`SCHEDULE_CONFIG` in `deploy/.env` names a `schedule.toml` inside the `jobs` container. The datasets directory (`DATASETS_DIR`) is mounted read-only at `/datasets`, so a file kept there is `/datasets/schedule.toml`. Copy `deploy/schedule.toml.example`. Its values are the defaults, and unknown keys are refused.
+
+- `configuration` — `A` to `D`. Unset, the service runs A on the **elevation proxy**: peak elevation over 90°, labelled as such on every decision, and allowed for A and B only.
+- `model` — a model directory under the datasets root, as `meridian model fit` printed it. Required for C and D. It must be its configuration's model: A's model for A or B.
+- `frames`, `time_limit_s`, `turnaround_s`, `seed` — see the file.
+
+**A configuration the service cannot obey stops it at start, by name.** That covers a learned configuration without a model, another configuration's model, or a model or history that cannot be read. A schedule made some other way than configured must not look like the configured one. After changing the file or its model, run `compose up -d jobs`.
+
+**A model that reads history (C, D) reads the newest labelled dataset under the datasets root.** Every decision states that history's `as_of`, and `meridian_scheduler_history_age_seconds` is its age. Refreshing it means exporting a snapshot and labelling it (§ Dataset snapshots). The service notices the new dataset on its next round, and nothing needs restarting.
+
+### Reading a decision
+
+`GET /api/v1/assignments/{id}`, and a station's page on the dashboard, show each decision's explanation:
+- **`terms`** — the value, and the yield, frames and priority it is the product of. The yield's source is `model`, with its route, or `elevation_proxy`.
+- **`weighed_against`** — every pass it could not share the antenna with, best first.
+- **`rule`** — for a skip, `overlap` or `eligible_cap`.
+- **`alternative`** — for a skip, the pass that took its slot; for a selection, the best pass it displaced.
+- **`run`** — the solver's status, and the history's `as_of`.
+
+`schedule_runs` holds each run itself: the configuration's hash, the model's hash, the solver's version, status, objective, bound and runtime, and the counts.
+
+- **`optimal`** means proven best.
+- **`time_limit`** means the best found when time ran out.
+- **`fallback`** means the solver gave no usable answer, and greedy under the same constraints decided instead. `detail` says why.
+
+### Declined and offline work
+
+A station that stops naming a `held` assignment before its window has declined it. The assignment becomes `revoked` with reason `declined`, and the next round gives its time to another of that station's passes. When a round finds a station `offline`, its work not yet begun becomes `revoked` with reason `offline`. If the station returns still holding such an assignment, it goes back to `held`, because MSP has no message that takes work back. If it returns without it, the pass is decided again (D-171). A revoked assignment is never delivered and never counted as a miss. The public lists show each pass's latest decision.
+
+### Comparing the schedulers
+
+`meridian schedule evaluate` replays a dataset's test span under every scheduler and prints SC-1. It needs no database, and needs the `fit` extra only to have fitted the models:
+
+```bash
+uv run meridian model fit <dataset> --config model-a.toml    # and C, and D, with one pair of dates
+uv run meridian schedule evaluate <dataset> --config schedule-evaluation.toml
+```
+
+Copy `deploy/schedule-evaluation.toml.example`, and name the A, C and D models in it. All three must be fitted on this dataset, with the same split dates, or the command refuses (D-172). It prints, top to bottom:
+
+- **Provenance:** the dataset's, raw snapshot's, models' and configuration's hashes; the objective, the constraints, the solver's version and time limit, and the seed.
+- **What was replayed:** the test span's station-days at or above the completeness threshold, the ones left out, the candidates, and how many of them have a known outcome.
+- **One row per scheduler:** greedy A and greedy B (existing practice), the optimiser under A to D, and the oracle, which knows every outcome.
+  - Each row gives the passes taken, the frames decoded, frames per station-hour, the **unknown share**, the fraction of the oracle's frames, and how each day was solved.
+  - The unknown share is the part of the schedule nobody attempted, so it adds no frames. A scheduler that departs from what was actually attempted is judged low by exactly that share.
+- **SC-1, D − B**, and **D − greedy B**, each per station-hour and relative, with 95% paired-bootstrap intervals over station-days.
+
+Run it twice and diff: the same dataset, file and seed print the same bytes. `threshold` in the file reads the comparison at another completeness threshold (D-151).
+
+Exit codes are the models' (§ Models): 0 printed, 1 refused, **3 a directory that no longer matches its manifest**.
+
+### Watching it
+
+The dashboard's Scheduling row shows three panels:
+- **solver outcomes per hour**, by status: a rising `fallback` line means the solver's answers are missing or being refused;
+- **solver time**, against the configured limit;
+- **model history age**, absent while no model reads history.
+
+### The completion gate, at a prompt
+
+Stage 18's gate is that **the optimised scheduler always emits a constraint-valid schedule, records its reasoning, and can be compared reproducibly against baselines and an oracle.**
+
+```bash
+compose exec jobs meridian schedule --from <ISO-8601 Z> --to <ISO-8601 Z> --config /datasets/schedule.toml
+curl -s localhost:8000/api/v1/assignments?limit=5 | python -m json.tool     # each with its explanation
+uv run meridian schedule evaluate <dataset> --config schedule-evaluation.toml > one.txt
+uv run meridian schedule evaluate <dataset> --config schedule-evaluation.toml > two.txt
+diff one.txt two.txt                                                          # nothing
+```
+
+`tests/unit/test_scheduler_gate.py` asserts each clause through the commands. It uses a 22-day snapshot in which a second satellite clashes with the first once a day, and each claim has a positive control:
+- Every schedule of every scheduler is valid, including when the solver gives no answer or a wrong one. The wrong answer is shown to be wrong.
+- Every decision under D explains itself from the model's yield.
+- The report is the same twice and in processes with different hash seeds, and it moves with its seed and its data.
+- The oracle takes at least every scheduler's frames on every day.
+
+`tests/integration/test_scheduler_gate.py` asserts the database half: every decision a round stores, under A to D and with the solver failing, names a recorded run and explains itself, and no antenna is given two passes at once.
 
 ---
 
@@ -913,7 +1002,7 @@ Prometheus and Alertmanager are not published on the host. Grafana is, so its ad
 - **`simulated`:** every station series carries it. Measured and simulated stations are never summed into one figure.
 - **API panels:** `meridian_http_*` comes from every API worker.
 - **Pool panel:** reflects whichever worker answered the scrape.
-- **Scheduling panels:** `meridian_job_*`, `meridian_passes_computed` and `meridian_scheduler_candidates` come from the jobs process alone.
+- **Scheduling panels:** `meridian_job_*`, `meridian_passes_computed`, `meridian_scheduler_candidates`, `meridian_scheduler_runs_total{status}`, `meridian_scheduler_solver_seconds` and `meridian_scheduler_history_age_seconds` come from the jobs process alone. A rising `status="fallback"` count means the schedule is greedy's; the history age is how long the model's history has gone unrefreshed (D-170).
 - **Not published until Stage 20:** confirmed misses, indeterminate outcomes and loss budget remaining. A zero there would mean "not measured" (D-086, D-111).
 
 ### Delivering alerts

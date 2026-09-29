@@ -259,6 +259,34 @@ def test_rows_are_read_back_typed() -> None:
     assert read.simulated is False
 
 
+def test_a_report_s_frame_count_is_read_and_may_be_absent() -> None:
+    """A count, a null and an export from before the column: 12, None, None."""
+    lines = b"".join(
+        canonical_line(
+            {"assignment_id": f"as_{n}", "revision": 1, "outcome": "decoded"}
+            | {"simulated": False}
+            | extra
+        )
+        for n, extra in enumerate(
+            ({"frames_decoded": 12}, {"frames_decoded": None}, {})
+        )
+    )
+
+    read = parse_rows(files(**{"observations.jsonl": lines})).observations
+
+    assert [one.frames_decoded for one in read] == [12, None, None]
+
+
+def test_a_frame_count_that_is_not_whole_is_refused() -> None:
+    line = canonical_line(
+        {"assignment_id": "as_1", "revision": 1, "outcome": "decoded"}
+        | {"simulated": False, "frames_decoded": "12"}
+    )
+
+    with pytest.raises(MalformedSnapshotError, match="frames_decoded"):
+        parse_rows(files(**{"observations.jsonl": line}))
+
+
 def test_longitudes_are_read_for_both_kinds_of_station() -> None:
     """An archive station with no published location has no longitude."""
     rows = parse_rows(

@@ -48,7 +48,7 @@ flowchart TD
 
 *Snapshot taken 2026-09-28. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stage 23's software is built, ahead of its turn.** It was built beside Stages 18 and 20, which are in flight on their own branches, and touches none of their files. Its decisions are D-200 through D-211, `docs/THREAT-MODEL.md` is its threat model, and `docs/OPERATIONS.md` § Rate limits, § Rotating secrets, § Security scanning, § Backup and restore and § Failure recovery are its runbook. It added no migration.
+**Stage 23's software is built, ahead of its turn; Stage 19 is still next.** It was built beside Stage 18, merged first, and Stage 20, in flight on its own branch, and touches none of Stage 20's files. Its decisions are D-200 through D-211, `docs/THREAT-MODEL.md` is its threat model, and `docs/OPERATIONS.md` § Rate limits, § Rotating secrets, § Security scanning, § Backup and restore and § Failure recovery are its runbook. It added no migration.
 - **The completion gate passes, clause by clause:**
   - **A documented threat model.** Assets, actors, five trust boundaries and the supply chain, one row per threat naming the code or decision behind its mitigation, and a public API privacy review whose fields a test pins (D-200, D-210).
   - **A tested restore procedure.** A weekly drill restores the newest nightly dump into a scratch database and checks it, and `tests/integration/test_restore_drill.py` runs that drill against the test database, requiring every table's row count to match (D-209). CI's round trip still runs.
@@ -75,7 +75,43 @@ flowchart TD
   - the altitude a station publishes is to the metre, which the privacy review leaves open for the team (D-210), and MSP §4.1 owes a sentence saying `name` and `operator` are public;
   - the database owner remains a superuser, which TimescaleDB requires.
 
-**Stage 17's software is built.** Its decisions are D-155 through D-164, and `docs/OPERATIONS.md` § Models is its runbook. **Stage 18 is next.**
+**Stage 18's software is built.** Its decisions are D-165 through D-172, and `docs/OPERATIONS.md` § Scheduling is its runbook. **Stage 19 is next.**
+- **The completion gate passes, and is demonstrable at a prompt.** Every schedule is checked against the constraints before it is written, including when the solver fails or gives a wrong answer. Every stored decision names its run and explains itself. `meridian schedule evaluate`, run twice, prints the same bytes.
+
+  `tests/unit/test_scheduler_gate.py` asserts each clause through the commands. `tests/integration/test_scheduler_gate.py` asserts the database half. Every claim has a positive control.
+- **Two defects were found and fixed first:**
+  - skipped decisions were being delivered to stations, and expired as declines;
+  - rolling rounds could schedule a new pass on top of one already assigned.
+
+  A skip is now a record that never moves, and each round schedules around what earlier rounds assigned (D-165).
+- **One set of constraints for every scheduler** (D-166):
+  - windows widened by timing uncertainty, plus turnaround;
+  - D-035's cap of eight eligible assignments, now enforced;
+  - the downlink;
+  - availability;
+  - commitments.
+
+  `violations` checks every schedule, the Stage 7 baselines included, before anything is written.
+- **The optimiser is a mixed-integer programme solved by HiGHS** (`highspy`, MIT, D-167). It runs on one thread with a fixed seed and zero gap, so identical input gives an identical schedule. Its answer is a claim: one that breaks a rule, or no answer within the time limit, falls back to greedy under the same constraints, and the run says so.
+- **A pass is worth yield × frames × priority**, the last under B and D only (D-168). D is weighted as B is, amending D-160, so D − B is the model alone. With no model, A and B use a labelled elevation proxy; C and D refuse to run without one.
+- **Live passes are scored by the same feature code as training examples** (D-169). A model that reads history reads it from the newest labelled dataset, and every decision states that dataset's `as_of`.
+- **Every run is a `schedule_runs` row, and every decision stores its explanation** (D-170): its terms, what it was weighed against, the deciding rule and the alternative. The jobs service schedules with the optimiser under `SCHEDULE_CONFIG`, amending D-110. The public API and the dashboard show the explanation. Three metrics and three Grafana panels watch the solver and the history's age.
+- **Reissue** (D-171). A held assignment dropped before its window is `revoked` as declined, and its time goes to another of that station's passes. An offline station's work not yet begun is `revoked` as offline. A revoked assignment the station still names is reinstated while nothing newer claims its window, since MSP cannot take work back. Decisions carry a `revision`, and a revoked assignment is never counted as a miss.
+- **SC-1 is measured by replay** (D-172). `meridian schedule evaluate` runs seven schedulers over the models' test span, on the station-days at or above the completeness threshold:
+  - greedy A and greedy B;
+  - the optimiser under A to D;
+  - an oracle valued by the frames each pass actually decoded.
+
+  It reports frames per station-hour, each schedule's unknown-outcome share, and D − B with a paired-bootstrap interval. An unattempted pass is never imputed.
+- **Not built:**
+  - an SC-1 figure on real data, which waits on the same measured passes the model does;
+  - fairness and coverage terms in the objective, which are optional in the roadmap and have nothing to act on at one station (D-168);
+  - cross-station reissue: a pass belongs to one station, and there is no coverage term to reward moving it (D-171).
+- **Known limits, each stated rather than hidden:**
+  - the replay solves each station-day on its own, so two passes either side of midnight can both be taken; every scheduler, the oracle included, gets the same leeway;
+  - turnaround is one number for every station, as `stations` holds none.
+
+**Stage 17's software is built.** Its decisions are D-155 through D-164, and `docs/OPERATIONS.md` § Models is its runbook.
 - **The completion gate passes, and is demonstrable at a prompt:**
   - **One interface.** Configurations A–D are one key in `model.toml`.
   - **Temporal splits.** Splits are on dates the configuration states.

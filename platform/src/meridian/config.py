@@ -47,6 +47,9 @@ class Settings:
     """Seconds between the scheduled jobs' rounds (D-110)."""
     schedule_horizon_s: int
     """How far ahead of now each round generates and schedules (D-110)."""
+    schedule_config: str
+    """The ``schedule.toml`` each round schedules under, or empty for its
+    defaults: configuration A on the elevation proxy (D-168)."""
     jobs_metrics_port: int
     """Where the scheduled jobs serve their metrics, inside the network (D-109)."""
 
@@ -270,6 +273,7 @@ def load_settings(*, secrets_held: frozenset[str] = EVERY_SECRET) -> Settings:
         # D-026's two-hour delivery horizon filled with room to spare.
         schedule_interval_s=_int_env("SCHEDULE_INTERVAL_S", 300),
         schedule_horizon_s=_int_env("SCHEDULE_HORIZON_S", 6 * 3600),
+        schedule_config=os.environ.get("SCHEDULE_CONFIG", "").strip(),
         # Never published outside the compose network, so nothing depends on
         # the number itself beyond Prometheus's scrape configuration agreeing.
         jobs_metrics_port=_int_env("JOBS_METRICS_PORT", 9464),
