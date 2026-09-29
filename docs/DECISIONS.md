@@ -4665,7 +4665,7 @@ D-029 settled that products, when they travel, travel by pre-signed PUT, and tha
 **2026-09-29 · accepted** · *Migration 0021, `meridian schedule runs`, `meridian report timing`, Stage 19*
 
 The roadmap lists five views. **Two are built:**
-- **`timing_error`:** per current observation with a first detection, `first_detection_at − aos` for its pass, beside the element set's age at the pass and the station's clock uncertainty from the nearest heartbeat. It carries `EVALUATION.md` §6.1's exclusion as a flag, `within_clock_uncertainty`, and does not apply it, so the reader can see what the exclusion removes. `meridian report timing` reads it.
+- **`timing_error`:** per current observation with a first detection, `first_detection_at − aos` for its pass, beside the element set's age at the pass and the station's clock uncertainty from the nearest heartbeat. The station's time is corrected by the clock offset its nearest heartbeat reported, as §6.1 and D-025 require, and the uncorrected figure is kept beside it. §6.1's two exclusions are carried as `excluded`, `clock_offset_unknown` or `within_clock_uncertainty`, and not applied, so the reader can see what they remove. `meridian passes timing` reads it: not `meridian report`, whose reports are regenerated from a snapshot (Stage 22), because a live view there would read as one of them.
 - **`scheduler_performance`:** per `schedule_runs` row, decisions by kind, the solver's status, whether it fell back, how many assignments were later revoked, and how many of its assignments have a current observation, by outcome. `meridian schedule runs` reads it.
 
 Both are **views, not materialised tables**, as `DATA-MODEL.md` has always said, until profiling says otherwise. **They are operators' reads, not reported numbers.** Every published figure is regenerated from a snapshot (rule 8), and a view over live tables answers differently each time it is read.
@@ -4695,12 +4695,12 @@ Dropping raw rows would make those answers depend on when they were asked. That 
 - Chunks compress after 7 days (migration 0006), and `held_assignments` and the listening block compress well.
 - Fifty simulated stations are fifty million rows a year. That is the case Stage 21 measures, and Stage 33 decides retention across tiers with the numbers in hand.
 
-**`heartbeats_hourly` is a continuous aggregate** per station and hour. It holds:
+**`heartbeats_hourly` is a continuous aggregate** per station and hour. It holds no largest gap, because an aggregate cannot compute one; a gap shows as an hour with fewer heartbeats. It holds:
 - the heartbeat count, and how many heartbeats reported listening;
 - the first and last `received_at`;
 - `simulated`.
 
-It is real-time, so the unmaterialised recent hours are read from raw rows. A refresh policy keeps it current, and it is created `WITH NO DATA` because migrations run in one transaction. It serves the reads that need coverage rather than evidence: the public uptime series and the dashboard's sparkline. Stage 20's availability figure reads every heartbeat in a 30-day window per request, and this aggregate is where that stage can take it, which is its decision to make. A test checks the aggregate against raw counts, the roadmap's "verify aggregate completeness" step.
+It is real-time, so the unmaterialised recent hours are read from raw rows. A refresh policy keeps it current, and it is created `WITH NO DATA` because migrations run in one transaction. It serves the reads that need coverage rather than evidence: the public uptime series and the dashboard's sparkline. Stage 20's availability figure reads every heartbeat in a 30-day window per request, and this aggregate is where that stage can take it, which is its decision to make. A test checks the aggregate against raw counts, the roadmap's "verify aggregate completeness" step. It found one limit, now asserted: a row written into an hour below the refresh watermark is not seen until the next refresh, because a real-time aggregate reads raw rows only above it. A heartbeat is stamped with the platform's clock as it arrives (D-013), and the policy stops an hour short of now, so only a hand-written or restored row lands there, and it is counted within 30 minutes.
 
 **Backups hold heartbeats for their own retention** (7 daily, 4 weekly, 6 monthly dumps). That is a copy, not a policy.
 

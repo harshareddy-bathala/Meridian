@@ -20,6 +20,7 @@ import argparse
 import sys
 from datetime import datetime
 
+from meridian.cli_views import run_pass_timing
 from meridian.config import load_settings
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.orbit.types import require_utc
@@ -88,7 +89,7 @@ def _print_generation_report(report: GenerationReport) -> None:
 
 
 def run_passes(args: argparse.Namespace) -> int:
-    """Run ``meridian passes generate``, the subcommand's only action.
+    """Run ``meridian passes generate``, or ``meridian passes timing``.
 
     Args:
         args: The parsed command line, carrying ``start`` and ``end`` as typed.
@@ -104,6 +105,8 @@ def run_passes(args: argparse.Namespace) -> int:
         ``meridian station``: a CLI call is a single short-lived process and
         there is nothing here for a pool to amortize.
     """
+    if args.action == "timing":
+        return run_pass_timing(args)
     try:
         horizon = GenerationHorizon(
             start=parse_horizon_bound(args.start, "--from"),

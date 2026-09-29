@@ -229,3 +229,19 @@ tr.selected {
   fill: var(--dim);
   font-size: 9px;
 }
+
+/* The uptime strip: coverage, drawn in the liveness colour for "heard". */
+.uptime {
+  margin: 1rem 0;
+  max-width: 24rem;
+}
+
+.uptime svg {
+  width: 100%;
+  height: auto;
+  border-bottom: 1px solid var(--rule);
+}
+
+.uptime-bar {
+  fill: var(--online);
+}

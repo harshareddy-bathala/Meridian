@@ -31,6 +31,7 @@ from meridian.cli_snapshot import (
     EXIT_CORRUPT,
     datasets_root,
 )
+from meridian.cli_views import add_runs_arguments, run_schedule_runs
 from meridian.config import load_settings
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.prediction.live import LiveScorer, LiveScoringError
@@ -103,7 +104,17 @@ def add_schedule_parser(
             f"${DATASETS_ROOT_ENV}, else {DEFAULT_DATASETS_ROOT})"
         ),
     )
-    actions = schedule.add_subparsers(dest="action", metavar="[evaluate]")
+    actions = schedule.add_subparsers(dest="action", metavar="[evaluate|runs]")
+    add_runs_arguments(
+        actions.add_parser(
+            "runs",
+            help="how recent runs fared: solver, decisions and their outcomes",
+            description=(
+                "Reads the scheduler_performance view (D-177). An operator's"
+                " read; schedulers are compared by replay, not here."
+            ),
+        )
+    )
     evaluate = actions.add_parser(
         "evaluate",
         help="compare every scheduler and the oracle on a dataset's test span",
@@ -214,8 +225,11 @@ def run_scheduler(args: argparse.Namespace) -> int:
         horizon, the configuration or its model is refused, the database cannot
         be reached, or the schedule broke a constraint.
     """
-    if getattr(args, "action", None) == "evaluate":
+    action = getattr(args, "action", None)
+    if action == "evaluate":
         return run_schedule_evaluate(args)
+    if action == "runs":
+        return run_schedule_runs(args)
     return _run_horizon(args)
 
 

@@ -49,6 +49,7 @@ from meridian.cli_snapshot import (
     add_snapshot_parser,
     run_snapshot,
 )
+from meridian.cli_views import add_timing_arguments
 from meridian.config import load_settings
 from meridian.store import station_tokens, stations
 from meridian.store.pool import DatabaseUnreachableError, connect_once
@@ -249,7 +250,7 @@ def _add_station_parser(
 def _add_passes_parser(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """Wire ``meridian passes`` and its one action."""
+    """Wire ``meridian passes`` and its two actions."""
     passes = subcommands.add_parser(
         "passes",
         help="generate pass windows",
@@ -266,6 +267,16 @@ def _add_passes_parser(
     )
     generate.add_argument("--from", dest="start", required=True, help="ISO-8601 UTC")
     generate.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
+    add_timing_arguments(
+        passes_actions.add_parser(
+            "timing",
+            help="first detection against predicted rise, clock-corrected",
+            description=(
+                "Reads the timing_error view (D-177, EVALUATION.md §6.1). An"
+                " operator's read; the reported figure comes from a snapshot."
+            ),
+        )
+    )
 
 
 def _add_pending_parsers(
