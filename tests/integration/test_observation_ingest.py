@@ -329,3 +329,158 @@ def test_an_observation_from_an_issued_assignment_still_reports(
     ingest(rollback, submission(assignment_id="as_silent"), station_id=STATION_ID)
 
     assert state_of(rollback, "as_silent") == "reported"
+
+
+# --- D-173: a reported floor is a noise measurement ----------------------------
+
+FLOOR = {"noise_floor_dbfs": -52.3, "receiver_gain_db": 32.8}
+
+
+def noise_rows(
+    rollback: Any, assignment_id: str = "as_ingest"
+) -> list[tuple[Any, ...]]:
+    """The assignment's noise rows, in revision order."""
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select revision, source, measured_at, centre_freq_hz, bandwidth_hz,"
+            " azimuth_deg, noise_floor_dbfs, receiver_gain_db, simulated"
+            " from noise_measurements where assignment_id = %s order by revision",
+            (assignment_id,),
+        )
+        return list(cur.fetchall())
+
+
+def test_a_reported_floor_is_recorded_where_it_was_heard(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """One row, at the assignment's frequency, pointed nowhere (D-173)."""
+    insert_assignment()
+
+    ingest(rollback, submission(**FLOOR), station_id=STATION_ID)
+
+    assert noise_rows(rollback) == [
+        (1, "observation", STARTED_AT, 137900000, None, None, -52.3, 32.8, False)
+    ]
+
+
+def test_the_bandwidth_is_the_catalogued_transmitters(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    insert_assignment()
+    with rollback.cursor() as cur:
+        cur.execute(
+            "insert into satellite_transmitters (satellite_id, centre_freq_hz, mode,"
+            " bandwidth_hz) values (%s, 137900000, 'lrpt', 150000)",
+            (SATELLITE_ID,),
+        )
+
+    ingest(rollback, submission(**FLOOR), station_id=STATION_ID)
+
+    assert [row[4] for row in noise_rows(rollback)] == [150000]
+
+
+def test_an_observation_without_a_floor_records_no_noise(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """Every MSP 0.2 observation, and a 0.3 one that measured no floor."""
+    insert_assignment()
+
+    ingest(rollback, submission(), station_id=STATION_ID)
+
+    assert revision_count(rollback, "as_ingest") == 1
+    assert noise_rows(rollback) == []
+
+
+def test_a_retry_records_its_floor_once(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """The queued-retry case writes nothing, the noise row included."""
+    insert_assignment()
+
+    ingest(rollback, submission(**FLOOR), station_id=STATION_ID)
+    ingest(rollback, submission(**FLOOR), station_id=STATION_ID)
+
+    assert len(noise_rows(rollback)) == 1
+
+
+def test_a_correction_appends_a_floor_and_keeps_the_first(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """Append-only, as the observation it belongs to (D-015, D-173)."""
+    insert_assignment()
+
+    ingest(rollback, submission(**FLOOR), station_id=STATION_ID)
+    ingest(
+        rollback,
+        submission(noise_floor_dbfs=-48.0, receiver_gain_db=20.0),
+        station_id=STATION_ID,
+    )
+
+    assert [(row[0], row[6], row[7]) for row in noise_rows(rollback)] == [
+        (1, -52.3, 32.8),
+        (2, -48.0, 20.0),
+    ]
+
+
+def test_a_simulated_stations_floor_is_simulated(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """Rule 5: the flag is the registry's, carried to the noise row too."""
+    insert_assignment(assignment_id="as_sim", station_id=SIMULATED_STATION_ID)
+
+    ingest(
+        rollback,
+        submission(assignment_id="as_sim", **FLOOR),
+        station_id=SIMULATED_STATION_ID,
+    )
+
+    assert [row[8] for row in noise_rows(rollback, "as_sim")] == [True]
+
+
+def test_every_noise_row_is_its_observations_floor(
+    rollback: Any, insert_assignment: InsertAssignment
+) -> None:
+    """The pairing a foreign key cannot hold between two hypertables (0020).
+
+    Every observation revision with a floor has exactly one noise row, and that
+    row repeats the observation's floor, gain, start, station and provenance.
+    """
+    insert_assignment()
+    insert_assignment(assignment_id="as_sim", station_id=SIMULATED_STATION_ID)
+    insert_assignment(assignment_id="as_quiet")
+    ingest(rollback, submission(**FLOOR), station_id=STATION_ID)
+    ingest(
+        rollback,
+        submission(noise_floor_dbfs=-47.5, receiver_gain_db=32.8),
+        station_id=STATION_ID,
+    )
+    ingest(
+        rollback,
+        submission(assignment_id="as_sim", **FLOOR),
+        station_id=SIMULATED_STATION_ID,
+    )
+    ingest(rollback, submission(assignment_id="as_quiet"), station_id=STATION_ID)
+
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select count(*) from observations o"
+            " full join noise_measurements n"
+            "   on n.assignment_id = o.assignment_id and n.revision = o.revision"
+            " where (o.noise_floor_dbfs is not null or n.id is not null)"
+            "   and o.assignment_id in ('as_ingest', 'as_sim', 'as_quiet')"
+            "   and (n.id is null or o.assignment_id is null"
+            "        or n.noise_floor_dbfs <> o.noise_floor_dbfs"
+            "        or n.receiver_gain_db <> o.receiver_gain_db"
+            "        or n.measured_at <> o.started_at"
+            "        or n.station_id <> o.station_id"
+            "        or n.simulated <> o.simulated)"
+        )
+        (disagreeing,) = cur.fetchone()
+        cur.execute(
+            "select count(*) from noise_measurements"
+            " where assignment_id in ('as_ingest', 'as_sim', 'as_quiet')"
+        )
+        (recorded,) = cur.fetchone()
+
+    assert recorded == 3
+    assert disagreeing == 0

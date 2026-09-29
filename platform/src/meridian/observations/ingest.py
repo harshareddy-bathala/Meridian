@@ -2,7 +2,9 @@
 
 The service behind MSP §4.4. It takes the facts a station submitted, resolves the
 two the station is not trusted for, decides whether the submission is a first
-report, an unchanged retry or a correction, and writes at most one row.
+report, an unchanged retry or a correction, and writes at most one revision.
+A revision that reports a noise floor also writes that floor's
+``noise_measurements`` row, in the same transaction (D-173).
 
 It speaks no HTTP: the errors below are domain errors, and ``meridian.api``
 translates them into MSP §6 codes — the same division
@@ -15,7 +17,7 @@ is the one piece of Stage 9 that has to be right and is cheapest to be sure of
 away from a database.
 
 Reference: docs/MSP-SPEC.md §4.4, §6; docs/DECISIONS.md D-015, D-027, D-048,
-D-070, D-071.
+D-070, D-071, D-173.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from datetime import datetime
 
 from meridian.observations.canonical_body import content_sha256
 from meridian.store.assignments import mark_assignment_reported
+from meridian.store.noise_measurements import record_observation_floor
 from meridian.store.observations import (
     AssignmentForReport,
     DecodeStatistics,
@@ -271,12 +274,21 @@ def _write_unless_unchanged(
     decision: RevisionDecision,
     digest: bytes,
 ) -> str:
-    """Append the revision, or answer an unchanged retry without writing."""
+    """Append the revision, or answer an unchanged retry without writing.
+
+    A revision carrying a noise floor is also a noise measurement, recorded from
+    the row just stored (D-173). A retry writes neither: its floor already has
+    its row.
+    """
     if decision.existing_observation_id is not None:
         return decision.existing_observation_id
-    return insert_observation(
+    observation_id = insert_observation(
         conn, record, revision=decision.revision, content_sha256=digest
     )
+    record_observation_floor(
+        conn, assignment_id=record.assignment_id, revision=decision.revision
+    )
+    return observation_id
 
 
 def _report_assignment(

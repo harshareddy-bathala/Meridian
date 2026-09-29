@@ -15,7 +15,9 @@ migration adding a column changes no snapshot until someone decides it should.
 **Columns left out on purpose.** A station's ``token_sha256`` and
 ``registration_key_sha256`` are credentials. ``operator`` may name a person,
 and no feature needs it. The token timestamps are current state that D-143
-says no label may use. None of them is read, so none can reach a file.
+says no label may use. A product's ``uri`` is where one station keeps a file,
+of use to nobody reading a snapshot and never published (D-176). None of them
+is read, so none can reach a file.
 
 **What a raw snapshot is not.** Coordinates are kept at full precision, because
 Stage 17 computes geometry from them. That makes a raw snapshot private: it is
@@ -23,8 +25,10 @@ not published as-is, and Stage 30's evidence dataset decides what may be.
 
 **Scope.** Passes whose ``aos`` falls in ``[since, as_of)``, and what they
 depend on: their assignments, every observation revision submitted by
-``as_of``, the heartbeats received inside each assignment's window, and the
-element sets, stations, capabilities, satellites and transmitters they name.
+``as_of`` with the noise floor and products recorded from it, the heartbeats
+received inside each assignment's window, and the element sets, stations,
+capabilities, satellites and transmitters they name. A survey's noise reading
+names no assignment and is scoped by when it was measured.
 Archive receptions are scoped by ``started_at`` over the same interval, and
 bring the element sets current at each UTC day's start for every satellite
 they name, so the export can compute an archive station's denominator (D-150). Nothing
@@ -32,7 +36,7 @@ outside the interval is read, so a pass near ``since`` has less contemporaneous
 evidence than one in the middle — which the labeller reports as indeterminate,
 not as a miss (D-147).
 
-Reference: docs/DECISIONS.md D-139, D-143, D-144, D-145, D-150.
+Reference: docs/DECISIONS.md D-139, D-143, D-144, D-145, D-150, D-173, D-176.
 """
 
 from __future__ import annotations
@@ -182,6 +186,26 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         f" from observations where assignment_id in ({_SCOPED_ASSIGNMENTS})"
         " and submitted_at <= %(as_of)s"
         " order by assignment_id, revision, started_at",
+    ),
+    SnapshotTable(
+        "noise_measurements",
+        "select id, station_id, measured_at, source, assignment_id, revision,"
+        " centre_freq_hz, bandwidth_hz, azimuth_deg, noise_floor_dbfs,"
+        " receiver_gain_db, simulated, recorded_at"
+        " from noise_measurements where recorded_at <= %(as_of)s"
+        f" and (assignment_id in ({_SCOPED_ASSIGNMENTS})"
+        "  or (source = 'survey' and measured_at >= %(since)s"
+        "   and measured_at < %(as_of)s"
+        f"   and station_id in ({_SCOPED_STATIONS})))"
+        " order by id, measured_at",
+    ),
+    SnapshotTable(
+        "products",
+        "select id, assignment_id, revision, observation_started_at, station_id,"
+        " element_index, kind, sha256, size_bytes, created_at, simulated"
+        f" from products where assignment_id in ({_SCOPED_ASSIGNMENTS})"
+        " and created_at <= %(as_of)s"
+        " order by id",
     ),
     SnapshotTable(
         "heartbeats",

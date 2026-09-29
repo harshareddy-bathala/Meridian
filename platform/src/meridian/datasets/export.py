@@ -102,7 +102,15 @@ SNAPSHOTS = "snapshots"
 LISTENING = "listening"
 """The frozen ``was_listening`` answers, ``listening.jsonl``."""
 
-SIMULATED_SPLIT = ("passes", "assignments", "observations", "heartbeats", "stations")
+SIMULATED_SPLIT = (
+    "passes",
+    "assignments",
+    "observations",
+    "noise_measurements",
+    "products",
+    "heartbeats",
+    "stations",
+)
 """Tables counted in the manifest as measured and simulated, apart — never one
 total across both populations (rule 5)."""
 

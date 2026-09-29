@@ -25,9 +25,10 @@ NEVER_EXPORTED = (
     "operator",
     "token_issued_at",
     "token_revoked_at",
+    "uri",
 )
-"""Credentials, a column that may name a person, and current state no label
-may use (D-143)."""
+"""Credentials, a column that may name a person, current state no label may
+use (D-143), and where a station keeps a product (D-176)."""
 
 
 def test_every_table_is_a_file_the_manifest_accepts() -> None:
@@ -44,6 +45,9 @@ def test_the_snapshot_holds_what_d_143_lists() -> None:
         "passes",
         "assignments",
         "observations",
+        # Recorded from each observation revision (D-173, D-176).
+        "noise_measurements",
+        "products",
         "heartbeats",
         "element_sets",
         "stations",
