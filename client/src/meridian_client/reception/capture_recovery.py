@@ -109,6 +109,7 @@ def facts_for(
                 paths.report,
                 recording_duration_s=recording.sample_count / recording.sample_rate_hz,
                 output_dir=paths.output_dir,
+                require_products=False,
             )
         except DecodeReportError as exc:
             decode = DecodeFailure(str(exc))

@@ -43,7 +43,7 @@ import json
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from pathlib import Path, PurePosixPath
 
@@ -137,7 +137,11 @@ class DecodeFailure:
 
 
 def read_decode_report(
-    path: Path, *, recording_duration_s: float, output_dir: Path
+    path: Path,
+    *,
+    recording_duration_s: float,
+    output_dir: Path,
+    require_products: bool = True,
 ) -> DecodeReport:
     """Read and check the report a decoder wrote, and the products it names.
 
@@ -147,6 +151,10 @@ def read_decode_report(
             inside it.
         output_dir: ``{output_dir}``. Every product must be a regular file
             inside it, after symbolic links are followed.
+        require_products: Refuse the report over a product that fails that
+            test, as the decode settles. ``False`` drops the product instead,
+            for rebuilding a settled result from disk: a waterfall removed
+            since must not turn a decoded pass into a failed decode.
 
     Raises:
         DecodeReportError: The file is missing, too large, not JSON, not a
@@ -163,9 +171,22 @@ def read_decode_report(
     except (OSError, ValueError) as exc:
         raise DecodeReportError(f"the report is not JSON: {exc}") from exc
     report = parse_decode_report(decoded, recording_duration_s=recording_duration_s)
-    for product in report.products:
-        _require_inside(output_dir, product.path)
-    return report
+    if require_products:
+        for product in report.products:
+            _require_inside(output_dir, product.path)
+        return report
+    return replace(
+        report,
+        products=tuple(one for one in report.products if _inside(output_dir, one.path)),
+    )
+
+
+def _inside(output_dir: Path, relative: PurePosixPath) -> bool:
+    try:
+        _require_inside(output_dir, relative)
+    except DecodeReportError:
+        return False
+    return True
 
 
 def _require_inside(output_dir: Path, relative: PurePosixPath) -> None:

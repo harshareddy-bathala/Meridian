@@ -421,3 +421,32 @@ def test_a_stamp_taken_at_recovery_matches_the_file(folders: CaptureFolders) -> 
     path = manifest.tuning.recording_path  # type: ignore[union-attr]
     assert recovered.recording_stamp == RecordingStamp.of(path)
     assert replace(recovered, recording_stamp=None).recording_unchanged() is False
+
+
+def test_a_product_gone_since_the_decode_settled_is_dropped_not_fatal(
+    folders: CaptureFolders, tmp_path: Path
+) -> None:
+    """The decode stands; only the missing product is left undeclared."""
+    folder = _decoded_with_products(folders)
+    store = ProductStore(tmp_path / "products")
+    keep_products(facts_decode(folder, tmp_path, store), folder, store)
+    (decode_paths(folder).output_dir / "image.png").unlink()
+    manifest = Manifest(
+        assignment(), "reported", NOW, recording=recording(tmp_path / "r.u8")
+    )
+
+    facts = facts_for(manifest, folder, store)
+
+    assert isinstance(facts.decode, DecodeReport)
+    assert facts.decode.frames_decoded == 3
+    assert [one.kind for one in facts.products] == ["waterfall"]
+
+
+def facts_decode(folder: Path, tmp_path: Path, store: ProductStore) -> DecodeReport:
+    decode = facts_for(
+        Manifest(assignment(), "reported", NOW, recording=recording(tmp_path / "r.u8")),
+        folder,
+        store,
+    ).decode
+    assert isinstance(decode, DecodeReport)
+    return decode
