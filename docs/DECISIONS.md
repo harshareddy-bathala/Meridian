@@ -4154,6 +4154,47 @@ For slow API, 20 s is past the client's 10 s read timeout and short of `stale`.
 
 ---
 
+## D-192 — A fault is judged from the platform's own records, against the ledger, afterwards
+
+**2026-09-29 · accepted** · *`meridian/reliability/{faults,fault_check}.py`; `meridian/store/fault_evidence.py`; `meridian reliability faults`, Stage 21.*
+
+`meridian reliability faults --ledger PATH` reads a run's fault ledger (D-189) and asks, for each fault, the roadmap's questions. Every answer comes from what the platform stored — heartbeats, assignments with their revocations and redecisions, scheduling rounds, and classifications — never from anything the platform was told about the fault.
+
+| Check | Asked of | Passes when |
+|---|---|---|
+| `held` | faults that stop heartbeats | no heartbeat was stored inside the window: the silence the ledger claims is the one the platform saw |
+| `detected` | faults that stop heartbeats | a silence of ninety seconds or more read `offline` within SC-5's ninety seconds of the fault; a shorter one correctly never did (D-190) |
+| `no_new_work` | a station that went offline | nothing was decided for it between going offline and being heard again (D-166) |
+| `replanned` | a station offline while a round ran | every piece of work decided before it went offline, and starting after that round, was revoked as `offline` (D-171). The verdict reports how many passes were decided again |
+| `no_false_miss` | faults that remove listening evidence, withhold a report or decline work | no pass the fault touched is classified `confirmed_miss` (CLAUDE.md rule 7) |
+| `declines_honoured` | `declines` | each assignment the ledger says was let go of was revoked as `declined` |
+| `recovered` | a closed fault | a heartbeat within ninety seconds of the close. For the platform's faults, a heartbeat from any station; for the scheduler, a round within fifteen minutes (`ScheduledTaskStalled`'s own threshold) |
+| `alerted` | with `--prometheus`, a station that went offline | `StationOffline` fired, and how long after the fault |
+
+**A check that does not apply is `None`, not a pass.** A verdict passes when no check failed. The output marks the inapplicable checks with a dash, so a run is never reported as having passed a question it was not asked.
+
+**Detection is derived, and the verdict says so.** Liveness is computed on read (D-054), so a station silent for ninety seconds is offline, to every reader, at the ninetieth second. The `detected` check is therefore arithmetic about stored heartbeats. What it proves is that the silence was real (`held`), and that everything downstream acted on it (`no_new_work`, `replanned`, `no_false_miss`). The measured half of SC-5 is the alert: scrape interval plus rule evaluation on top of the ninety seconds, read from Prometheus.
+
+**Read independently of the simulator.** The platform cannot import `meridian_sim` (D-138), so it has its own ledger reader. A unit test reads a ledger the simulator wrote, so a divergence between the two readers fails a test rather than a run. A line either reader cannot read fails the whole read, for D-189's reason.
+
+**A decision's instant is its run's `decided_at`**, the `now` the scheduler judged liveness at (D-170), and only a decision with no run falls back to `issued_at`. A pass classified under several configurations reads as a miss if any one of them says so.
+
+*Rejected:* storing the verdicts in a table, which would put ground truth's shadow in the database D-189 keeps it out of; the verdict is printed and optionally written as JSON beside the ledger. Also rejected: judging detection from the dashboard's liveness at the moment of reading, which answers "is it offline now", not "when did it become so".
+
+---
+
+## D-195 — One heartbeat has one time: the handler's
+
+**2026-09-29 · accepted** · *`meridian/api/msp/heartbeat.py`; `meridian/store/heartbeats.py`, Stage 21. Amends the reasoning in `insert_heartbeat`'s docstring.*
+
+The heartbeat handler reads the platform's clock once (`platform_clock.utc_now()`) and reconciles held work, revocations and reinstatements at that instant. Until now it stored the heartbeat row, and bumped `stations.last_heartbeat_at`, with the database's `now()` — the transaction's start. Two clocks for one event, a few milliseconds apart in production, and, in a test running inside one transaction, the same frozen instant for every heartbeat.
+
+Both are now stamped with the handler's instant. `insert_heartbeat` and `touch_last_heartbeat` take it as an optional argument, and without one they fall back to `now()`, as before. The column is still the platform's clock and never the station's `sent_at`, which was the reason the original docstring gave for leaving it to the default.
+
+**Why Stage 21 needed it.** Its gate drives a fleet through real MSP on a stated clock, so that a ninety-second silence can be judged without waiting ninety seconds. That is only possible if the time the platform stores is the time it was told, and it is the same substitution `platform_clock` was written to allow. A conformance test stamps a heartbeat at a stated instant and requires the row, the station's last-seen instant and the response to carry it. It fails if the handler stops passing its instant.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -4401,8 +4442,10 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-189 the fault ledger | `meridian_sim/{ledger,station}.py`; `tests/msp_conformance/test_simulator_supervisor.py` |
 | D-190 expected detection decided by the verifier | `meridian_sim/faults.py` |
 | D-191 slow API as a response lost after commit | `meridian_sim/faults.py` |
+| D-192 a fault judged from the platform's own records | `meridian/reliability/{faults,fault_check}.py`; `meridian/store/fault_evidence.py`; `meridian/cli_reliability.py` (`faults`); `tests/unit/test_reliability_faults.py` |
 | D-193 the pool checks a connection as it lends it | `meridian/store/pool.py`; `tests/integration/test_pool.py` |
 | D-194 platform faults from the host | `deploy/tools/chaos.py`; `pyproject.toml` (its lint set); `.github/workflows/ci.yml` (the compose job's fault step); `tests/msp_conformance/test_platform_restart.py`; `tests/unit/{test_chaos_tool,test_jobs_rounds}.py` |
+| D-195 one heartbeat, one time | `meridian/api/msp/heartbeat.py`; `meridian/store/heartbeats.py`; `DATA-MODEL.md` (heartbeats); `tests/msp_conformance/test_heartbeat_endpoint.py` |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

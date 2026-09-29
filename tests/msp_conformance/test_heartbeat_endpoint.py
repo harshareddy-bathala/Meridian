@@ -16,11 +16,13 @@ Reference: docs/MSP-SPEC.md §4.2, §4.3, §6, §8; docs/DECISIONS.md D-003, D-0
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from meridian.api import platform_clock
 from meridian.api.app import create_app
 from meridian.api.dependencies import get_connection
 from meridian.store.invites import hash_invite_token
@@ -119,6 +121,38 @@ def test_the_response_has_exactly_the_two_fields_msp_defines(
 
     assert response.status_code == 200, response.text
     assert sorted(response.json()) == ["assignments", "server_time"]
+
+
+def test_one_heartbeat_has_one_time_the_platform_s(
+    client: TestClient,
+    station: dict[str, str],
+    rollback: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-195: the row, the station's last-seen instant and the response agree.
+
+    The handler judges reconciliation at the platform clock's instant, so the
+    row it stores is stamped with that instant too, not with the database's
+    transaction clock — one heartbeat, one time.
+    """
+    at = datetime(2026, 9, 29, 12, 0, 30, tzinfo=UTC)
+    monkeypatch.setattr(platform_clock, "utc_now", lambda: at)
+
+    response = client.post(
+        HEARTBEAT_PATH,
+        json=heartbeat_body(station["station_id"]),
+        headers=auth(station),
+    )
+
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select h.received_at, s.last_heartbeat_at from heartbeats h"
+            " join stations s using (station_id) where h.station_id = %s",
+            (station["station_id"],),
+        )
+        rows = cur.fetchall()
+    assert response.json()["server_time"] == "2026-09-29T12:00:30.000Z"
+    assert rows == [(at, at)]
 
 
 def test_a_station_with_no_work_gets_an_empty_list_not_a_null(

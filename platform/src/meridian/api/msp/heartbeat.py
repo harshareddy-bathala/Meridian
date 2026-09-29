@@ -94,7 +94,7 @@ finished.
 
 
 def _record_heartbeat(
-    conn: Connection, body: HeartbeatRequestBody, station_id: str
+    conn: Connection, body: HeartbeatRequestBody, station_id: str, now: datetime
 ) -> bool:
     """Store one heartbeat and bump the station's last-seen instant.
 
@@ -108,6 +108,10 @@ def _record_heartbeat(
         body: The validated §4.2 payload.
         station_id: The identity the bearer token authenticated as — not
             ``body.station_id``, which the caller has already checked matches.
+        now: The platform's clock for this heartbeat. The row and the
+            station's last-seen instant are stamped with it, the instant the
+            reconciliation below judges by, so one heartbeat has one time
+            (D-195).
 
     Returns:
         Whether the station is simulated, from its registration record, so the
@@ -121,8 +125,10 @@ def _record_heartbeat(
     # station's own claim about its nature is not evidence (D-048, CLAUDE.md
     # rule 5). MSP §4.2 puts no such field on the wire today, and this is what
     # keeps that true if a later revision adds one.
-    insert_heartbeat(conn, body.to_new_heartbeat(simulated=provenance.simulated))
-    touch_last_heartbeat(conn, station_id)
+    insert_heartbeat(
+        conn, body.to_new_heartbeat(simulated=provenance.simulated), received_at=now
+    )
+    touch_last_heartbeat(conn, station_id, at=now)
     return provenance.simulated
 
 
@@ -287,7 +293,7 @@ def heartbeat(
 
     now = platform_clock.utc_now()
     with conn.transaction():
-        simulated = _record_heartbeat(conn, body, station_id)
+        simulated = _record_heartbeat(conn, body, station_id, now)
         _apply_reconciliation(conn, station_id, body, now)
         due = _assignments_due_now(conn, station_id, now)
 

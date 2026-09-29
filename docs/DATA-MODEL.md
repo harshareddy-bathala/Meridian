@@ -184,7 +184,7 @@ The listening block is stored whole — assignment, satellite, frequency **and m
 
 `clock_offset_s` and `clock_uncertainty_s` are both nullable, and `null` means unknown — never conflated with `0.0`. `EVALUATION.md` §6.1 discards any timing error smaller than the reported uncertainty, which needs both numbers (D-016).
 
-Partitioned on `received_at`, the platform's clock, not the station's `sent_at` (D-013).
+Partitioned on `received_at`, the platform's clock, not the station's `sent_at` (D-013). The MSP handler stamps it, and the station's `last_heartbeat_at`, with the one instant it reconciles the heartbeat at, so a heartbeat and every decision taken from it share one time (D-195).
 
 Retention: full resolution 90 days, then downsampled. **The retention policy is not created in Phase 1** — dropping chunks before the continuous aggregate that downsamples them exists is just data loss on a timer. It lands in Phase 3 with the aggregate.
 

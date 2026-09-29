@@ -77,12 +77,16 @@ class NewHeartbeat:
     clock_uncertainty_s: float | None
 
 
-def insert_heartbeat(conn: Connection, heartbeat: NewHeartbeat) -> None:
+def insert_heartbeat(
+    conn: Connection, heartbeat: NewHeartbeat, *, received_at: datetime | None = None
+) -> None:
     """Insert one heartbeat row.
 
-    ``received_at`` is left to the column's ``default now()`` — the
-    platform's own clock, not a value this function is handed, the same
-    reasoning ``store.station_tokens.rotate_station_token`` applies to
+    ``received_at`` is the platform's own clock, never the station's. The MSP
+    handler passes the instant it reconciled the heartbeat at, so the row and
+    every decision taken from it share one clock (D-195); omitted, it is the
+    column's ``default now()``, the reasoning
+    ``store.station_tokens.rotate_station_token`` applies to
     ``token_issued_at``.
 
     Does not touch ``stations.last_heartbeat_at``; see
@@ -96,8 +100,10 @@ def insert_heartbeat(conn: Connection, heartbeat: NewHeartbeat) -> None:
                 (station_id, sent_at, state, held_assignments,
                  listening_assignment_id, listening_satellite_id,
                  listening_freq_hz, listening_mode,
-                 health_json, simulated, clock_offset_s, clock_uncertainty_s)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                 health_json, simulated, clock_offset_s, clock_uncertainty_s,
+                 received_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s,
+                    coalesce(%s, now()))
             """,
             (
                 heartbeat.station_id,
@@ -112,12 +118,19 @@ def insert_heartbeat(conn: Connection, heartbeat: NewHeartbeat) -> None:
                 heartbeat.simulated,
                 heartbeat.clock_offset_s,
                 heartbeat.clock_uncertainty_s,
+                received_at,
             ),
         )
 
 
-def touch_last_heartbeat(conn: Connection, station_id: str) -> None:
-    """Bump ``stations.last_heartbeat_at`` to ``now()``.
+def touch_last_heartbeat(
+    conn: Connection, station_id: str, *, at: datetime | None = None
+) -> None:
+    """Bump ``stations.last_heartbeat_at`` to ``at``, or to ``now()`` without one.
+
+    ``at`` is the same platform instant :func:`insert_heartbeat` stamps the row
+    with, so liveness and the heartbeat it is derived from never disagree
+    (D-195).
 
     Separate from :func:`insert_heartbeat` rather than folded into it, so a
     caller composing both under one transaction controls the ordering
@@ -126,8 +139,9 @@ def touch_last_heartbeat(conn: Connection, station_id: str) -> None:
     """
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
-            "update stations set last_heartbeat_at = now() where station_id = %s",
-            (station_id,),
+            "update stations set last_heartbeat_at = coalesce(%s, now())"
+            " where station_id = %s",
+            (at, station_id),
         )
 
 
