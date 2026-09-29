@@ -53,8 +53,10 @@ that contains the project's own name while protecting nothing.
 _SECRET_NAME = r"[\w-]*(?:token|registration_key|password|passwd|pepper|secret)"
 
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    # `Bearer abc…` in a header echoed into a message or a repr.
-    (re.compile(r"(?i)\b(bearer)\s+[^\s'\",;]+"), rf"\1 {REDACTED}"),
+    # `Bearer abc…` in a header echoed into a message or a repr. Not the prose
+    # "bearer token", which the platform's own lines use: redacting its second
+    # word would mangle a line the runbook tells operators to look for.
+    (re.compile(r"(?i)\b(bearer)\s+(?!tokens?\b)[^\s'\",;]+"), rf"\1 {REDACTED}"),
     # `invite_token='abc'`, `"registration_key": "abc"`, `METRICS_TOKEN=abc`.
     (
         re.compile(rf"(?i)({_SECRET_NAME}['\"]?\s*[:=]\s*b?['\"]?)([^'\"\s,;)}}\]]+)"),
@@ -92,7 +94,15 @@ class RedactingFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         """Redact ``record`` in place; never drops it."""
-        record.msg = redact(record.getMessage())
+        try:
+            message = record.getMessage()
+        except Exception:
+            # A malformed call (arguments that do not fit the format) would
+            # otherwise raise out of Handler.handle into the code that logged,
+            # where logging's own error handling never sees it. Keep both
+            # halves, redacted, so the line still says what went wrong.
+            message = f"{record.msg!s} {record.args!r}"
+        record.msg = redact(message)
         record.args = None
         if record.exc_info and not record.exc_text:
             record.exc_text = logging.Formatter().formatException(record.exc_info)

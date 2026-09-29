@@ -52,6 +52,22 @@ def test_ordinary_lines_are_left_alone() -> None:
     assert redact(line) == line
 
 
+def test_the_words_bearer_token_are_prose_not_a_credential() -> None:
+    """The rotation line the runbook tells operators to look for survives."""
+    line = "bearer token re-hashed under the new pepper"
+    assert redact(line) == line
+    assert redact("Bearer tokenabc123") == f"Bearer {REDACTED}"
+
+
+def test_a_malformed_logging_call_does_not_raise() -> None:
+    record = logging.LogRecord(
+        "meridian.test", logging.INFO, __file__, 1, "%s and %s", ("Bearer abc",), None
+    )
+
+    assert RedactingFilter().filter(record)
+    assert "abc" not in record.getMessage().replace(REDACTED, "")
+
+
 def test_a_remembered_value_is_removed_wherever_it_appears() -> None:
     remember_secrets(["0f9a0f9a0f9a0f9a0f9a0f9a0f9a0f9a"])
 

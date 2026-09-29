@@ -170,11 +170,18 @@ def retire(directory: Path, name: str) -> None:
     write_secret(directory, PREVIOUS_PEPPER, "")
 
 
-def recreate_command(name: str) -> str:
-    """The command that makes the running services read `name` again."""
+def recreate_command(name: str, *, public: bool = False) -> str:
+    """The command that makes the running services read `name` again.
+
+    `public` adds the public override. Recreating the api without it on a
+    public deployment would publish its port on the host and drop
+    MERIDIAN_PUBLIC and CLIENT_ADDRESS_HEADER while the tunnel keeps forwarding
+    to it (D-206).
+    """
     services = " ".join(READERS.get(name, ("api",)))
-    public = " -f deploy/docker-compose.public.yml" if name == TUNNEL_TOKEN else ""
-    return f"{COMPOSE}{public} up -d --force-recreate {services}"
+    with_public = public or name == TUNNEL_TOKEN
+    extra = " -f deploy/docker-compose.public.yml" if with_public else ""
+    return f"{COMPOSE}{extra} up -d --force-recreate {services}"
 
 
 def run(action: str, name: str | None, directory: Path, env_file: Path) -> str:
@@ -189,7 +196,9 @@ def run(action: str, name: str | None, directory: Path, env_file: Path) -> str:
     else:
         (rotate if action == "rotate" else retire)(directory, name)
     done = {"rotate": "rotated", "retire": "retired", "set": "stored"}[action]
-    return f"{done} {name}; then: {recreate_command(name)}"
+    # A stored tunnel token is what marks a public deployment.
+    public = (directory / TUNNEL_TOKEN).is_file()
+    return f"{done} {name}; then: {recreate_command(name, public=public)}"
 
 
 def main(argv: list[str] | None = None) -> int:

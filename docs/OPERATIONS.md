@@ -691,6 +691,8 @@ Each platform secret is read once, when its process starts (D-201). Rotating one
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml
 ```
 
+On a public deployment, add `-f deploy/docker-compose.public.yml` to it as well. If you leave it out, the recreated `api` publishes its port on the host and loses `MERIDIAN_PUBLIC` and `CLIENT_ADDRESS_HEADER`, while the tunnel keeps forwarding to it (D-206). The tool adds the file to the command it prints whenever `deploy/secrets/tunnel_token` exists.
+
 **Why the tool and not an editor.** It writes each file `0444` inside a `0700` directory, which is the combination a container's uid can read and another user on the host cannot. It replaces a file by renaming a new one into place, which a bind mount does not follow, so the change reaches a container only when that container is recreated. That is why every step below ends with `--force-recreate`.
 
 ### The pepper

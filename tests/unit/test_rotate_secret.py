@@ -117,6 +117,20 @@ def test_the_printed_command_recreates_every_reader(tool: ModuleType) -> None:
     assert command.endswith("--force-recreate api jobs prometheus")
 
 
+def test_a_public_deployment_is_recreated_with_the_public_file(
+    tool: ModuleType, tmp_path: Path
+) -> None:
+    """Without it the api would publish its port and drop MERIDIAN_PUBLIC."""
+    tool.init(tmp_path, {})
+    private = tool.run("rotate", "metrics_token", tmp_path, tmp_path / ".env")
+    tool.set_secret(tmp_path, "tunnel_token", "eyJhIjoi...")
+
+    public = tool.run("rotate", "metrics_token", tmp_path, tmp_path / ".env")
+
+    assert "docker-compose.public.yml" not in private
+    assert "-f deploy/docker-compose.public.yml up -d" in public
+
+
 def test_env_values_ignores_comments_and_quotes(
     tool: ModuleType, tmp_path: Path
 ) -> None:
