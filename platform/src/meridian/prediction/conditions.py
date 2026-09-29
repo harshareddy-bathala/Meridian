@@ -39,6 +39,7 @@ Reference: docs/DECISIONS.md D-131, D-160, D-221, D-222, D-224.
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -146,6 +147,14 @@ def _judged(chosen: EnvironmentSample, rule: Rule, at: datetime) -> Choice:
 class Conditions:
     """A snapshot's values, answering for any pass.
 
+    Answers exactly as :func:`value_before` does, without scanning every value
+    for every pass. Values are grouped by place and sorted by the preference
+    that orders them within one place; for a pass, each place near enough is
+    searched from the latest interval begun by the pass, back to the first
+    published before it, and the nearest place's answer wins. A snapshot holds
+    every hourly republish of a forecast, and a model is fitted on thousands
+    of passes, so a scan per pass is the difference between seconds and hours.
+
     Args:
         samples: Every value the snapshot holds.
         places: Each station's latitude and longitude.
@@ -156,18 +165,37 @@ class Conditions:
         samples: Sequence[EnvironmentSample] = (),
         places: dict[str, tuple[float, float]] | None = None,
     ) -> None:
-        """Keep only the two quantities the group reads."""
-        wanted = (KP.quantity, CLOUD.quantity)
-        self._samples = tuple(one for one in samples if one.quantity in wanted)
+        """Keep only the two quantities the group reads, indexed by place."""
+        groups: dict[tuple[str, float | None, float | None], list[EnvironmentSample]]
+        groups = {}
+        for one in samples:
+            if one.quantity in (KP.quantity, CLOUD.quantity):
+                key = (one.quantity, one.lat_deg, one.lon_deg)
+                groups.setdefault(key, []).append(one)
+        self._groups = {
+            key: _Place(sorted(members, key=_within_place))
+            for key, members in groups.items()
+        }
         self._places = places or {}
 
     def choices(self, station_id: str, at: datetime) -> tuple[Choice, Choice]:
         """The Kp and cloud cover one pass reads."""
         place = self._places.get(station_id)
-        return (
-            value_before(self._samples, KP, at, None),
-            value_before(self._samples, CLOUD, at, place),
-        )
+        return self._choose(KP, at, None), self._choose(CLOUD, at, place)
+
+    def _choose(
+        self, rule: Rule, at: datetime, place: tuple[float, float] | None
+    ) -> Choice:
+        """:func:`value_before`, one binary search per place."""
+        best = []
+        for (quantity, _, _), held in self._groups.items():
+            if quantity == rule.quantity and _near(held.members[0], rule, place):
+                found = held.latest_before(at)
+                if found is not None:
+                    best.append(found)
+        if not best:
+            return Choice(None, "nothing published before the pass")
+        return _judged(max(best, key=lambda one: _preference(one, place)), rule, at)
 
     def values(self, station_id: str, at: datetime) -> tuple[float, ...]:
         """The group's four features, in :data:`CONDITION_FEATURES` order."""
@@ -176,6 +204,30 @@ class Conditions:
             for choice in self.choices(station_id, at)
             for number in _encoded(choice)
         )
+
+
+class _Place:
+    """One place's values, in :func:`_within_place` order."""
+
+    def __init__(self, members: list[EnvironmentSample]) -> None:
+        self.members = members
+        self._begins = [one.observed_from for one in members]
+
+    def latest_before(self, at: datetime) -> EnvironmentSample | None:
+        """The preferred value begun by ``at`` and published before it.
+
+        The first published before ``at``, searching back from the latest
+        interval begun by then.
+        """
+        for index in range(bisect_right(self._begins, at) - 1, -1, -1):
+            if self.members[index].published_at < at:
+                return self.members[index]
+        return None
+
+
+def _within_place(one: EnvironmentSample) -> tuple[datetime, datetime, int]:
+    """:func:`_preference` at one place, where the distance is the same."""
+    return one.observed_from, one.published_at, one.sample_id
 
 
 def _encoded(choice: Choice) -> tuple[float, float]:

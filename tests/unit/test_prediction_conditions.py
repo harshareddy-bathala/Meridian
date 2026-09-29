@@ -5,6 +5,7 @@ Reference: docs/DECISIONS.md D-221, D-222, D-224.
 
 from __future__ import annotations
 
+import random
 from datetime import UTC, datetime, timedelta
 
 from meridian.datasets.canonical import canonical_line
@@ -140,3 +141,32 @@ def test_a_value_normalised_twice_is_read_once_from_the_later_load() -> None:
 
 def test_a_snapshot_from_before_stage_31_holds_no_values() -> None:
     assert read_environment_samples({}) == ()
+
+
+def test_the_indexed_answer_is_the_scanned_answer_for_every_pass() -> None:
+    """``Conditions`` searches an index; ``value_before`` is the definition.
+
+    Seeded rows at three places — one near, one beyond 25 km, one global —
+    with forecasts republished hourly and revisions published after later
+    passes, then every pass across two days asked of both.
+    """
+    generator = random.Random(31)
+    near, far = (12.99, 77.61), (13.40, 77.59)
+    rows = []
+    for n in range(600):
+        quantity, place, hours = generator.choice(
+            [("kp_index", None, 3), ("cloud_cover", near, 1), ("cloud_cover", far, 1)]
+        )
+        observed = T + timedelta(hours=generator.randrange(-24, 24))
+        published = observed + timedelta(hours=generator.randrange(-30, 6))
+        value = None if generator.random() < 0.1 else generator.uniform(0, 9)
+        rows.append(sample(n, observed, published, value, quantity, place, hours))
+    samples = read(*rows)
+    conditions = Conditions(samples, {"st": HERE})  # type: ignore[arg-type]
+
+    for minutes in range(-24 * 60, 24 * 60, 17):
+        at = T + timedelta(minutes=minutes)
+        assert conditions.choices("st", at) == (
+            value_before(samples, KP, at, None),  # type: ignore[arg-type]
+            value_before(samples, CLOUD, at, HERE),  # type: ignore[arg-type]
+        )
