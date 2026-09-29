@@ -361,7 +361,7 @@ Planned as a table of what the ingested products say about each area. **A series
 `region_alerts (alert_id, area_id, quantity, rule, baseline_from, baseline_until, current_from, current_until, baseline_value, current_value, change, change_low, change_high, threshold, report_sha256, summary, recorded_at)`
 `region_alert_deliveries (delivery_id, alert_id, channel, outcome, detail, attempted_at)`
 
-Built by migration `0022`. A regional alert is a change in an area against its baseline whose whole interval lay beyond its threshold (D-231), recorded from a regional report. `alert_id` is `ra_` and 24 hex digits derived from what the alert is about and the snapshot and configuration it came from, so recording a report twice writes nothing; a CHECK holds the change inside its own interval. Every delivery attempt is appended; the only channel is `record_only` until Stage 29 builds notifications (D-232). Neither table shares a name with the platform's Prometheus alerting (D-228).
+Built by migration `0022`. A regional alert is a change in an area against its baseline whose whole interval lay beyond its threshold (D-231), recorded from a regional report. `alert_id` is `ra_` and 24 hex digits derived from what the alert is about and the snapshot and configuration it came from, so recording a report twice writes nothing; a CHECK holds the interval in order — not the change inside it, which a percentile bootstrap does not promise. Every delivery attempt is appended; the only channel is `record_only` until Stage 29 builds notifications (D-232). Neither table shares a name with the platform's Prometheus alerting (D-228).
 
 ---
 

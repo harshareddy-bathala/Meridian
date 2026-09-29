@@ -92,15 +92,15 @@ def measure_change(
         verdict="insufficient",
         reason="",
     )
-    if min(len(before), len(after)) < config.min_points:
-        return replace(
-            blank, reason=f"fewer than {config.min_points} values in a period"
-        )
-    if rule.kind == "relative" and _mean(before) == 0:
-        return replace(blank, reason="a relative change from a baseline of zero")
+    too_little = _too_little(rule, before, after, config.min_points)
+    if too_little is not None:
+        return replace(blank, reason=too_little)
     change = _difference(rule, before, after)
     seed = _seed(config.seed, area_id, quantity)
-    low, high = _interval(rule, before, after, config, seed)
+    interval = _interval(rule, before, after, config, seed)
+    if interval is None:
+        return replace(blank, reason="every resampled baseline was zero")
+    low, high = interval
     beyond = high < rule.threshold if rule.threshold < 0 else low > rule.threshold
     return replace(
         blank,
@@ -115,6 +115,17 @@ def measure_change(
             " or does not cross it"
         ),
     )
+
+
+def _too_little(
+    rule: Rule, before: Sequence[float], after: Sequence[float], min_points: int
+) -> str | None:
+    """Why no change can be measured from these values, or None."""
+    if min(len(before), len(after)) < min_points:
+        return f"fewer than {min_points} values in a period"
+    if rule.kind == "relative" and _mean(before) == 0:
+        return "a relative change from a baseline of zero"
+    return None
 
 
 def _values(points: Sequence[SeriesPoint], period: Period) -> list[float]:
@@ -140,8 +151,13 @@ def _interval(
     after: Sequence[float],
     config: RegionsConfig,
     seed: int,
-) -> tuple[float, float]:
-    """A percentile bootstrap of the difference, periods resampled apart."""
+) -> tuple[float, float] | None:
+    """A percentile bootstrap of the difference, periods resampled apart.
+
+    A relative change is undefined from a resampled baseline of zero, so that
+    draw is dropped; None when every draw was. The point estimate is not
+    promised to lie inside a percentile interval, and is not moved into it.
+    """
     generator = random.Random(seed)
     draws = []
     for _ in range(config.resamples):
@@ -150,6 +166,8 @@ def _interval(
         if rule.kind == "relative" and sum(a) == 0:
             continue
         draws.append(_difference(rule, a, b))
+    if not draws:
+        return None
     draws.sort()
     tail = (1.0 - config.confidence) / 2.0
     low = draws[max(0, math.floor(tail * len(draws)))]

@@ -15,8 +15,9 @@ Three shapes of product, three ways of placing one on an area:
   ``nearest_km``, as a daily mean. The method says which.
 * **Detections** (``fire_count``, ``fire_radiative_power_sum``): detections
   inside the area per UTC day — only for days a fetched artefact's box and day
-  covered the whole area. A covered day with none is **0**; a day nobody asked
-  about is **absent**, never 0 (D-221).
+  covered the whole area, fetched after the day ended. A covered day with none
+  is **0**; a day nobody asked about, or asked about only while it was under
+  way, is **absent**, never 0 (D-221).
 
 **The latest revision of each value is used**, since a report describes the
 world as the snapshot knew it. That is the opposite of a feature's pre-pass
@@ -83,10 +84,16 @@ class SeriesPoint:
 def latest_revisions(
     samples: Iterable[EnvironmentSample],
 ) -> tuple[EnvironmentSample, ...]:
-    """One sample per ``(source, series_key)``: the one published last."""
-    latest: dict[tuple[str, str], EnvironmentSample] = {}
+    """One sample per value: the one published last.
+
+    A value is its source, its ``series_key`` and its place. The place is part
+    of it because several adapters key a value by time alone (an hour of cloud,
+    a day of rain, a composite's pixel) and are asked about several points, so
+    two places' values share a ``series_key`` without one revising the other.
+    """
+    latest: dict[tuple[str, str, float | None, float | None], EnvironmentSample] = {}
     for one in samples:
-        key = (one.source_id, one.series_key)
+        key = (one.source_id, one.series_key, one.lat_deg, one.lon_deg)
         held = latest.get(key)
         if held is None or (one.published_at, one.sample_id) > (
             held.published_at,
@@ -218,7 +225,12 @@ def _fires(context: _Context, samples: list[EnvironmentSample]) -> list[SeriesPo
 
 
 def _covered_days(context: _Context) -> dict[datetime, set[int]]:
-    """UTC days a fetched FIRMS artefact covered, over the whole area."""
+    """UTC days a fetched FIRMS artefact covered, over the whole area.
+
+    Only days that had ended when the artefact was fetched: ``follow`` asks for
+    today every few hours, and a count of the morning is not a count of the
+    day. A day asked about only while it was under way is absent, not 0.
+    """
     west, south, east, north = context.polygon.bbox
     days: dict[datetime, set[int]] = defaultdict(set)
     for record in context.records.values():
@@ -233,7 +245,7 @@ def _covered_days(context: _Context) -> dict[datetime, set[int]]:
         box_w, box_s, box_e, box_n = record.extent
         if box_w <= west and box_s <= south and box_e >= east and box_n >= north:
             day = _day(record.valid_from)
-            while day < record.valid_to:
+            while day < record.valid_to and day + DAY <= record.retrieved_at:
                 days[day].add(record.record_id)
                 day += DAY
     return days

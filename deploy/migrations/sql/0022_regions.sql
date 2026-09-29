@@ -79,8 +79,10 @@ create table region_alerts (
     summary            text        not null check (length(btrim(summary)) > 0),
     recorded_at        timestamptz not null default now(),
 
+    -- Only the interval's own order: a percentile bootstrap does not promise
+    -- to hold the point estimate, least of all for a relative change.
     constraint region_alert_interval_is_ordered
-        check (change_low <= change and change <= change_high),
+        check (change_low <= change_high),
     constraint region_alert_periods_are_ordered
         check (baseline_from < baseline_until and current_from < current_until)
 );
