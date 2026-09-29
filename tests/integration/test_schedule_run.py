@@ -1061,7 +1061,7 @@ def test_a_mask_on_a_chain_that_cannot_receive_the_pass_is_ignored(
             " freq_max_hz, modes, polarisation, min_elevation_deg,"
             " horizon_mask_json)"
             " values (%s, 'uhf', 435000000, 438000000, '{fsk}', 'rhcp', 10,"
-            " '[{\"az_deg\": 0, \"min_el_deg\": 90}]'::jsonb)",
+            ' \'[{"az_deg": 0, "min_el_deg": 90}]\'::jsonb)',
             (STATION,),
         )
 

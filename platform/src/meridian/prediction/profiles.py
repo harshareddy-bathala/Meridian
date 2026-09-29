@@ -27,11 +27,20 @@ this, and the two are kept apart.
 settle margin has passed, as in :mod:`meridian.prediction.history`. **Never
 missing** (D-161): an empty cell is at its prior, beside a count of zero.
 
+**Persisted by the same functions** (D-174). :func:`station_profiles` gives every
+horizon sector and interference cell of each station as they stand at a
+dataset's ``as_of``, for ``meridian profiles build`` to write. It calls the same
+placement, quartile and shrinkage the features do, so a stored profile is the
+profile a feature read. It differs in one respect: a simulated station's profile
+is built from its own simulated reports and says so. Features never read a
+simulated report, and the stored profiles never feed a feature.
+
 Which report of a physical pass is read: the most informative of its
 assignments' latest revisions, as D-146 pools them. A simulated report is
 never read (D-078).
 
-Reference: docs/DECISIONS.md D-031, D-078, D-146, D-148, D-157, D-159, D-161.
+Reference: docs/DECISIONS.md D-031, D-078, D-146, D-148, D-157, D-159, D-161,
+D-174.
 """
 
 from __future__ import annotations
@@ -49,13 +58,27 @@ from meridian.prediction.feature_rows import FeatureRows, PassGeometry, Reading
 from meridian.prediction.geometry import peak_and_sweep, sector, track_at
 from meridian.prediction.history import RECENT
 
-__all__ = ["ENVIRONMENT", "Environment"]
+__all__ = [
+    "ENVIRONMENT",
+    "HORIZON_SECTOR_DEG",
+    "HOUR_BAND_H",
+    "NOISE_SECTOR_DEG",
+    "PROFILE_METHOD",
+    "Environment",
+    "HorizonSector",
+    "InterferenceCell",
+    "StationProfiles",
+    "station_profiles",
+]
 
 HORIZON_SECTOR_DEG = 10.0
 NOISE_SECTOR_DEG = 45.0
 HOUR_BAND_H = 4
 SHRINK = 5
 """Pseudo-count: a cell of five readings is trusted halfway."""
+PROFILE_METHOD = "d159-v1"
+"""The version of this module's horizon and interference, as a stored row names
+it (D-060, D-174). A change to either rule changes this."""
 _LOWER_QUARTILE = 0.25
 _A_SPREAD = 2
 """Predictions needed before their rises can disagree."""
@@ -83,6 +106,9 @@ class _Heard:
     timing_error_s: float | None
     noise_dbfs: float | None
     noise_cell: tuple[int, int]
+    gain_db: float | None = None
+    """The gain ``noise_dbfs`` was measured at. Read only by the persisted
+    profile (D-174)."""
 
 
 class Environment:
@@ -198,6 +224,7 @@ def _place(
         else (detected - one.aos).total_seconds(),
         noise_dbfs=report.noise_floor_dbfs,
         noise_cell=_noise_cell(one, geometry, rows.longitudes),
+        gain_db=report.receiver_gain_db,
     )
 
 
@@ -243,7 +270,12 @@ def _interference(heard: Sequence[_Heard], cell: tuple[int, int]) -> tuple[float
     if not in_cell:
         return 0.0, 0
     overall = median(one.noise_dbfs for one in readings if one.noise_dbfs is not None)
-    lift = median(value for value in in_cell if value is not None) - overall
+    return _shrunk_lift([value for value in in_cell if value is not None], overall)
+
+
+def _shrunk_lift(in_cell: Sequence[float], overall: float) -> tuple[float, int]:
+    """A cell's median over the station's, shrunk towards 0 dB by its count."""
+    lift = median(in_cell) - overall
     return len(in_cell) / (len(in_cell) + SHRINK) * lift, len(in_cell)
 
 
@@ -272,3 +304,156 @@ def _divergence(one: LabelledPass, rows: FeatureRows) -> float:
     if len(rises) < _A_SPREAD:
         return 0.0
     return (max(rises) - min(rises)).total_seconds()
+
+
+# --- the persisted profiles (D-174) -------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class HorizonSector:
+    """One 10° sector of a station's learned horizon."""
+
+    azimuth_deg: float
+    width_deg: float
+    floor_deg: float
+    """The learned floor, at its prior of 0° where nothing was detected."""
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class InterferenceCell:
+    """One sector and band of local solar hour of a station's noise floor."""
+
+    azimuth_deg: float
+    width_deg: float
+    hour_start: int
+    hour_width: int
+    lift_db: float
+    """Over the station's median, at its prior of 0 dB where nothing was read."""
+    count: int
+    gain_min_db: float | None
+    gain_max_db: float | None
+    """The gains the cell's floors were measured at; both null when it is empty."""
+
+
+@dataclass(frozen=True, slots=True)
+class StationProfiles:
+    """One station's learned horizon and interference, every cell of each."""
+
+    station_id: str
+    simulated: bool
+    horizon: tuple[HorizonSector, ...]
+    interference: tuple[InterferenceCell, ...]
+    median_dbfs: float | None
+    """The station's median floor, which each cell's lift is relative to."""
+
+
+def station_profiles(
+    labelled: Iterable[LabelledPass],
+    rows: FeatureRows,
+    *,
+    settle_margin_s: int,
+    as_of: datetime,
+) -> tuple[StationProfiles, ...]:
+    """Every station's profiles from what had settled by ``as_of``, by station id.
+
+    Args:
+        labelled: A labelled dataset's passes, of both populations.
+        rows: Its raw snapshot's feature rows.
+        settle_margin_s: The dataset's settle margin.
+        as_of: The dataset's ``as_of``. A report counts once it had settled.
+
+    Returns:
+        One entry per station with a labelled pass, whether or not anything
+        was heard: a station with no reports has its profile at its prior.
+    """
+    margin = timedelta(seconds=settle_margin_s)
+    heard: dict[str, list[_Heard]] = {}
+    simulated: dict[str, bool] = {}
+    for one in labelled:
+        simulated.setdefault(one.station_id, one.simulated)
+        held = heard.setdefault(one.station_id, [])
+        report = _own_report(one, rows)
+        geometry = rows.geometry.get(one.pass_id)
+        if report is None or geometry is None or one.label is None:
+            continue
+        placed = _place(one, report, geometry, rows, one.los + margin)
+        if placed.settled_at <= as_of:
+            held.append(placed)
+    return tuple(
+        StationProfiles(
+            station_id=station_id,
+            simulated=simulated[station_id],
+            horizon=_horizon_sectors(heard[station_id]),
+            interference=_interference_cells(heard[station_id]),
+            median_dbfs=_median_floor(heard[station_id]),
+        )
+        for station_id in sorted(heard)
+    )
+
+
+def _own_report(one: LabelledPass, rows: FeatureRows) -> Reading | None:
+    """The most informative report of this rise from the pass's own population."""
+    readings = [
+        reading
+        for member in one.pass_ids
+        for reading in rows.readings.get(member, ())
+        if reading.simulated == one.simulated
+    ]
+    return min(readings, key=_informativeness, default=None)
+
+
+def _horizon_sectors(heard: Sequence[_Heard]) -> tuple[HorizonSector, ...]:
+    by_sector: dict[int, list[float]] = {}
+    for one in heard:
+        if one.detection is not None:
+            azimuth, elevation = one.detection
+            by_sector.setdefault(sector(azimuth, HORIZON_SECTOR_DEG), []).append(
+                elevation
+            )
+    return tuple(
+        HorizonSector(
+            azimuth_deg=index * HORIZON_SECTOR_DEG,
+            width_deg=HORIZON_SECTOR_DEG,
+            floor_deg=_learned_floor(by_sector.get(index, [])),
+            count=len(by_sector.get(index, [])),
+        )
+        for index in range(int(360 // HORIZON_SECTOR_DEG))
+    )
+
+
+def _median_floor(heard: Sequence[_Heard]) -> float | None:
+    floors = [one.noise_dbfs for one in heard if one.noise_dbfs is not None]
+    return median(floors) if floors else None
+
+
+def _interference_cells(heard: Sequence[_Heard]) -> tuple[InterferenceCell, ...]:
+    overall = _median_floor(heard)
+    cells = []
+    for index in range(int(360 // NOISE_SECTOR_DEG)):
+        for band in range(24 // HOUR_BAND_H):
+            in_cell = [
+                one
+                for one in heard
+                if one.noise_dbfs is not None and one.noise_cell == (index, band)
+            ]
+            floors = [one.noise_dbfs for one in in_cell if one.noise_dbfs is not None]
+            gains = [one.gain_db for one in in_cell if one.gain_db is not None]
+            lift, count = (
+                (0.0, 0)
+                if overall is None or not floors
+                else _shrunk_lift(floors, overall)
+            )
+            cells.append(
+                InterferenceCell(
+                    azimuth_deg=index * NOISE_SECTOR_DEG,
+                    width_deg=NOISE_SECTOR_DEG,
+                    hour_start=band * HOUR_BAND_H,
+                    hour_width=HOUR_BAND_H,
+                    lift_db=lift,
+                    count=count,
+                    gain_min_db=min(gains) if count and gains else None,
+                    gain_max_db=max(gains) if count and gains else None,
+                )
+            )
+    return tuple(cells)

@@ -184,6 +184,7 @@ def _report(
             if decoded
             else None,
             "noise_floor_dbfs": rng.uniform(-105.0, -90.0),
+            "receiver_gain_db": 32.8,
             "simulated": False,
         }
     )

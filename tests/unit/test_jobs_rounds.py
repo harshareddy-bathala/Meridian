@@ -19,9 +19,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from prometheus_client import REGISTRY
 
-from meridian.jobs.job_metrics import PASS_GENERATION, SCHEDULE
+from meridian.jobs.job_metrics import PASS_GENERATION, PROFILES, SCHEDULE
 from meridian.jobs.rounds import RoundPlan, run_round, run_until_stopped
 from meridian.pass_generation import GenerationHorizon, GenerationReport
+from meridian.profile_build import ProfileBuildReport
 from meridian.scheduler.optimiser import SolverRun
 from meridian.scheduler.run import ScheduleReport, ScheduleRequest
 from meridian.scheduler.schedule_config import ScheduleConfig
@@ -32,12 +33,17 @@ HISTORY_AS_OF = NOW - timedelta(days=2)
 
 
 class _Work:
-    """Two tasks that record what they were asked and can be made to fail."""
+    """The round's tasks, recording what they were asked; any can be made to fail."""
 
     def __init__(
-        self, *, generation_fails: bool = False, status: str = "optimal"
+        self,
+        *,
+        generation_fails: bool = False,
+        profiles_fail: bool = False,
+        status: str = "optimal",
     ) -> None:
         self.generation_fails = generation_fails
+        self.profiles_fail = profiles_fail
         self.status = status
         self.horizons: list[GenerationHorizon] = []
         self.requests: list[ScheduleRequest] = []
@@ -81,6 +87,20 @@ class _Work:
                 detail=None,
             ),
             history_as_of=HISTORY_AS_OF,
+        )
+
+    def profiles(self) -> ProfileBuildReport:
+        if self.profiles_fail:
+            raise RuntimeError("the datasets volume is not mounted")
+        return ProfileBuildReport(
+            declared_capabilities=1,
+            declared_written=0,
+            dataset=None,
+            dataset_as_of=None,
+            already_built=False,
+            stations_built=0,
+            horizon_rows=0,
+            interference_rows=0,
         )
 
 
@@ -201,3 +221,26 @@ def test_a_stop_before_the_first_round_runs_nothing() -> None:
     stop.set()
 
     assert run_until_stopped(lambda: None, 1.0, stop) == 0
+
+
+def test_a_round_ends_by_building_the_profiles() -> None:
+    """D-174: every round, after scheduling, and visible to Prometheus."""
+    before = sample("meridian_job_duration_seconds_count", PROFILES) or 0.0
+
+    outcome = run_round(_Work(), PLAN, NOW)
+
+    assert outcome.profiled is not None
+    assert sample("meridian_job_duration_seconds_count", PROFILES) == before + 1
+    assert sample("meridian_job_last_success_timestamp_seconds", PROFILES)
+
+
+def test_a_failed_profile_build_leaves_the_schedule_standing() -> None:
+    """Profiles are for showing; receiving and scheduling do not wait on them."""
+    failures = sample("meridian_job_failures_total", PROFILES) or 0.0
+
+    outcome = run_round(_Work(profiles_fail=True), PLAN, NOW)
+
+    assert outcome.profiled is None
+    assert outcome.generated is not None
+    assert outcome.scheduled is not None
+    assert sample("meridian_job_failures_total", PROFILES) == failures + 1

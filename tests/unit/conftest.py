@@ -102,6 +102,7 @@ def _observation(
         "outcome": outcome,
         "first_detection_at": None,
         "noise_floor_dbfs": None,
+        "receiver_gain_db": None,
         "simulated": simulated,
     }
 

@@ -206,3 +206,17 @@ groups:
         annotations:
           summary: The reliability task has not completed once since the jobs process started.
           runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+      # Warning, not critical: profiles are for showing and for diagnosis, and a
+      # round that cannot build them still receives and schedules (D-174).
+      - alert: ScheduledTaskNeverSucceeded
+        expr: >-
+          time() - process_start_time_seconds{job="meridian-jobs"} > 900
+          unless on(job, instance)
+          meridian_job_last_success_timestamp_seconds{task="profiles"}
+        labels:
+          severity: warning
+          task: profiles
+        annotations:
+          summary: The profiles task has not completed once since the jobs process started.
+          runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded

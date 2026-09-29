@@ -10,7 +10,8 @@ amortize.
 metrics directory several workers need (``cli_serve``); ``jobs`` and ``db`` are
 the scheduled work and the migration check beside it; ``snapshot`` exports,
 labels and verifies Stage 15's datasets (``cli_snapshot``); ``model`` fits,
-evaluates and shows Stage 17's models (``cli_model``). A command whose stage
+evaluates and shows Stage 17's models (``cli_model``); ``profiles`` writes the
+horizon and interference profiles (``cli_profiles``). A command whose stage
 has not arrived yet — ``report`` — reports which stage of
 docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md builds it and exits
 :data:`EXIT_NOT_IMPLEMENTED`, so a caller gets an answer rather than a
@@ -39,6 +40,7 @@ from meridian.cli_invite import run_invite
 from meridian.cli_jobs import add_jobs_parser, run_jobs
 from meridian.cli_model import add_model_parser, run_model
 from meridian.cli_passes import run_passes
+from meridian.cli_profiles import add_profiles_parser, run_profiles
 from meridian.cli_regions import add_regions_parser, run_regions
 from meridian.cli_reliability import add_reliability_parser, run_reliability
 from meridian.cli_schedule import add_schedule_parser, run_scheduler
@@ -301,6 +303,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_model_parser(subcommands)
     add_reliability_parser(subcommands)
     add_regions_parser(subcommands)
+    add_profiles_parser(subcommands)
     _add_pending_parsers(subcommands)
 
     return parser
@@ -316,6 +319,7 @@ NEEDS_ACTION = frozenset(
         "passes",
         "regions",
         "reliability",
+        "profiles",
         "snapshot",
         "station",
     }
@@ -337,6 +341,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "passes": run_passes,
     "regions": run_regions,
     "reliability": run_reliability,
+    "profiles": run_profiles,
     "schedule": run_scheduler,
     "serve": run_serve,
     "snapshot": run_snapshot,
