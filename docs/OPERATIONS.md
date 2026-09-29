@@ -175,6 +175,7 @@ reserve_bytes = 1073741824
 
 [retention]
 keep_recordings = false   # true keeps each recording after its result is sent
+products_max_bytes = 2147483648   # the product store's cap; oldest evicted first
 ```
 
 To replay recordings instead of receiving, name one per assignment:

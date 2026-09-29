@@ -19,7 +19,7 @@ Phase found         Action
 ``handed_over``     delete its recording; prune the folder after 30 days
 ==================  =====================================================
 
-Reference: docs/DECISIONS.md D-015, D-073, D-074, D-122, D-123.
+Reference: docs/DECISIONS.md D-015, D-073, D-074, D-122, D-123, D-176.
 """
 
 from __future__ import annotations
@@ -39,6 +39,11 @@ from meridian_client.reception.decode_report import (
 )
 from meridian_client.reception.manifest import Manifest, RecordingStamp, advance
 from meridian_client.reception.outcome_rules import ReceptionFacts
+from meridian_client.reception.product_store import (
+    HeldProduct,
+    ProductStore,
+    digest_of,
+)
 from meridian_client.reception.protocols import BYTES_PER_SAMPLE, Recording
 from meridian_client.reception.subprocess_decoder import decode_paths
 
@@ -47,6 +52,8 @@ __all__ = [
     "Recovery",
     "discard_recording",
     "facts_for",
+    "held_products",
+    "keep_products",
     "recover",
 ]
 
@@ -68,34 +75,73 @@ class Recovery:
     unreadable: tuple[ScannedFolder, ...] = ()
 
 
-def facts_for(manifest: Manifest, folder: Path) -> ReceptionFacts:
+def facts_for(
+    manifest: Manifest, folder: Path, products: ProductStore | None = None
+) -> ReceptionFacts:
     """The facts of a finished reception, read back from its folder.
 
     Args:
         manifest: A manifest in ``refused`` or ``reported``.
         folder: Its capture folder, where the decode report is.
+        products: The station's product store. ``None`` declares no products,
+            as a station with nowhere to keep them must not.
 
     Note:
         A decode that failed stored its reason in the manifest. One that
         succeeded left its report on disk, and the report is read again here
         rather than carried in memory — so the result built at hand-over and the
         one rebuilt after a restart come from the same bytes.
+
+        Each product the report names is hashed again from the output
+        directory, and declared only if the store holds that hash (D-176). A
+        product the store could not keep is never claimed.
     """
     recording = manifest.recording
     if manifest.phase == "refused" or recording is None:
         return ReceptionFacts(manifest.assignment, reason=manifest.reason)
     decode: DecodeReport | DecodeFailure
+    paths = decode_paths(folder)
     if manifest.reason is not None:
         decode = DecodeFailure(manifest.reason)
     else:
         try:
             decode = read_decode_report(
-                decode_paths(folder).report,
+                paths.report,
                 recording_duration_s=recording.sample_count / recording.sample_rate_hz,
+                output_dir=paths.output_dir,
             )
         except DecodeReportError as exc:
             decode = DecodeFailure(str(exc))
-    return ReceptionFacts(manifest.assignment, recording, decode)
+    held: tuple[HeldProduct, ...] = ()
+    if products is not None and isinstance(decode, DecodeReport):
+        held = held_products(decode, paths.output_dir, products)
+    return ReceptionFacts(manifest.assignment, recording, decode, products=held)
+
+
+def keep_products(report: DecodeReport, folder: Path, products: ProductStore) -> None:
+    """Copy every product a settled decode named into the station's store."""
+    output_dir = decode_paths(folder).output_dir
+    for one in report.products:
+        products.keep(output_dir / one.path)
+
+
+def held_products(
+    report: DecodeReport, output_dir: Path, products: ProductStore
+) -> tuple[HeldProduct, ...]:
+    """The report's products the store holds, in the order the decoder named them.
+
+    Two names for identical bytes are one product, declared once, under the
+    kind named first.
+    """
+    held: dict[str, HeldProduct] = {}
+    for one in report.products:
+        try:
+            sha256, size = digest_of(output_dir / one.path)
+        except OSError:
+            continue
+        if sha256 not in held and products.holds(sha256):
+            held[sha256] = HeldProduct(kind=one.kind, sha256=sha256, size_bytes=size)
+    return tuple(held.values())
 
 
 def recover(

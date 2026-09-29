@@ -16,6 +16,7 @@ Reference: docs/DECISIONS.md D-073, D-121 to D-126.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -31,8 +32,13 @@ from meridian_client.observation_message import (
     build_observation_body,
 )
 from meridian_client.reception.capture_folder import CaptureFolders
-from meridian_client.reception.decode_report import DecodeFailure, DecodeReport
+from meridian_client.reception.decode_report import (
+    DecodeFailure,
+    DecodeReport,
+    read_decode_report,
+)
 from meridian_client.reception.disk_guard import DiskGuard
+from meridian_client.reception.product_store import ProductStore
 from meridian_client.reception.protocols import (
     CapturePlan,
     DecodeJob,
@@ -586,3 +592,71 @@ def test_tuning_is_what_the_manifest_records_while_capturing(
         "u8",
     )
     assert manifest.recording is None
+
+
+# --- products (D-176) ---------------------------------------------------------
+
+
+class ProductRun:
+    """A decode that writes a waterfall and names it, as a real decoder would."""
+
+    def __init__(self, job: DecodeJob) -> None:
+        self._job = job
+
+    def poll(self) -> DecodeReport | DecodeFailure | None:
+        paths = decode_paths(self._job.folder)
+        paths.output_dir.mkdir(parents=True, exist_ok=True)
+        (paths.output_dir / "waterfall.png").write_bytes(b"waterfall")
+        paths.report.write_text(
+            json.dumps(
+                {**REPORT, "products": [{"kind": "waterfall", "path": "waterfall.png"}]}
+            )
+        )
+        recording = self._job.recording
+        return read_decode_report(
+            paths.report,
+            recording_duration_s=recording.sample_count / recording.sample_rate_hz,
+            output_dir=paths.output_dir,
+        )
+
+    def cancel(self) -> None:
+        pass
+
+
+class ProductDecoder(ScriptedDecoder):
+    def start(self, job: DecodeJob) -> ProductRun:  # type: ignore[override]
+        self.jobs.append(job)
+        return ProductRun(job)
+
+
+def test_a_named_product_is_kept_and_declared(tmp_path: Path, wall: FakeWall) -> None:
+    store = ProductStore(tmp_path / "products")
+    setup = setup_for(tmp_path, wall, decoder=ProductDecoder(), products=store)
+    executor = executor_for(setup, wall)
+
+    work_a_pass(executor, wall)
+    (result,) = drain(executor)
+
+    sha256 = hashlib.sha256(b"waterfall").hexdigest()
+    assert store.holds(sha256)
+    assert result.products == (
+        {
+            "kind": "waterfall",
+            "uri": f"station:products/{sha256}",
+            "sha256": sha256,
+            "size_bytes": len(b"waterfall"),
+        },
+    )
+
+
+def test_a_station_with_no_store_declares_no_products(
+    tmp_path: Path, wall: FakeWall
+) -> None:
+    setup = setup_for(tmp_path, wall, decoder=ProductDecoder())
+    executor = executor_for(setup, wall)
+
+    work_a_pass(executor, wall)
+    (result,) = drain(executor)
+
+    assert result.outcome == "decoded"
+    assert result.products == ()
