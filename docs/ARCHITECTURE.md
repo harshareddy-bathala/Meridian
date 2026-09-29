@@ -146,7 +146,9 @@ Regional monitoring (module 19): registered areas of interest, and what the inge
 
 **Not the platform's own monitoring.** Prometheus, Grafana and the alert rules watch Meridian; this module watches places on the ground, and the two never share a name in code (the same separation D-013 made for "health").
 
-Reads ingested records through `ingest`'s normalised tables and **never at runtime from a source**. Holds no personal data: an area of interest is a place and a label, and who may register one is open (D-137).
+Reads ingested records through `ingest`'s normalised tables and **never at runtime from a source**. Holds no personal data: an area of interest is a place and a label, and who may register one is open (D-137) — until it is settled, an operator registers one and nothing about it is published (D-227).
+
+Built at Stage 32 as `platform/src/meridian/regions/`. A regional report — series, change against a baseline with its interval, coverage by our own decoded receptions, and two cross-checks — is a pure function of a raw snapshot and a configuration, published as a content-addressed directory (D-229 to D-233). Only areas and recorded alerts are rows. Nothing on the scheduling or reception path imports it.
 
 ### `firmware`
 Arduino rotator controller. Stepper control, homing, limit switches, network command interface.

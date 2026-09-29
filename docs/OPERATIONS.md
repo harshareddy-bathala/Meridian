@@ -925,6 +925,51 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.74.
 
 ---
 
+## Regional monitoring
+
+Stage 32 watches places, not Meridian. Its decisions are D-227 to D-233. **It is not the platform's monitoring**: nothing here is a Prometheus metric, an alert rule or an Alertmanager route, and nothing on the scheduling or reception path reads it (D-228).
+
+### Areas of interest
+
+An area is a place and a label, registered by an operator — there is no endpoint that creates one, and nothing about an area is published until the team settles D-137 (D-227).
+
+| Task | Command |
+|---|---|
+| Register a rectangle | `meridian regions add --label "Bengaluru urban" --bbox 77.45,12.85,77.75,13.10` |
+| Register a polygon | `meridian regions add --label "…" --geojson area.geojson` — one Polygon, one ring |
+| List areas | `meridian regions list` |
+| Stop watching one | `meridian regions retire <area id>` — kept, never deleted |
+
+A label or note that looks like an email address, a phone number or a street address is refused: an area describes ground, never a person. The same shape registered twice is the same area.
+
+### Reports
+
+```bash
+meridian snapshot export --since 2026-06-01T00:00:00Z   # far enough back for the baseline
+cp deploy/regions.toml.example regions.toml             # set [baseline] and [current]
+meridian regions report --snapshot data/datasets/snapshots/<dir> --config regions.toml
+```
+
+The report is computed from the snapshot alone and published under `data/datasets/regions/<hash>/`. Run it twice and the second run prints `already held, identically`. It prints, per active area:
+
+- each series — points, how many are missing, and the latest value with the product it came from;
+- each change against the baseline: `ALERT`, `WITHIN` or `insufficient`, with the change, its interval and both periods' counts. An alert needs the whole interval past the threshold (D-231);
+- how many of our measured decoded receptions covered the area — simulated ones only if `include_simulated = true`, and then printed apart;
+- the two cross-checks (D-233). An **ingest gap** lists the days we imaged the area and a public product had no value: check that `meridian-ingest follow` ran and the source's box covers the area. A chain check that **differs** means decode rates on wet and dry days disagree beyond their intervals: at 137 MHz that is the station, not the sky — look at connectors and feedline weatherproofing;
+- how many tiles are held for the area, always called imagery.
+
+A baseline outside the snapshot's scope gives `insufficient`, never a zero: export with an earlier `--since`.
+
+### Alerts
+
+```bash
+meridian regions record-alerts --report data/datasets/regions/<dir>
+```
+
+Each alert is recorded in `region_alerts` once — recording the same report again writes nothing — and handed to the delivery interface, which **records only** until Stage 29 builds notifications: each attempt is a `region_alert_deliveries` row with channel `record_only` saying so (D-232). Nothing is emailed or messaged.
+
+---
+
 ## Backup and restore
 
 Host tools, standard library only (D-115). They reach the database through `compose exec db`, so no password appears on the host's command line.

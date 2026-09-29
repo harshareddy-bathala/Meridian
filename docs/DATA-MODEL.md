@@ -287,7 +287,7 @@ One row per evidence-dataset package; the package itself is files, as `products`
 
 ## Ingest and archive tables
 
-Seven tables and a view, for modules 18 and 19. **Five are built.** Migration `0016` built `ingest_sources` and `ingest_records` — the provenance pair, reused unchanged by Stage 31 rather than duplicated (D-140) — and `archive_stations` and `archive_observations`, which hold what an archive published about somebody else's receptions (D-139). Migration `0021` built `environment_samples`, Stage 31's published values (D-221). The remaining two are **planned**, and their column tuples are the intent until Stage 32 writes its migration. What all of them share is decided in D-132, D-133, D-134 and D-140:
+Seven tables and a view, for modules 18 and 19. **Five are built.** Migration `0016` built `ingest_sources` and `ingest_records` — the provenance pair, reused unchanged by Stage 31 rather than duplicated (D-140) — and `archive_stations` and `archive_observations`, which hold what an archive published about somebody else's receptions (D-139). Migration `0021` built `environment_samples`, Stage 31's published values (D-221), and migration `0022` built Stage 32's `areas_of_interest` with the two regional alert tables below. `area_series` is not built: series are published as files (D-229). What all of them share is decided in D-132, D-133, D-134 and D-140:
 
 - **Raw arrivals are append-only.** A re-fetch that differs is a new row, never an overwrite — the discipline D-015 applies to observations, applied to data we did not author either.
 - **Provenance is complete or the record is refused.** Source, original identifier, source version, retrieval time, licence and checksum, for every record, whatever it carries. The version of the transformation that produced a value sits on the normalised row rather than on the arrival (D-140): an artefact is retrieved once and may be normalised many times.
@@ -346,17 +346,22 @@ The normalised values features and regional series are read from — an index, a
 
 `observed_from`/`observed_to` is the interval described, closed, equal for an instantaneous detection. Location is `lat_deg`/`lon_deg` as a pair, null for a global value, with `footprint_m` the side of the square it stands for. `product` names the source's product and version and `quality` its own flag, verbatim. No `area_id`: which area a value falls in is Stage 32's computation over these rows.
 
-### `areas_of_interest` *(planned)*
-`(area_id, label, geometry, centroid_lat_deg, centroid_lon_deg, area_km2, created_at, active, notes)`
+### `areas_of_interest`
+`(area_id, label, geometry, geometry_sha256, centroid_lat_deg, centroid_lon_deg, area_km2, created_at, active, notes)`
 
-A place and a label — nothing else. **No owner, no contact, no address**: an area of interest describes ground, and the moment it describes a person it becomes personal data the project does not hold (`PROJECT.md` §16). Who may register one, and whether a registration is public, is open (D-137).
+Built by migration `0022` with Stage 32. A place and a label — nothing else. **No owner, no contact, no address**: an area of interest describes ground, and the moment it describes a person it becomes personal data the project does not hold (`PROJECT.md` §16). Who may register one, and whether a registration is public, is open (D-137); until it is settled an operator registers one at the command line, nothing about an area is published, and a label or note that looks like an email address, a phone number or a street address is refused (D-227).
 
-`geometry` is the registered extent; the centroid and area are derived and stored so a listing does not need the geometry. `active` retires an area without deleting its series, because a series that vanishes cannot be checked against what was published from it.
+`geometry` is a GeoJSON Polygon with one ring, CHECKed as a Polygon; the centroid and area are derived by `meridian.regions.geometry` and stored so a listing does not need the geometry. `geometry_sha256` is unique, so one shape is one area and a changed shape is a new area. `active` retires an area without deleting it, because a series that vanishes cannot be checked against what was published from it. `notes` is never exported into a snapshot.
 
-### `area_series` *(planned)*
-`(area_id, quantity, observed_at, value, value_unit, record_id, method, computed_at)`
+### `area_series` *(not built — D-229)*
 
-What the ingested products say about a registered area over time. **Every point names the `record_id` it was computed from** and the `method` version that computed it, so a chart on the dashboard can be traced to an artefact with a checksum and a licence. Recomputing with a new method appends; it never rewrites an earlier series.
+Planned as a table of what the ingested products say about each area. **A series is a pure function of a raw snapshot and a configuration**, so it is published as files in a regional report instead (`data/datasets/regions/`, below), where every point names its sources, products, record ids and retrieval time. A table would be a cache of that function that could drift from it.
+
+### `region_alerts` and `region_alert_deliveries`
+`region_alerts (alert_id, area_id, quantity, rule, baseline_from, baseline_until, current_from, current_until, baseline_value, current_value, change, change_low, change_high, threshold, report_sha256, summary, recorded_at)`
+`region_alert_deliveries (delivery_id, alert_id, channel, outcome, detail, attempted_at)`
+
+Built by migration `0022`. A regional alert is a change in an area against its baseline whose whole interval lay beyond its threshold (D-231), recorded from a regional report. `alert_id` is `ra_` and 24 hex digits derived from what the alert is about and the snapshot and configuration it came from, so recording a report twice writes nothing; a CHECK holds the change inside its own interval. Every delivery attempt is appended; the only channel is `record_only` until Stage 29 builds notifications (D-232). Neither table shares a name with the platform's Prometheus alerting (D-228).
 
 ---
 
@@ -373,6 +378,8 @@ Written by `meridian snapshot export`, the only step that reads the database, in
 - the `element_sets` the passes were computed from, `satellites` with their `transmitters`, and `stations` with their `capabilities`, effective from `registered_at` until `deleted_at`;
 - `archive_stations`, `archive_observations` and `ingest_provenance`, kept in their own files and their own vocabulary;
 - `environment_samples` *(Stage 31)* — every published value made public before `as_of` that describes time from a week before `since`, with the artefacts it cites added to `ingest_records` and their sources' terms to the manifest (D-222). A snapshot from before Stage 31 has no such file and reads as holding none;
+- `areas_of_interest` *(Stage 32)* — every area registered before `as_of`, active or retired, without its notes (D-227). `ingest_records` also carries every public artefact fetched about time near the scope — a FIRMS day with no detections, a tile — with its `spatial_extent` (D-229);
+- `pass_ground_tracks` *(Stage 32)* — per pass with a report, measured or simulated and flagged: the sub-satellite point every 30 s over `[aos, los)`, to three decimals of a degree, propagated at export so no regional computation propagates (D-230);
 - `archive_passes` *(Stage 16)* — the passes our orbit service says each archive station could have received, for the satellites it was seen receiving, propagated at export so labelling never propagates (D-150). What could not be computed is counted in the manifest, not left out.
 - `pass_tracks` *(Stage 17)* — per measured pass, where it was in the sky: `pass_id`, `start` (its `aos`), `step_s` (30), and `azimuth_deg` and `elevation_deg` sampled every 30 s over `[aos, los)`, to a hundredth of a degree with azimuth folded into `[0, 360)`. Propagated at export from the pass's own element set over its own station, after the snapshot transaction has read everything and closed, so that no feature propagates and no hash rests on `sgp4` agreeing to the last bit (D-158). Simulated passes get no track, and a pass whose station or element set is not in the snapshot is counted under `pass_tracks.*` in the manifest, never dropped.
 
@@ -405,6 +412,18 @@ Written by `meridian model fit` from an evaluation dataset, its raw snapshot and
 - `manifest.json` — kind `model`; the dataset's hash as `derived_from`, `model-1` as the transformation version, the configuration's hash and resolved values as `parameters`; the archive `sources` the dataset carried, with their licences and terms, so a model fitted on archive receptions still names whose they were; and counts: `examples.train`, `.validate` and `.test` with their `_decoded`, `examples.simulated` (usable passes left out, D-078) and `examples.without_weight` (left out of an `ipw` fit for want of a weight).
 
 **A model holds no example.** Examples are rebuilt from the dataset and its raw snapshot whenever they are needed, since they are a pure function of both (D-157), and `meridian model evaluate` follows `derived_from` to find them, checking each hash.
+
+### Regional report — `data/datasets/regions/<hash prefix>/` *(Stage 32)*
+
+Written by `meridian regions report` from a raw snapshot and a regional configuration (`deploy/regions.toml.example`), with no database, network or clock, so the same two inputs always name the same directory (D-229). Published and read by the same rules as a snapshot.
+
+- `areas.jsonl` — every area in the snapshot: id, label, area, active, bounding box and the shape's digest.
+- `series.jsonl` — per active area, quantity and period: the value or a `missing_reason`, how many published values it combines, its unit, the `method` that placed the product on the area (`regions-1: …`), and the `sources`, `products`, `record_ids` and newest `retrieved_at` behind it.
+- `changes.jsonl` — per area and quantity with a rule: both periods' counts and means, the change, its bootstrap interval, and a verdict of `alert`, `within` or `insufficient` with the reason (D-231). `alerts.jsonl` is the `alert` rows, each with its derived `alert_id`.
+- `coverage.jsonl` — each decoded reception whose ground track came within half a swath of an area, with the closest approach and `simulated` (D-230).
+- `ingest_agreement.jsonl` and `weather_agreement.jsonl` — the two cross-checks, as rates with Wilson intervals and counts (D-233).
+- `imagery.jsonl` — tiles overlapping each area, by record id, each labelled as imagery that is never read for a value (D-133).
+- `manifest.json` — kind `regions_report`; the raw snapshot as `derived_from`, `regions-1` as the transformation version, the configuration's hash and values; the sources' terms; and counts, coverage measured and simulated apart.
 ---
 
 ## Conventions
