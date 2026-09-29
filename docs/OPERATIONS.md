@@ -472,7 +472,7 @@ uv run meridian-ingest follow --once        # one round: each due source fetched
 uv run meridian-ingest follow --interval 300 # rounds until interrupted
 ```
 
-A source is due when its newest retrieval is older than its cadence (Kp and cloud hourly, fires three-hourly, the rest daily or slower). `--no-load` fetches only. A cron line for the machine holding the raw store:
+A source is due when its newest retrieval is older than its cadence (Kp and cloud hourly, fires three-hourly, the rest daily or slower). A round loads only artefacts not yet recorded, so its cost is what arrived, not everything ever held; after a normaliser changes, run `meridian-ingest load` once to re-apply it to what is held. `--no-load` fetches only. A cron line for the machine holding the raw store:
 
 ```cron
 */15 * * * *  cd /srv/meridian && DATABASE_URL=... uv run meridian-ingest follow --once >> /var/log/meridian-ingest.log 2>&1
@@ -966,7 +966,7 @@ A baseline outside the snapshot's scope gives `insufficient`, never a zero: expo
 meridian regions record-alerts --report data/datasets/regions/<dir>
 ```
 
-Each alert is recorded in `region_alerts` once — recording the same report again writes nothing — and handed to the delivery interface, which **records only** until Stage 29 builds notifications: each attempt is a `region_alert_deliveries` row with channel `record_only` saying so (D-232). Nothing is emailed or messaged.
+Each alert is recorded in `region_alerts` once — recording the same report again writes nothing — and handed to the delivery interface, which **records only** until Stage 29 builds notifications: each attempt is a `region_alert_deliveries` row with channel `record_only` saying so (D-232). An alert recorded by a run that stopped before its delivery was recorded is delivered by the next run, not passed by. Nothing is emailed or messaged.
 
 ---
 
