@@ -18,12 +18,15 @@ from meridian_ingest.raw_store import RawStore
 __all__ = ["run_load"]
 
 
-def run_load(settings: IngestSettings, sources: tuple[str, ...]) -> int:
+def run_load(
+    settings: IngestSettings, sources: tuple[str, ...], *, new_only: bool = False
+) -> int:
     """Load every stored artefact of each source into the database.
 
     Args:
         settings: For the raw store's root.
         sources: Which sources, already resolved.
+        new_only: Only artefacts not yet recorded; see ``load_source``.
 
     Returns:
         0, or 1 when the database cannot be reached.
@@ -41,7 +44,7 @@ def run_load(settings: IngestSettings, sources: tuple[str, ...]) -> int:
     conn.autocommit = True
     with conn:
         for source_id in sources:
-            report = load_source(conn, store, source_id)
+            report = load_source(conn, store, source_id, new_only=new_only)
             say(
                 f"{source_id}: {report.records_written} artefacts, "
                 f"{report.stations_written} stations, "

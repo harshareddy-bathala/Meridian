@@ -97,7 +97,7 @@ def follow_round(
         else:
             failed = True
     if load and fetched:
-        failed = run_load(settings, tuple(fetched)) != 0 or failed
+        failed = run_load(settings, tuple(fetched), new_only=True) != 0 or failed
     return failed
 
 

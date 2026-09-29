@@ -125,13 +125,20 @@ def register_source(conn: Connection, descriptor: SourceDescriptor) -> bool:
     return False
 
 
-def load_source(conn: Connection, store: RawStore, source_id: str) -> LoadReport:
-    """Load every artefact held for one source.
+def load_source(
+    conn: Connection, store: RawStore, source_id: str, *, new_only: bool = False
+) -> LoadReport:
+    """Load every artefact held for one source, or only those never recorded.
 
     Args:
         conn: An open connection.
         store: The raw store holding the retrieved artefacts.
         source_id: A registered source.
+        new_only: Skip artefacts already in ``ingest_records``. ``follow`` sets
+            it, so a round costs what arrived rather than all ever held; an
+            artefact commits with everything derived from it, so a recorded one
+            is a loaded one. ``load`` leaves it unset, to re-apply a bumped
+            normaliser to what is already held.
 
     Returns:
         What each artefact did.
@@ -152,9 +159,15 @@ def load_source(conn: Connection, store: RawStore, source_id: str) -> LoadReport
     """
     registered = register_source(conn, adapter_for(source_id).descriptor)
     normaliser = normaliser_for(source_id)
+    recorded = (
+        {one.raw_path for one in find_ingest_records_for_source(conn, source_id)}
+        if new_only
+        else set()
+    )
     loads = tuple(
         load_artefact(conn, store, normaliser, raw_path)
         for raw_path in store.scan(source_id)
+        if raw_path not in recorded
     )
     return LoadReport(
         source_id=source_id, source_registered=registered, artefacts=loads

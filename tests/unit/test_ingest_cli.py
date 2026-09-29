@@ -347,7 +347,7 @@ def test_load_commits_each_artefact_on_its_own(
     class _SeenError(Exception):
         pass
 
-    def record(conn: _Connection, *_args: object) -> object:
+    def record(conn: _Connection, *_args: object, **_kwargs: object) -> object:
         seen.append(conn.autocommit)
         raise _SeenError
 
@@ -378,7 +378,7 @@ def test_a_load_that_is_refused_says_why_without_a_traceback(
 ) -> None:
     """Exit 1 and the error's own sentence, like every other refusal here."""
 
-    def refuse(*_args: object) -> object:
+    def refuse(*_args: object, **_kwargs: object) -> object:
         raise error
 
     monkeypatch.setattr(cli_load, "connect_once", lambda _settings: _Connection())

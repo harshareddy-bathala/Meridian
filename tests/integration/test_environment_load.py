@@ -67,6 +67,18 @@ def test_a_published_index_loads_once_and_a_second_load_writes_nothing(
     assert again.wrote_nothing()
 
 
+def test_a_follow_round_loads_only_what_arrived_since_the_last(
+    rollback: Any, store: RawStore, publish_public: Any
+) -> None:
+    kp(store, publish_public, "swpc-kp-2026-09-28.json", FETCHED)
+    first = load_source(rollback, store, "noaa_swpc_kp", new_only=True)
+    again = load_source(rollback, store, "noaa_swpc_kp", new_only=True)
+
+    assert len(first.artefacts) == 1
+    assert first.samples_written == 16
+    assert again.artefacts == (), "an artefact already recorded is not re-read"
+
+
 def test_a_blank_value_is_a_row_with_its_reason(
     rollback: Any, store: RawStore, publish_public: Any
 ) -> None:
