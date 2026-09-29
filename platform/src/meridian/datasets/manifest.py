@@ -59,10 +59,15 @@ __all__ = [
 MANIFEST_FORMAT = 1
 """Bumped when the stored shape changes. An unknown format is refused."""
 
-Kind = Literal["raw_snapshot", "evaluation_dataset", "model"]
-KINDS: tuple[Kind, ...] = ("raw_snapshot", "evaluation_dataset", "model")
-_DERIVED: tuple[Kind, ...] = ("evaluation_dataset", "model")
-"""Kinds made from another directory, which name it and how (D-163)."""
+Kind = Literal["raw_snapshot", "evaluation_dataset", "model", "regions_report"]
+KINDS: tuple[Kind, ...] = (
+    "raw_snapshot",
+    "evaluation_dataset",
+    "model",
+    "regions_report",
+)
+_DERIVED: tuple[Kind, ...] = ("evaluation_dataset", "model", "regions_report")
+"""Kinds made from another directory, which name it and how (D-163, D-229)."""
 
 _FILE_NAME = re.compile(r"^([a-z][a-z0-9_]*\.jsonl|model\.json)$")
 """Ours, and plain: a file name is a table name, or a model's one file (D-163),
