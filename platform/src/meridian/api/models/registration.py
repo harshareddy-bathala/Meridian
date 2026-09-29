@@ -58,10 +58,15 @@ class Location(BaseModel):
 
 
 class HorizonMaskEntry(BaseModel):
-    """One entry of an optional, azimuth-resolved declared obstruction (D-031)."""
+    """One entry of an optional, azimuth-resolved declared obstruction (D-031).
 
-    azimuth_deg: float = Field(alias="az_deg")
-    min_elevation_deg: float = Field(alias="min_el_deg")
+    Bounded, because a declared mask constrains scheduling (D-175): an azimuth
+    of 720 or an elevation of 400 would exclude passes for a reason no
+    operator meant. ``400 malformed`` says so instead.
+    """
+
+    azimuth_deg: float = Field(alias="az_deg", ge=0, lt=360)
+    min_elevation_deg: float = Field(alias="min_el_deg", ge=-90, le=90)
 
 
 class CapabilityPayload(BaseModel):
