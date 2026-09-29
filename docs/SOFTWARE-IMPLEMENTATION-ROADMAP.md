@@ -46,7 +46,24 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-09-28. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-09-29. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stage 31's software is built** (2026-09-29), ahead of its place in the sequence, because it depends only on Stages 14 and 15. Its decisions are D-220 through D-226, and `docs/OPERATIONS.md` § External archive ingest, *Public environmental and space-weather sources*, is its runbook.
+- **The completion gate passes, and is demonstrable at a prompt.** `tests/unit/test_conditions_gate.py` publishes synthetic artefacts in the providers' formats as a fetch would, deletes them, and then — with every socket and database connection refused — normalises, freezes a raw snapshot and reads the features three times, identically. The Kp product is fetched twice a day apart with one interval revised: a pass between the fetches reads the first value, a pass after reads the revision, and every value names the artefact it came from.
+- **Nine sources, one per class** (D-220): Kp from NOAA SWPC, cloud cover and aerosol from Open-Meteo (CAMS), fires from NASA FIRMS, NDVI from the ORNL DAAC subsets, precipitation from NASA POWER, night-time lights from NASA Black Marble, and display-only imagery from NASA GIBS and ISRO Bhuvan — Bhuvan display-only because its terms say so. Each is registered off, asks about places from the settings file, and rounds a point before sending it.
+- **`environment_samples`** (migration 0030, D-221): one row per published value, append-only and content-hashed; a missing value is a row with a reason, never a zero; a tile is never a row.
+- **Published before the pass** (D-222): `published_at` is the artefact's declared production time where that precedes our fetch, otherwise our fetch. A revision is a new row, and `value_before` reads only rows published before the pass.
+- **Keys and limits** (D-223): a key is a placeholder until the socket and is redacted from every error; each source's published limits are honoured at 90% by a ledger that survives between runs.
+- **The `conditions` feature group** (D-224): Kp and cloud cover with their indicators, read by configuration D only, from snapshots only.
+- **Near real time** is `meridian-ingest follow` on the ingest machine (D-225); HDF5 is the `hdf5` extra (D-226).
+- **Not built:**
+  - any live retrieval: every adapter is exercised against synthetic fixtures, and each source's terms page is re-read before its first real fetch (D-220);
+  - D-131's leave-one-group-out run, which waits on a model of real data (D-224);
+  - the minimum count of disturbed passes `EVALUATION.md` §3 asks to be stated in advance;
+  - a GFZ definitive Kp as the reanalysis column, which D-131 keeps apart from the feature and which nothing yet reads.
+- **Known limits, each stated rather than hidden:**
+  - a backfill never supplies features for passes already flown, because a value we fetched after a pass cannot be shown to have existed before it;
+  - the terms in `ATTRIBUTION.md` were read from quotations of the providers' pages, because the build environment could not reach them.
 
 **Stage 20's software is built** (2026-09-28), ahead of Stage 19, which it does not need: it classifies whatever was scheduled. **Stage 19 is next.** Its decisions are D-180 through D-187, and `docs/OPERATIONS.md` § Alerts, *LossBudgetThresholdReached* and *Reliability figures*, is its runbook.
 - **The completion gate passes, and is demonstrable at a prompt.** Every reliability number can be traced back to assignments, observations and heartbeat evidence:

@@ -386,6 +386,57 @@ The tree is read-only by construction: a record's directory is sealed after publ
 
 ---
 
+### Public environmental and space-weather sources
+
+Stage 31's nine sources — one per class, listed with their terms by `meridian-ingest sources` and in `ATTRIBUTION.md` — arrive through the same four verbs, into `environment_samples` instead of the archive tables (D-220, D-221). **Every one is off until you enable or name it**, so a fresh install still fetches only the reference archive. Re-read a source's terms page, named in `ATTRIBUTION.md`, before its first live fetch.
+
+A source asked about places reads them from its table in `ingest.toml`:
+
+```toml
+[sources.open_meteo_cloud]
+enabled = true
+points = [[12.97, 77.59]]            # [latitude, longitude]; sent rounded to 0.01°
+
+[sources.nasa_firms]
+enabled = true
+bbox = [74.0, 11.5, 78.6, 18.5]      # west, south, east, north
+# key from $FIRMS_MAP_KEY (or $FIRMS_MAP_KEY_FILE)
+
+[sources.isro_bhuvan]
+bbox = [74.0, 11.5, 78.6, 18.5]
+layers = ["<a Bhuvan layer name>"]   # display only; no default
+```
+
+| Source | Needs | Key variable |
+|---|---|---|
+| `noaa_swpc_kp` | nothing | — |
+| `open_meteo_cloud`, `open_meteo_aerosol` | `points` | — |
+| `nasa_gibs` | `bbox`, optionally `layers` | — |
+| `nasa_firms` | `bbox` | `FIRMS_MAP_KEY` |
+| `ornl_modis_ndvi`, `nasa_power_precipitation` | `points`, and `--since`/`--until` | — |
+| `nasa_black_marble` | `bbox`, `--since`/`--until`, the `hdf5` extra | `EARTHDATA_TOKEN` |
+| `isro_bhuvan` | `bbox`, `layers` | — |
+
+- **Keys never appear in anything printed.** A source that takes its key in the URL is planned with a placeholder, substituted at the request, and redacted from every error (D-223).
+- **Published limits are honoured before they are reached.** Each source's own limits are counted in `<raw_root>/.ledger/`, which survives between runs; a fetch waits for a slot that reopens soon and otherwise stops and says when to come back. `sources` prints what is left of each window.
+- **Tiles are recorded and never read for a number** — `load` reports them as skipped (D-133). Bhuvan's map images are display only because its terms say so (D-220).
+- **Night-time lights need `uv sync --extra hdf5`** (or `pip install 'meridian-ingest[hdf5]'`); without it `normalise` refuses that source by name (D-226).
+
+**Near real time is `follow`, run where `meridian-ingest` is installed, never in the compose stack** (D-225):
+
+```bash
+uv run meridian-ingest follow --once        # one round: each due source fetched, then loaded
+uv run meridian-ingest follow --interval 300 # rounds until interrupted
+```
+
+A source is due when its newest retrieval is older than its cadence (Kp and cloud hourly, fires three-hourly, the rest daily or slower). `--no-load` fetches only. A cron line for the machine holding the raw store:
+
+```cron
+*/15 * * * *  cd /srv/meridian && DATABASE_URL=... uv run meridian-ingest follow --once >> /var/log/meridian-ingest.log 2>&1
+```
+
+**A value is a feature only for passes after it was published**, and "published" is our own fetch unless the artefact states an earlier production time (D-222). So a backfill never supplies features for passes already flown: the conditions group fills in from when `follow` starts running. Features are read from a snapshot's `environment_samples.jsonl`, never from the table while scheduling (D-224).
+
 ## Dataset snapshots
 
 Prediction and evaluation never read the live tables. They read an **immutable snapshot**, so every number in a report can be regenerated from a snapshot, a configuration and a seed (rule 8). There are two steps, and only the first one needs the database (D-143):

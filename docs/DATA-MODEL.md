@@ -287,7 +287,7 @@ One row per evidence-dataset package; the package itself is files, as `products`
 
 ## Ingest and archive tables
 
-Seven tables and a view, for modules 18 and 19. **Four are built**, by migration `0016`: `ingest_sources` and `ingest_records` — the provenance pair, created here and reused unchanged by Stage 31 rather than duplicated (D-140) — and `archive_stations` and `archive_observations`, which hold what an archive published about somebody else's receptions (D-139). The remaining three are **planned**, and their column tuples are the intent until Stages 31 and 32 write their migrations. What all of them share is decided in D-132, D-133, D-134 and D-140:
+Seven tables and a view, for modules 18 and 19. **Five are built.** Migration `0016` built `ingest_sources` and `ingest_records` — the provenance pair, reused unchanged by Stage 31 rather than duplicated (D-140) — and `archive_stations` and `archive_observations`, which hold what an archive published about somebody else's receptions (D-139). Migration `0030` built `environment_samples`, Stage 31's published values (D-221). The remaining two are **planned**, and their column tuples are the intent until Stage 32 writes its migration. What all of them share is decided in D-132, D-133, D-134 and D-140:
 
 - **Raw arrivals are append-only.** A re-fetch that differs is a new row, never an overwrite — the discipline D-015 applies to observations, applied to data we did not author either.
 - **Provenance is complete or the record is refused.** Source, original identifier, source version, retrieval time, licence and checksum, for every record, whatever it carries. The version of the transformation that produced a value sits on the normalised row rather than on the arrival (D-140): an artefact is retrieved once and may be normalised many times.
@@ -335,12 +335,16 @@ Every stored artefact beside the terms it arrived under, joining `ingest_records
 
 **None of these four is a hypertable, and none is compressed.** `element_sets` is the precedent: append-only, time-stamped, read in bulk rather than in recent windows. Making one a hypertable later is supported and cheap; undoing it is not, and `downgrade()` always raises. Compression would also be perverse — archive receptions are months old when they load, so a policy on `started_at` would compress a chunk on creation and every backfill would write into a compressed one.
 
-### `environment_samples` *(planned)*
-`(sample_id, record_id, quantity, observed_at, published_at, value, value_unit, area_id, method)`
+### `environment_samples`
+`(sample_id, record_id, source_id, transformation_version, series_key, content_sha256, quantity, value, missing_reason, value_unit, observed_from, observed_to, published_at, published_basis, product, lat_deg, lon_deg, footprint_m, quality, loaded_at)`
 
-The normalised scalar values features are read from — an index, a condition, a composite's value over an area. `area_id` is null for a global or point value.
+The normalised values features and regional series are read from — an index, a condition, a composite's pixel, a detection — built by migration `0030` (D-221). One row per value per artefact, keyed `(record_id, series_key, transformation_version)` and content-hashed, so re-normalising appends and a disagreeing normaliser is refused, as for archive receptions (D-140, D-142).
 
-**`published_at` is the load-bearing column.** It is when the value became available, and the pre-pass rule reads it: the value used for a pass is the latest one whose `published_at` precedes the pass (D-131). A later revision of the same `observed_at` is a new row with a later `published_at`, and a model that selects on `observed_at` alone has read the future.
+**`published_at` is the load-bearing column.** It is when the value became available: the artefact's own production time where it declares one earlier than our fetch (`published_basis = 'source_declared'`), otherwise our retrieval (`'retrieved'`), and never later than the retrieval (D-222). The value used for a pass is chosen among rows published before it (D-131). A later revision of the same interval is a new row with a later `published_at`, and a model that selects on `observed_from` alone has read the future.
+
+**A missing value is a row**: `value` null and `missing_reason` saying why, exactly one of the two present by CHECK. It is never a zero, and the pre-pass rule never falls back to an older value across one (D-221).
+
+`observed_from`/`observed_to` is the interval described, closed, equal for an instantaneous detection. Location is `lat_deg`/`lon_deg` as a pair, null for a global value, with `footprint_m` the side of the square it stands for. `product` names the source's product and version and `quality` its own flag, verbatim. No `area_id`: which area a value falls in is Stage 32's computation over these rows.
 
 ### `areas_of_interest` *(planned)*
 `(area_id, label, geometry, centroid_lat_deg, centroid_lon_deg, area_km2, created_at, active, notes)`
@@ -368,6 +372,7 @@ Written by `meridian snapshot export`, the only step that reads the database, in
 - `listening` — per settled scheduled assignment, `listening_confirmed` as `Registry.was_listening()` answered it at export (D-145) — and the `heartbeats` overlapping those windows;
 - the `element_sets` the passes were computed from, `satellites` with their `transmitters`, and `stations` with their `capabilities`, effective from `registered_at` until `deleted_at`;
 - `archive_stations`, `archive_observations` and `ingest_provenance`, kept in their own files and their own vocabulary;
+- `environment_samples` *(Stage 31)* — every published value made public before `as_of` that describes time from a week before `since`, with the artefacts it cites added to `ingest_records` and their sources' terms to the manifest (D-222). A snapshot from before Stage 31 has no such file and reads as holding none;
 - `archive_passes` *(Stage 16)* — the passes our orbit service says each archive station could have received, for the satellites it was seen receiving, propagated at export so labelling never propagates (D-150). What could not be computed is counted in the manifest, not left out.
 - `pass_tracks` *(Stage 17)* — per measured pass, where it was in the sky: `pass_id`, `start` (its `aos`), `step_s` (30), and `azimuth_deg` and `elevation_deg` sampled every 30 s over `[aos, los)`, to a hundredth of a degree with azimuth folded into `[0, 360)`. Propagated at export from the pass's own element set over its own station, after the snapshot transaction has read everything and closed, so that no feature propagates and no hash rests on `sgp4` agreeing to the last bit (D-158). Simulated passes get no track, and a pass whose station or element set is not in the snapshot is counted under `pass_tracks.*` in the manifest, never dropped.
 
@@ -450,9 +455,10 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `loss_diagnoses.cause` *(planned)* | `satellite_silent`, `station_not_listening`, `obstruction`, `interference`, `timing_fault`, `undetermined` — D-104 |
 | `report_deliveries.kind` *(planned)* | `pass`, `weekly` — D-098 |
 | `report_deliveries.channel` *(planned)* | `email`, `telegram` — D-098 |
-| `ingest_sources.access_constraint` *(planned)* | `none`, `key_counted`, `registration` — D-132 |
-| `ingest_records.payload_kind` *(planned)* | `data`, `tile` — a `tile` is never read for a value, D-133 |
-| `environment_samples.quantity` *(planned)* | free-text lowercase at first, as `station_capabilities.modes` is — index and product naming varies too much between sources to freeze |
+| `ingest_sources.access_constraint` | `none`, `key_counted`, `registration` — D-132 |
+| `ingest_records.payload_kind` | `data`, `tile` — a `tile` is never read for a value, D-133 |
+| `environment_samples.quantity` | lowercase words, `^[a-z][a-z0-9_]{0,63}$`: `kp_index`, `cloud_cover`, `aerosol_optical_depth`, `fire_radiative_power`, `ndvi`, `precipitation`, `night_lights_radiance` so far — free text, as `station_capabilities.modes` is, because naming varies too much between sources to freeze |
+| `environment_samples.published_basis` | `source_declared`, `retrieved` — D-222 |
 
 ---
 
