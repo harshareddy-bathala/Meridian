@@ -43,6 +43,7 @@ RAW_TABLES = (
     "listening",
     "archive_passes",
     "pass_tracks",
+    "environment_samples",
 )
 """What an export writes: every snapshot table, the frozen listening answers,
 the archive stations' computed passes and our passes' tracks."""
