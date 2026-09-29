@@ -103,10 +103,18 @@ class GibsAdapter:
 def _tile(layer: str, day: date | None, row: int, col: int) -> RemoteArtefact:
     stamp = "default" if day is None else day.isoformat()
     start = None if day is None else datetime(day.year, day.month, day.day, tzinfo=UTC)
+    span = tile_span_deg(LEVEL)
+    west, north = -180.0 + col * span, 90.0 - row * span
     return RemoteArtefact(
         url=f"{BASE}/{layer}/default/{stamp}/250m/{LEVEL}/{row}/{col}.jpg",
         original_identifier=f"{layer}/{stamp}/{LEVEL}/{row}/{col}",
         payload_kind="tile",
         valid_from=start,
         valid_to=None if start is None else start + timedelta(days=1),
+        spatial_extent={
+            "west": west,
+            "south": north - span,
+            "east": west + span,
+            "north": north,
+        },
     )

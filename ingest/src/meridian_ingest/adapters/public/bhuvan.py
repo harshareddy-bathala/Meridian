@@ -73,6 +73,12 @@ class BhuvanAdapter:
                     url=f"{BASE}?{query}",
                     original_identifier=f"{layer}@{bbox.as_text()}",
                     payload_kind="tile",
+                    spatial_extent={
+                        "west": bbox.west,
+                        "south": bbox.south,
+                        "east": bbox.east,
+                        "north": bbox.north,
+                    },
                 )
             )
         return tuple(planned)
