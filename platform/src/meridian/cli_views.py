@@ -79,7 +79,12 @@ def run_pass_timing(args: argparse.Namespace) -> int:
 
 
 def print_runs(runs: list[RunPerformance]) -> None:
-    """One line per run: what it decided, how the solver did, what came of it."""
+    """One line per run and population: what it decided, and what came of it.
+
+    A run that scheduled both populations prints two lines. Their decided and
+    solver columns are the whole run's; the outcome columns are each line's own
+    population, never summed across both (rule 5).
+    """
     if not runs:
         _say("no schedule run is recorded yet")
         return

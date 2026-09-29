@@ -23,7 +23,10 @@ __all__ = ["RunPerformance", "TimingError", "find_recent_runs", "find_timing_err
 
 @dataclass(frozen=True, slots=True)
 class RunPerformance:
-    """One schedule run, and what became of its assignments."""
+    """One schedule run and population, and what became of its assignments.
+
+    The run's own counts are the whole run's; the rest are this population's.
+    """
 
     run_id: str
     decided_at: datetime
@@ -44,8 +47,10 @@ class RunPerformance:
     not_attempted: int
     outstanding: int
     frames_decoded: int
+    assignments: int
+    """This population's decisions in the run."""
     simulated: bool | None
-    """Null for a run that made no assignment."""
+    """Null for a run that decided nothing."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,8 +76,9 @@ def find_recent_runs(conn: Connection, *, limit: int) -> list[RunPerformance]:
             "select run_id, decided_at, model_config, yield_source, solver_status,"
             " fell_back, runtime_s, candidates, scheduled, skipped, revoked,"
             " expired, decoded, signal_no_decode, no_signal, aborted,"
-            " not_attempted, outstanding, frames_decoded, simulated"
-            " from scheduler_performance order by decided_at desc, run_id desc"
+            " not_attempted, outstanding, frames_decoded, assignments, simulated"
+            " from scheduler_performance"
+            " order by decided_at desc, run_id desc, simulated nulls first"
             " limit %s",
             (limit,),
         )

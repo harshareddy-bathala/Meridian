@@ -83,10 +83,18 @@ comment on view timing_error is
 -- ---------------------------------------------------------------------------
 -- scheduler_performance (D-177)
 --
--- Per schedule run: what it decided, how the solver did, and what became of the
--- assignments it made — revoked, reported by outcome, or still owed. A decision
--- belongs to the run that made it (D-170); a pass decided again belongs to the
--- later run as a new revision (D-171), so no assignment is counted twice.
+-- Per schedule run and population: what it decided, how the solver did, and
+-- what became of the assignments it made — revoked, reported by outcome, or
+-- still owed. A decision belongs to the run that made it (D-170); a pass decided
+-- again belongs to the later run as a new revision (D-171), so no assignment is
+-- counted twice.
+--
+-- One row per population the run's decisions fell in, never one total across
+-- both (rule 5): a run that scheduled station 001 and the simulated fleet
+-- together is two rows. The run's own figures — status, candidates, scheduled,
+-- skipped — are the whole run's and repeat on each; every count after them is
+-- that row's population only. A run that decided nothing has one row whose
+-- `simulated` is null.
 
 create view scheduler_performance as
 select r.run_id,
@@ -100,6 +108,8 @@ select r.run_id,
        r.candidates,
        r.scheduled,
        r.skipped,
+       a.simulated,
+       count(a.assignment_id)                                    as assignments,
        count(a.assignment_id) filter (where a.state = 'revoked')  as revoked,
        count(a.assignment_id) filter (where a.state = 'expired')  as expired,
        count(o.assignment_id) filter (where o.outcome = 'decoded') as decoded,
@@ -114,15 +124,15 @@ select r.run_id,
              and a.state in ('issued', 'held', 'in_progress')
              and o.assignment_id is null
        )                                                         as outstanding,
-       coalesce(sum(o.frames_decoded), 0)                        as frames_decoded,
-       bool_or(a.simulated)                                      as simulated
+       coalesce(sum(o.frames_decoded), 0)                        as frames_decoded
 from schedule_runs r
 left join assignments a on a.schedule_run_id = r.run_id
 left join observations_current o on o.assignment_id = a.assignment_id
-group by r.run_id;
+group by r.run_id, a.simulated;
 
 comment on view scheduler_performance is
-    'Each schedule run with its solver status and what became of its assignments. '
+    'Each schedule run and population, with its solver status and what became of '
+    'that population''s assignments; never one total across both. '
     'An operator''s read; the schedulers are compared by replay (D-172). '
     'docs/DECISIONS.md D-170, D-177.';
 

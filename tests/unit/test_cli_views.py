@@ -43,6 +43,7 @@ def run(**changes: object) -> RunPerformance:
         "not_attempted": 0,
         "outstanding": 0,
         "frames_decoded": 412,
+        "assignments": 5,
         "simulated": True,
     }
     base.update(changes)

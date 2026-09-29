@@ -1484,3 +1484,49 @@ def test_heartbeats_hourly_is_a_continuous_aggregate_with_no_retention(conn) -> 
         )
         procs = {row[0] for row in cur.fetchall()}
     assert "policy_retention" not in procs
+
+
+def test_a_run_over_both_populations_is_two_rows_never_one_total(fixtures) -> None:
+    """Rule 5: a real station's outcomes are never summed with simulated ones."""
+    fixtures(
+        "insert into stations (station_id, name, operator, lat_deg, lon_deg, alt_m,"
+        " token_sha256, registration_key_sha256, simulated, simulator_run_id, seed)"
+        " values ('st_fixture_sim', 'Sim', 'tests', 51.5, -0.1, 20, %s, %s, true,"
+        " 'run-both', 1)",
+        OTHER_HASH,
+        OTHER_HASH,
+    )
+    fixtures(
+        "insert into schedule_runs (run_id, decided_at, horizon_start, horizon_end,"
+        " model_config, config_sha256, parameters, yield_source, solver,"
+        " solver_version, status, objective, time_limit_s, runtime_s, stations,"
+        " candidates, scheduled, skipped)"
+        " values ('sr_both', now(), now(), now() + interval '6 hours', 'A', %s,"
+        " '{}'::jsonb, 'elevation_proxy', 'highs', '1.0', 'optimal', 1.0, 10,"
+        " 0.1, 2, 2, 2, 0)",
+        ZERO_HASH,
+    )
+    element_set = _insert_element_set(fixtures)
+    _insert_assignment(
+        fixtures, "as_real", _insert_scheduled_pass(fixtures, element_set)
+    )
+    _insert_assignment(
+        fixtures,
+        "as_sim",
+        _insert_scheduled_pass(fixtures, element_set, hours_ahead=1),
+    )
+    fixtures(
+        "update assignments set station_id = 'st_fixture_sim', simulated = true"
+        " where assignment_id = 'as_sim'"
+    )
+    fixtures(
+        "update assignments set schedule_run_id = 'sr_both'"
+        " where assignment_id in ('as_real', 'as_sim')"
+    )
+
+    rows = fixtures(
+        "select simulated, assignments, scheduled from scheduler_performance"
+        " where run_id = 'sr_both' order by simulated"
+    )
+
+    assert rows == [(False, 1, 2), (True, 1, 2)]
