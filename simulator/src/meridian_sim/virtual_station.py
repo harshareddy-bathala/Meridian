@@ -45,10 +45,11 @@ from meridian_sim.config import (
     state_dir_for_station,
 )
 from meridian_sim.executor import SimulatedExecutor
-from meridian_sim.faults import FaultState
+from meridian_sim.faults import FaultState, declines_assignment
 
 __all__ = [
     "RegistrationNeededError",
+    "StationParts",
     "StationPaths",
     "VirtualStation",
     "paths_for",
@@ -77,6 +78,15 @@ class RegistrationNeededError(RuntimeError):
     asked it. An operator fixes them differently — the first by issuing a new
     invite, the second by giving the run the invites it already has.
     """
+
+
+@dataclass(frozen=True, slots=True)
+class StationParts:
+    """The pieces of a station's loop that fault injection acts through."""
+
+    seed: int
+    record: AssignmentRecord
+    executor: SimulatedExecutor
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +131,9 @@ class VirtualStation:
         loop: The reference client's loop, already assembled.
         transport: The connection the loop speaks over, owned here so that
             closing the station closes it.
+        parts: The loop's held-work record and receiver, and the seed they
+            were built from — reached for only by the fault injection that
+            acts through them (D-188).
 
     Note:
         Deliberately not a subclass or a wrapper of anything in the client. It
@@ -135,17 +148,46 @@ class VirtualStation:
         credentials: StationCredentials,
         loop: StationLoop,
         transport: MspTransport,
+        parts: StationParts,
     ) -> None:
         """Hold a station's identity, its loop and the connection beneath it."""
         self.index = index
         self.station_id = credentials.station_id
         self.heartbeat_interval_s = credentials.heartbeat_interval_s
+        self.seed = parts.seed
         self._loop = loop
         self._transport = transport
+        self._parts = parts
 
     def tick(self, now: datetime) -> TickOutcome:
         """Run one heartbeat cycle. The loop's own, unmodified."""
         return self._loop.tick(now)
+
+    def decline(self, now: datetime) -> tuple[str, ...]:
+        """Let go of some held work whose window has not opened yet.
+
+        Which work is drawn from this station's seed and each assignment's id
+        (:func:`~meridian_sim.faults.declines_assignment`). Through the client's
+        own record, so the next heartbeat's ``held_assignments`` simply stops
+        naming them — the only way MSP has to decline (D-003).
+
+        Returns:
+            The ids released, for the run's fault ledger.
+        """
+        executing = self._loop.executing()
+        chosen = {
+            one.assignment_id
+            for one in self._parts.record.held()
+            if one.start_at > now
+            and (executing is None or one.assignment_id != executing.assignment_id)
+            and declines_assignment(self.seed, one.assignment_id)
+        }
+        released = self._parts.record.release(chosen)
+        return tuple(sorted(one.assignment_id for one in released))
+
+    def take_faulted(self) -> tuple[tuple[str, str], ...]:
+        """Which passes the receiver's faults changed since the last call."""
+        return self._parts.executor.take_faulted()
 
     def close(self) -> None:
         """Release this station's connection pool."""
@@ -281,11 +323,17 @@ def _assemble(
         bearer_token=credentials.bearer_token,
         http_transport=wiring.http_transport,
     )
+    seed = seed_for_station(config.master_seed, index)
+    parts = StationParts(
+        seed=seed,
+        record=AssignmentRecord(wiring.paths.held_assignments),
+        executor=SimulatedExecutor(seed, wiring.faults),
+    )
     loop = StationLoop(
         transport,
         credentials,
-        AssignmentRecord(wiring.paths.held_assignments),
-        SimulatedExecutor(seed_for_station(config.master_seed, index), wiring.faults),
+        parts.record,
+        parts.executor,
         ObservationQueue(wiring.paths.outbox),
     )
-    return VirtualStation(index, credentials, loop, transport)
+    return VirtualStation(index, credentials, loop, transport, parts)

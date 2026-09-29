@@ -30,6 +30,7 @@ Reference: docs/MSP-SPEC.md §4.3, §4.4; docs/DECISIONS.md D-073, D-077, D-078.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from meridian_client.assignment_message import Assignment
@@ -45,7 +46,7 @@ from meridian_client.observation_message import (
     Signal,
 )
 from meridian_sim.config import seed_for_pass
-from meridian_sim.faults import RECEIVER_DOWN, FaultState
+from meridian_sim.faults import DECODER_DEGRADED, RECEIVER_DOWN, FaultState
 from meridian_sim.outcomes import SimulatedOutcome, decide_outcome
 
 __all__ = ["SimulatedExecutor"]
@@ -91,6 +92,7 @@ class SimulatedExecutor:
         self._begun: set[str] = set()
         self._held_but_not_begun: set[str] = set()
         self._ready: list[ObservationResult] = []
+        self._faulted: list[tuple[str, str]] = []
 
     def capture_window(self, assignment: Assignment) -> CaptureWindow:
         """The assignment's own window, which is what keeps D-077's bodies fixed."""
@@ -115,6 +117,7 @@ class SimulatedExecutor:
         """
         if RECEIVER_DOWN in self._faults.active:
             self._held_but_not_begun.add(assignment.assignment_id)
+            self._faulted.append((RECEIVER_DOWN, assignment.assignment_id))
             return
         self._begun.add(assignment.assignment_id)
 
@@ -149,6 +152,17 @@ class SimulatedExecutor:
         self._ready.clear()
         return completed
 
+    def take_faulted(self) -> tuple[tuple[str, str], ...]:
+        """Which passes a fault changed since the last call, as (kind, id) pairs.
+
+        For the run's fault ledger, which the supervisor writes: the executor
+        knows which pass a dead receiver or a failing decoder touched, and
+        nothing on MSP may say so (D-189).
+        """
+        faulted = tuple(self._faulted)
+        self._faulted.clear()
+        return faulted
+
     def _abandoned(self, assignment: Assignment) -> ObservationResult:
         """A pass this station took and never started.
 
@@ -170,6 +184,12 @@ class SimulatedExecutor:
         """Turn one finished window into the observation it produced."""
         seed = self._pass_seed(assignment)
         outcome = decide_outcome(seed, assignment.expected_max_elevation_deg)
+        if DECODER_DEGRADED in self._faults.active and outcome.outcome == "decoded":
+            # Heard and not decoded: the signal block stays, because the radio
+            # did hear it, and only the claim of frames goes (Stage 27's
+            # negative control).
+            outcome = replace(outcome, outcome="signal_no_decode")
+            self._faulted.append((DECODER_DEGRADED, assignment.assignment_id))
         return ObservationResult(
             assignment_id=assignment.assignment_id,
             started_at=assignment.start_at,

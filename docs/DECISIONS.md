@@ -4035,6 +4035,76 @@ A figure the platform cannot give is never a zero or a bare null (D-086).
 
 ---
 
+## D-188 — Stage 21's station faults, each injected where the real one happens
+
+**2026-09-29 · accepted** · *`meridian_sim/{faults,supervisor,executor,virtual_station}.py`; `meridian_client/held_assignments.py`, Stage 21.*
+
+Stage 10's five faults already cover four of the roadmap's list: station disconnect (`network_down`), observation upload delay (`upload_blocked`), client restart (`restart`) and invalid token (`token_revoked`). Stage 21 adds six. Each is injected at the layer where the real failure happens, for D-074's reason: a fault faked above the code under test tests a rehearsal of it.
+
+| Roadmap fault | Kind | Injected |
+|---|---|---|
+| heartbeat delay | `heartbeat_delayed` | beneath the client: only `POST /heartbeat` fails, for one to five ticks |
+| network partition | `partition` | beneath the client, like `network_down`, but scheduled for a seeded share of the fleet at once |
+| slow API | `slow_api` | beneath the client: the request is forwarded and committed, then the response is lost to a read timeout |
+| clock drift | `clock_drift` | the station's loop is handed `now` plus an error growing 0.5–3 s per tick; the window closing is a resync |
+| degraded decoder | `decoder_degraded` | in the executor: `decoded` becomes `signal_no_decode`, and the signal block stays |
+| assignment rejection | `declines` | in the held record: 30% of held, not yet begun work is released, drawn from the station's seed and the assignment's id |
+
+**Stage 10's schedules do not move.** Its four recurring kinds share one seeded stream in a fixed order, so a new kind drawn from that stream would change every schedule already drawn from it, and every earlier run's seed would stop meaning that run. Each new kind is drawn from a stream of its own, `"{seed}:{scenario}:{kind}"`. A unit test pins a hash of every Stage 10 scenario's schedule, computed from Stage 10's own code.
+
+**A partition belongs to the fleet.** Its members are drawn from the master seed and the station count, and every member is cut off on the same ticks. The point is correlated loss that the scheduler has to route around. Independent outages that happened to coincide would test that only by accident. Its members depend on the count; station 1's own schedule still does not.
+
+**A decline is a release, not a message.** MSP has no decline message (D-003). A station declines by no longer naming work in `held_assignments`, so the reference client gains `AssignmentRecord.release`, written to disk before it returns, like `accept`. A real station may use it too. Drawing from the station's seed and the assignment's id means a restarted station declines the same work.
+
+**`chaos` is every recurring fault, and `faulty` is unchanged.** Like `faulty`, `chaos` leaves out `token_revoked`, because a fleet that dies of old age tests nothing after the first hour. It is the scenario the long run injects.
+
+*Rejected:* adding the new kinds to Stage 10's stream, which is simpler and silently re-draws every earlier run. Also rejected: a decline message in MSP, which D-003 already refused. And a clock fault in the client's time source, which the loop does not consult: it takes `now` from its caller, and that is where a real station's wrong clock enters too.
+
+---
+
+## D-189 — The fault ledger: ground truth kept by the run, never by the platform
+
+**2026-09-29 · accepted** · *`meridian_sim/ledger.py`; `python -m meridian_sim.station --ledger`, Stage 21. Extends D-105.*
+
+What a run injected is written to a **ledger** in the run's state directory (`faults.jsonl` by default). The ledger is an append-only JSON-lines file with three kinds of line:
+- **`open`** — a fault came into force on a target;
+- **`close`** — it stopped;
+- **`act`** — it did something to named assignments: work released by a decline, a pass a dead receiver never began, a decode that failed.
+
+Every line carries the format version, the run, the kind, the target (`station:<index>` or `platform:<component>`) and a UTC instant. The instant is the true one, so a drifting clock does not skew it.
+
+**The ledger is never sent over MSP and never stored in the platform's database.** It is D-105's rule for Stage 25's causes, applied from the start. A platform that could read what was done to it would be graded against its own answer key. The platform proves what it detected from its own records, and the verifier joins that proof to the ledger afterwards (D-192).
+
+**It is flushed and synced per line.** A fault is rare next to a heartbeat. A run that dies part-way leaves a ledger that is true up to the moment it died, so it still has the line for the fault that killed the run.
+
+**The ledger agrees with the schedule.** `FaultSchedule.windows` prints a run's faults before it runs. An MSP conformance test runs a four-station `chaos` fleet for eighty rounds, and checks that every window the ledger opened and closed is one the schedules printed, on the rounds they printed. A positive control, deleting the closes, makes that test fail.
+
+**A reader refuses what it does not understand.** A line in another version, an unknown event, a close with no open, or a mistyped field fails the whole read. A verifier that skipped such lines would grade the platform against only part of the truth. The platform parses the format independently, because `meridian-sim` and `meridian` share no code (D-138), and `ledger.py`'s docstring is the definition.
+
+*Rejected:* a `faults` table in the platform database, which is the answer key in the examinee's hands and a migration nothing else needs. Also rejected: faults sent in the heartbeat's `health` object, which is on MSP.
+
+---
+
+## D-190 — A fault's expected detection is decided by the verifier, from its length
+
+**2026-09-29 · accepted** · *`meridian_sim/faults.py` (`heartbeat_delayed`), with `meridian.reliability.faults` in Stage 21.*
+
+The ledger records **what was done and for how long**, not what the platform should conclude. A delayed heartbeat of one tick should read `stale` at most and cost the station nothing. A gap of three ticks should read `offline` within ninety seconds, and the station's unbegun work should be revoked. Which case a window is follows from its length, the heartbeat interval and the liveness thresholds.
+
+Those thresholds live in `meridian.registry.liveness`, fixed by SC-5 (D-013). The simulator does not import the platform (D-138), so if it predicted the verdict it would need a second copy of 60 and 90 that could drift from the first. The verifier reads the window from the ledger and applies the platform's own constants.
+
+---
+
+## D-191 — A slow platform is a response lost after the commit
+
+**2026-09-29 · accepted** · *`meridian_sim/faults.py` (`slow_api`), Stage 21.*
+
+In the station fleet, the roadmap's "slow API" is injected as its worst consequence rather than as a delay. The request reaches the platform and is committed, and the response is then lost to `httpx.ReadTimeout`. The station believes a stored request was lost, and resends it on its next tick. That is exactly the case idempotency exists for. An observation is identified by a derived id (D-027), and its revisions are append-only (D-015), so the platform must store it once.
+
+A delay short of the client's timeout changes nothing the platform can observe, except the latency that Stage 21's scale runs already measure. Real latency, from pausing the API container, is injected by the host tool as a platform fault.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -4273,6 +4343,15 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-187 the public reliability body | `meridian/api/public/{reliability,models/reliability}.py`; `meridian/cli_reliability.py` |
 | — the amended entries | D-067, D-111, D-146 and D-171, each with a note naming its amendment |
 | — the completion gate, and how to run it by hand | `tests/integration/test_reliability_gate.py`; `OPERATIONS.md` § Reliability figures |
+
+**Landed 2026-09-29**, building Stage 21's failure injection and scale simulation.
+
+| Decision | Applied to |
+|---|---|
+| D-188 six station faults, each where the real one happens | `meridian_sim/{faults,supervisor,executor,virtual_station}.py`; `meridian_client/held_assignments.py` (`release`) |
+| D-189 the fault ledger | `meridian_sim/{ledger,station}.py`; `tests/msp_conformance/test_simulator_supervisor.py` |
+| D-190 expected detection decided by the verifier | `meridian_sim/faults.py` |
+| D-191 slow API as a response lost after commit | `meridian_sim/faults.py` |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

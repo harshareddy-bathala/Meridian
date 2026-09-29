@@ -17,26 +17,38 @@ A station that stops — today only a revoked token (D-024) — is retired from 
 round and the others carry on. The run ends when every station has stopped, or
 when the caller's round budget runs out.
 
-Reference: docs/DECISIONS.md D-024, D-069, D-074, D-076, D-080.
+**Every fault is written to the run's ledger as it opens and closes** (D-189),
+along with the assignments it acted on. The supervisor is the one place that
+knows both what is scheduled to break and which station it broke, so it is the
+one place that writes it down.
+
+Reference: docs/DECISIONS.md D-024, D-069, D-074, D-076, D-080, D-188, D-189.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
 from meridian_sim.config import RunConfig, seed_for_station
 from meridian_sim.faults import (
+    CLOCK_DRIFT,
+    DECLINES,
+    PARTITION,
     FaultInjectingTransport,
     FaultSchedule,
     FaultState,
+    FleetPartition,
+    partition_for,
     schedule_for,
 )
+from meridian_sim.ledger import FaultLedger
 from meridian_sim.virtual_station import VirtualStation, register_or_resume
 
 __all__ = ["RoundOutcome", "Supervisor"]
@@ -81,6 +93,8 @@ class _Member:
     station: VirtualStation
     schedule: FaultSchedule
     faults: FaultState = field(default_factory=FaultState)
+    previous: frozenset[str] = frozenset()
+    """What was in force on the last round, to see a fault open and close."""
 
 
 class Supervisor:
@@ -95,6 +109,8 @@ class Supervisor:
         http_transport: Where the bytes go beneath the fault injector. Defaults
             to a real network connection; a test supplies one reaching the
             platform in-process.
+        ledger: Where the faults this run injects are written. ``None`` writes
+            nothing, which a clean run and most tests want.
     """
 
     def __init__(
@@ -102,12 +118,15 @@ class Supervisor:
         config: RunConfig,
         invite_tokens: Sequence[str] = (),
         http_transport: httpx.BaseTransport | None = None,
+        ledger: FaultLedger | None = None,
     ) -> None:
         """Prepare a fleet. Nothing registers until :meth:`bring_up`."""
         self._config = config
         self._invite_tokens = tuple(invite_tokens)
         self._http_transport = http_transport
+        self._ledger = ledger
         self._members: list[_Member] = []
+        self._partition = FleetPartition()
 
     def bring_up(self) -> tuple[str, ...]:
         """Register or resume every station, in index order.
@@ -127,6 +146,11 @@ class Supervisor:
         """
         for index in range(1, self._config.station_count + 1):
             self._members.append(self._member_for(index))
+        self._partition = partition_for(
+            self._config.master_seed,
+            self._config.scenario,
+            self._config.station_count,
+        )
         return tuple(one.station.station_id for one in self._members)
 
     def tick_round(self, tick: int, now: datetime) -> RoundOutcome:
@@ -135,7 +159,10 @@ class Supervisor:
         Args:
             tick: Which round, counting from zero. The fault schedules are
                 functions of this.
-            now: The instant to hand each station's loop.
+            now: The true instant. Each station's loop is handed it plus its
+                clock's error, which is zero unless its clock is drifting; the
+                ledger is written in true time, so it can be set against the
+                platform's clock.
 
         Returns:
             What the round did.
@@ -146,12 +173,22 @@ class Supervisor:
         submitted: list[str] = []
 
         for member in list(self._members):
-            member.faults.active = member.schedule.active_at(tick)
+            active = member.schedule.active_at(tick)
+            if self._partition.active_for(member.index, tick):
+                active |= {PARTITION}
+            self._note_transitions(member, active, tick, now)
+            member.faults.active = active
             if member.schedule.restarts_at(tick):
                 self._restart(member)
                 restarted.append(member.index)
                 continue
-            outcome = member.station.tick(now)
+            station_now = now + timedelta(seconds=member.schedule.clock_error_s(tick))
+            if DECLINES in active:
+                declined = member.station.decline(station_now)
+                acts = ((DECLINES, one) for one in declined)
+                self._note_acts(member, acts, tick, now)
+            outcome = member.station.tick(station_now)
+            self._note_acts(member, member.station.take_faulted(), tick, now)
             ticked.append(member.index)
             submitted.extend(outcome.submitted)
             if outcome.stop_reason is not None:
@@ -232,6 +269,50 @@ class Supervisor:
             faults=faults,
         )
 
+    def _note_transitions(
+        self, member: _Member, active: frozenset[str], tick: int, now: datetime
+    ) -> None:
+        """Write to the ledger each fault that opened or closed on this round."""
+        if self._ledger is not None:
+            target = _target(member.index)
+            for kind in sorted(active - member.previous):
+                self._ledger.open(
+                    kind,
+                    target,
+                    now,
+                    tick=tick,
+                    station_id=member.station.station_id,
+                    seed=member.station.seed,
+                    detail=self._detail(member, kind),
+                )
+            for kind in sorted(member.previous - active):
+                self._ledger.close(kind, target, now, tick=tick)
+        member.previous = active
+
+    def _note_acts(
+        self,
+        member: _Member,
+        acts: Iterable[tuple[str, str]],
+        tick: int,
+        now: datetime,
+    ) -> None:
+        """Write to the ledger what open faults did to named assignments."""
+        by_kind: defaultdict[str, list[str]] = defaultdict(list)
+        for kind, assignment_id in acts:
+            by_kind[kind].append(assignment_id)
+        if self._ledger is None:
+            return
+        for kind, ids in sorted(by_kind.items()):
+            self._ledger.act(kind, _target(member.index), now, tuple(ids), tick=tick)
+
+    def _detail(self, member: _Member, kind: str) -> dict[str, object]:
+        """What a reader of the ledger needs to know about one fault's shape."""
+        if kind == CLOCK_DRIFT:
+            return {"drift_s_per_tick": member.schedule.drift_s_per_tick}
+        if kind == PARTITION:
+            return {"members": sorted(self._partition.members)}
+        return {}
+
     def _invite_for(self, index: int) -> str | None:
         """The invite offered to station ``index``, if the run was given one."""
         if index <= len(self._invite_tokens):
@@ -293,6 +374,11 @@ class Supervisor:
         if not self._members:
             return DEFAULT_INTERVAL_S
         return float(min(one.station.heartbeat_interval_s for one in self._members))
+
+
+def _target(index: int) -> str:
+    """How the ledger names station ``index``."""
+    return f"station:{index}"
 
 
 def _next_due_at(due_at: float, interval_s: float) -> float:

@@ -255,3 +255,26 @@ def test_replacing_the_record_leaves_no_partial_file(tmp_path: Path) -> None:
     record.accept([assignment("as_b")])
 
     assert [one.name for one in sorted(tmp_path.iterdir())] == ["held.json"]
+
+
+def test_releasing_work_stops_it_being_named(tmp_path: Path) -> None:
+    """MSP §4.2's only decline: the next heartbeat simply does not name it."""
+    path = tmp_path / "held.json"
+    record = AssignmentRecord(path)
+    record.accept(
+        [assignment("as_kept"), assignment("as_let_go", starts_in_minutes=20)]
+    )
+
+    released = record.release({"as_let_go", "as_never_held"})
+
+    assert [one.assignment_id for one in released] == ["as_let_go"]
+    assert record.held_ids() == ["as_kept"]
+    assert AssignmentRecord(path).held_ids() == ["as_kept"]
+
+
+def test_releasing_nothing_held_writes_nothing(tmp_path: Path) -> None:
+    """No file appears for a station that let go of nothing."""
+    path = tmp_path / "held.json"
+
+    assert AssignmentRecord(path).release({"as_unknown"}) == ()
+    assert not path.exists()

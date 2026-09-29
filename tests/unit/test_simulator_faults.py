@@ -5,24 +5,34 @@ checked against a stub that records what reached it. Both are testable without a
 platform, which is what makes "a run with faults is as reproducible as a clean
 one" something that can be asserted rather than hoped for.
 
-Reference: docs/DECISIONS.md D-024, D-074.
+Reference: docs/DECISIONS.md D-024, D-074, D-188.
 """
 
 from __future__ import annotations
+
+import hashlib
 
 import httpx
 import pytest
 
 from meridian_sim.config import seed_for_station
 from meridian_sim.faults import (
+    CLOCK_DRIFT,
+    DECLINES,
+    DECODER_DEGRADED,
+    HEARTBEAT_DELAYED,
     NETWORK_DOWN,
+    PARTITION,
     RECEIVER_DOWN,
     RESTART,
     SCENARIOS,
+    SLOW_API,
     TOKEN_REVOKED,
     UPLOAD_BLOCKED,
     FaultInjectingTransport,
     FaultState,
+    declines_assignment,
+    partition_for,
     schedule_for,
 )
 
@@ -252,3 +262,205 @@ def test_the_state_can_change_under_a_live_transport() -> None:
     transport.handle_request(request())
 
     assert len(inner.requests) == 2
+
+
+STAGE_10_DIGEST = "9d633f691480b1a233cf26a2b52e458f1fa36649f1187eb6b9e696078a7aa537"
+"""Every Stage 10 scenario's schedule for stations 1 to 3 over 600 ticks, hashed.
+
+Computed from Stage 10's own ``faults.py`` before Stage 21 touched it. A seed
+has to go on meaning the run it always meant, or every earlier result stops
+being repeatable (D-188).
+"""
+
+
+def test_stage_10_schedules_are_the_ones_their_seeds_always_gave() -> None:
+    """Stage 21's faults are drawn on streams of their own, and move nothing."""
+    digest = hashlib.sha256()
+    for index in (1, 2, 3):
+        seed = seed_for_station(MASTER_SEED, index)
+        for scenario in (
+            "network",
+            "upload",
+            "restart",
+            "receiver",
+            "revoked",
+            "faulty",
+        ):
+            schedule = schedule_for(seed, scenario)
+            for tick in range(TICKS):
+                kinds = ",".join(sorted(schedule.active_at(tick)))
+                digest.update(f"{index}:{scenario}:{tick}:{kinds};".encode())
+
+    assert digest.hexdigest() == STAGE_10_DIGEST
+
+
+@pytest.mark.parametrize(
+    "scenario", ["heartbeat", "slow", "drift", "decoder", "declines"]
+)
+def test_each_stage_21_fault_recurs_and_leaves_the_station_mostly_working(
+    scenario: str,
+) -> None:
+    """Often enough that a run sees several, rarely enough to measure the platform."""
+    (kind,) = SCENARIOS[scenario]
+    ticks = ticks_where(scenario, kind)
+
+    assert len(ticks) > 1
+    assert len(ticks) < TICKS // 4
+
+
+def test_chaos_is_every_recurring_fault_and_never_a_revoked_token() -> None:
+    """The long run's scenario, which must not let the fleet die of old age."""
+    schedule = schedule_for(STATION_SEED, "chaos")
+    seen = {kind for tick in range(TICKS * 2) for kind in schedule.active_at(tick)}
+
+    assert TOKEN_REVOKED not in seen
+    # A partition is the fleet's, drawn by `partition_for`, never a station's.
+    assert seen == set(SCENARIOS["chaos"]) - {PARTITION}
+
+
+def test_the_windows_are_the_schedule_printed_up_front() -> None:
+    """What a run will do is printable before it does any of it."""
+    schedule = schedule_for(STATION_SEED, "chaos")
+    from_windows = {
+        (window.kind, tick)
+        for window in schedule.windows(TICKS)
+        for tick in range(window.first_tick, (window.last_tick or TICKS) + 1)
+        if tick < TICKS
+    }
+    from_ticks = {
+        (kind, tick) for tick in range(TICKS) for kind in schedule.active_at(tick)
+    }
+
+    assert from_windows == from_ticks
+
+
+def test_a_revoked_token_is_a_window_that_never_closes() -> None:
+    """Printed as open-ended, which is what the ledger will show."""
+    windows = schedule_for(STATION_SEED, "revoked").windows(TICKS)
+
+    assert [(one.kind, one.last_tick) for one in windows] == [(TOKEN_REVOKED, None)]
+
+
+def test_a_delayed_heartbeat_fails_only_the_heartbeat() -> None:
+    """Uploads still arrive: the platform sees a gap in heartbeats and nothing else."""
+    inner = RecordingTransport()
+    transport = FaultInjectingTransport(
+        inner, FaultState(active=frozenset({HEARTBEAT_DELAYED}))
+    )
+
+    with pytest.raises(httpx.ConnectError):
+        transport.handle_request(request("/msp/v0/heartbeat"))
+    transport.handle_request(request("/msp/v0/observations"))
+
+    assert [one.url.path for one in inner.requests] == ["/msp/v0/observations"]
+
+
+def test_a_partitioned_station_cannot_reach_the_platform() -> None:
+    """Beneath the client, like an outage: the retry policy runs for real."""
+    inner = RecordingTransport()
+    transport = FaultInjectingTransport(
+        inner, FaultState(active=frozenset({PARTITION}))
+    )
+
+    with pytest.raises(httpx.ConnectError):
+        transport.handle_request(request())
+
+    assert inner.requests == []
+
+
+def test_a_slow_platform_commits_the_request_and_loses_the_answer() -> None:
+    """The case idempotency exists for: stored, and the station never hears so."""
+    inner = RecordingTransport()
+    transport = FaultInjectingTransport(inner, FaultState(active=frozenset({SLOW_API})))
+
+    with pytest.raises(httpx.ReadTimeout):
+        transport.handle_request(request("/msp/v0/observations"))
+
+    assert [one.url.path for one in inner.requests] == ["/msp/v0/observations"]
+
+
+def test_a_drifting_clock_runs_away_and_is_corrected_at_the_end() -> None:
+    """Zero outside a window, growing inside it, zero again once it closes."""
+    schedule = schedule_for(STATION_SEED, "drift")
+    (window, *_) = schedule.windows(TICKS)
+    last = window.last_tick
+    assert last is not None
+
+    errors = [
+        schedule.clock_error_s(tick) for tick in range(window.first_tick, last + 1)
+    ]
+
+    assert schedule.clock_error_s(window.first_tick - 1) == 0.0
+    assert errors[0] == pytest.approx(schedule.drift_s_per_tick)
+    assert errors == sorted(errors)
+    assert schedule.clock_error_s(last + 1) == 0.0
+
+
+def test_a_clock_that_is_not_drifting_is_right() -> None:
+    """Every scenario without the fault hands the station true time."""
+    schedule = schedule_for(STATION_SEED, "faulty")
+
+    assert all(schedule.clock_error_s(tick) == 0.0 for tick in range(TICKS))
+
+
+def test_a_partition_is_the_same_for_the_same_fleet() -> None:
+    """Drawn from the master seed, so two runs cut off the same stations."""
+    first = partition_for(MASTER_SEED, "partition", 10)
+    second = partition_for(MASTER_SEED, "partition", 10)
+
+    assert first == second
+
+
+def test_a_partition_cuts_off_some_of_the_fleet_and_never_all_of_it() -> None:
+    """All of it would be the platform's outage, not a partition."""
+    partition = partition_for(MASTER_SEED, "partition", 10)
+
+    assert 1 <= len(partition.members) < 10
+    assert partition.members <= set(range(1, 11))
+
+
+def test_a_partitioned_fleet_breaks_together() -> None:
+    """Correlated loss is the point: every member is cut off on the same ticks."""
+    partition = partition_for(MASTER_SEED, "partition", 10)
+    outside = next(iter(set(range(1, 11)) - partition.members))
+
+    for tick in range(TICKS):
+        cut = {one for one in range(1, 11) if partition.active_for(one, tick)}
+        assert cut in (set(), set(partition.members))
+    assert not any(partition.active_for(outside, tick) for tick in range(TICKS))
+    assert any(partition.active_for(min(partition.members), t) for t in range(TICKS))
+
+
+@pytest.mark.parametrize(("scenario", "count"), [("faulty", 10), ("partition", 1)])
+def test_no_partition_without_the_fault_or_without_survivors(
+    scenario: str, count: int
+) -> None:
+    """A scenario that does not name it, or a fleet of one, is never partitioned."""
+    partition = partition_for(MASTER_SEED, scenario, count)
+
+    assert not any(partition.active_for(1, tick) for tick in range(TICKS))
+
+
+def test_a_declining_station_declines_the_same_work_every_time() -> None:
+    """Drawn from the station and the assignment, so a restart changes nothing."""
+    ids = [f"as_{number:04d}" for number in range(1000)]
+    first = [declines_assignment(STATION_SEED, one) for one in ids]
+    second = [declines_assignment(STATION_SEED, one) for one in ids]
+
+    assert first == second
+    assert 200 < sum(first) < 400
+
+
+@pytest.mark.parametrize(
+    "kind", [HEARTBEAT_DELAYED, CLOCK_DRIFT, DECODER_DEGRADED, DECLINES]
+)
+def test_faults_above_or_beside_the_transport_let_the_request_through(
+    kind: str,
+) -> None:
+    """Only the kinds that are network failures may touch a request to the API."""
+    inner = RecordingTransport()
+    transport = FaultInjectingTransport(inner, FaultState(active=frozenset({kind})))
+
+    transport.handle_request(request("/msp/v0/observations"))
+
+    assert len(inner.requests) == 1

@@ -136,6 +136,32 @@ class AssignmentRecord:
         self._held = merged
         return merged
 
+    def release(self, assignment_ids: Collection[str]) -> tuple[Assignment, ...]:
+        """Let go of held work, which MSP §4.2 reads as a decline.
+
+        Args:
+            assignment_ids: What to stop holding. An id this station does not
+                hold is ignored.
+
+        Returns:
+            The assignments released.
+
+        Note:
+            There is no decline message (D-003): the next heartbeat simply stops
+            naming these, and the platform revokes them if their windows are
+            still ahead (D-171). Written before returning, like :meth:`accept`,
+            so a station that crashes after deciding still does not name them.
+        """
+        released = tuple(
+            one for one in self._held if one.assignment_id in assignment_ids
+        )
+        if not released:
+            return ()
+        remaining = tuple(one for one in self._held if one not in released)
+        _write(self._path, remaining)
+        self._held = remaining
+        return released
+
     def drop_closed(
         self, now: datetime, *, keep: Collection[str] = ()
     ) -> tuple[Assignment, ...]:
