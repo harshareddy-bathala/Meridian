@@ -144,13 +144,13 @@ class RegionsConfig:
         if (self.baseline is None) != (self.current is None):
             message = "give both [baseline] and [current], or neither"
             raise RegionsConfigError(message)
-        _within("resamples", self.resamples, 100, 100_000)
+        _whole("resamples", self.resamples, 100, 100_000)
         _within("confidence", self.confidence, 0.5, 0.999)
-        _within("min_points", self.min_points, 2, 10_000)
+        _whole("min_points", self.min_points, 2, 10_000)
         _within("nearest_km", self.nearest_km, 0.0, 1_000.0)
         _within("swath_km", self.swath_km, 1.0, 10_000.0)
         _within("wet_day_mm", self.wet_day_mm, 0.0, 1_000.0)
-        _within("seed", self.seed, 0, 2**32 - 1)
+        _whole("seed", self.seed, 0, 2**32 - 1)
         flag: object = self.include_simulated
         if not isinstance(flag, bool):
             message = f"include_simulated is true or false, not {flag!r}"
@@ -263,6 +263,18 @@ def _moment(value: object, name: str) -> datetime:
 
 def _period(period: Period | None) -> dict[str, datetime] | None:
     return None if period is None else {"from": period.start, "until": period.until}
+
+
+def _whole(name: str, value: object, low: int, high: int) -> None:
+    """A count or a seed, which is never a float.
+
+    ``2000.0`` is refused: a seed's digest and a ``range()`` both tell it apart
+    from ``2000``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        message = f"{name} is a whole number, not {value!r}"
+        raise RegionsConfigError(message)
+    _within(name, value, low, high)
 
 
 def _within(name: str, value: object, low: float, high: float) -> None:

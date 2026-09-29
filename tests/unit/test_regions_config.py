@@ -44,6 +44,9 @@ def test_periods_come_as_a_pair() -> None:
         ({"seeds": 1}, "unknown keys"),
         ({"confidence": 1.5}, "outside"),
         ({"resamples": 10}, "outside"),
+        ({"resamples": 2000.0}, "whole number"),
+        ({"seed": 1.0}, "whole number"),
+        ({"min_points": 3.5}, "whole number"),
         ({"rules": {"ndvi": {"kind": "ratio", "threshold": -0.1}}}, "kind"),
         (
             {"rules": {"ndvi": {"kind": "relative", "threshold": 0}}},
