@@ -4573,11 +4573,11 @@ Simulated receptions are never in either check: a simulated reception imaged not
 
 ## D-173 — `noise_measurements`: dBFS at a stated gain, one row per reception, partitioned like the observation it came from
 
-**2026-09-29 · accepted** · *`noise_measurements`, migration 0020, Stage 19*
+**2026-09-29 · accepted** · *`noise_measurements`, migration 0021, Stage 19*
 
 D-104 left one gap for this migration: the planned `noise_floor_dbm` presumes an absolute calibration the roadmap excludes. D-103 is accepted, so the table holds what a station can honestly report. **`noise_floor_dbfs` and `receiver_gain_db`, both required.** A floor without its gain is not a measurement anyone can compare, which is why MSP 0.3 already refuses one (D-117). Interference is judged against the same station's own history, where a relative figure is enough.
 
-**Rows are observation-sourced from this stage on.** The roadmap gives that producer to Stage 25. It comes forward because the gate asks for an active producer, and the only noise figure anything produces is the one in an observation body. Each accepted observation carrying a floor writes one row in the same transaction. Migration 0020 backfills the observations already held. Stage 25 keeps what the roadmap gives it beyond that: its ground-truth faults and the verdict's use of the row.
+**Rows are observation-sourced from this stage on.** The roadmap gives that producer to Stage 25. It comes forward because the gate asks for an active producer, and the only noise figure anything produces is the one in an observation body. Each accepted observation carrying a floor writes one row in the same transaction. Migration 0021 backfills the observations already held. Stage 25 keeps what the roadmap gives it beyond that: its ground-truth faults and the verdict's use of the row.
 
 **What a row holds:**
 - `station_id`, `measured_at`, `source`, `noise_floor_dbfs`, `receiver_gain_db` and `simulated`, copied from the registry as every such column is;
@@ -4642,7 +4642,7 @@ D-031 said the scheduler takes `max(declared, learned)` per azimuth bin. **Half 
 
 ## D-176 — `products` is a manifest of what a station holds; upload stays undefined
 
-**2026-09-29 · accepted** · *Amends D-029's timing · `products`, migration 0020, the decode report, `meridian_client.reception`, Stage 19*
+**2026-09-29 · accepted** · *Amends D-029's timing · `products`, migration 0021, the decode report, `meridian_client.reception`, Stage 19*
 
 D-029 settled that products, when they travel, travel by pre-signed PUT, and that the table is designed "when a receiver exists to produce a product". Stage 13 built the receiver and decoder, but nothing yet names a product. **This stage builds the manifest, and not the transfer.**
 
@@ -4652,7 +4652,7 @@ D-029 settled that products, when they travel, travel by pre-signed PUT, and tha
 
 **These fields fit MSP 0.3 as it stands.** §4.4 already carries `kind`, `uri`, `sha256` "and whatever else the product type warrants", so there is no version bump.
 
-**The platform normalises the array into `products` rows** at ingest, beside the verbatim `products_json`, which stays the record of what was sent (D-018). Each row holds `(assignment_id, revision)`, `kind`, `sha256`, `size_bytes`, `uri`, `created_at` and `simulated`. An element without a valid sha256 is kept in `products_json` and gets no row, and ingest counts it. Migration 0020 backfills the observations already held under the same rule. **The public API serves a product's kind, sha256 and size, never its uri.** A station-local path is of no use to anyone outside, and it is the kind of detail D-093 keeps off the public surface. Stage 30's evidence dataset references products by sha256 (D-104), so the hash is the identity that matters.
+**The platform normalises the array into `products` rows** at ingest, beside the verbatim `products_json`, which stays the record of what was sent (D-018). Each row holds `(assignment_id, revision)`, `kind`, `sha256`, `size_bytes`, `uri`, `created_at` and `simulated`. An element without a valid sha256 is kept in `products_json` and gets no row, and ingest counts it. Migration 0021 backfills the observations already held under the same rule. **The public API serves a product's kind, sha256 and size, never its uri.** A station-local path is of no use to anyone outside, and it is the kind of detail D-093 keeps off the public surface. Stage 30's evidence dataset references products by sha256 (D-104), so the hash is the identity that matters.
 
 **Retention.** Rows are kept as long as the observation they belong to. The bytes live on the station, under its cap. D-135's open question about how long a station retains its data covers them once transfer exists.
 
@@ -4662,7 +4662,7 @@ D-029 settled that products, when they travel, travel by pre-signed PUT, and tha
 
 ## D-177 — Two analytical views are built; the roadmap's other three are answered elsewhere
 
-**2026-09-29 · accepted** · *Migration 0021, `meridian schedule runs`, `meridian report timing`, Stage 19*
+**2026-09-29 · accepted** · *Migration 0022, `meridian schedule runs`, `meridian passes timing`, Stage 19*
 
 The roadmap lists five views. **Two are built:**
 - **`timing_error`:** per current observation with a first detection, `first_detection_at − aos` for its pass, beside the element set's age at the pass and the station's clock uncertainty from the nearest heartbeat. The station's time is corrected by the clock offset its nearest heartbeat reported, as §6.1 and D-025 require, and the uncorrected figure is kept beside it. §6.1's two exclusions are carried as `excluded`, `clock_offset_unknown` or `within_clock_uncertainty`, and not applied, so the reader can see what they remove. `meridian passes timing` reads it: not `meridian report`, whose reports are regenerated from a snapshot (Stage 22), because a live view there would read as one of them.
@@ -4673,20 +4673,20 @@ Both are **views, not materialised tables**, as `DATA-MODEL.md` has always said,
 **Three are answered elsewhere:**
 - **Pass completeness** is `station_days.jsonl` in every evaluation dataset (D-149, D-154). A view would give a different answer on each read.
 - **Element-set divergence** needs the propagator, and lives in `meridian.orbit` (`DATA-MODEL.md`, `element_sets`). Stage 17's divergence feature is read from a rise's predictions (D-159). Neither is expressible in SQL.
-- **Current reliability indicators** are Stage 20's: the service level indicators are counted in `meridian.reliability`, where a snapshot can run them too. That stage is in progress and owns the decision.
+- **Current reliability indicators** are Stage 20's: the service level indicators are counted in `meridian.reliability` from `pass_classifications`, where a snapshot can run them too, and D-184 rejects a view for them.
 
 ---
 
 ## D-178 — Heartbeats are never dropped; an hourly aggregate serves the reads that do not need them
 
-**2026-09-29 · accepted** · *Migration 0021, `heartbeats_hourly`, `GET /api/v1/stations/{id}/uptime`, Stage 19*
+**2026-09-29 · accepted** · *Migration 0022, `heartbeats_hourly`, `GET /api/v1/stations/{id}/uptime`, Stage 19*
 
 `DATA-MODEL.md` planned 90 days of heartbeats at full resolution, then downsampling. The roadmap asks for the queries first, then the aggregate, then its verification, and only then retention. **The queries say there is no retention to introduce.**
 
 **Three readers need raw heartbeats, for any window a pass can be asked about:**
 - `Registry.was_listening`, which is rule 7. It matches the listening block's assignment, satellite, frequency and mode against one pass's window, and no count per bucket can answer that.
 - The snapshot export, whose `since` has no floor. Its `listening.jsonl` would silently turn `true` into `false` for any window older than retention.
-- Stage 20's classification, now in progress, which reclassifies every settled pass whenever its configuration changes.
+- Stage 20's classification (D-182), which reclassifies every settled pass whenever its configuration changes, reading heartbeats through `Registry.was_listening` and its own evidence queries.
 
 Dropping raw rows would make those answers depend on when they were asked. That breaks rule 8 without anything saying so.
 
@@ -4700,7 +4700,7 @@ Dropping raw rows would make those answers depend on when they were asked. That 
 - the first and last `received_at`;
 - `simulated`.
 
-It is real-time, so the unmaterialised recent hours are read from raw rows. A refresh policy keeps it current, and it is created `WITH NO DATA` because migrations run in one transaction. It serves the reads that need coverage rather than evidence: the public uptime series and the dashboard's sparkline. Stage 20's availability figure reads every heartbeat in a 30-day window per request, and this aggregate is where that stage can take it, which is its decision to make. A test checks the aggregate against raw counts, the roadmap's "verify aggregate completeness" step. It found one limit, now asserted: a row written into an hour below the refresh watermark is not seen until the next refresh, because a real-time aggregate reads raw rows only above it. A heartbeat is stamped with the platform's clock as it arrives (D-013), and the policy stops an hour short of now, so only a hand-written or restored row lands there, and it is counted within 30 minutes.
+It is real-time, so the unmaterialised recent hours are read from raw rows. A refresh policy keeps it current, and it is created `WITH NO DATA` because migrations run in one transaction. It serves the reads that need coverage rather than evidence: the public uptime series and the dashboard's sparkline. Stage 20's availability figure reads every heartbeat in its window on each request, and D-187 names a cache as the remedy if that proves slow; an hourly count cannot replace it, because availability measures the gaps between heartbeats, and the aggregate is where a cheaper approximation would start. A test checks the aggregate against raw counts, the roadmap's "verify aggregate completeness" step. It found one limit, now asserted: a row written into an hour below the refresh watermark is not seen until the next refresh, because a real-time aggregate reads raw rows only above it. A heartbeat is stamped with the platform's clock as it arrives (D-013), and the policy stops an hour short of now, so only a hand-written or restored row lands there, and it is counted within 30 minutes.
 
 **Backups hold heartbeats for their own retention** (7 daily, 4 weekly, 6 monthly dumps). That is a copy, not a policy.
 
@@ -4948,6 +4948,19 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-187 the public reliability body | `meridian/api/public/{reliability,models/reliability}.py`; `meridian/cli_reliability.py` |
 | — the amended entries | D-067, D-111, D-146 and D-171, each with a note naming its amendment |
 | — the completion gate, and how to run it by hand | `tests/integration/test_reliability_gate.py`; `OPERATIONS.md` § Reliability figures |
+
+**Landed 2026-09-29**, building the deferred storage and Stage 19's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-173 `noise_measurements`, dBFS at a stated gain | `deploy/migrations/sql/0021_deferred_storage.sql`; `meridian/store/noise_measurements.py`; `meridian/observations/ingest.py`; the snapshot's `noise_measurements.jsonl` |
+| D-174 profiles persisted, versioned by dataset | `meridian/prediction/{profiles,profile_source}.py`; `meridian/profile_build.py`; `meridian/store/profiles.py`; `meridian/cli_profiles.py`; the jobs `profiles` task; `GET /api/v1/stations/{id}/profiles`; `dashboard/src/HorizonPlot.tsx` |
+| D-175 the declared horizon constrains scheduling | `meridian/scheduler/{declared_horizon,candidates,run}.py`; `meridian_client/registration.py`; `meridian/api/models/registration.py` |
+| D-176 `products` as a station-held manifest | `meridian/store/{products,observation_history}.py`; `meridian_client/reception/{decode_report,product_store,capture_recovery,reception_executor}.py`; `MSP-SPEC.md` §4.4 |
+| D-177 two views, three answered elsewhere | `deploy/migrations/sql/0022_views_and_heartbeat_aggregate.sql`; `meridian/store/operator_views.py`; `meridian/cli_views.py` |
+| D-178 heartbeats never dropped, an hourly aggregate | `heartbeats_hourly` in migration 0022; `meridian/store/heartbeat_coverage.py`; `GET /api/v1/stations/{id}/uptime`; `dashboard/src/UptimeStrip.tsx` |
+| — the amended entries | D-029 and D-031, each with a note naming its amendment |
+| — the completion gate, and how to run it by hand | `tests/unit/test_deferred_storage_gate.py`; `tests/integration/test_deferred_storage_gate.py`; `OPERATIONS.md` § Stored measurements and profiles |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

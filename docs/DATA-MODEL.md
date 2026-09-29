@@ -2,7 +2,7 @@
 
 PostgreSQL with TimescaleDB. Observations and heartbeats are hypertables.
 
-> **Phase 1 scope.** D-018 builds eight of the tables below plus `invite_tokens` (D-020) and `satellite_transmitters` (D-021). `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles` were deferred — see D-018 for why each one waited — and Stage 19 built them once each had a producer and a consumer (migration `0020`, D-173 to D-176). Two derived views and an hourly heartbeat aggregate followed (migration `0021`, D-177, D-178).
+> **Phase 1 scope.** D-018 builds eight of the tables below plus `invite_tokens` (D-020) and `satellite_transmitters` (D-021). `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles` were deferred — see D-018 for why each one waited — and Stage 19 built them once each had a producer and a consumer (migration `0021`, D-173 to D-176). Two derived views and an hourly heartbeat aggregate followed (migration `0022`, D-177, D-178).
 >
 > **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below and are **planned, not built**. Nothing here is a migration; the rules they share are D-104.
 
@@ -199,11 +199,11 @@ What happened to each settled, scheduled pass, and the evidence it was decided f
 - **Append-only.** Unique on `(assignment_id, method, config_sha256)`, so a changed rule or parameter writes new rows beside the old, and a re-run writes nothing. See D-182.
 
 ### `products`
-What a station declared it holds from one reception — a waterfall, an image, decoded frames — named by `sha256` (migration `0020`, D-176).
+What a station declared it holds from one reception — a waterfall, an image, decoded frames — named by `sha256` (migration `0021`, D-176).
 
 `(id, assignment_id, revision, observation_started_at, station_id, element_index, kind, sha256, size_bytes, uri, created_at, simulated)`, with a foreign key to the observation revision it came from.
 
-- **Producer:** observation ingest, from each element of `products_json` with a non-empty `kind` and a 64-hex `sha256`, in the transaction that writes the revision. Migration `0020` backfilled every earlier observation by the same rule. The reference client declares only files its decoder named and its product store holds.
+- **Producer:** observation ingest, from each element of `products_json` with a non-empty `kind` and a 64-hex `sha256`, in the transaction that writes the revision. Migration `0021` backfilled every earlier observation by the same rule. The reference client declares only files its decoder named and its product store holds.
 - **Consumers:** the public observation list, which serves kind, hash and size, never `uri`; the raw snapshot, likewise without `uri`; Stage 30's evidence dataset, by hash.
 - **No transfer.** MSP 0.x defines none (D-029); `uri` is `station:products/<sha256>` for the reference client, meaning held by the station, not fetchable. An element outside the rule stays in `products_json` and gets no row.
 - **Retention:** as long as the observation it belongs to — never dropped. The bytes live on the station under its store's cap, oldest evicted first, and an eviction is not reported.
@@ -219,19 +219,19 @@ A station's horizon by azimuth bin: what a capability's mask **declared**, and w
 - **Retention:** append-only and never dropped: a new dataset or mask writes new rows, and an earlier profile stays so a diagnosis can cite the one it read.
 
 ### `noise_measurements` *(hypertable)*
-Measured noise floor, one row per reception revision or survey reading (migration `0020`, D-173).
+Measured noise floor, one row per reception revision or survey reading (migration `0021`, D-173).
 
 `(id, station_id, measured_at, source, assignment_id, revision, centre_freq_hz, bandwidth_hz, azimuth_deg, noise_floor_dbfs, receiver_gain_db, simulated, recorded_at)`, keyed `(id, measured_at)`.
 
 **dBFS at a stated gain**, never dBm: RF calibration is outside what a station can honestly claim (D-103, D-104). `source` is `observation` or `survey`; an observation's row names its assignment and revision and has no azimuth, because one floor covers a whole pass and an unpointed antenna pointed nowhere. The sector is assigned where a profile is derived.
 
-- **Producer:** observation ingest, from each revision carrying a floor, by the query migration `0020` backfilled with. Nothing produces a survey row yet; the `CHECK` admits one.
+- **Producer:** observation ingest, from each revision carrying a floor, by the query migration `0021` backfilled with. Nothing produces a survey row yet; the `CHECK` admits one.
 - **Consumers:** the raw snapshot, and so every labelled dataset; Stage 25's verdict and Stage 27's interference cause.
 - Partitioned on `measured_at`, the observation's `started_at`, under the same ingest bound as `observations` (D-013). No foreign key to `observations`: TimescaleDB refuses one between hypertables, so ingest writes both in one transaction and a test checks every row against its observation.
 - **Retention:** never dropped (D-178), no compression policy: its volume is the observation count.
 
 ### `interference_profiles`
-A station's noise floor by 45° sector of the pass's peak and 4-hour band of local solar hour, over the station's median, with the gains behind each cell (migration `0020`, D-174).
+A station's noise floor by 45° sector of the pass's peak and 4-hour band of local solar hour, over the station's median, with the gains behind each cell (migration `0021`, D-174).
 
 `(id, station_id, method, dataset_sha256, trained_from, trained_until, azimuth_deg, azimuth_width_deg, hour_start, hour_width, noise_lift_db, station_median_dbfs, sample_count, gain_min_db, gain_max_db, built_at, simulated)`. All 48 cells are written, an empty one at its prior with no gains (D-161).
 
@@ -501,7 +501,7 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 
 `observations_current` exposes the highest revision per assignment, and it ships alongside the `observations` table because appending corrections rather than overwriting them is meaningless without something that reads the current one.
 
-Two more are built (migration `0021`, D-177). **They are operators' reads, not reported numbers**: a view over live tables answers differently each time it is read, and every published figure comes from a snapshot (rule 8).
+Two more are built (migration `0022`, D-177). **They are operators' reads, not reported numbers**: a view over live tables answers differently each time it is read, and every published figure comes from a snapshot (rule 8).
 
 - `timing_error` — first detection against predicted AOS for each current observation, **corrected by the station's clock offset** from its nearest heartbeat (`EVALUATION.md` §6.1, D-025), with the uncorrected figure and element-set age beside it. §6.1's exclusions are named in `excluded` — `clock_offset_unknown`, `within_clock_uncertainty` — and not applied. `meridian passes timing` reads it.
 - `scheduler_performance` — each schedule run with its solver status and what became of its assignments: revoked, expired, each outcome, still owed, frames decoded. `meridian schedule runs` reads it.
