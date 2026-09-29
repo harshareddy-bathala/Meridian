@@ -1,4 +1,4 @@
--- 0030 — published environmental and space-weather values
+-- 0021 — published environmental and space-weather values
 --
 -- Stage 31 brings in values other people publish about the atmosphere, the
 -- ionosphere and the ground: a geomagnetic index, cloud cover, fire

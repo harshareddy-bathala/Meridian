@@ -1,7 +1,7 @@
 """Values public products published — indices, conditions, composites, detections.
 
 Reads and writes ``environment_samples``
-(``deploy/migrations/sql/0030_environment_samples.sql``). A row says that a
+(``deploy/migrations/sql/0021_environment_samples.sql``). A row says that a
 source published a value for a quantity, over an interval, at a place or for
 the globe, and when that value became available.
 

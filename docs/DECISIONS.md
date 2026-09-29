@@ -4069,7 +4069,7 @@ D-132 names classes, not vendors. Stage 31 has to name one provider per class to
 
 ## D-221 — Published values are `environment_samples`, and a missing value is a row that says so
 
-**2026-09-29 · accepted** · *migration 0030, `meridian.store.environment_samples`, `meridian_ingest.normalise.samples`, `DATA-MODEL.md`*
+**2026-09-29 · accepted** · *migration 0021, `meridian.store.environment_samples`, `meridian_ingest.normalise.samples`, `DATA-MODEL.md`*
 
 `DATA-MODEL.md` planned `environment_samples` as the one normalised table the features read. It is built as planned, with four changes of detail:
 

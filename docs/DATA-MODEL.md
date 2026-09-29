@@ -287,7 +287,7 @@ One row per evidence-dataset package; the package itself is files, as `products`
 
 ## Ingest and archive tables
 
-Seven tables and a view, for modules 18 and 19. **Five are built.** Migration `0016` built `ingest_sources` and `ingest_records` — the provenance pair, reused unchanged by Stage 31 rather than duplicated (D-140) — and `archive_stations` and `archive_observations`, which hold what an archive published about somebody else's receptions (D-139). Migration `0030` built `environment_samples`, Stage 31's published values (D-221). The remaining two are **planned**, and their column tuples are the intent until Stage 32 writes its migration. What all of them share is decided in D-132, D-133, D-134 and D-140:
+Seven tables and a view, for modules 18 and 19. **Five are built.** Migration `0016` built `ingest_sources` and `ingest_records` — the provenance pair, reused unchanged by Stage 31 rather than duplicated (D-140) — and `archive_stations` and `archive_observations`, which hold what an archive published about somebody else's receptions (D-139). Migration `0021` built `environment_samples`, Stage 31's published values (D-221). The remaining two are **planned**, and their column tuples are the intent until Stage 32 writes its migration. What all of them share is decided in D-132, D-133, D-134 and D-140:
 
 - **Raw arrivals are append-only.** A re-fetch that differs is a new row, never an overwrite — the discipline D-015 applies to observations, applied to data we did not author either.
 - **Provenance is complete or the record is refused.** Source, original identifier, source version, retrieval time, licence and checksum, for every record, whatever it carries. The version of the transformation that produced a value sits on the normalised row rather than on the arrival (D-140): an artefact is retrieved once and may be normalised many times.
@@ -338,7 +338,7 @@ Every stored artefact beside the terms it arrived under, joining `ingest_records
 ### `environment_samples`
 `(sample_id, record_id, source_id, transformation_version, series_key, content_sha256, quantity, value, missing_reason, value_unit, observed_from, observed_to, published_at, published_basis, product, lat_deg, lon_deg, footprint_m, quality, loaded_at)`
 
-The normalised values features and regional series are read from — an index, a condition, a composite's pixel, a detection — built by migration `0030` (D-221). One row per value per artefact, keyed `(record_id, series_key, transformation_version)` and content-hashed, so re-normalising appends and a disagreeing normaliser is refused, as for archive receptions (D-140, D-142).
+The normalised values features and regional series are read from — an index, a condition, a composite's pixel, a detection — built by migration `0021` (D-221). One row per value per artefact, keyed `(record_id, series_key, transformation_version)` and content-hashed, so re-normalising appends and a disagreeing normaliser is refused, as for archive receptions (D-140, D-142).
 
 **`published_at` is the load-bearing column.** It is when the value became available: the artefact's own production time where it declares one earlier than our fetch (`published_basis = 'source_declared'`), otherwise our retrieval (`'retrieved'`), and never later than the retrieval (D-222). The value used for a pass is chosen among rows published before it (D-131). A later revision of the same interval is a new row with a later `published_at`, and a model that selects on `observed_from` alone has read the future.
 
