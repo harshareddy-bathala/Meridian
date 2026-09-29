@@ -79,7 +79,7 @@ def _learn(
     insert_learned_interference(
         conn,
         build,
-        [InterferenceRow(0.0, 45.0, 4, 4, 1.5, -97.0, 3, 20.0, 32.8)],
+        [InterferenceRow(0.0, 45.0, 4, 4, 1.54, -97.04, 3, 20.0, 32.8)],
     )
 
 
@@ -87,7 +87,7 @@ def test_declared_and_learned_are_served_apart_with_provenance(
     client: TestClient, rollback: Any, station: str, tmp_path: Path
 ) -> None:
     build_profiles(rollback, tmp_path)
-    _learn(rollback, bytes([1]) * 32, 10.0)
+    _learn(rollback, bytes([1]) * 32, 10.4)
 
     body = client.get(f"/api/v1/stations/{station}/profiles").json()
 
@@ -115,7 +115,9 @@ def test_declared_and_learned_are_served_apart_with_provenance(
             "sample_count": 5,
         }
     ]
+    # Published coarser than stored: whole degrees, tenths of a decibel (§7).
     assert body["interference"]["station_median_dbfs"] == -97.0
+    assert body["interference"]["cells"][0]["noise_lift_db"] == 1.5
     assert body["interference"]["cells"][0]["gain_max_db"] == 32.8
 
 

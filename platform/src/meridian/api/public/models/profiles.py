@@ -5,10 +5,12 @@ horizon is a claim the operator published and the learned one is evidence, so
 they are two fields and never one (D-031). Only the declared one constrains
 scheduling (D-175).
 
-**Nothing is coarsened.** A capability's mask is published as declared
-(``capabilities``), and a learned floor per 10° of sky is a fact about what the
-station can see, not about where it is. Neither can be inverted into a position,
-unlike a pass window, which D-093 widens.
+**What is coarsened, and why.** A capability's mask is published as declared,
+as ``capabilities`` already publishes it. A learned horizon was never chosen by
+the operator, and a skyline can in principle be matched against terrain, so its
+floors are published to whole degrees, as D-093 publishes every other angle.
+Interference is published to a tenth of a decibel. ``docs/THREAT-MODEL.md`` §7
+reviews both.
 
 Every profile states its provenance: the station's ``simulated`` flag, and for a
 learned one the method and the dataset it was built from, by hash (D-174).
@@ -52,12 +54,13 @@ class PublicHorizonBin(BaseModel):
     """Detections behind a learned bin; null for a declared one."""
 
     @classmethod
-    def from_row(cls, row: HorizonBin) -> Self:
-        """Publish one bin."""
+    def from_row(cls, row: HorizonBin, *, whole_degrees: bool = False) -> Self:
+        """Publish one bin; a learned one's floor to whole degrees."""
+        floor = row.min_elevation_deg
         return cls(
             azimuth_deg=row.azimuth_deg,
             azimuth_width_deg=row.azimuth_width_deg,
-            min_elevation_deg=row.min_elevation_deg,
+            min_elevation_deg=float(round(floor)) if whole_degrees else floor,
             sample_count=row.sample_count,
         )
 
@@ -96,7 +99,9 @@ class PublicLearnedHorizon(BaseModel):
             trained_from=row.trained_from,
             trained_until=row.trained_until,
             built_at=row.built_at,
-            bins=[PublicHorizonBin.from_row(one) for one in row.bins],
+            bins=[
+                PublicHorizonBin.from_row(one, whole_degrees=True) for one in row.bins
+            ],
         )
 
 
@@ -120,7 +125,7 @@ class PublicInterferenceCell(BaseModel):
             azimuth_width_deg=row.azimuth_width_deg,
             hour_start=row.hour_start,
             hour_width=row.hour_width,
-            noise_lift_db=row.noise_lift_db,
+            noise_lift_db=round(row.noise_lift_db, 1),
             sample_count=row.sample_count,
             gain_min_db=row.gain_min_db,
             gain_max_db=row.gain_max_db,
@@ -149,7 +154,7 @@ class PublicInterference(BaseModel):
             trained_from=row.trained_from,
             trained_until=row.trained_until,
             built_at=row.built_at,
-            station_median_dbfs=medians.pop() if len(medians) == 1 else None,
+            station_median_dbfs=_tenth(medians.pop()) if len(medians) == 1 else None,
             cells=[PublicInterferenceCell.from_row(one) for one in row.cells],
         )
 
@@ -181,3 +186,8 @@ class PublicStationProfiles(BaseModel):
             if row.interference is None
             else PublicInterference.from_row(row.interference),
         )
+
+
+def _tenth(value: float | None) -> float | None:
+    """A decibel figure to a tenth, as it is published."""
+    return None if value is None else round(value, 1)
