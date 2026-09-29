@@ -520,6 +520,8 @@ Inline was the simpler option for a constrained client and is rejected on arithm
 
 O-1 is closed. The `products` table is designed against this at Stage 19, when a receiver exists to produce a product.
 
+*Amended by D-176.* The table is built at Stage 19 as a manifest of what a station holds, named by its decoder. The transfer is still undefined, and waits for an object store and an MSP 0.4 decision.
+
 ---
 
 ## D-030 — O-2 resolved: polling, for all of MSP 0.x
@@ -549,6 +551,8 @@ Stored as `station_capabilities.horizon_mask_json jsonb not null default '[]'`. 
 **Declared and learned never merge into one number.** The Phase 2 `horizon_profiles` table carries `source in ('declared', 'learned')`, and the scheduler takes `max(declared, learned)` per azimuth bin. A declaration therefore constrains scheduling immediately — which is the operator's legitimate need, they can see the building — but never overwrites a measurement and never appears in a learned profile's training data. That separation is what "without pre-empting the learned profile" has to mean; storing the declaration into the same column the model writes would make the model's own output an input to itself.
 
 The flat list is deliberately coarse. A station that knows its horizon to a degree is unusual; a station that knows there is a building to the north is normal.
+
+*Amended by D-175.* Only the declared mask constrains scheduling; the learned horizon reaches it as a feature, since a learned floor used as a constraint could never come down. The reference client's mask had never reached the platform, and is now sent inside each capability.
 
 ---
 
@@ -4564,6 +4568,139 @@ Stage 32 asks for our receptions to be checked against the public layers, as a c
 - **The receiving chain against the weather.** At 137 MHz rain does not attenuate the downlink enough for a decode to notice. So for stations inside an area, the decode rate of passes they attempted while confirmed listening (rule 7) should agree on wet days (precipitation ≥ `wet_day_mm`) and dry days. Intervals that do not overlap are reported as `differs`, which points at the station — water in a connector, a feedline that detunes when wet — not at the sky. Too few attempts either side is `insufficient`.
 
 Simulated receptions are never in either check: a simulated reception imaged nothing and its weather is invented.
+
+---
+
+## D-173 — `noise_measurements`: dBFS at a stated gain, one row per reception, partitioned like the observation it came from
+
+**2026-09-29 · accepted** · *`noise_measurements`, migration 0020, Stage 19*
+
+D-104 left one gap for this migration: the planned `noise_floor_dbm` presumes an absolute calibration the roadmap excludes. D-103 is accepted, so the table holds what a station can honestly report. **`noise_floor_dbfs` and `receiver_gain_db`, both required.** A floor without its gain is not a measurement anyone can compare, which is why MSP 0.3 already refuses one (D-117). Interference is judged against the same station's own history, where a relative figure is enough.
+
+**Rows are observation-sourced from this stage on.** The roadmap gives that producer to Stage 25. It comes forward because the gate asks for an active producer, and the only noise figure anything produces is the one in an observation body. Each accepted observation carrying a floor writes one row in the same transaction. Migration 0020 backfills the observations already held. Stage 25 keeps what the roadmap gives it beyond that: its ground-truth faults and the verdict's use of the row.
+
+**What a row holds:**
+- `station_id`, `measured_at`, `source`, `noise_floor_dbfs`, `receiver_gain_db` and `simulated`, copied from the registry as every such column is;
+- for `source = 'observation'`, the `assignment_id` and `revision` it came from, both required by a check, and one row per revision. A corrected report appends, as D-015 keeps the old observation;
+- `centre_freq_hz`, the assignment's pass frequency, which is what the station was tuned to;
+- `bandwidth_hz`, the transmitter's where the catalogue knows it, otherwise null;
+- **`azimuth_deg`, null for an observation-sourced row.** A report carries one floor for a whole pass, and a station with no rotator (D-126) was not pointed anywhere. Writing the pass's peak azimuth here would state as measured a direction nobody measured. The sector is assigned where the profile is derived, from the frozen track, as Stage 17 already does it (D-159).
+
+**Partitioned on `measured_at`, the observation's `started_at`.** This is D-013's stated exception, taken for the same reason and with the same bound: ingest refuses a `started_at` outside `[now − 30 days, now + 1 hour]`, so no row can land in 1970. Keyed `(id, measured_at)`, as D-013 requires of a hypertable.
+
+**`source in ('observation', 'survey')`.** The DATA-MODEL distinction is kept because survey sweeps have a different duty cycle. Nothing produces a survey row yet, and the check admits one so that the first sweep needs no migration.
+
+*Rejected: reading `observations.noise_floor_dbfs` in place of a table.* That is the only source today, but it can never hold a survey sweep, and every consumer the roadmap names (Stages 25, 27 and 28) would read a column on a table it has no other reason to touch. Duplicating one number per reception buys a table the later stages can share.
+
+---
+
+## D-174 — Learned profiles are persisted outputs of the Stage 17 code, versioned by the dataset they came from
+
+**2026-09-29 · accepted** · *`horizon_profiles`, `interference_profiles`, `meridian profiles build`, Stage 19*
+
+Stage 17 computes the horizon and interference profiles in memory, from a labelled dataset, every time a pass is scored (D-157, D-169). Nothing held them, so a profile could not be shown, compared across time, or named as the evidence for a loss diagnosis (Stage 27). These two tables hold them, and **they are written by the same functions the features call**, in `meridian.prediction.profiles`. A persisted profile that disagreed with the one the model saw would explain nothing.
+
+**A profile is versioned by the dataset it was built from.** Every row carries:
+- `dataset_sha256`, the labelled dataset whose settled reports built it;
+- `method`, a versioned string (D-060);
+- `trained_from` and `trained_until`, the settled reports' span;
+- `built_at`, and the sample count behind each bin or cell.
+
+Building twice from one dataset writes nothing the second time. A prediction is traceable to the profile that produced it through the dataset its decision already states (D-169), which is D-009's requirement met without a second pointer.
+
+**Declared and learned are separate rows and never merge** (D-031). `horizon_profiles.source` is `declared` or `learned`. A declared row is the station's capability mask, written as it stands when the profile is built, with `method = 'declared'` and no dataset. Nothing declared is ever read by the learned computation.
+
+**A station's profile is built from that station's own reports, and carries its `simulated` flag.** Stage 17's features never read a simulated report (D-078), and they still do not. A simulated station's persisted profile is built from its own simulated reports, is labelled as simulated at every layer (rule 5), and never feeds a feature, because **these tables feed nothing back into prediction**. Without this, a deployment of simulated stations would build nothing at all, and the gate's producer could only be shown against a database seeded by hand.
+
+**Each interference cell states the gains it was measured at**, as `gain_min_db` and `gain_max_db`. The cell is the feature's cell, a 45° sector by a 4-hour band of local solar hour, so the table explains the feature exactly. Stage 27 judges a raised floor "at the same gain" and can refuse a cell whose gains differ, or read `noise_measurements` directly.
+
+**Timing error and element-set divergence are not persisted.** Timing error is a view (D-177). Divergence is read from the predictions of one rise and has nothing to accumulate.
+
+*Rejected: a profile computed live by the scheduler and written as a side effect of scoring.* It would write on every round, give one dataset many identical rows, and make a scheduling run the only way to get a profile.
+
+---
+
+## D-175 — The declared horizon constrains scheduling; the learned one does not
+
+**2026-09-29 · accepted** · *Amends D-031 · `scheduler/constraints.py`, `scheduler/candidates.py`, `meridian_client` registration, Stage 19*
+
+D-031 said the scheduler takes `max(declared, learned)` per azimuth bin. **Half of that is adopted.** A declared mask is a hard constraint: a pass whose track clears the declared floor at no point is not a candidate, and is skipped with that reason. The check is part of D-166's rules, so `violations` refuses a schedule that breaks it, whichever scheduler wrote it.
+
+**The learned floor is not a constraint.** A sector the scheduler stops sending work to is a sector the station never hears, so its learned floor could never come down again. That is a feedback loop, and it would remove from the history the very passes that could correct it. The learned horizon already reaches scheduling as a feature, `horizon_clear_share`, where a sparse or wrong sector costs expected value rather than eligibility. The model learns how far to trust it (D-159, D-161).
+
+**How a mask is read.** The list is a step function: each point's floor holds from its azimuth to the next point's, clockwise, wrapping at 360°. A pass clears the mask if any sample of its track is above the floor at that sample's azimuth. The track is the one the scheduler already computes for live scoring (D-169). An empty mask, the default, constrains nothing, and a station that declares none schedules exactly as before.
+
+**The reference client's mask never reached the platform, and that is fixed first.** The client sent `horizon_mask` at the top level of the registration body. MSP §4.1 places it inside each capability, and the platform's registration model ignored the unknown key. Every mask a station declared was dropped without a word. The client now sends it inside each capability, and a conformance test finds it in `station_capabilities.horizon_mask_json`.
+
+---
+
+## D-176 — `products` is a manifest of what a station holds; upload stays undefined
+
+**2026-09-29 · accepted** · *Amends D-029's timing · `products`, migration 0020, the decode report, `meridian_client.reception`, Stage 19*
+
+D-029 settled that products, when they travel, travel by pre-signed PUT, and that the table is designed "when a receiver exists to produce a product". Stage 13 built the receiver and decoder, but nothing yet names a product. **This stage builds the manifest, and not the transfer.**
+
+**The decoder names its products.** The decode report (D-124) gains an optional `products` list of `{kind, path}`, with `path` relative to the decoder's output directory. The client reads nothing else a decoder writes (D-124), and guessing a kind from a file extension is exactly the leniency D-122 refuses. A path outside the output directory, or naming a missing file, invalidates the report, as a bad offset does. A decoder that names nothing produces no products, which is valid.
+
+**The station keeps what it declares, content-addressed.** The client hashes each named file and moves it to `products/<sha256>` in its state directory, out of the capture folder that is pruned after 30 days. Each file is declared in the observation's `products` array as `kind`, `sha256`, `size_bytes` and a `uri` of `station:products/<sha256>`. That uri means "held by the station that reported it". It is not an address anyone can fetch, which is honest while no transfer exists. The store is capped by `station.toml` and evicts oldest-first, and **an evicted product is not reported**, because MSP has no message for it. The platform's row therefore says where a product was declared held, not that it is still there. This is a stated limit.
+
+**These fields fit MSP 0.3 as it stands.** §4.4 already carries `kind`, `uri`, `sha256` "and whatever else the product type warrants", so there is no version bump.
+
+**The platform normalises the array into `products` rows** at ingest, beside the verbatim `products_json`, which stays the record of what was sent (D-018). Each row holds `(assignment_id, revision)`, `kind`, `sha256`, `size_bytes`, `uri`, `created_at` and `simulated`. An element without a valid sha256 is kept in `products_json` and gets no row, and ingest counts it. Migration 0020 backfills the observations already held under the same rule. **The public API serves a product's kind, sha256 and size, never its uri.** A station-local path is of no use to anyone outside, and it is the kind of detail D-093 keeps off the public surface. Stage 30's evidence dataset references products by sha256 (D-104), so the hash is the identity that matters.
+
+**Retention.** Rows are kept as long as the observation they belong to. The bytes live on the station, under its cap. D-135's open question about how long a station retains its data covers them once transfer exists.
+
+*Deferred: the transfer itself.* It needs an object store in the deployment, a pre-signed URL in MSP (a 0.4 decision), and a consumer that reads the bytes. Stage 30 is the first, and it needs only the hash.
+
+---
+
+## D-177 — Two analytical views are built; the roadmap's other three are answered elsewhere
+
+**2026-09-29 · accepted** · *Migration 0021, `meridian schedule runs`, `meridian report timing`, Stage 19*
+
+The roadmap lists five views. **Two are built:**
+- **`timing_error`:** per current observation with a first detection, `first_detection_at − aos` for its pass, beside the element set's age at the pass and the station's clock uncertainty from the nearest heartbeat. It carries `EVALUATION.md` §6.1's exclusion as a flag, `within_clock_uncertainty`, and does not apply it, so the reader can see what the exclusion removes. `meridian report timing` reads it.
+- **`scheduler_performance`:** per `schedule_runs` row, decisions by kind, the solver's status, whether it fell back, how many assignments were later revoked, and how many of its assignments have a current observation, by outcome. `meridian schedule runs` reads it.
+
+Both are **views, not materialised tables**, as `DATA-MODEL.md` has always said, until profiling says otherwise. **They are operators' reads, not reported numbers.** Every published figure is regenerated from a snapshot (rule 8), and a view over live tables answers differently each time it is read.
+
+**Three are answered elsewhere:**
+- **Pass completeness** is `station_days.jsonl` in every evaluation dataset (D-149, D-154). A view would give a different answer on each read.
+- **Element-set divergence** needs the propagator, and lives in `meridian.orbit` (`DATA-MODEL.md`, `element_sets`). Stage 17's divergence feature is read from a rise's predictions (D-159). Neither is expressible in SQL.
+- **Current reliability indicators** are Stage 20's: the service level indicators are counted in `meridian.reliability`, where a snapshot can run them too. That stage is in progress and owns the decision.
+
+---
+
+## D-178 — Heartbeats are never dropped; an hourly aggregate serves the reads that do not need them
+
+**2026-09-29 · accepted** · *Migration 0021, `heartbeats_hourly`, `GET /api/v1/stations/{id}/uptime`, Stage 19*
+
+`DATA-MODEL.md` planned 90 days of heartbeats at full resolution, then downsampling. The roadmap asks for the queries first, then the aggregate, then its verification, and only then retention. **The queries say there is no retention to introduce.**
+
+**Three readers need raw heartbeats, for any window a pass can be asked about:**
+- `Registry.was_listening`, which is rule 7. It matches the listening block's assignment, satellite, frequency and mode against one pass's window, and no count per bucket can answer that.
+- The snapshot export, whose `since` has no floor. Its `listening.jsonl` would silently turn `true` into `false` for any window older than retention.
+- Stage 20's classification, now in progress, which reclassifies every settled pass whenever its configuration changes.
+
+Dropping raw rows would make those answers depend on when they were asked. That breaks rule 8 without anything saying so.
+
+**The volume does not force it.**
+- At the 30 s interval, a station sends about 2,900 heartbeats a day, a little over a million a year.
+- Chunks compress after 7 days (migration 0006), and `held_assignments` and the listening block compress well.
+- Fifty simulated stations are fifty million rows a year. That is the case Stage 21 measures, and Stage 33 decides retention across tiers with the numbers in hand.
+
+**`heartbeats_hourly` is a continuous aggregate** per station and hour. It holds:
+- the heartbeat count, and how many heartbeats reported listening;
+- the first and last `received_at`;
+- `simulated`.
+
+It is real-time, so the unmaterialised recent hours are read from raw rows. A refresh policy keeps it current, and it is created `WITH NO DATA` because migrations run in one transaction. It serves the reads that need coverage rather than evidence: the public uptime series and the dashboard's sparkline. Stage 20's availability figure reads every heartbeat in a 30-day window per request, and this aggregate is where that stage can take it, which is its decision to make. A test checks the aggregate against raw counts, the roadmap's "verify aggregate completeness" step.
+
+**Backups hold heartbeats for their own retention** (7 daily, 4 weekly, 6 monthly dumps). That is a copy, not a policy.
+
+**Observations are not dropped either.** Migration 0005's note left their retention to "90 days then downsampled". An observation is the system of record, and rule 8 applies to it as it does to heartbeats, so the same answer holds.
+
+*Rejected: a 90-day drop with guards.* Export and reclassification would refuse old windows, and old passes would keep a frozen classification. That is honest, but it makes one Stage 20 answer depend on the day it was computed. It also buys space that compression already provides at the scale this network has.
 
 ---
 
