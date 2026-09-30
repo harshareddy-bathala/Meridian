@@ -48,6 +48,23 @@ flowchart TD
 
 *Snapshot taken 2026-09-30. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
+**Stage 25's software is built** (2026-09-30), beside Stage 22, which it does not need and which merged first. **Stage 24 is still next in order**, and its seventy-two hour run is done on the Pi. Stage 26 now waits only on D-106, what "usable" means. Its decisions are D-250 through D-253, `docs/OPERATIONS.md` § Ground-truth faults is its runbook, and `docs/SCALE-AND-FAULTS.md` § Ground-truth faults is the specification of its faults' effects. Its migration is `0026`.
+- **The completion gate passes.** *A simulated fleet running each of the four new faults produces observations carrying the evidence that fault changes, and a run record naming every injected cause, while nothing the platform holds reveals the cause.*
+  - `tests/integration/test_ground_truth_gate.py` runs three stations under `sky` over a day of real passes, on a stated clock.
+  - It checks every cause in the ledger, with its parameters, and on every station for a silence.
+  - It compares each acted-on pass's stored evidence with the clean evidence recomputed from its seed, and checks untouched passes match exactly.
+  - It finds no cause label in any text or JSON value of any table, with a planted label as the positive control.
+  - It checks that every derived row is simulated.
+- **Frames expected** (D-250): `satellite_transmitters.frame_interval_s`, loaded by `meridian catalogue load`, which fills an unknown interval and never replaces a known one; computed from acquisition to loss by one function, and read per assignment from a raw snapshot for Stage 26. Meteor LRPT's 0.113778 s is derived, not measured, and is to be checked against SatDump's counts on station 001.
+- **Virtual stations report MSP 0.3's evidence** (D-251): a noise floor at a fixed gain, SNR across the window and the decoder's frame counts, derived from the unchanged outcome model on a stream of its own, so no seed's outcome moved.
+- **Four faults with ground-truth causes** (D-252, D-253): gradual degradation, a new obstruction, interference and a silent satellite. They act on the evidence, and the outcome follows. They are written to the run's ledger with their parameters and the passes they changed, and never to MSP or the database. The simulator places a pass in its sky with Skyfield, in one exempted module, checked against the platform's prediction to 0.01°.
+- **Owed, not done:**
+  - the review of the fault specification by a team member other than Stage 27's author, which D-105 requires before Stage 27 begins;
+  - a check of the LRPT frame interval on station 001.
+- **Known limits:**
+  - the fault effects are shapes, not a link budget;
+  - a station process that restarts reopens its sky faults at the restart, so a degradation's loss starts again from there, as the ledger then says.
+
 **Stage 22's software is built** (2026-09-30). Its decisions are D-234 through D-240, and `docs/OPERATIONS.md` § Evaluation reports is its runbook. It added no migration. **Stage 24 is next in order.** Its seventy-two hour run is done on the Pi; Stage 25 is unblocked beside it.
 - **The completion gate passes, and is demonstrable at a prompt.** `meridian report build --snapshot … --config … --seed …` writes a sealed run, and `meridian report verify <run>` regenerates it and compares hashes. `tests/unit/test_report_gate.py` builds one run in which every section measures its claim, with every socket and database refused. It asserts:
   - the same run twice, and in a fresh interpreter on another root;

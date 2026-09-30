@@ -5631,6 +5631,16 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the completion gate, and how to run it by hand | `tests/unit/test_report_gate.py`; `OPERATIONS.md` § Evaluation reports |
 | — the amended entry | D-224, whose leave-one-group-out key is `without` (D-237) |
 
+**Landed 2026-09-30**, building Stage 25's reception evidence and ground-truth faults.
+
+| Decision | Applied to |
+|---|---|
+| D-250 frame interval and frames expected | migration 0026; `meridian/{catalogue_file,cli_catalogue}.py`; `meridian/store/{satellites,snapshot_reads}.py`; `meridian/observations/frames_expected.py`; `meridian/datasets/frames_expected.py`; `deploy/catalogue/development.json`; `DATA-MODEL.md`; `tests/unit/{test_frames_expected,test_catalogue_file}.py`; `tests/integration/{test_catalogue_load,test_migration_lifecycle}.py` |
+| D-251 the simulator's MSP 0.3 evidence | `meridian_sim/{evidence,executor,report_blocks}.py`; `tests/unit/{test_simulator_evidence,test_simulator_executor}.py`; `tests/e2e/test_simulated_station_round_trip.py` |
+| D-252 Skyfield in one simulator module | `meridian_sim/sky_track.py`; `simulator/pyproject.toml`; `pyproject.toml` (its exemption); `ARCHITECTURE.md` rule 2; `tests/unit/test_simulator_sky_track.py` |
+| D-253 four faults with ground-truth causes | `meridian_sim/{faults,sky_faults,sky_effects,fleet_faults,fault_notes,fault_schedule,supervisor,station,config,virtual_station}.py`; `deploy/{docker-compose.yml,.env.example}`; `docs/SCALE-AND-FAULTS.md` § Ground-truth faults; `OPERATIONS.md` § Ground-truth faults; `tests/unit/{test_simulator_sky_faults,test_simulator_sky_ground_truth,test_simulator_cli,test_reliability_faults}.py` |
+| — the completion gate | `tests/integration/test_ground_truth_gate.py`: three stations under `sky` over a day of real passes, read from the ledger and from every table, with a planted label as the positive control |
+
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
