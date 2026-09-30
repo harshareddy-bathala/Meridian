@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = REPO_ROOT / "deploy" / "alembic.ini"
-HEAD_REVISION = "0025"
+HEAD_REVISION = "0026"
 """The newest revision, written out rather than read from the script directory.
 
 Deriving it would make these tests assert that alembic agrees with itself. Pinned,
@@ -546,3 +546,35 @@ def test_0024_s_hourly_aggregate_agrees_with_the_raw_heartbeats(
             " where hour = '2026-09-01T01:00:00Z'"
         ).fetchone()
         assert hour == (141, 120)
+
+
+def test_0026_leaves_every_existing_downlink_s_interval_unknown(
+    scratch_database: str, monkeypatch
+) -> None:
+    """D-250: a downlink held before the column existed has no interval.
+
+    Null, not a default: nobody looked the interval up for it, and a number
+    here would become the denominator of every frames ratio computed for its
+    passes. `meridian catalogue load` fills it from a file that states it.
+    """
+    monkeypatch.setenv("DATABASE_URL", scratch_database)
+    _upgrade_to(scratch_database, "0025")
+
+    with psycopg.connect(scratch_database, autocommit=True) as conn:
+        conn.execute(
+            "insert into satellites (satellite_id, name) values ('norad:1', 'T')"
+        )
+        conn.execute(
+            "insert into satellite_transmitters (satellite_id, centre_freq_hz,"
+            " mode) values ('norad:1', 137100000, 'lrpt')"
+        )
+
+    _upgrade_to_head(scratch_database)
+
+    with psycopg.connect(scratch_database, autocommit=True) as conn:
+        held = conn.execute(
+            "select frame_interval_s from satellite_transmitters"
+        ).fetchall()
+        assert held == [(None,)]
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute("update satellite_transmitters set frame_interval_s = -1")

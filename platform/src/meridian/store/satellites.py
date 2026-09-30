@@ -1,10 +1,10 @@
 """Tracked objects and their downlinks — the SQL layer under pass generation.
 
 Reads ``satellites`` and ``satellite_transmitters``
-(``deploy/migrations/sql/0003_satellites.sql``). Like the rest of
-``meridian.store``, this module makes no decision about *which* satellites are
-worth tracking or which downlink a station should be pointed at — it returns the
-catalogue as it stands and lets the caller choose.
+(``deploy/migrations/sql/0003_satellites.sql``, and the frame interval migration
+0026 added). Like the rest of ``meridian.store``, this module makes no decision
+about *which* satellites are worth tracking or which downlink a station should be
+pointed at — it returns the catalogue as it stands and lets the caller choose.
 
 A satellite is a row here because someone entered it; the element sets that make
 it predictable are ``meridian.store.element_sets``' table, and the two are
@@ -32,6 +32,7 @@ __all__ = [
     "NewSatellite",
     "NewTransmitter",
     "StoredTransmitter",
+    "fill_frame_interval",
     "find_active_transmitters",
     "find_satellite_priorities",
     "insert_satellite",
@@ -69,6 +70,12 @@ class NewTransmitter:
     polarisation: str | None = None
     bandwidth_hz: int | None = None
     source: str = "manual"
+    frame_interval_s: float | None = None
+    """Nominal seconds between frames, or ``None`` when nobody has stated it.
+
+    What frames expected is computed from (D-250). Unknown is ``None``, never a
+    guess: the verdict then omits the frames ratio rather than inventing one.
+    """
 
 
 def insert_satellite(conn: Connection, satellite: NewSatellite) -> bool:
@@ -128,8 +135,8 @@ def insert_transmitter(conn: Connection, transmitter: NewTransmitter) -> bool:
             """
             insert into satellite_transmitters
                 (satellite_id, centre_freq_hz, mode, polarisation,
-                 bandwidth_hz, source)
-            values (%s, %s, %s, %s, %s, %s)
+                 bandwidth_hz, source, frame_interval_s)
+            values (%s, %s, %s, %s, %s, %s, %s)
             on conflict (satellite_id, centre_freq_hz, mode)
                 where deleted_at is null
                 do nothing
@@ -141,6 +148,49 @@ def insert_transmitter(conn: Connection, transmitter: NewTransmitter) -> bool:
                 transmitter.polarisation,
                 transmitter.bandwidth_hz,
                 transmitter.source,
+                transmitter.frame_interval_s,
+            ),
+        )
+        return cur.rowcount > 0
+
+
+def fill_frame_interval(conn: Connection, transmitter: NewTransmitter) -> bool:
+    """Give a live downlink its frame interval, if it has none yet.
+
+    Args:
+        conn: An open connection. This function owns its transaction, which
+            nests as a savepoint inside the caller's.
+        transmitter: The downlink as a catalogue describes it. Nothing happens
+            when it states no interval.
+
+    Returns:
+        True when an unknown interval was filled; False when the row already
+        had one, or does not exist, or the document states none.
+
+    Note:
+        **Fills an unknown, never replaces a known.** Every downlink loaded
+        before migration 0026 has a null interval, and a deployment gets its
+        intervals by re-running the load it already runs — so a repeat load has
+        to be able to write this one column. It still does not overwrite: an
+        interval somebody set is a claim every frames ratio computed since rests
+        on, and changing it is an operator's decision with that consequence,
+        not a side effect of an edited file (D-250).
+    """
+    if transmitter.frame_interval_s is None:
+        return False
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            update satellite_transmitters
+            set frame_interval_s = %s
+            where satellite_id = %s and centre_freq_hz = %s and mode = %s
+              and deleted_at is null and frame_interval_s is null
+            """,
+            (
+                transmitter.frame_interval_s,
+                transmitter.satellite_id,
+                transmitter.centre_freq_hz,
+                transmitter.mode,
             ),
         )
         return cur.rowcount > 0

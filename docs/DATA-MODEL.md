@@ -58,11 +58,11 @@ Divergence between successive sets for the same object is computed on demand, no
 Catalogue identity, name, orbital regime, and observed activity status. The last matters for the silent-satellite confound in `docs/EVALUATION.md`.
 
 ### `satellite_transmitters`
-`(satellite_id, centre_freq_hz, mode, polarisation, bandwidth_hz, active, source)`
+`(satellite_id, centre_freq_hz, mode, polarisation, bandwidth_hz, active, source, frame_interval_s)`
 
 A satellite's known transmitters, as a child table rather than a column on `satellites`. The scheduler selects a transmitter by joining it against a station capability's frequency range — `freq_min_hz <= centre_freq_hz <= freq_max_hz` — and that predicate is not indexable inside a JSON blob. `active` carries the silent-satellite status. See D-021.
 
-**Planned: a nullable nominal frame interval per transmitter.** The reception verdict compares frames decoded against frames *expected*, and expected is the pass's duration over the transmitter's frame interval — computed by the platform, so every station's ratio has one definition. Where the interval is unknown the column is null and the verdict omits that ratio rather than guessing it (D-104).
+**`frame_interval_s`, the nominal seconds between frames** (migration `0026`, D-250). The reception verdict compares frames decoded against frames *expected*. Expected is the pass's duration, acquisition to loss, over this interval, and the platform computes it so that every station's ratio has one definition. The column is nullable with no default. Where the interval is unknown it is null, and the verdict omits that ratio rather than guessing it (D-104). `meridian catalogue load` writes it for a new downlink and fills it where it is null, and never replaces an interval already held.
 
 ### `passes`
 Computed pass windows — **not** observations. A pass exists whether or not anyone observed it, which is exactly what the completeness ratio in the evaluation methodology requires.

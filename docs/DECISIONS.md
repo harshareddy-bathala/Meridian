@@ -5247,6 +5247,30 @@ The section reports each as a distribution by fault kind: minimum, median, p95 a
 
 ---
 
+## D-250 — A transmitter's nominal frame interval, and frames expected from the pass
+
+**2026-09-30 · accepted** · *Migration 0026; `meridian/catalogue_file.py`, `meridian/store/satellites.py`, `meridian/cli_catalogue.py`, `meridian/observations/frames_expected.py`, `meridian/datasets/frames_expected.py`, Stage 25. Builds what D-104 planned.*
+
+D-103 keeps frames expected off the wire: the platform computes it, so every station's frames ratio has one definition. D-104 said what that needs, a nominal frame interval per transmitter, and left it planned. Four choices make it concrete.
+
+**The column.** `satellite_transmitters.frame_interval_s`, `double precision`, nullable, with no default and a `CHECK` that it is positive. Null means nobody has stated the interval. Existing downlinks stay null through the migration, because a default would put a number nobody looked up into the denominator of every ratio for their passes. It is in seconds, as a float: rounding LRPT's interval to whole milliseconds would put two tenths of a percent of error into every ratio.
+
+**Meteor LRPT's value is derived, not measured.** LRPT sends 72 ksym/s QPSK with rate-½ convolutional coding, which is 72 kbit/s of frames. A frame, the 1024-byte CADU a decoder counts, is 8192 bits. So one frame arrives every 8192 / 72000 = **0.113778 s**, and a ten-minute pass expects 5273. The development catalogue states this value for both Meteor downlinks. Two things could make it wrong, and neither is assumed away:
+- an operator may switch a satellite to its 80 ksym/s mode, where the interval is 0.1024 s. A catalogue that still said 72k would then read every ratio about ten percent high;
+- a decoder may count frames in some other unit.
+
+Both are checked the same way. On station 001, SatDump's frame count for a clean high pass is compared with this denominator, and the comparison is recorded when it is made. Until then the figure is a derivation, and the verdict (Stage 26) learns what a good reception's ratio looks like rather than assuming 1.0.
+
+**A repeat load fills an unknown interval and never replaces a known one.** `meridian catalogue load` never updates a held row (D-079). This column needs one exception, because a deployment that loaded its catalogue before 0026 has to get its intervals by re-running the load it already runs. `fill_frame_interval` writes the column only where it is null, and the tally reports it as `frame intervals: N filled`. An interval already held is not overwritten. Every ratio computed since the interval was set rests on it, so correcting one is an operator's decision with that consequence, taken deliberately.
+
+**"The pass" is acquisition to loss as the platform predicted it.** It is not the assignment's window, which the platform widened by its own timing uncertainty (D-021). Nor is it the station's recording. If the denominator grew with element-set age, an older element set would make every reception look worse. Frames expected rounds down, since a frame cut off by loss of signal was never sent whole. It is an upper bound on purpose, because nothing below the horizon mask is heard. The count is computed by one pure function in `meridian.observations`. The snapshot exports the interval with its transmitter, and `meridian.datasets.frames_expected` reads the count for each assignment from a raw snapshot, which is where Stage 26 will read it. A snapshot exported before 0026 reads as every interval unknown. It is not refused, and its ratios are absent, exactly as for a downlink with no interval today.
+
+*Rejected: storing frames expected on the observation or the pass.* It is arithmetic over two stored facts. A stored copy would disagree with them the first time an interval was filled.
+
+*Rejected: letting a repeat load overwrite the interval.* That is simpler, and it would let an edited file silently change the denominator of every past ratio.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

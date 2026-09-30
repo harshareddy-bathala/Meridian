@@ -99,6 +99,55 @@ def test_the_optional_fields_are_optional(tmp_path: Path) -> None:
     assert one.orbital_regime == "leo"
     assert transmitter.polarisation is None
     assert transmitter.bandwidth_hz is None
+    assert transmitter.frame_interval_s is None
+
+
+def test_a_frame_interval_is_read_in_seconds(tmp_path: Path) -> None:
+    """What frames expected is computed from (D-250)."""
+    entry = satellite(
+        transmitters=[
+            {"centre_freq_hz": 137100000, "mode": "lrpt", "frame_interval_s": 0.113778}
+        ]
+    )
+
+    (transmitter,) = read_catalogue(
+        written(tmp_path, {"satellites": [entry]})
+    ).transmitters
+
+    assert transmitter.frame_interval_s == pytest.approx(0.113778)
+
+
+def test_a_whole_number_of_seconds_is_an_interval_too(tmp_path: Path) -> None:
+    """``2`` and ``2.0`` are one claim, and both arrive as a float."""
+    entry = satellite(
+        transmitters=[
+            {"centre_freq_hz": 137100000, "mode": "lrpt", "frame_interval_s": 2}
+        ]
+    )
+
+    (transmitter,) = read_catalogue(
+        written(tmp_path, {"satellites": [entry]})
+    ).transmitters
+
+    assert transmitter.frame_interval_s == 2.0
+    assert isinstance(transmitter.frame_interval_s, float)
+
+
+@pytest.mark.parametrize("interval", [0, -0.1, True, "0.11"])
+def test_an_interval_that_is_not_a_positive_number_is_refused(
+    tmp_path: Path, interval: object
+) -> None:
+    """Zero would expect infinitely many frames; a boolean or text is a typo."""
+    entry = satellite(
+        transmitters=[
+            {"centre_freq_hz": 137100000, "mode": "lrpt", "frame_interval_s": interval}
+        ]
+    )
+
+    with pytest.raises(
+        MalformedCatalogueError, match=r"transmitters\[0\]\.frame_interval_s"
+    ):
+        read_catalogue(written(tmp_path, {"satellites": [entry]}))
 
 
 def test_a_missing_field_names_where_it_was_missing(tmp_path: Path) -> None:
@@ -184,3 +233,5 @@ def test_the_shipped_development_catalogue_reads(tmp_path: Path) -> None:  # noq
         137900000,
     }
     assert all(one.source == "manual" for one in document.element_sets)
+    # Both downlinks are Meteor LRPT, whose interval the file states (D-250).
+    assert {one.frame_interval_s for one in document.transmitters} == {0.113778}

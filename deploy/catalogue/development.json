@@ -9,7 +9,8 @@
           "centre_freq_hz": 137100000,
           "mode": "lrpt",
           "polarisation": "rhcp",
-          "bandwidth_hz": 150000
+          "bandwidth_hz": 150000,
+          "frame_interval_s": 0.113778
         }
       ],
       "element_sets": [
@@ -28,7 +29,8 @@
           "centre_freq_hz": 137900000,
           "mode": "lrpt",
           "polarisation": "rhcp",
-          "bandwidth_hz": 150000
+          "bandwidth_hz": 150000,
+          "frame_interval_s": 0.113778
         }
       ],
       "element_sets": [
