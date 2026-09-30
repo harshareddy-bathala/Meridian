@@ -316,9 +316,6 @@ def test_the_evidence_it_measured_is_what_the_platform_stores(
         (end_at - start_at).total_seconds(),
         station_noise_floor_dbfs(station_seed),
     )
-    if expected is None:
-        pytest.skip("this seed's first pass aborted, which measures nothing")
-
     with rollback.cursor() as cur:
         cur.execute(
             """
@@ -349,17 +346,22 @@ def test_the_evidence_it_measured_is_what_the_platform_stores(
         )
         aos, los, interval_s = cur.fetchone()
 
+    assert (frames_expected(aos, los, interval_s) or 0) > 0
+    if expected is None:
+        # Which pass comes first follows the wall clock, and about one in fifty
+        # aborts: an aborted pass measured nothing, so nothing is stored.
+        assert stored == (None, None, None, None, None)
+        assert noise == []
+        return
+    window_s = (end_at - start_at).total_seconds()
     assert stored == (
         expected.noise_floor_dbfs,
         expected.receiver_gain_db,
         len(expected.snr_db),
         DECODER,
-        count_frames(
-            expected.snr_db, (end_at - start_at).total_seconds(), outcome.outcome
-        )[0],
+        count_frames(expected.snr_db, window_s, outcome.outcome)[0],
     )
     assert noise == [(expected.noise_floor_dbfs, True)]
-    assert (frames_expected(aos, los, interval_s) or 0) > 0
 
 
 def test_a_second_run_reports_the_same_thing_about_the_same_pass(
