@@ -32,7 +32,7 @@ from meridian.datasets.row_fields import MalformedSnapshotError
 from meridian.prediction.feature_rows import read_feature_rows
 from meridian.prediction.lineage import LineageError, raw_of
 from meridian.prediction.live import LiveScoringError, newest_dataset_path
-from meridian.prediction.profiles import StationProfiles, station_profiles
+from meridian.prediction.profile_cells import StationProfiles, station_profiles
 
 __all__ = ["DatasetProfiles", "NewestDataset", "newest_dataset", "read_profiles"]
 

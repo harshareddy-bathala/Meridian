@@ -44,7 +44,7 @@ from meridian.api.public.pagination import (
 from meridian.config import Settings
 from meridian.store.heartbeat_coverage import find_hourly_coverage
 from meridian.store.heartbeats import find_heartbeats_before
-from meridian.store.profiles import find_station_profiles
+from meridian.store.profile_reads import find_station_profiles
 from meridian.store.station_capabilities import find_capabilities_for_station
 from meridian.store.station_directory import (
     DirectoryStation,

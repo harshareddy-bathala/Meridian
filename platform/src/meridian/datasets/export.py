@@ -78,10 +78,10 @@ from meridian.store.schema_revision import find_current_revision
 from meridian.store.snapshot_reads import (
     SNAPSHOT_TABLES,
     SnapshotScope,
-    read_source_terms,
     read_table,
     snapshot_instant,
 )
+from meridian.store.snapshot_source_terms import read_source_terms
 from meridian.store.stations import Connection
 
 __all__ = [

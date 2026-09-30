@@ -1,6 +1,6 @@
 """A station's horizon and interference, as the public API states them.
 
-Turns ``store.profiles.StationProfileRead`` into a response body. The declared
+Turns ``store.profile_reads.StationProfileRead`` into a response body. The declared
 horizon is a claim the operator published and the learned one is evidence, so
 they are two fields and never one (D-031). Only the declared one constrains
 scheduling (D-175).
@@ -25,14 +25,13 @@ from typing import Self
 
 from pydantic import BaseModel
 
-from meridian.store.profiles import (
+from meridian.store.profile_reads import (
     DeclaredProfile,
-    HorizonBin,
-    InterferenceRow,
     LearnedHorizonProfile,
     LearnedInterferenceProfile,
     StationProfileRead,
 )
+from meridian.store.profiles import HorizonBin, InterferenceRow
 
 __all__ = [
     "PublicDeclaredHorizon",

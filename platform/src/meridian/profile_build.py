@@ -26,8 +26,9 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
+from meridian.prediction.profile_cells import StationProfiles
 from meridian.prediction.profile_source import newest_dataset, read_profiles
-from meridian.prediction.profiles import PROFILE_METHOD, StationProfiles
+from meridian.prediction.profiles import PROFILE_METHOD
 from meridian.scheduler.declared_horizon import DeclaredMask
 from meridian.store.profiles import (
     DeclaredBin,

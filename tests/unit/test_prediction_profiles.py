@@ -27,14 +27,12 @@ from meridian.prediction.feature_rows import (
     Reading,
     read_feature_rows,
 )
-from meridian.prediction.profiles import (
-    ENVIRONMENT,
-    SHRINK,
-    Environment,
+from meridian.prediction.profile_cells import (
     HorizonSector,
     StationProfiles,
     station_profiles,
 )
+from meridian.prediction.profiles import ENVIRONMENT, SHRINK, Environment
 
 DAY0 = datetime(2026, 9, 1, 6, 0, tzinfo=UTC)
 MARGIN_S = 24 * 3600

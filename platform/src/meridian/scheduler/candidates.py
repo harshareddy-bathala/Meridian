@@ -33,11 +33,10 @@ from meridian.registry.liveness import derive_liveness
 from meridian.scheduler import Candidate, Commitment
 from meridian.scheduler.assignment_records import PassFacts
 from meridian.scheduler.constraints import DELIVERY_LEAD, window
-from meridian.scheduler.declared_horizon import DeclaredMask, clears_any
-from meridian.scheduler.live_inputs import TRACK_STEP_S
 from meridian.scheduler.priority_baseline import NEUTRAL_PRIORITY
 from meridian.scheduler.reissue import next_revision, reopens
 from meridian.scheduler.schedule_config import ScheduleConfig
+from meridian.scheduler.station_chains import clears_declared_horizon, load_chains
 from meridian.store.element_sets import find_element_set_by_id
 from meridian.store.passes import StoredPass, find_passes_in_horizon
 from meridian.store.receiving_stations import ReceivingStation
@@ -52,7 +51,6 @@ from meridian.store.schedule_reads import (
     find_commitments,
     find_latest_decisions,
 )
-from meridian.store.station_capabilities import find_capabilities_for_station
 from meridian.store.stations import Connection, find_station_heartbeat
 
 __all__ = [
@@ -141,53 +139,6 @@ class StationWork:
     stored: dict[int, StoredPass]
     """Every prediction rising in the horizon for this station, decided or
     not: a candidate's rise is read from them (D-148, D-169)."""
-
-
-def _load_capabilities(
-    conn: Connection, station_id: str
-) -> list[tuple[ReceiveCapability, DeclaredMask]]:
-    """One station's declared receiving chains, each with its declared mask."""
-    return [
-        (
-            ReceiveCapability(
-                freq_min_hz=stored.freq_min_hz,
-                freq_max_hz=stored.freq_max_hz,
-                modes=tuple(stored.modes),
-                min_elevation_deg=stored.min_elevation_deg,
-            ),
-            DeclaredMask.from_stored(stored.horizon_mask),
-        )
-        for stored in find_capabilities_for_station(conn, station_id)
-    ]
-
-
-def _clears_declared_horizon(  # noqa: PLR0913 — each is one fact the test needs
-    orbit: OrbitService,
-    *,
-    element_set: ElementSet,
-    site: GroundSite,
-    stored: StoredPass,
-    transmitter: StoredTransmitter,
-    chains: Sequence[tuple[ReceiveCapability, DeclaredMask]],
-) -> bool:
-    """Whether a chain that can receive this downlink sees the pass over its mask.
-
-    The track is sampled as live scoring samples it (D-169). It is computed only
-    when every covering chain declares a mask, so a station that declares none
-    propagates nothing more than it did before (D-175).
-    """
-    masks = [
-        mask
-        for capability, mask in chains
-        if covers_transmission(capability, transmitter.centre_freq_hz, transmitter.mode)
-    ]
-    if not masks or any(mask.empty for mask in masks):
-        return True
-    angles = orbit.look_angles(
-        element_set, site, stored.aos, stored.los, step_s=TRACK_STEP_S
-    )
-    track = [(one.azimuth_deg % 360.0, one.elevation_deg) for one in angles]
-    return clears_any(masks, track)
 
 
 def _first_receivable_transmitter(
@@ -355,7 +306,7 @@ def work_for_station(
     request: ScheduleRequest,
 ) -> StationWork:
     """Gather one station's open candidates over the horizon, with their ties."""
-    chains = _load_capabilities(conn, station.station_id)
+    chains = load_chains(conn, station.station_id)
     capabilities = [capability for capability, _ in chains]
     site = GroundSite(
         lat_deg=station.lat_deg, lon_deg=station.lon_deg, alt_m=station.alt_m
@@ -384,7 +335,7 @@ def work_for_station(
             continue
 
         element_set = element_set_for(conn, stored.element_set_id)
-        if not _clears_declared_horizon(
+        if not clears_declared_horizon(
             orbit,
             element_set=element_set,
             site=site,
