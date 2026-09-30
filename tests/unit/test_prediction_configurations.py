@@ -418,3 +418,58 @@ def test_an_archive_pass_before_since_is_no_example(
     )
 
     assert [one.positive for one in later.examples] == [False]
+
+
+# --- leaving a group out (D-237) ---------------------------------------------
+
+
+def test_leaving_conditions_out_of_d_keeps_its_name_and_its_objective() -> None:
+    without = CONFIGURATIONS["D"].leaving_out(("conditions",))
+
+    assert without.name == "D"
+    assert without.weighted_by_priority
+    assert without.groups == tuple(one for one in GROUPS if one != "conditions")
+    assert set(CONFIGURATIONS["D"].features) - set(without.features)
+
+
+def test_leaving_nothing_out_is_the_configuration_itself() -> None:
+    assert CONFIGURATIONS["C"].leaving_out(()) is CONFIGURATIONS["C"]
+
+
+def test_a_model_config_leaving_a_group_out_records_it_and_hashes_it() -> None:
+    from meridian.prediction.model_config import (
+        ModelConfig,
+        config_from_parameters,
+        model_config_sha256,
+        parse_model_config,
+    )
+
+    plain = parse_model_config('configuration = "D"\n')
+    without = parse_model_config('configuration = "D"\nwithout = ["conditions"]\n')
+
+    assert without.without == ("conditions",)
+    assert "without" not in plain.parameters()
+    assert without.parameters()["without"] == ["conditions"]
+    assert model_config_sha256(plain) != model_config_sha256(without)
+    assert config_from_parameters(without.parameters()) == without
+    assert model_config_sha256(ModelConfig(configuration="D")) == model_config_sha256(
+        plain
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        ('configuration = "A"\nwithout = ["conditions"]\n', "reads"),
+        ('configuration = "D"\nwithout = ["ours", "ours"]\n', "each left out once"),
+        ('configuration = "A"\nwithout = ["elevation"]\n', "no inputs"),
+        ('configuration = "D"\nwithout = "conditions"\n', "list of group names"),
+    ],
+)
+def test_a_group_the_configuration_cannot_leave_out_is_refused(
+    text: str, reason: str
+) -> None:
+    from meridian.prediction.model_config import ModelConfigError, parse_model_config
+
+    with pytest.raises(ModelConfigError, match=reason):
+        parse_model_config(text)

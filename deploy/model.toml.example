@@ -47,3 +47,10 @@ seed = 0
 # validate_until, each a whole train / validate / judge split, for the spread
 # of every figure (D-162). 0 .. 20; 0 runs none, and the report says so.
 folds = 4
+
+# Feature groups this configuration reads that the fit leaves out, for the
+# leave-one-group-out run of EVALUATION.md §3: configuration "D" with
+# ["conditions"] is D∖conditions (D-224, D-237). Each must be a group the
+# configuration reads, and at least one must remain. Recorded, and hashed, only
+# when it names a group. `meridian report build` fits D∖conditions itself.
+# without = ["conditions"]

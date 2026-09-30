@@ -59,9 +59,34 @@ def test_the_hash_is_over_values_not_spelling() -> None:
         (b"labels = 3\n", "must be a table"),
         (b"[labels]\nsilent_min_attempts = 0\n", "[labels]"),
         (b"[labels\n", "not UTF-8 TOML"),
+        (b'[prediction]\nconfiguration = "D"\n', "fits every configuration"),
+        (b"[prediction]\nseed = 3\n", "derives every seed"),
+        (b'[prediction]\nwithout = ["conditions"]\n', "leaves out each group"),
+        (b"[prediction]\nfolds = 99\n", "[prediction]"),
+        (b"[prediction]\nlearning_rate = 1\n", "unknown settings"),
+        (b"[prediction]\nresamples = 5\n", "outside 100..100000"),
+        (b"[prediction]\nmin_disturbed = true\n", "must be a number"),
+        (b'[prediction]\npopulation = "archive"\nweighting = "x"\n', "weighting"),
         (b"\xff\xfe", "not UTF-8 TOML"),
     ],
 )
 def test_what_it_cannot_use_is_refused(text: bytes, reason: str) -> None:
     with pytest.raises(ReportConfigError, match=reason.replace("[", r"\[")):
         parse_report_config(text)
+
+
+def test_prediction_settings_are_the_models_own_and_the_sections() -> None:
+    config = parse_report_config(
+        b"[prediction]\nmin_station_history = 5\n"
+        b"train_until = 2026-09-11T00:00:00Z\n"
+        b"validate_until = 2026-09-16T00:00:00Z\n"
+        b"resamples = 500\nmin_disturbed = 12\n"
+    ).config.prediction
+
+    assert config.model.min_station_history == 5
+    assert config.resamples == 500
+    assert config.min_disturbed == 12
+    shared = config.parameters()["model"]
+    assert isinstance(shared, dict)
+    assert "seed" not in shared
+    assert "configuration" not in shared

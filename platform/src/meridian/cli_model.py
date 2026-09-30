@@ -59,7 +59,7 @@ from meridian.prediction.splits import SplitError
 if TYPE_CHECKING:
     from meridian.prediction.model_files import FittedDirectory
 
-__all__ = ["FIT_EXTRA", "add_model_parser", "run_model", "show_lines"]
+__all__ = ["FIT_EXTRA", "NEEDS_EXTRA", "add_model_parser", "run_model", "show_lines"]
 
 EXIT_FAILED = 1
 """Matches ``meridian.cli.EXIT_FAILED``."""
@@ -67,7 +67,7 @@ EXIT_FAILED = 1
 FIT_EXTRA = ("sklearn", "scipy", "joblib")
 """A missing import from these means the ``fit`` extra is not installed."""
 
-_NEEDS_EXTRA = (
+NEEDS_EXTRA = (
     "needs the fit extra, which this installation does not have"
     " (uv sync --extra fit, or pip install 'meridian[fit]'); scoring and"
     " `meridian model show` do not (D-155)"
@@ -141,7 +141,7 @@ def run_model(args: argparse.Namespace) -> int:
     except ModuleNotFoundError as exc:
         if (exc.name or "").split(".")[0] not in FIT_EXTRA:
             raise
-        return _refuse(action, _NEEDS_EXTRA)
+        return _refuse(action, NEEDS_EXTRA)
     except DamagedSnapshotError as exc:
         _refuse(action, str(exc))
         return EXIT_CORRUPT

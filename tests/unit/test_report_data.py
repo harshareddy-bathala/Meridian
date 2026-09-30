@@ -43,7 +43,9 @@ def of(found: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
 def test_the_report_is_rendered_from_its_results_files_alone(built: Any) -> None:
     """Every number report.md prints is in a hashed file, because it came from one."""
     again = render_report(
-        run=rows(built.files["run.jsonl"]), data=rows(built.files["data.jsonl"])
+        run=rows(built.files["run.jsonl"]),
+        data=rows(built.files["data.jsonl"]),
+        prediction=rows(built.files["prediction.jsonl"]),
     )
 
     assert again == built.files["report.md"]

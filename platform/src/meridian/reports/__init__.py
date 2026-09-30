@@ -16,13 +16,17 @@ and publishes a sealed **run directory**:
 ``meridian report verify`` rebuilds a run from what it recorded and compares
 hashes, which is the stage's completion gate as a command.
 
-The sections arrive one at a time. **Data** is here: provenance, the labels
-and their exclusions, completeness and weighting, and the silences §5 of
-``EVALUATION.md`` counts apart.
+The sections arrive one at a time:
+
+* **data** — provenance, the labels and their exclusions, completeness and
+  weighting, and the silences §5 of ``EVALUATION.md`` counts apart;
+* **prediction** — A, C, D and D∖conditions fitted, published and judged,
+  with station-day bootstrap intervals, the comparisons between them, SC-2,
+  and a reliability diagram per model (D-237).
 
 **Nothing here opens a database or a socket.** The snapshot is the only input
 that holds data, and a report command never fetches anything (rule 8, and the
 roadmap's "no report command may silently fetch mutable external data").
 
-Reference: docs/DECISIONS.md D-234 to D-236.
+Reference: docs/DECISIONS.md D-234 to D-237.
 """

@@ -84,7 +84,13 @@ def test_a_run_is_built_from_a_snapshot_alone_and_verifies(
     assert "regenerates identically" in capsys.readouterr().out
     assert guarded.attempts == []
     names = {one.name for one in read_directory(run).manifest.files}
-    assert names == {"config.toml", "data.jsonl", "report.md", "run.jsonl"}
+    assert names == {
+        "config.toml",
+        "data.jsonl",
+        "prediction.jsonl",
+        "report.md",
+        "run.jsonl",
+    }
 
 
 def test_building_twice_names_one_directory(

@@ -140,8 +140,9 @@ def fit_split(found: ExampleSet, split: Split, config: ModelConfig) -> FittedMod
         ModelFitError: A span is too small or holds one outcome only.
     """
     _check_enough(found, split)
-    configuration = CONFIGURATIONS[config.configuration]
-    document: dict[str, object] = {
+    configuration = CONFIGURATIONS[config.configuration].leaving_out(config.without)
+    left_out = {"without": list(config.without)} if config.without else {}
+    document: dict[str, object] = left_out | {
         "model_format": MODEL_FORMAT,
         "configuration": configuration.name,
         "population": config.population,

@@ -26,6 +26,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from meridian.cli_model import FIT_EXTRA, NEEDS_EXTRA
 from meridian.cli_snapshot import (
     DATASETS_ROOT_ENV,
     DEFAULT_DATASETS_ROOT,
@@ -109,9 +110,19 @@ def add_report_parser(
 
 
 def run_report(args: argparse.Namespace) -> int:
-    """Run one ``meridian report`` action."""
+    """Run one ``meridian report`` action.
+
+    Both fit models, so both need the ``fit`` extra, which the platform image
+    does not install (D-155); without it they say what to install rather than
+    raise, as ``meridian model`` does.
+    """
     actions = {"build": _build, "verify": _verify}
-    return actions[args.action](args)
+    try:
+        return actions[args.action](args)
+    except ModuleNotFoundError as exc:
+        if (exc.name or "").split(".")[0] not in FIT_EXTRA:
+            raise
+        return _refuse(args.action, f"fits models, so it {NEEDS_EXTRA}")
 
 
 def _build(args: argparse.Namespace) -> int:

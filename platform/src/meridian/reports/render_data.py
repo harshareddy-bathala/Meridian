@@ -5,7 +5,7 @@ Reference: docs/DECISIONS.md D-235; ``EVALUATION.md`` §4 and §5.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from meridian.reports.markdown import cell, rate, table
 
@@ -160,28 +160,42 @@ def _table(one: Row, key: str) -> Mapping[str, object]:
 
 
 def _weighting_lines(found: Sequence[Row]) -> list[tuple[str, ...]]:
-    if any("not_weighted" in one for one in found):
-        return [
+    """One line per figure, one column per population.
+
+    A population that is not weighted says why in the first line, and has a
+    dash in the rest.
+    """
+    lines: list[tuple[str, ...]] = []
+    for index, (label, show) in enumerate(_WEIGHTING):
+        lines.append(
             (
-                "weighting",
-                *(f"not weighted: {one['not_weighted']}" for one in found),
+                label,
+                *(
+                    show(one)
+                    if "not_weighted" not in one
+                    else (f"not weighted: {one['not_weighted']}" if index == 0 else "—")
+                    for one in found
+                ),
             )
-        ]
+        )
+    return lines
 
-    def weighted(one: Row) -> str:
-        flag = " — **unreliable**" if one["unreliable"] else ""
-        return rate(one["weighted_rate"]) + flag
 
-    return [
-        ("propensity model", *(cell(one["model"]) for one in found)),
-        ("weight floor", *(cell(one["floor"]) for one in found)),
-        ("unweighted rate", *(rate(one["unweighted"]) for one in found)),
-        ("weighted rate", *(weighted(one) for one in found)),
-        ("effective n", *(cell(one["ess"]) for one in found)),
-        ("weighted passes", *(cell(one["weighted"]) for one in found)),
-        ("unsupported", *(cell(one["unsupported"]) for one in found)),
-        ("weights, min to max", *(cell(one["weight_quartiles"]) for one in found)),
-    ]
+def _weighted(one: Row) -> str:
+    flag = " — **unreliable**" if one["unreliable"] else ""
+    return rate(one["weighted_rate"]) + flag
+
+
+_WEIGHTING: tuple[tuple[str, Callable[[Row], str]], ...] = (
+    ("propensity model", lambda one: cell(one["model"])),
+    ("weight floor", lambda one: cell(one["floor"])),
+    ("unweighted rate", lambda one: rate(one["unweighted"])),
+    ("weighted rate", _weighted),
+    ("effective n", lambda one: cell(one["ess"])),
+    ("weighted passes", lambda one: cell(one["weighted"])),
+    ("unsupported", lambda one: cell(one["unsupported"])),
+    ("weights, min to max", lambda one: cell(one["weight_quartiles"])),
+)
 
 
 def _silences(rows: Sequence[Row]) -> list[str]:

@@ -25,6 +25,11 @@ another is an edit to this file, never to code.
 * ``folds`` — rolling-origin folds ``meridian model evaluate`` refits inside
   the span before ``validate_until``, for the variance of its figures
   (D-162). Default 4; 0 runs none, and the report says so.
+* ``without`` — feature groups the configuration reads that this fit leaves
+  out, for ``EVALUATION.md`` §3's leave-one-group-out run: D with
+  ``without = ["conditions"]`` is D∖conditions (D-224, D-237). Default none.
+  Recorded, and hashed, only when it names a group, so every model fitted
+  before it existed keeps its hash.
 
 **Strict, as the labelling configuration is:** an unknown key, a wrong type or
 a value out of range is refused by name, and the hash is of the resolved
@@ -45,6 +50,7 @@ from datetime import datetime
 from pathlib import Path
 
 from meridian.datasets.canonical import canonical_bytes
+from meridian.prediction.configurations import CONFIGURATIONS
 
 __all__ = [
     "CONFIGURATION_NAMES",
@@ -87,6 +93,7 @@ class ModelConfig:
     weighting: str = "none"
     seed: int = 0
     folds: int = 4
+    without: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Refuse a name that is not one of the choices, or a value off the scale."""
@@ -110,6 +117,28 @@ class ModelConfig:
             )
             raise ModelConfigError(message)
         self._check_dates()
+        self._check_without()
+
+    def _check_without(self) -> None:
+        """Groups this configuration reads, each once, and never all of them."""
+        held: object = self.without
+        if not isinstance(held, list | tuple) or not all(
+            isinstance(one, str) for one in held
+        ):
+            message = f"without must be a list of group names, not {held!r}"
+            raise ModelConfigError(message)
+        object.__setattr__(self, "without", tuple(held))
+        groups = CONFIGURATIONS[self.configuration].groups
+        unread = sorted(set(self.without) - set(groups))
+        if unread or len(set(self.without)) != len(self.without):
+            message = (
+                f"without names {list(self.without)}; configuration"
+                f" {self.configuration} reads {list(groups)}, each left out once"
+            )
+            raise ModelConfigError(message)
+        if set(groups) <= set(self.without):
+            message = f"without leaves configuration {self.configuration} no inputs"
+            raise ModelConfigError(message)
 
     def _check_dates(self) -> None:
         """Each date aware, and training ending before validation does."""
@@ -143,7 +172,7 @@ class ModelConfig:
             "weighting": self.weighting,
             "seed": self.seed,
             "folds": self.folds,
-        }
+        } | ({"without": list(self.without)} if self.without else {})
 
 
 def parse_model_config(text: str) -> ModelConfig:

@@ -52,7 +52,7 @@ The sections below describe each module's responsibility in the finished system.
 | `client`, `simulator` | A station that registers, holds work, executes it and delivers observations from a durable queue, and a deterministic fleet of virtual ones that drives it over real MSP (Stage 10). The receiver and decoder behind the client's execution seam are Stage 13. |
 | `dashboard`, `ingest` | No directory yet — Stages 11 and 14. Ingest widens to environmental and space-weather sources at Stage 31 (D-132). |
 | `platform/regions` | No directory yet — Stage 32, regional monitoring (module 19). |
-| `platform/reports` | Stage 22's evaluation reports: a sealed run built from a raw snapshot, one configuration and a master seed, and regenerated to verify it. Sections arrive one at a time; the data section is built. |
+| `platform/reports` | Stage 22's evaluation reports: a sealed run built from a raw snapshot, one configuration and a master seed, and regenerated to verify it. Sections arrive one at a time; data and prediction are built. |
 | `platform/notifications`, `platform/datasets` | No directory yet — Stages 29 and 30, which add the post-reception layer (D-102). |
 | `firmware` | No directory yet, and excluded from the software roadmap: it is built alongside the antenna and rotator rather than in a software stage. |
 

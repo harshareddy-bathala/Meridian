@@ -4732,6 +4732,8 @@ Two sources sharing one allowance — Open-Meteo's two endpoints are limited per
 
 **Not built:** D-131's leave-one-group-out run, D without this group, reported beside the four configurations. It needs a configuration key and a model of real data; there is no model of real data yet (Stage 17), and the key is owed with the first fit that could use it.
 
+*Amended by D-237:* the key is `without`, and the evaluation report fits D∖conditions beside the four configurations.
+
 ---
 
 ## D-225 — Near real time is `meridian-ingest follow`, on the ingest machine, never in the jobs service
@@ -5078,6 +5080,61 @@ The regional report already derived its per-area seeds this way, privately. The 
 **One configuration file, one table per section, each table checked by its owner.** `[labels]` is exactly `meridian snapshot label`'s configuration one level down, checked by `label_config_from_mapping`, which `parse_label_config` now calls too. The tables for the later sections arrive with them. A test holds the example's `[labels]` to `deploy/snapshot.toml.example`, so the two documented defaults cannot drift apart.
 
 *Rejected: a configuration that names other configuration files.* A run could then only be regenerated from several files, one of which may have changed since. One file, copied into the run, is the whole of what was configured.
+
+---
+
+## D-237 — The prediction section: four fits, a leave-one-group-out key, and intervals that resample station-days
+
+**2026-09-30 · accepted** · *`meridian.reports.{prediction,prediction_rows,bootstrap,svg,render_prediction}`, `meridian.prediction.{model_config,configurations,fit}`, `meridian.scheduler.comparison`, `meridian.cli_model`*
+
+**What is fitted.** The section fits four models, each through the functions `meridian model fit` and `meridian model evaluate` call:
+- **A**, whose model is also B's, since B differs in the scheduler's objective and never in its probabilities (D-160);
+- **C**;
+- **D**;
+- **D∖conditions**, the leave-one-group-out run of `EVALUATION.md` §3.
+
+Each fit:
+- draws its seed from the master as `model.<name>`, taken modulo 2³² because a model's seed is 32-bit;
+- is published under `models/` and read back before it is judged, so the report scores the file that ships.
+
+A test fits D again with `meridian model fit` and the recorded seed and gets the same directory. The `[prediction]` table holds the settings every fit shares. `configuration`, `seed` and `without` are refused there, because the report sets them itself.
+
+**A model that cannot be fitted is a row that says why**, and the report is still built. The reasons include:
+- too few examples;
+- only simulated passes (D-078);
+- a configuration the archive population cannot take (D-156);
+- no split dates.
+
+On a development snapshot every model is refused, which is the true answer.
+
+**`without` is the configuration key D-224 owed.**
+- **What it takes.** It names groups the configuration reads, each once, and never all of them.
+- **What it changes.** `Configuration.leaving_out` keeps the name and the objective, so D∖conditions is still D, fitted on less. The model file records `without` when it is set.
+- **Hashes.** It is written, and hashed, only when it names a group, so every model fitted before it keeps its hash.
+
+**Every interval is a station-day bootstrap.** Passes at one station on one day share weather, interference and the station's state, so drawing single passes would count a bad day many times over and narrow the interval. A resample draws whole station-days. The Brier score, the skill against the base rate (SC-2's reduction) and each comparison are read on the same draws. The comparisons are D against D∖conditions, C against A, and D against A. So a difference between two models on the same passes is paired, as the scheduler's gain is (D-172).
+
+The seed is `bootstrap.prediction`. The percentiles are by nearest rank, through the scheduler comparison's function, now public as `percentile_interval`. A draw on which the skill is undefined is dropped and counted.
+
+**SC-2 is read from D's skill** and stated two ways:
+- whether the point estimate meets 25%;
+- whether the whole interval is above it.
+
+The criterion does not say which one counts, so the report does not choose.
+
+**Kp is untested below a count stated in advance.** A disturbed pass is one with a published Kp at or above `disturbed_kp`, NOAA's G1 storm by default. Below `min_disturbed` of them in the test span, the section says Kp is untested, never that it does not help (`EVALUATION.md` §3). Cloud cover's count is stated beside it and never folded into one verdict.
+
+*Not built:* a leave-one-feature-out run for Kp and for cloud cover apart. `without` leaves out a group, and the two share one.
+
+**Reals in the results are rounded to six decimal places.** Fits agree across numerical environments to about 1e-9 (D-163). A published figure should not move with a library's last bits, and three places are printed.
+
+**The reliability diagram is drawn by hand**, as every figure is (D-235). Each point is one bin's mean prediction against its observed frequency, with a Wilson interval. The diagonal is perfect calibration, and a strip beneath counts the passes in each bin. Its style comes from the reference data-visualisation palette:
+- one blue on a light surface;
+- a recessive grid;
+- text in ink;
+- a key above the plot rather than a label on the data.
+
+**Without the `fit` extra**, `meridian report` says what to install, as `meridian model` does. The message is `cli_model.NEEDS_EXTRA`, now public.
 
 ---
 

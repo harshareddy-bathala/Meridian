@@ -73,3 +73,41 @@ hour_band_h = 4
 # inverse — 20 at the default — and the report counts how many were floored
 # (D-153). Greater than 0, at most 1.
 floor = 0.05
+
+# ── [prediction] — the model settings every configuration is fitted under, as
+#    deploy/model.toml.example documents them, and the section's own. The report
+#    fits A, C, D and D∖conditions itself and derives each one's seed, so
+#    `configuration`, `seed` and `without` are refused here (D-236, D-237).
+#    Needs the fit extra: uv sync --extra fit.
+[prediction]
+
+# Whose passes: "own", or "archive", which only configuration A can take; the
+# others are then reported as not fitted, with the reason (D-156).
+population = "own"
+
+# Settled, usable outcomes a station needs before the configured model scores
+# it; below that, the geometry-only model does (cold start, D-161).
+min_station_history = 20
+
+# The split dates (D-162). No default: without them no model is fitted, and
+# every model's row says so. Set them for the snapshot being reported.
+# train_until = 2027-01-01T00:00:00Z
+# validate_until = 2027-02-01T00:00:00Z
+
+inverse_regularisation = 1.0
+weighting = "none"
+
+# Rolling-origin folds refitted inside the span before validate_until.
+folds = 4
+
+# Station-day bootstrap draws behind every interval in the section. 100 .. 100000.
+resamples = 2000
+
+# A pass is disturbed when the Kp published before it is at least this: NOAA's
+# G1 storm. 0 .. 9.
+disturbed_kp = 5.0
+
+# Disturbed test passes needed before the Kp feature is judged at all. Below
+# it, the report says Kp is untested — never that it does not help
+# (EVALUATION.md §3). Stated here, before any result is seen.
+min_disturbed = 30

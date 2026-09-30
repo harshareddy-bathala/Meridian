@@ -34,11 +34,16 @@ from meridian.datasets.publish import (
     publish_directory,
     read_directory,
 )
+from meridian.datasets.seeds import derive
 from meridian.reports.config import ConfigFile, report_config_sha256
 from meridian.reports.data import DATA_FILE, data_rows
+from meridian.reports.prediction import Destination, Fitted, fit_variants
+from meridian.reports.prediction_rows import PREDICTION_FILE, prediction_rows
 from meridian.reports.render import render_report
+from meridian.reports.render_prediction import prediction_figures
 
 __all__ = [
+    "BOOTSTRAP_PREDICTION",
     "CONFIG_FILE",
     "METHOD_VERSION",
     "REPORTS",
@@ -52,7 +57,7 @@ __all__ = [
     "with_environment",
 ]
 
-METHOD_VERSION = "report-1"
+METHOD_VERSION = "report-2"
 """Bumped whenever a section's method changes, so two runs made under different
 methods can never share a hash."""
 
@@ -60,6 +65,7 @@ REPORTS = "reports"
 """Runs published without ``--output`` live under ``<datasets root>/reports/``."""
 
 RUN_FILE = "run.jsonl"
+BOOTSTRAP_PREDICTION = "bootstrap.prediction"
 REPORT_FILE = "report.md"
 CONFIG_FILE = "config.toml"
 
@@ -96,7 +102,8 @@ def build_run(
         raw: The raw snapshot, as :func:`read_directory` verified it.
         config: The configuration, beside the bytes it was read from.
         seed: The master seed every component's seed is derived from.
-        root: The datasets root the evaluation dataset is published under.
+        root: The datasets root the evaluation dataset and the models are
+            published under.
         created_at: When this run happened, recorded and never hashed.
 
     Returns:
@@ -105,6 +112,7 @@ def build_run(
     Raises:
         NotARawSnapshotError: ``raw`` is not a raw snapshot.
         MalformedSnapshotError: A row lacks a field a label needs.
+        ModuleNotFoundError: The ``fit`` extra is not installed.
     """
     if raw.manifest.kind != "raw_snapshot":
         message = f"{raw.path} is a {raw.manifest.kind}, not a raw snapshot"
@@ -113,15 +121,10 @@ def build_run(
         raw, config.config.labels, root=root, created_at=created_at
     )
     dataset = read_directory(labelled.path)
-    sections: dict[str, Rows] = {
-        RUN_FILE: _run_rows(raw.manifest, config, seed),
-        DATA_FILE: data_rows(raw, dataset),
-    }
-    files = {name: _lines(rows) for name, rows in sections.items()}
-    files[REPORT_FILE] = render_report(
-        run=_parsed(files[RUN_FILE]), data=_parsed(files[DATA_FILE])
+    computed = _sections(
+        raw, dataset, config, seed, Destination(root=root, created_at=created_at)
     )
-    files[CONFIG_FILE] = config.text
+    files = _files(computed, config.text)
     manifest = Manifest(
         kind="evaluation_report",
         schema_revision=raw.manifest.schema_revision,
@@ -136,12 +139,62 @@ def build_run(
         config_sha256=report_config_sha256(config.config),
         parameters={
             "seed": seed,
-            "seeds": {},
+            "seeds": computed.seeds,
             "config": config.config.parameters(),
             "evaluation_dataset": content_sha256(dataset.manifest),
+            "models": computed.models,
         },
     )
     return Run(manifest=manifest, files=files)
+
+
+@dataclass(frozen=True, slots=True)
+class _Computed:
+    """Each results file's rows, the seeds they drew, and the models fitted."""
+
+    rows: Mapping[str, Rows]
+    seeds: Mapping[str, int]
+    models: Mapping[str, bytes]
+
+
+def _sections(
+    raw: SnapshotDirectory,
+    dataset: SnapshotDirectory,
+    config: ConfigFile,
+    seed: int,
+    destination: Destination,
+) -> _Computed:
+    """Every section's rows. Each seed is derived here, by name, and recorded."""
+    prediction = config.config.prediction
+    seeds, outcomes, inputs = fit_variants(
+        dataset, raw, prediction, seed=seed, destination=destination
+    )
+    seeds[BOOTSTRAP_PREDICTION] = derive(seed, BOOTSTRAP_PREDICTION)
+    rows = {
+        RUN_FILE: _run_rows(raw.manifest, config, seed, seeds),
+        DATA_FILE: data_rows(raw, dataset),
+        PREDICTION_FILE: prediction_rows(
+            outcomes, inputs, prediction, seed=seeds[BOOTSTRAP_PREDICTION]
+        ),
+    }
+    models = {
+        one.variant.name: one.sha256 for one in outcomes if isinstance(one, Fitted)
+    }
+    return _Computed(rows=rows, seeds=dict(sorted(seeds.items())), models=models)
+
+
+def _files(computed: _Computed, config_text: bytes) -> dict[str, bytes]:
+    """The results files, and the report and figures rendered from them parsed."""
+    files = {name: _lines(rows) for name, rows in computed.rows.items()}
+    parsed = {name: _parsed(data) for name, data in files.items()}
+    files[REPORT_FILE] = render_report(
+        run=parsed[RUN_FILE],
+        data=parsed[DATA_FILE],
+        prediction=parsed[PREDICTION_FILE],
+    )
+    files |= prediction_figures(parsed[PREDICTION_FILE])
+    files[CONFIG_FILE] = config_text
+    return files
 
 
 def with_environment(run: Run, environment: Mapping[str, object]) -> Run:
@@ -163,9 +216,11 @@ def publish_run(run: Run, output: Path) -> PublishedDirectory:
         raise RunExistsError(message) from exc
 
 
-def _run_rows(raw: Manifest, config: ConfigFile, seed: int) -> Rows:
+def _run_rows(
+    raw: Manifest, config: ConfigFile, seed: int, seeds: Mapping[str, int]
+) -> Rows:
     """The run record: method, inputs and seeds. Every derived seed has a row."""
-    return [
+    record: Rows = [
         {
             "row": "run",
             "method": METHOD_VERSION,
@@ -173,6 +228,10 @@ def _run_rows(raw: Manifest, config: ConfigFile, seed: int) -> Rows:
             "config_sha256": report_config_sha256(config.config),
             "seed": seed,
         }
+    ]
+    return record + [
+        {"row": "seed", "component": name, "seed": value}
+        for name, value in sorted(seeds.items())
     ]
 
 

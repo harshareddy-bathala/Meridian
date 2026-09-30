@@ -15,20 +15,24 @@ from collections.abc import Mapping, Sequence
 
 from meridian.reports.markdown import cell, table
 from meridian.reports.render_data import render_data
+from meridian.reports.render_prediction import render_prediction
 
 __all__ = ["render_report"]
 
 Row = Mapping[str, object]
 
 
-def render_report(*, run: Sequence[Row], data: Sequence[Row]) -> bytes:
+def render_report(
+    *, run: Sequence[Row], data: Sequence[Row], prediction: Sequence[Row]
+) -> bytes:
     """The whole report, as the bytes written to ``report.md``.
 
     Args:
         run: ``run.jsonl``, parsed: the run record.
         data: ``data.jsonl``, parsed: the data section.
+        prediction: ``prediction.jsonl``, parsed: the prediction section.
     """
-    lines = [*_header(run), *render_data(data)]
+    lines = [*_header(run), *render_data(data), *render_prediction(prediction)]
     return ("\n".join(lines).rstrip("\n") + "\n").encode("utf-8")
 
 

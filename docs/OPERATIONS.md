@@ -819,7 +819,7 @@ diff one.txt two.txt                                                          # 
 
 Every number in a report is regenerable from a raw snapshot, one configuration and one seed (rule 8, `EVALUATION.md` §9). `meridian report build` computes a report from those three and nothing else, and `meridian report verify` proves a report regenerates. Neither opens a database or a socket.
 
-Decisions this section puts into practice: D-234 to D-236.
+Decisions this section puts into practice: D-234 to D-237.
 
 ### Building a run
 
@@ -830,7 +830,8 @@ uv run meridian report build \
   --seed 4471
 ```
 
-- **The configuration** is one file, one table per section. Copy `analysis/configs/evaluation.toml.example`, whose values are the defaults. An unknown table or key is refused, and so is a `seed`.
+- **It fits models, so it needs the `fit` extra** (`uv sync --extra fit`), as `meridian model fit` does. Without it, it says so and exits 1.
+- **The configuration** is one file, one table per section. Copy `analysis/configs/evaluation.toml.example`, whose values are the defaults. An unknown table or key is refused, and so is a `seed`. **Set `train_until` and `validate_until` under `[prediction]`** for the snapshot you are reporting. Without them no model is fitted, and the prediction section says so.
 - **The seed** is the master seed. Every component that draws a random number draws from a seed derived from it by name, and the run lists each one (D-236).
 - **The run** goes under `<datasets root>/reports/<hash12>/`, or where `--output` says. Building the same inputs twice names the same directory, and the second build says `already held, identically`. An `--output` that already holds a different run is refused, never overwritten.
 
@@ -841,6 +842,8 @@ reports/<hash12>/
 ├── report.md       the report, rendered from the results files beside it
 ├── run.jsonl       the run record: method, snapshot, configuration, seeds
 ├── data.jsonl      the data section's results
+├── prediction.jsonl                the prediction section's results
+├── reliability_<model>.svg         one reliability diagram per fitted model
 ├── config.toml     the configuration, byte for byte as it was given
 └── manifest.json   every file's digest, the inputs, the seeds, and the environment
 ```
@@ -850,6 +853,14 @@ reports/<hash12>/
   - every outcome label and exclusion reason, with measured and simulated kept apart;
   - completeness and weighting for our stations and the archive's;
   - silent-satellite exclusions and the indeterminate share, each with its interval (`EVALUATION.md` §4, §5).
+- **The prediction section** covers A, C, D and D∖conditions (B's model is A's):
+  - it fits each under the `[prediction]` settings with a seed derived from the master, publishes it under `models/`, and judges it on the test span;
+  - it reports the Brier score, the skill against the training base rate, the reliability diagram, calibration by station, band and element-set age, the cold-start routes and the rolling-origin folds;
+  - it compares D against D∖conditions, C against A, and D against A on the same passes;
+  - it reads SC-2 from D;
+  - it counts disturbed passes, and says Kp is **untested** below `min_disturbed`.
+
+  Every interval is a 95% bootstrap that resamples whole station-days (D-237). A model that could not be fitted is a row that says why, and the report is still built.
 - **The environment block** in `manifest.json` records the commit (and whether the tree had uncommitted changes), the Python and dependency versions, where the snapshot was read from, and how long the build took. It is **not part of the hash** (D-235), so the hash names the numbers, not the machine. A run built from uncommitted code says so when it is built. Build reported figures from a clean tree.
 - The evaluation dataset the run labelled is published under `evaluation/` as `meridian snapshot label` would publish it, and the run names it by hash.
 
