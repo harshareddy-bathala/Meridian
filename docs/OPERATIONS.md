@@ -1031,7 +1031,7 @@ The aggregate refreshes every 30 minutes and reads raw rows for anything newer. 
 Stage 19's gate is that **every deferred table has an active producer, consumer, provenance policy, migration test, and retention decision.**
 
 ```bash
-compose exec api meridian db status                          # at 0022
+compose exec api meridian db status                          # at 0024
 compose exec jobs meridian profiles build                    # declared masks, and the newest dataset
 compose exec jobs meridian profiles build                    # already held, identically
 curl -s localhost:8000/api/v1/stations/<id>/profiles | python -m json.tool

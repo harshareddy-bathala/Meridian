@@ -1,10 +1,10 @@
 """Noise measurements — the floor each reception reported, as its own record.
 
-Writes ``noise_measurements`` (``deploy/migrations/sql/0021_deferred_storage.sql``).
+Writes ``noise_measurements`` (``deploy/migrations/sql/0023_deferred_storage.sql``).
 An observation that carries a noise floor gets one row here, written in the
 same transaction as the observation revision it came from (D-173). The row is
 derived from that stored revision, not from the submission, by the same query
-migration 0021 backfilled every earlier observation with. There is therefore one
+migration 0023 backfilled every earlier observation with. There is therefore one
 definition of an observation's floor, and a row written at ingest cannot differ
 from one the backfill would have written.
 

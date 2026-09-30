@@ -1,12 +1,12 @@
 """Products — what a station declared it holds from one reception.
 
-Writes ``products`` (``deploy/migrations/sql/0021_deferred_storage.sql``). An
+Writes ``products`` (``deploy/migrations/sql/0023_deferred_storage.sql``). An
 observation revision's ``products`` array is stored verbatim in
 ``observations.products_json`` (D-018), and each element that names a kind and a
 sha256 also becomes a row here, in the same transaction (D-176).
 
 The rows are read from the stored revision, not from the submission, by the
-query migration 0021 backfilled every earlier observation with. So ingest and
+query migration 0023 backfilled every earlier observation with. So ingest and
 the backfill hold one rule for which elements are products:
 - an object whose ``kind`` is a non-empty string and whose ``sha256`` is 64 hex
   digits;

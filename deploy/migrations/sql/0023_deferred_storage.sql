@@ -1,4 +1,4 @@
--- 0021 — The four deferred tables: noise, the two profiles, and products
+-- 0023 — The four deferred tables: noise, the two profiles, and products
 --
 -- D-018 deferred these until something produced them and something read them.
 -- Stage 19 builds both ends, and this migration is the storage. Each table's

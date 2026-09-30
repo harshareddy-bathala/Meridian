@@ -113,7 +113,7 @@ def test_all_expected_tables_exist(conn) -> None:
         # Stage 18's scheduler runs (0018, D-170).
         "schedule_runs",
         # D-018's four deferred tables, built at Stage 19 once each had a
-        # producer and a consumer (0021, D-173, D-174, D-176).
+        # producer and a consumer (0023, D-173, D-174, D-176).
         "noise_measurements",
         "horizon_profiles",
         "interference_profiles",
@@ -1123,7 +1123,7 @@ def test_a_classification_is_held_once_per_method_and_configuration(
         )
 
 
-# --- 0021, the deferred tables ------------------------------------------------
+# --- 0023, the deferred tables ------------------------------------------------
 
 
 def _insert_observation(execute: Any, assignment_id: str = "as_stored") -> Any:
@@ -1346,7 +1346,7 @@ def test_the_profiles_and_products_are_plain_tables(conn) -> None:
     assert not ({"horizon_profiles", "interference_profiles", "products"} & hypertables)
 
 
-# --- 0022, the views and the hourly aggregate -----------------------------------
+# --- 0024, the views and the hourly aggregate -----------------------------------
 
 
 def _detected_observation(execute: Any, assignment_id: str, *, seconds: int) -> Any:

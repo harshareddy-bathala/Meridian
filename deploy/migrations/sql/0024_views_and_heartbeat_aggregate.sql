@@ -1,4 +1,4 @@
--- 0022 — Two operators' views, and heartbeats summarised by the hour
+-- 0024 — Two operators' views, and heartbeats summarised by the hour
 --
 -- docs/DECISIONS.md D-177 and D-178.
 --

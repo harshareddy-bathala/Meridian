@@ -1,7 +1,7 @@
 """The two operators' views: how schedule runs fared, and pass timing error.
 
 Reads ``scheduler_performance`` and ``timing_error``
-(``deploy/migrations/sql/0022_views_and_heartbeat_aggregate.sql``). They answer
+(``deploy/migrations/sql/0024_views_and_heartbeat_aggregate.sql``). They answer
 an operator at a prompt. They are not reported numbers: a view over live tables
 answers differently each time, and every published figure comes from a snapshot
 (rule 8, D-177).

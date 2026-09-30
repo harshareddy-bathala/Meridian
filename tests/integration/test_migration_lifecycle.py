@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = REPO_ROOT / "deploy" / "alembic.ini"
-HEAD_REVISION = "0022"
+HEAD_REVISION = "0024"
 """The newest revision, written out rather than read from the script directory.
 
 Deriving it would make these tests assert that alembic agrees with itself. Pinned,
@@ -373,12 +373,12 @@ def test_0015_adds_reception_evidence_across_a_compressed_chunk(
             )
 
 
-def test_0021_backfills_noise_and_products_from_a_compressed_chunk(
+def test_0023_backfills_noise_and_products_from_a_compressed_chunk(
     scratch_database: str, monkeypatch
 ) -> None:
     """D-173, D-176: every floor and product already held gets its row.
 
-    Stops at 0020 and stores two observations old enough to be compressed, as a
+    Stops at 0022 and stores two observations old enough to be compressed, as a
     deployment that has run for a week holds them. The first has an assignment,
     a floor and four `products` elements, of which only two are valid. The
     second has a floor but no assignment row, so there is no frequency to file
@@ -386,7 +386,7 @@ def test_0021_backfills_noise_and_products_from_a_compressed_chunk(
     upgrading.
     """
     monkeypatch.setenv("DATABASE_URL", scratch_database)
-    _upgrade_to(scratch_database, "0020")
+    _upgrade_to(scratch_database, "0022")
 
     waterfall = "ab" * 32
     frames = "CD" * 32
@@ -475,7 +475,7 @@ def test_0021_backfills_noise_and_products_from_a_compressed_chunk(
         assert kept == (4,)
 
 
-def test_0022_s_hourly_aggregate_agrees_with_the_raw_heartbeats(
+def test_0024_s_hourly_aggregate_agrees_with_the_raw_heartbeats(
     scratch_database: str, monkeypatch
 ) -> None:
     """D-178's check before anything relies on it: the aggregate loses nothing.

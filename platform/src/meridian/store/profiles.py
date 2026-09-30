@@ -1,7 +1,7 @@
 """Horizon and interference profiles — stored, versioned, and read back.
 
 Writes and reads ``horizon_profiles`` and ``interference_profiles``
-(``deploy/migrations/sql/0021_deferred_storage.sql``). What goes in them is
+(``deploy/migrations/sql/0023_deferred_storage.sql``). What goes in them is
 decided elsewhere: the learned rows by :mod:`meridian.prediction.profiles`, the
 declared rows by a capability's mask. This module persists and retrieves.
 
