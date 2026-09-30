@@ -83,6 +83,9 @@ def work(  # noqa: PLR0913 — one stored assignment's fields
         redecided_at=None if redecided is None else s(redecided),
         offline_revocations=(at,) if revoked_reason == "offline" and at else (),
         declined_at=at if revoked_reason == "declined" else None,
+        revocations=(at,) if at else (),
+        # Given back a minute after it was taken, as a returning station would.
+        reinstatements=(at + timedelta(seconds=60),) if given_back and at else (),
     )
 
 
@@ -177,6 +180,38 @@ def test_a_revocation_from_an_earlier_outage_does_not_count_for_this_one() -> No
     )
 
     assert check(judge_station_fault(fault(), earlier), "replanned")[0] is False
+
+
+def test_a_round_still_reading_when_the_station_returned_owes_nothing() -> None:
+    """Began while offline, read after the station was back: it saw it back.
+
+    Found by Stage 21's rehearsal: a round began a second before a heartbeat
+    and wrote ten seconds after it.
+    """
+    returned_mid_round = evidence(
+        work=(work(),), rounds=(s(180),), round_ends={s(180): s(190)}
+    )
+
+    assert (
+        check(judge_station_fault(fault(), returned_mid_round), "replanned")[0] is None
+    )
+
+
+def test_work_already_taken_in_an_earlier_outage_is_not_owed_again() -> None:
+    """Revoked before, never given back: this round had nothing left to revoke.
+
+    Found by Stage 21's two-hour rehearsal on the real stack, where a station
+    that came back did not always get its work back; the in-process gate's
+    stations always did.
+    """
+    taken = evidence(
+        work=(work(revoked_reason="offline", revoked=-600),), rounds=(s(120),)
+    )
+
+    passed, detail = check(judge_station_fault(fault(), taken), "replanned")
+
+    assert passed is True
+    assert detail == "it held no unbegun work to revoke"
 
 
 def test_work_revoked_as_offline_in_a_short_gap_fails() -> None:
@@ -326,8 +361,10 @@ def test_the_alert_is_the_measured_half_of_sc_5() -> None:
 
     assert check(judge_station_fault(fault(), fired), "alerted") == (
         True,
-        "StationOffline fired 104 s after the fault",
+        "StationOffline fired 104 s after the fault, 15 s after it read offline",
     )
+    early = evidence(alert_asked=True, alert_fired_at=s(20))
+    assert check(judge_station_fault(fault(), early), "alerted")[0] is None
     assert check(judge_station_fault(fault(), silent), "alerted")[0] is False
     assert all(
         one.name != "alerted" for one in judge_station_fault(fault(), evidence()).checks
@@ -413,3 +450,25 @@ def test_a_ledger_line_it_cannot_read_is_refused(line: str) -> None:
     """A verdict against part of the truth is a verdict against another run."""
     with pytest.raises(FaultLedgerError, match="line 1"):
         read_fault_ledger([line])
+
+
+def test_an_alert_already_firing_times_nothing_about_this_fault() -> None:
+    """StationOffline is summed over the fleet: another station's alert is theirs."""
+    inherited = evidence(alert_asked=True, alert_already_firing=True)
+
+    passed, detail = check(judge_station_fault(fault(), inherited), "alerted")
+
+    assert passed is None
+    assert "not attributable" in detail
+
+
+def test_a_rise_is_the_first_firing_sample_after_the_fault() -> None:
+    """Already firing at the fault's start is no rise; a later sample is."""
+    from meridian.reliability.fault_check import first_rise
+
+    start = T0.timestamp()
+
+    assert first_rise([start - 5, start + 60], start).already_firing
+    rose = first_rise([start + 70, start + 75], start)
+    assert (rose.fired_at, rose.already_firing) == (s(70), False)
+    assert first_rise([], start).fired_at is None

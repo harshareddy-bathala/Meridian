@@ -105,6 +105,11 @@ PLATFORM_KINDS = frozenset(
     {"platform_restart", "database_restart", "scheduler_down", "api_paused"}
 )
 
+ROUND_READ_GRACE = timedelta(seconds=60)
+"""How long after it begins a round known only by its revocations may still be
+reading liveness. A round with a run record says exactly, by when it wrote;
+Stage 21's rehearsal measured ten seconds at ten stations."""
+
 RECOVERY_WITHIN = OFFLINE
 """How soon after a fault ends a station must be heard again.
 
@@ -173,6 +178,24 @@ class StationWork:
     declined_at: datetime | None = None
     """When it was first revoked as declined, from the same history."""
 
+    revocations: tuple[datetime, ...] = ()
+    """Every instant it was revoked, for any reason (D-196)."""
+
+    reinstatements: tuple[datetime, ...] = ()
+    """Every instant it was given back (D-171, D-196)."""
+
+    def live_before(self, instant: datetime) -> bool:
+        """Whether it was the station's work just before ``instant``.
+
+        Not if it had been revoked and not given back since: a round cannot
+        revoke what an earlier round already took, and owes it nothing.
+        """
+        taken = max((at for at in self.revocations if at < instant), default=None)
+        if taken is None:
+            return True
+        back = max((at for at in self.reinstatements if at < instant), default=None)
+        return back is not None and back > taken
+
 
 @dataclass(frozen=True, slots=True)
 class StationEvidence:
@@ -196,6 +219,11 @@ class StationEvidence:
 
     alert_fired_at: datetime | None = None
     alert_asked: bool = False
+    alert_already_firing: bool = False
+    """``StationOffline`` was firing for another station when this fault began."""
+
+    round_ends: Mapping[datetime, datetime] = field(default_factory=dict)
+    """When each round's reads were done, by when it began, where known."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -494,8 +522,14 @@ def _replanned(silence: _Silence, evidence: StationEvidence) -> Check:
     if span is None:
         return _nothing_revoked_in(silence, evidence)
     start, end = span
+    # A round owes an outage a revocation only if the station was still silent
+    # when the round had finished reading. One that began offline and read the
+    # station after it returned saw it back, and was right to leave its work.
     during = [
-        one for one in evidence.rounds if start <= one and (end is None or one < end)
+        one
+        for one in evidence.rounds
+        if start <= one
+        and (end is None or evidence.round_ends.get(one, one + ROUND_READ_GRACE) < end)
     ]
     if not during:
         return Check("replanned", None, "no scheduling round ran while it was offline")
@@ -505,7 +539,7 @@ def _replanned(silence: _Silence, evidence: StationEvidence) -> Check:
         for one in evidence.work
         if one.decided_at < start
         and one.start_at > first_round
-        and not (one.declined_at is not None and one.declined_at <= first_round)
+        and one.live_before(first_round)
     )
     return _revocations_of(owed, start, end)
 
@@ -677,17 +711,40 @@ def _alerted(
     fault: InjectedFault, silence: _Silence, evidence: StationEvidence
 ) -> Check:
     """When ``StationOffline`` fired, measured from the fault — SC-5's measured half."""
-    if _offline_span(silence) is None:
-        # The alert is summed over the fleet, so one firing here may be another
-        # station's; with no offline span of its own, this fault is owed none.
-        return Check("alerted", None, "never offline, so no alert was owed")
+    offline_at = silence.offline_at
+    unattributable = _unattributable(offline_at, evidence)
+    if unattributable is not None:
+        return Check("alerted", None, unattributable)
     fired = evidence.alert_fired_at
-    if fired is None:
+    if fired is None or offline_at is None:
         return Check("alerted", False, "StationOffline never fired")
     latency = (fired - fault.opened_at).total_seconds()
+    after_offline = (fired - offline_at).total_seconds()
     return Check(
-        "alerted", True, f"StationOffline fired {latency:.0f} s after the fault"
+        "alerted",
+        True,
+        f"StationOffline fired {latency:.0f} s after the fault, "
+        f"{after_offline:.0f} s after it read offline",
     )
+
+
+def _unattributable(
+    offline_at: datetime | None, evidence: StationEvidence
+) -> str | None:
+    """Why this fault is owed no alert, or cannot be timed by one; else ``None``.
+
+    ``StationOffline`` is summed over the fleet (D-197), so it times a fault
+    only when it rose for this station: not before it went offline, not
+    already firing for another, and not at all for one never offline.
+    """
+    if offline_at is None:
+        return "never offline, so no alert was owed"
+    if evidence.alert_already_firing:
+        return "StationOffline was already firing for another station: not attributable"
+    fired = evidence.alert_fired_at
+    if fired is not None and fired < offline_at:
+        return "StationOffline rose before this station read offline: not attributable"
+    return None
 
 
 def _within(

@@ -31,6 +31,7 @@ from meridian.store.stations import Connection
 
 __all__ = [
     "FaultWork",
+    "Round",
     "find_first_heartbeat_after",
     "find_first_round_after",
     "find_heartbeat_times",
@@ -61,6 +62,12 @@ class FaultWork:
 
     declined_at: datetime | None
     """The first time it was revoked as declined, from the same history."""
+
+    revocations: list[datetime]
+    """Every time it was revoked, for any reason, oldest first."""
+
+    reinstatements: list[datetime]
+    """Every time it was given back, oldest first."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +132,13 @@ def find_station_work(
                        and e.reason = 'offline' order by e.at) as offline_revocations,
                    (select min(e.at) from assignment_revocations e
                      where e.assignment_id = a.assignment_id and e.event = 'revoked'
-                       and e.reason = 'declined') as declined_at
+                       and e.reason = 'declined') as declined_at,
+                   array(select e.at from assignment_revocations e
+                     where e.assignment_id = a.assignment_id and e.event = 'revoked'
+                     order by e.at) as revocations,
+                   array(select e.at from assignment_revocations e
+                     where e.assignment_id = a.assignment_id
+                       and e.event = 'reinstated' order by e.at) as reinstatements
             from assignments a
             left join schedule_runs r on r.run_id = a.schedule_run_id
             where a.station_id = %s and a.decision = 'scheduled'
@@ -137,30 +150,44 @@ def find_station_work(
         return tuple(cur.fetchall())
 
 
+@dataclass(frozen=True, slots=True)
+class Round:
+    """One recorded scheduling round: when it judged liveness, and when it wrote."""
+
+    began: datetime
+    """The round's ``now``: the instant it judged every station by (D-170)."""
+
+    wrote: datetime | None
+    """When its run was written, so its reads were done; ``None`` for a round
+    known only by the revocations it made, which records no run."""
+
+
 def find_rounds_between(
     conn: Connection, *, start: datetime, end: datetime
-) -> tuple[datetime, ...]:
-    """When each recorded scheduling round in ``[start, end)`` judged liveness.
+) -> tuple[Round, ...]:
+    """Every recorded scheduling round that began in ``[start, end)``.
 
     A round leaves a record when it decides something — a run (D-170) — or when
     it revokes an offline station's work (D-196). A round that did neither
     wrote nothing, and a verdict cannot hold the platform to a round it cannot
-    see.
+    see. A run's ``created_at`` says when its reads were done: a round reads
+    liveness after it begins, and Stage 21's rehearsal saw ten seconds between.
     """
-    with conn.cursor(row_factory=class_row(_Instant)) as cur:
+    with conn.cursor(row_factory=class_row(Round)) as cur:
         cur.execute(
             """
-            select at from (
-                select decided_at as at from schedule_runs
-                union
-                select at from assignment_revocations
+            select began, max(wrote) as wrote from (
+                select decided_at as began, created_at as wrote from schedule_runs
+                union all
+                select at, null from assignment_revocations
                 where event = 'revoked' and reason = 'offline'
             ) rounds
-            where at >= %s and at < %s order by at
+            where began >= %s and began < %s
+            group by began order by began
             """,
             (start, end),
         )
-        return tuple(one.at for one in cur.fetchall())
+        return tuple(cur.fetchall())
 
 
 def find_pass_classes(

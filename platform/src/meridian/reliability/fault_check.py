@@ -14,6 +14,7 @@ import json
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from meridian.reliability.faults import (
@@ -37,7 +38,7 @@ from meridian.store.fault_evidence import (
 )
 from meridian.store.stations import Connection
 
-__all__ = ["AlertLookup", "check_faults", "prometheus_alert_lookup"]
+__all__ = ["AlertAnswer", "AlertLookup", "check_faults", "prometheus_alert_lookup"]
 
 MARGIN = timedelta(minutes=5)
 """How far either side of a fault its evidence is read.
@@ -46,8 +47,19 @@ Wider than SC-5's ninety seconds, so the heartbeat before a fault and the first
 one after it are always inside the window, whatever the cadence.
 """
 
-AlertLookup = Callable[[str, datetime, datetime], datetime | None]
-"""When an alert first fired firing between two instants, or ``None``."""
+
+@dataclass(frozen=True, slots=True)
+class AlertAnswer:
+    """When an alert first began firing inside a window, and whether it already was."""
+
+    fired_at: datetime | None
+    already_firing: bool
+    """Firing when the window opened. The alert is summed over the fleet, so a
+    firing inherited from another station's fault times nothing about this one."""
+
+
+AlertLookup = Callable[[str, datetime, datetime], AlertAnswer]
+"""When an alert began firing between two instants."""
 
 STATION_OFFLINE_ALERT = "StationOffline"
 PROMETHEUS_STEP_S = 5
@@ -115,20 +127,26 @@ def _judge_station(
             redecided_at=one.redecided_at,
             offline_revocations=tuple(one.offline_revocations),
             declined_at=one.declined_at,
+            revocations=tuple(one.revocations),
+            reinstatements=tuple(one.reinstatements),
         )
         for one in find_station_work(conn, station_id, start=start, end=end)
     )
     touched = sorted({one.assignment_id for one in work} | set(fault.assignment_ids))
+    answer = (
+        None if alerts is None else alerts(STATION_OFFLINE_ALERT, fault.opened_at, end)
+    )
+    rounds = find_rounds_between(conn, start=start, end=end)
     evidence = StationEvidence(
         heartbeats=find_heartbeat_times(conn, station_id, start=start, end=end),
         work=work,
-        rounds=find_rounds_between(conn, start=start, end=end),
+        rounds=tuple(one.began for one in rounds),
+        round_ends={one.began: one.wrote for one in rounds if one.wrote},
         classifications=find_pass_classes(conn, touched),
         reported=find_reported(conn, touched),
         as_of=now,
-        alert_fired_at=None
-        if alerts is None
-        else alerts(STATION_OFFLINE_ALERT, fault.opened_at, end),
+        alert_fired_at=answer.fired_at if answer else None,
+        alert_already_firing=bool(answer and answer.already_firing),
         alert_asked=alerts is not None,
     )
     return judge_station_fault(fault, evidence, alongside)
@@ -161,11 +179,12 @@ def prometheus_alert_lookup(base_url: str) -> AlertLookup:
     finer than the fifteen-second evaluation interval the answer depends on.
     """
 
-    def first_firing(name: str, start: datetime, end: datetime) -> datetime | None:
+    def first_firing(name: str, start: datetime, end: datetime) -> AlertAnswer:
+        # From a step before the window, to see whether it was already firing.
         query = urllib.parse.urlencode(
             {
                 "query": f'ALERTS{{alertname="{name}",alertstate="firing"}}',
-                "start": f"{start.timestamp():.3f}",
+                "start": f"{start.timestamp() - PROMETHEUS_STEP_S:.3f}",
                 "end": f"{end.timestamp():.3f}",
                 "step": str(PROMETHEUS_STEP_S),
             }
@@ -173,12 +192,23 @@ def prometheus_alert_lookup(base_url: str) -> AlertLookup:
         url = f"{base_url.rstrip('/')}/api/v1/query_range?{query}"
         with urllib.request.urlopen(url, timeout=PROMETHEUS_TIMEOUT_S) as response:
             body = json.load(response)
-        instants = [
+        instants = sorted(
             float(stamp)
             for series in body.get("data", {}).get("result", [])
             for stamp, value in series.get("values", [])
             if value == "1"
-        ]
-        return datetime.fromtimestamp(min(instants), UTC) if instants else None
+        )
+        return first_rise(instants, start.timestamp())
 
     return first_firing
+
+
+def first_rise(instants: list[float], start_s: float) -> AlertAnswer:
+    """The first firing sample after ``start_s``, unless it was firing already."""
+    if any(one <= start_s for one in instants):
+        return AlertAnswer(fired_at=None, already_firing=True)
+    after = [one for one in instants if one > start_s]
+    return AlertAnswer(
+        fired_at=datetime.fromtimestamp(after[0], UTC) if after else None,
+        already_firing=False,
+    )
