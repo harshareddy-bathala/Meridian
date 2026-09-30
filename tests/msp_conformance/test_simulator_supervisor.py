@@ -27,7 +27,8 @@ from meridian.store.invites import hash_invite_token
 from meridian_client import transport as transport_module
 from meridian_sim import supervisor as supervisor_module
 from meridian_sim.config import RunConfig, seed_for_station
-from meridian_sim.faults import PARTITION, partition_for, schedule_for
+from meridian_sim.fault_schedule import partition_for, schedule_for
+from meridian_sim.faults import PARTITION
 from meridian_sim.ledger import FaultLedger, read_ledger
 from meridian_sim.supervisor import Supervisor
 from meridian_sim.virtual_station import RegistrationNeededError, paths_for

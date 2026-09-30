@@ -45,7 +45,8 @@ from meridian_sim.config import (
     state_dir_for_station,
 )
 from meridian_sim.executor import SimulatedExecutor
-from meridian_sim.faults import FaultState, declines_assignment
+from meridian_sim.fault_schedule import declines_assignment
+from meridian_sim.faults import FaultState
 
 __all__ = [
     "RegistrationNeededError",
@@ -176,7 +177,7 @@ class VirtualStation:
         """Let go of some held work whose window has not opened yet.
 
         Which work is drawn from this station's seed and each assignment's id
-        (:func:`~meridian_sim.faults.declines_assignment`). Through the client's
+        (:func:`~meridian_sim.fault_schedule.declines_assignment`). Through the client's
         own record, so the next heartbeat's ``held_assignments`` simply stops
         naming them — the only way MSP has to decline (D-003).
 

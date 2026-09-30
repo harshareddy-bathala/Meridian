@@ -45,12 +45,30 @@ docs/PROJECT.md §9 SC-5.
 
 from __future__ import annotations
 
-import json
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-from meridian.registry.liveness import OFFLINE_AFTER_S, derive_liveness
+from meridian.reliability.fault_ledger import (
+    LEDGER_VERSION,
+    FaultLedgerError,
+    InjectedFault,
+    read_fault_ledger,
+)
+from meridian.reliability.fault_model import (
+    MISS_SENSITIVE,
+    NOT_LISTENED,
+    RECOVERY_WITHIN,
+    ROUND_RECOVERY_WITHIN,
+    SILENCING,
+    WHOLLY_SILENCING,
+    Check,
+    FaultVerdict,
+    PlatformEvidence,
+    Silence,
+    StationEvidence,
+    StationWork,
+)
+from meridian.reliability.fault_offline import detected, no_new_work, replanned
 
 __all__ = [
     "LEDGER_VERSION",
@@ -65,294 +83,6 @@ __all__ = [
     "judge_station_fault",
     "read_fault_ledger",
 ]
-
-LEDGER_VERSION = 1
-"""The ledger format this module reads; ``meridian_sim/ledger.py`` defines it."""
-
-OFFLINE = timedelta(seconds=OFFLINE_AFTER_S)
-
-SILENCING = frozenset(
-    {"network_down", "partition", "heartbeat_delayed", "token_revoked", "restart"}
-)
-"""Faults that stop a station's heartbeats reaching the platform."""
-
-WHOLLY_SILENCING = SILENCING - {"restart"}
-"""Faults under which no heartbeat may be stored at all.
-
-A restart is an instant: the process that dies on one tick heartbeats on the
-next, so a heartbeat inside its window is the station coming back, not the
-fault failing to hold.
-"""
-
-MISS_SENSITIVE = SILENCING | {
-    "upload_blocked",
-    "receiver_down",
-    "declines",
-    "slow_api",
-}
-"""Faults under which a lost pass must never read as ``confirmed_miss``.
-
-Each either removes the listening evidence, withholds the report, or declines
-the work. A drifting clock and a failing decoder are left out: under both the
-station did listen and heard what it heard, and what the classification makes
-of that is Stages 25 and 27's question.
-"""
-
-NOT_LISTENED = frozenset({"receiver_down", "declines"})
-"""Faults whose ledger ``act`` lines name passes the station did not listen to."""
-
-PLATFORM_KINDS = frozenset(
-    {"platform_restart", "database_restart", "scheduler_down", "api_paused"}
-)
-
-ROUND_READ_GRACE = timedelta(seconds=60)
-"""How long after it begins a round known only by its revocations may still be
-reading liveness. A round with a run record says exactly, by when it wrote;
-Stage 21's rehearsal measured ten seconds at ten stations."""
-
-RECOVERY_WITHIN = OFFLINE
-"""How soon after a fault ends a station must be heard again.
-
-Three heartbeat intervals: a station coming back heartbeats on its next tick,
-and one that has not been heard ninety seconds after its fault ended is, by
-SC-5's own threshold, still down.
-"""
-
-ROUND_RECOVERY_WITHIN = timedelta(minutes=15)
-"""How soon after the scheduler comes back a round must have run.
-
-``ScheduledTaskStalled``'s threshold: the platform's own statement of how long
-a round may take to happen before someone should be told.
-"""
-
-
-class FaultLedgerError(ValueError):
-    """A ledger line this module cannot read as the format it expects."""
-
-
-@dataclass(frozen=True, slots=True)
-class InjectedFault:
-    """One fault window from the ledger."""
-
-    run_id: str
-    kind: str
-    target: str
-    opened_at: datetime
-    closed_at: datetime | None = None
-    station_id: str | None = None
-    assignment_ids: tuple[str, ...] = ()
-    acted_at: Mapping[str, datetime] = field(default_factory=dict)
-    """When the fault first acted on each of :attr:`assignment_ids`."""
-
-    detail: Mapping[str, object] = field(default_factory=dict)
-
-    @property
-    def on_platform(self) -> bool:
-        """Whether this fault was done to the platform rather than a station."""
-        return self.target.startswith("platform:")
-
-
-@dataclass(frozen=True, slots=True)
-class StationWork:
-    """One scheduled assignment of the station under a fault, as stored."""
-
-    assignment_id: str
-    pass_id: int
-    decided_at: datetime
-    start_at: datetime
-    end_at: datetime
-    state: str
-    revoked_reason: str | None
-    revoked_at: datetime | None
-    redecided_at: datetime | None
-    """When a later revision of the same pass was decided, if one was."""
-
-    offline_revocations: tuple[datetime, ...] = ()
-    """Every instant it was revoked because its station was offline (D-196).
-
-    From the revocation history, so a reinstatement since does not erase one.
-    Each outage is judged by the revocations inside it: work revoked in an
-    earlier outage and given back has not been revoked in this one.
-    """
-
-    declined_at: datetime | None = None
-    """When it was first revoked as declined, from the same history."""
-
-    revocations: tuple[datetime, ...] = ()
-    """Every instant it was revoked, for any reason (D-196)."""
-
-    reinstatements: tuple[datetime, ...] = ()
-    """Every instant it was given back (D-171, D-196)."""
-
-    def live_before(self, instant: datetime) -> bool:
-        """Whether it was the station's work just before ``instant``.
-
-        Not if it had been revoked and not given back since: a round cannot
-        revoke what an earlier round already took, and owes it nothing.
-        """
-        taken = max((at for at in self.revocations if at < instant), default=None)
-        if taken is None:
-            return True
-        back = max((at for at in self.reinstatements if at < instant), default=None)
-        return back is not None and back > taken
-
-
-@dataclass(frozen=True, slots=True)
-class StationEvidence:
-    """Everything the platform stored that bears on one station's fault."""
-
-    heartbeats: tuple[datetime, ...]
-    """Receipt instants, oldest first, over the fault and a margin either side."""
-
-    work: tuple[StationWork, ...]
-    rounds: tuple[datetime, ...]
-    """When each scheduling round in the window judged liveness."""
-
-    classifications: Mapping[str, str]
-    """Stored class of each classified assignment, by assignment id."""
-
-    reported: frozenset[str]
-    """The touched assignments of which a report is stored."""
-
-    as_of: datetime
-    """When the evidence was read: nothing after it can have been stored."""
-
-    alert_fired_at: datetime | None = None
-    alert_asked: bool = False
-    alert_already_firing: bool = False
-    """``StationOffline`` was firing for another station when this fault began."""
-
-    round_ends: Mapping[datetime, datetime] = field(default_factory=dict)
-    """When each round's reads were done, by when it began, where known."""
-
-
-@dataclass(frozen=True, slots=True)
-class PlatformEvidence:
-    """What bears on a fault done to the platform itself."""
-
-    first_heartbeat_after: datetime | None
-    """The first heartbeat from any station at or after the fault closed."""
-
-    first_round_after: datetime | None
-    """The first scheduling round at or after the fault closed."""
-
-    reported_misses: tuple[str, ...]
-    """Passes whose window met the fault classified ``confirmed_miss`` although a
-    report of them is stored."""
-
-    as_of: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class Check:
-    """One question about one fault, and its answer."""
-
-    name: str
-    passed: bool | None
-    """``None`` when the question does not apply, or cannot be answered yet."""
-
-    detail: str
-
-
-@dataclass(frozen=True, slots=True)
-class FaultVerdict:
-    """Every check for one fault window."""
-
-    fault: InjectedFault
-    checks: tuple[Check, ...]
-
-    @property
-    def passed(self) -> bool:
-        """No check failed. A check that did not apply is not a failure."""
-        return all(one.passed is not False for one in self.checks)
-
-
-def read_fault_ledger(lines: Iterable[str]) -> tuple[InjectedFault, ...]:
-    """Fold a ledger's lines into one fault per window, in the order they opened.
-
-    Read independently of ``meridian_sim.ledger``, which the platform cannot
-    import (D-138); ``tests/unit/test_reliability_faults.py`` reads a ledger the
-    simulator wrote, so the two readers cannot drift apart unseen.
-
-    Raises:
-        FaultLedgerError: A line is not JSON, not this version, names an unknown
-            event, or closes or acts on a window that is not open. Refused
-            rather than skipped: a verdict against part of the truth is a
-            verdict against a different run.
-    """
-    folding = _Folding()
-    for number, raw in enumerate(lines, start=1):
-        if raw.strip():
-            folding.take(_parse_line(raw, number), number)
-    return tuple(folding.faults)
-
-
-class _Folding:
-    """A ledger part-read: the windows so far, and which of them are open."""
-
-    def __init__(self) -> None:
-        self.faults: list[InjectedFault] = []
-        self._open: dict[tuple[str, str, str], int] = {}
-
-    def take(self, line: Mapping[str, object], number: int) -> None:
-        """Apply one line to the windows read so far."""
-        key = (
-            _text(line, "run_id", number),
-            _text(line, "target", number),
-            _text(line, "kind", number),
-        )
-        at = _instant(_text(line, "at", number), number)
-        event = line.get("event")
-        if event == "open":
-            self._opened(key, at, line, number)
-        elif event in {"close", "act"}:
-            if key not in self._open:
-                raise FaultLedgerError(f"line {number}: {event} of an unopened {key}")
-            index = self._open[key]
-            if event == "close":
-                self.faults[index] = replace(self.faults[index], closed_at=at)
-                del self._open[key]
-            else:
-                current = self.faults[index]
-                ids = _ids(line, number)
-                self.faults[index] = replace(
-                    current,
-                    assignment_ids=current.assignment_ids + ids,
-                    acted_at={**{one: at for one in ids}, **current.acted_at},
-                )
-        else:
-            raise FaultLedgerError(f"line {number}: unknown event {event!r}")
-
-    def _opened(
-        self,
-        key: tuple[str, str, str],
-        at: datetime,
-        line: Mapping[str, object],
-        number: int,
-    ) -> None:
-        if key in self._open:
-            raise FaultLedgerError(f"line {number}: {key} opened twice")
-        self._open[key] = len(self.faults)
-        station_id = line.get("station_id")
-        detail = line.get("detail", {})
-        self.faults.append(
-            InjectedFault(
-                run_id=key[0],
-                target=key[1],
-                kind=key[2],
-                opened_at=at,
-                station_id=station_id if isinstance(station_id, str) else None,
-                detail=detail if isinstance(detail, dict) else {},
-            )
-        )
-
-
-def _ids(line: Mapping[str, object], number: int) -> tuple[str, ...]:
-    """The assignment ids an ``act`` line names."""
-    ids = line.get("assignment_ids", [])
-    if not isinstance(ids, list):
-        raise FaultLedgerError(f"line {number}: assignment_ids is not a list")
-    return tuple(str(one) for one in ids)
 
 
 def judge_station_fault(
@@ -369,12 +99,12 @@ def judge_station_fault(
             them: a station is not owed a heartbeat when its fault closes if
             another fault is still silencing it.
     """
-    silence = _Silence.around(fault.opened_at, evidence.heartbeats)
+    silence = Silence.around(fault.opened_at, evidence.heartbeats)
     checks = [
         _held(fault, evidence),
-        _detected(fault, silence),
-        _no_new_work(silence, evidence),
-        _replanned(silence, evidence),
+        detected(fault, silence),
+        no_new_work(silence, evidence),
+        replanned(silence, evidence),
         _no_false_miss(fault, evidence),
         _declines_honoured(fault, evidence),
         _recovered(fault, evidence, alongside),
@@ -418,35 +148,6 @@ def judge_platform_fault(
     return FaultVerdict(fault, (no_false_miss, recovered))
 
 
-@dataclass(frozen=True, slots=True)
-class _Silence:
-    """The gap in a station's heartbeats that a fault opened inside."""
-
-    last: datetime | None
-    """The last heartbeat at or before the fault opened."""
-
-    next: datetime | None
-    """The first heartbeat after it opened, or ``None`` if none was stored."""
-
-    @classmethod
-    def around(cls, opened_at: datetime, heartbeats: tuple[datetime, ...]) -> _Silence:
-        before = [one for one in heartbeats if one <= opened_at]
-        after = [one for one in heartbeats if one > opened_at]
-        return cls(max(before, default=None), min(after, default=None))
-
-    @property
-    def offline_at(self) -> datetime | None:
-        """When liveness first read ``offline`` in this gap, if it ever did."""
-        if self.last is None:
-            return None
-        crossing = self.last + OFFLINE
-        if self.next is not None and self.next < crossing:
-            return None
-        if derive_liveness(self.last, now=crossing) != "offline":
-            return None
-        return crossing
-
-
 def _held(fault: InjectedFault, evidence: StationEvidence) -> Check:
     """Whether the platform stored the silence the ledger claims."""
     if fault.kind not in WHOLLY_SILENCING:
@@ -460,139 +161,6 @@ def _held(fault: InjectedFault, evidence: StationEvidence) -> Check:
         if not inside
         else f"{len(inside)} heartbeat(s) stored inside the window, first at "
         f"{inside[0].isoformat()}",
-    )
-
-
-def _detected(fault: InjectedFault, silence: _Silence) -> Check:
-    """SC-5: offline within ninety seconds of the fault, when it lasted that long."""
-    if fault.kind not in SILENCING:
-        return Check("detected", None, f"{fault.kind} leaves the station reachable")
-    if silence.last is None:
-        return Check("detected", None, "the station was never heard before the fault")
-    offline_at = silence.offline_at
-    if offline_at is None:
-        gap = (silence.next - silence.last).total_seconds() if silence.next else 0.0
-        return Check(
-            "detected",
-            True,
-            f"silent {gap:.0f} s, short of offline: never offline, correctly (D-190)",
-        )
-    latency = (offline_at - fault.opened_at).total_seconds()
-    return Check(
-        "detected",
-        latency <= OFFLINE_AFTER_S,
-        f"offline {latency:.0f} s after the fault began (SC-5: ≤ {OFFLINE_AFTER_S} s)",
-    )
-
-
-def _offline_span(silence: _Silence) -> tuple[datetime, datetime | None] | None:
-    """From when the station was offline until it was heard again."""
-    offline_at = silence.offline_at
-    return None if offline_at is None else (offline_at, silence.next)
-
-
-def _no_new_work(silence: _Silence, evidence: StationEvidence) -> Check:
-    """Nothing decided for the station while it read offline (D-166)."""
-    span = _offline_span(silence)
-    if span is None:
-        return Check("no_new_work", None, "the station was never offline")
-    start, end = span
-    given = [
-        one.assignment_id
-        for one in evidence.work
-        if start <= one.decided_at and (end is None or one.decided_at < end)
-    ]
-    return Check(
-        "no_new_work",
-        not given,
-        "nothing was decided for it while offline"
-        if not given
-        else f"decided while offline: {', '.join(given)}",
-    )
-
-
-def _replanned(silence: _Silence, evidence: StationEvidence) -> Check:
-    """A round that ran while it was offline revoked the work it had not begun.
-
-    And, for a station that never went offline, that nothing of its was revoked
-    as offline in the gap: a heartbeat delay short of ninety seconds must cost
-    the station nothing it holds (D-190).
-    """
-    span = _offline_span(silence)
-    if span is None:
-        return _nothing_revoked_in(silence, evidence)
-    start, end = span
-    # A round owes an outage a revocation only if the station was still silent
-    # when the round had finished reading. One that began offline and read the
-    # station after it returned saw it back, and was right to leave its work.
-    during = [
-        one
-        for one in evidence.rounds
-        if start <= one
-        and (end is None or evidence.round_ends.get(one, one + ROUND_READ_GRACE) < end)
-    ]
-    if not during:
-        return Check("replanned", None, "no scheduling round ran while it was offline")
-    first_round = min(during)
-    owed = tuple(
-        one
-        for one in evidence.work
-        if one.decided_at < start
-        and one.start_at > first_round
-        and one.live_before(first_round)
-    )
-    return _revocations_of(owed, start, end)
-
-
-def _nothing_revoked_in(silence: _Silence, evidence: StationEvidence) -> Check:
-    """For a gap short of offline: no work was revoked as offline inside it."""
-    if silence.last is None or silence.next is None:
-        return Check("replanned", None, "the station was never offline")
-    last, heard = silence.last, silence.next
-    # Open at both ends. A round at the instant a heartbeat arrived may have
-    # judged liveness before it, when the station had been silent ninety
-    # seconds — offline, correctly, in the gap before this one.
-    early = [
-        one.assignment_id
-        for one in evidence.work
-        if any(last < at < heard for at in one.offline_revocations)
-    ]
-    if early:
-        return Check(
-            "replanned", False, f"revoked as offline, never offline: {', '.join(early)}"
-        )
-    return Check("replanned", None, "never offline, and nothing revoked as offline")
-
-
-def _revocations_of(
-    owed: tuple[StationWork, ...], offline_at: datetime, heard_at: datetime | None
-) -> Check:
-    """Whether every piece of owed work was revoked as offline inside this outage."""
-    revoked_at = {
-        one.assignment_id: min(
-            (
-                at
-                for at in one.offline_revocations
-                if offline_at <= at and (heard_at is None or at < heard_at)
-            ),
-            default=None,
-        )
-        for one in owed
-    }
-    kept = [name for name, at in revoked_at.items() if at is None]
-    if kept:
-        return Check(
-            "replanned", False, f"not revoked while offline: {', '.join(kept)}"
-        )
-    if not owed:
-        return Check("replanned", True, "it held no unbegun work to revoke")
-    first = min(at for at in revoked_at.values() if at is not None)
-    decided_again = sum(one.redecided_at is not None for one in owed)
-    return Check(
-        "replanned",
-        True,
-        f"{len(owed)} revoked {(first - offline_at).total_seconds():.0f} s after "
-        f"going offline; {decided_again} decided again",
     )
 
 
@@ -708,7 +276,7 @@ def _silenced_until(
 
 
 def _alerted(
-    fault: InjectedFault, silence: _Silence, evidence: StationEvidence
+    fault: InjectedFault, silence: Silence, evidence: StationEvidence
 ) -> Check:
     """When ``StationOffline`` fired, measured from the fault — SC-5's measured half."""
     offline_at = silence.offline_at
@@ -765,31 +333,3 @@ def _within(
         seen - since <= limit,
         f"first {what} {late:.0f} s after it ended",
     )
-
-
-def _parse_line(raw: str, number: int) -> dict[str, object]:
-    """One ledger line, parsed and checked to be this module's format."""
-    try:
-        line = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise FaultLedgerError(f"line {number}: not JSON: {exc}") from exc
-    if not isinstance(line, dict) or line.get("ledger") != LEDGER_VERSION:
-        raise FaultLedgerError(f"line {number}: not a version {LEDGER_VERSION} line")
-    return line
-
-
-def _text(line: Mapping[str, object], name: str, number: int) -> str:
-    value = line.get(name)
-    if not isinstance(value, str):
-        raise FaultLedgerError(f"line {number}: {name} is missing or not text")
-    return value
-
-
-def _instant(text: str, number: int) -> datetime:
-    try:
-        at = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise FaultLedgerError(f"line {number}: bad instant {text!r}") from exc
-    if at.tzinfo is None:
-        raise FaultLedgerError(f"line {number}: instant {text!r} has no zone")
-    return at

@@ -16,6 +16,7 @@ import httpx
 import pytest
 
 from meridian_sim.config import seed_for_station
+from meridian_sim.fault_schedule import declines_assignment, partition_for, schedule_for
 from meridian_sim.faults import (
     CLOCK_DRIFT,
     DECLINES,
@@ -31,9 +32,6 @@ from meridian_sim.faults import (
     UPLOAD_BLOCKED,
     FaultInjectingTransport,
     FaultState,
-    declines_assignment,
-    partition_for,
-    schedule_for,
 )
 
 MASTER_SEED = 4471

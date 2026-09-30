@@ -29,24 +29,25 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import httpx
 
 from meridian_sim.config import RunConfig, seed_for_station
-from meridian_sim.faults import (
-    CLOCK_DRIFT,
-    DECLINES,
-    PARTITION,
-    FaultInjectingTransport,
+from meridian_sim.fault_notes import FaultNotes
+from meridian_sim.fault_schedule import (
     FaultSchedule,
-    FaultState,
     FleetPartition,
     partition_for,
     schedule_for,
+)
+from meridian_sim.faults import (
+    DECLINES,
+    PARTITION,
+    FaultInjectingTransport,
+    FaultState,
 )
 from meridian_sim.ledger import FaultLedger
 from meridian_sim.virtual_station import VirtualStation, register_or_resume
@@ -136,7 +137,7 @@ class Supervisor:
         self._config = config
         self._invite_tokens = tuple(invite_tokens)
         self._http_transport = http_transport
-        self._ledger = ledger
+        self._notes = FaultNotes(ledger)
         self._members: list[_Member] = []
         self._partition = FleetPartition()
 
@@ -163,6 +164,7 @@ class Supervisor:
             self._config.scenario,
             self._config.station_count,
         )
+        self._notes.partition = self._partition
         return tuple(one.station.station_id for one in self._members)
 
     def tick_round(self, tick: int, now: datetime) -> RoundOutcome:
@@ -189,7 +191,16 @@ class Supervisor:
             active = member.schedule.active_at(tick)
             if self._partition.active_for(member.index, tick):
                 active |= {PARTITION}
-            self._note_transitions(member, active, tick, now)
+            self._notes.transitions(
+                index=member.index,
+                station=(member.station.station_id, member.station.seed),
+                schedule=member.schedule,
+                was=member.previous,
+                now_active=active,
+                tick=tick,
+                now=now,
+            )
+            member.previous = active
             member.faults.active = active
             if member.schedule.restarts_at(tick):
                 self._restart(member)
@@ -199,9 +210,9 @@ class Supervisor:
             if DECLINES in active:
                 declined = member.station.decline(station_now)
                 acts = ((DECLINES, one) for one in declined)
-                self._note_acts(member, acts, tick, now)
+                self._notes.acts(member.index, acts, tick, now)
             outcome = member.station.tick(station_now)
-            self._note_acts(member, member.station.take_faulted(), tick, now)
+            self._notes.acts(member.index, member.station.take_faulted(), tick, now)
             ticked.append(member.index)
             if outcome.heartbeat_sent:
                 heard.append(member.index)
@@ -296,50 +307,6 @@ class Supervisor:
             faults=faults,
         )
 
-    def _note_transitions(
-        self, member: _Member, active: frozenset[str], tick: int, now: datetime
-    ) -> None:
-        """Write to the ledger each fault that opened or closed on this round."""
-        if self._ledger is not None:
-            target = _target(member.index)
-            for kind in sorted(active - member.previous):
-                self._ledger.open(
-                    kind,
-                    target,
-                    now,
-                    tick=tick,
-                    station_id=member.station.station_id,
-                    seed=member.station.seed,
-                    detail=self._detail(member, kind),
-                )
-            for kind in sorted(member.previous - active):
-                self._ledger.close(kind, target, now, tick=tick)
-        member.previous = active
-
-    def _note_acts(
-        self,
-        member: _Member,
-        acts: Iterable[tuple[str, str]],
-        tick: int,
-        now: datetime,
-    ) -> None:
-        """Write to the ledger what open faults did to named assignments."""
-        by_kind: defaultdict[str, list[str]] = defaultdict(list)
-        for kind, assignment_id in acts:
-            by_kind[kind].append(assignment_id)
-        if self._ledger is None:
-            return
-        for kind, ids in sorted(by_kind.items()):
-            self._ledger.act(kind, _target(member.index), now, tuple(ids), tick=tick)
-
-    def _detail(self, member: _Member, kind: str) -> dict[str, object]:
-        """What a reader of the ledger needs to know about one fault's shape."""
-        if kind == CLOCK_DRIFT:
-            return {"drift_s_per_tick": member.schedule.drift_s_per_tick}
-        if kind == PARTITION:
-            return {"members": sorted(self._partition.members)}
-        return {}
-
     def _invite_for(self, index: int) -> str | None:
         """The invite offered to station ``index``, if the run was given one."""
         if index <= len(self._invite_tokens):
@@ -401,11 +368,6 @@ class Supervisor:
         if not self._members:
             return DEFAULT_INTERVAL_S
         return float(min(one.station.heartbeat_interval_s for one in self._members))
-
-
-def _target(index: int) -> str:
-    """How the ledger names station ``index``."""
-    return f"station:{index}"
 
 
 def _next_due_at(due_at: float, interval_s: float) -> float:
