@@ -36,6 +36,7 @@ from meridian.api.app import create_app
 from meridian.api.dependencies import get_connection
 from meridian.catalogue_file import read_catalogue
 from meridian.cli_catalogue import load_document
+from meridian.observations.frames_expected import frames_expected
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.pass_generation import GenerationHorizon, generate_passes
 from meridian.scheduler.run import ScheduleRequest, run_schedule
@@ -44,6 +45,12 @@ from meridian.store.invites import hash_invite_token
 from meridian.store.satellites import find_active_transmitters
 from meridian_sim import supervisor as supervisor_module
 from meridian_sim.config import RunConfig, seed_for_pass, seed_for_station
+from meridian_sim.evidence import (
+    DECODER,
+    count_frames,
+    evidence_for,
+    station_noise_floor_dbfs,
+)
 from meridian_sim.outcomes import decide_outcome
 from meridian_sim.supervisor import Supervisor
 
@@ -273,6 +280,86 @@ def test_provenance_survives_every_layer(
     assert _flag(rollback, "heartbeats", "station_id", station_id) is True
     assert _flag(rollback, "assignments", "assignment_id", assignment_id) is True
     assert current_observation(rollback, assignment_id)["simulated"] is True
+
+
+def test_the_evidence_it_measured_is_what_the_platform_stores(
+    started: Any, rollback: Any, tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Stage 25: MSP 0.3's evidence, from the model to the row, still simulated.
+
+    The floor, the gain, the SNR series and the decoder's counts are the ones
+    :mod:`meridian_sim.evidence` drew for this pass. The floor reaches
+    ``noise_measurements`` flagged simulated (D-173), and the pass has a
+    frames-expected figure for the frames decoded to be read against (D-250).
+    """
+    config = run_config(tmp_path)
+    fleet = Supervisor(config, [issue_invite(rollback)], started._transport)
+
+    with fleet:
+        (station_id,) = fleet.bring_up()
+        seed_the_platform(rollback, station_id)
+        assignment_id, start_at, end_at, elevation_deg = earliest_assignment(
+            rollback, station_id
+        )
+        _freeze(monkeypatch, start_at - timedelta(seconds=LEAD_S))
+
+        fleet.tick_round(0, start_at - timedelta(seconds=LEAD_S))
+        fleet.tick_round(1, start_at + timedelta(seconds=10))
+        fleet.tick_round(2, end_at + timedelta(seconds=10))
+
+    station_seed = seed_for_station(MASTER_SEED, 1)
+    pass_seed = seed_for_pass(station_seed, assignment_id)
+    outcome = decide_outcome(pass_seed, elevation_deg)
+    expected = evidence_for(
+        pass_seed,
+        outcome,
+        (end_at - start_at).total_seconds(),
+        station_noise_floor_dbfs(station_seed),
+    )
+    if expected is None:
+        pytest.skip("this seed's first pass aborted, which measures nothing")
+
+    with rollback.cursor() as cur:
+        cur.execute(
+            """
+            select noise_floor_dbfs, receiver_gain_db,
+                   jsonb_array_length(snr_samples), decoder, frames_decoded
+            from observations_current where assignment_id = %s
+            """,
+            (assignment_id,),
+        )
+        stored = cur.fetchone()
+        cur.execute(
+            "select noise_floor_dbfs, simulated from noise_measurements"
+            " where assignment_id = %s",
+            (assignment_id,),
+        )
+        noise = cur.fetchall()
+        cur.execute(
+            """
+            select p.aos, p.los, t.frame_interval_s
+            from assignments a
+            join passes p on p.id = a.pass_id
+            join satellite_transmitters t
+              on t.satellite_id = p.satellite_id
+             and t.centre_freq_hz = a.centre_freq_hz and t.mode = a.mode
+            where a.assignment_id = %s and t.deleted_at is null
+            """,
+            (assignment_id,),
+        )
+        aos, los, interval_s = cur.fetchone()
+
+    assert stored == (
+        expected.noise_floor_dbfs,
+        expected.receiver_gain_db,
+        len(expected.snr_db),
+        DECODER,
+        count_frames(
+            expected.snr_db, (end_at - start_at).total_seconds(), outcome.outcome
+        )[0],
+    )
+    assert noise == [(expected.noise_floor_dbfs, True)]
+    assert (frames_expected(aos, los, interval_s) or 0) > 0
 
 
 def test_a_second_run_reports_the_same_thing_about_the_same_pass(

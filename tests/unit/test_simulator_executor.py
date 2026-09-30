@@ -101,11 +101,12 @@ def test_the_digest_is_the_one_this_seed_has_always_produced() -> None:
     point: the value is not meaningful on its own, and a run whose observations
     changed without anyone deciding to change them is exactly what determinism
     is supposed to make impossible. Update it deliberately, in the commit that
-    changed the model.
+    changed the model. Last moved by Stage 25, which added MSP 0.3's evidence
+    to every body (D-251); the outcome itself did not change.
     """
     assert (
         body_digest(STATION_SEED, assignment())
-        == "8a360b15d7f59bd7de5837415be65a3c9d0cf053446e08a1660b40dfe964860d"
+        == "3e260aa128b0048c7645c7f1b502a7387178dfeefd5448f834210bc3fc735d7f"
     )
 
 
@@ -294,7 +295,8 @@ def _first_detected() -> object:
         (result,) = run_one(
             STATION_SEED, assignment(f"as_{index:04d}", elevation_deg=85.0)
         )
-        if result.signal is not None:  # type: ignore[attr-defined]
+        signal = result.signal  # type: ignore[attr-defined]
+        if signal is not None and signal.detected:
             return result
     raise AssertionError("no detected pass in the sweep")
 

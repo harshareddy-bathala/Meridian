@@ -5271,6 +5271,32 @@ Both are checked the same way. On station 001, SatDump's frame count for a clean
 
 ---
 
+## D-251 — Virtual stations report MSP 0.3's evidence, derived from the outcome and drawn apart from it
+
+**2026-09-30 · accepted** · *`meridian_sim/{evidence,executor}.py`, Stage 25. Applies D-103, D-117 and D-122 to the simulator.*
+
+Until now a virtual station sent MSP 0.2's evidence: an outcome, a detection, a peak SNR and Doppler. Stage 25's faults change the evidence a diagnosis reads, so the simulator first has to send that evidence: a noise floor at a gain, SNR across the pass, and the decoder's frame counts. Three rules govern it.
+
+**The outcome decides, and the evidence follows.** `outcomes.decide_outcome` is unchanged. `evidence.evidence_for` takes the outcome and produces what a receiver would have measured, for example:
+- SNR rising from the window's edges to the outcome's own `peak_snr_db` at the middle, and held under the detection bar before the reported first detection;
+- a noise floor that belongs to the station, drawn once from its seed, with half a decibel of jitter per pass;
+- a fixed gain of 30 dB;
+- frames counted from the time SNR spent above each of two bars.
+
+Nothing here can turn one outcome into another. That is a fault's job, and a fault does it by degrading this evidence and recounting by `count_frames`, the same rule. So the evidence cannot contradict the outcome, and D-117's checks hold by construction.
+
+**Drawn from a stream of its own, in a fixed order.** The stream is seeded on the pass seed plus `evidence`, and makes the same number of draws whatever the outcome. Every outcome any seed already gave is unchanged. Only the wire body grew, which moves the executor's regression digest once, deliberately. A fault that later changes an outcome moves no sample.
+
+**The reference client's shape for a pass that heard nothing.** A `no_signal` pass reports `detected: false` with its floor, gain and SNR series, plus a decode block that counted zero frames. This is what `outcome_rules` sends for a real station (D-122). A silent satellite and a raised floor then look different in the evidence, which is the only place they can. An `aborted` pass still reports nothing, because its decoder never finished.
+
+**The decoder is `meridian-sim`, and its version is the model's, `evidence-1`.** Calibration is segmented by decoder and version (EVALUATION.md §11.1). The new decoder name keeps simulated statistics out of every real decoder's segment. The version means a later change to this model reads as a new decoder rather than a drift in the old one.
+
+**Every figure is illustrative, and D-078 still binds.** The 5 dB decoding bar, the 20 dB fall to the window's edges and the range of floors are shapes chosen to be legible, not measurements. A simulated observation stays excluded from every training and evaluation set, and its evidence does too. What the evidence may be used for is the narrower claim D-105 allows.
+
+*Rejected: deriving the outcome from a simulated link budget.* It would be a better model, and it would change every outcome every existing seed gave. The Stage 10 to 21 results depend on those outcomes. It would also make the simulator's truth a second prediction model beside the real one.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

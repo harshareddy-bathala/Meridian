@@ -41,11 +41,21 @@ from meridian_client.execution import (
     assignment_status,
 )
 from meridian_client.observation_message import (
+    Decode,
     DopplerSample,
     ObservationResult,
     Signal,
+    SnrSample,
 )
 from meridian_sim.config import seed_for_pass
+from meridian_sim.evidence import (
+    DECODER,
+    DECODER_VERSION,
+    PassEvidence,
+    count_frames,
+    evidence_for,
+    station_noise_floor_dbfs,
+)
 from meridian_sim.faults import DECODER_DEGRADED, RECEIVER_DOWN, FaultState
 from meridian_sim.outcomes import SimulatedOutcome, decide_outcome
 
@@ -88,6 +98,7 @@ class SimulatedExecutor:
                 clean run and most tests want.
         """
         self._station_seed = station_seed
+        self._noise_floor_dbfs = station_noise_floor_dbfs(station_seed)
         self._faults = faults if faults is not None else FaultState()
         self._begun: set[str] = set()
         self._held_but_not_begun: set[str] = set()
@@ -190,13 +201,16 @@ class SimulatedExecutor:
             # negative control).
             outcome = replace(outcome, outcome="signal_no_decode")
             self._faulted.append((DECODER_DEGRADED, assignment.assignment_id))
+        window_s = (assignment.end_at - assignment.start_at).total_seconds()
+        evidence = evidence_for(seed, outcome, window_s, self._noise_floor_dbfs)
         return ObservationResult(
             assignment_id=assignment.assignment_id,
             started_at=assignment.start_at,
             ended_at=assignment.end_at,
             outcome=outcome.outcome,
-            signal=_signal_for(outcome, assignment),
+            signal=_signal_for(outcome, evidence, assignment),
             client_notes=_notes_for(seed),
+            decode=_decode_for(outcome, evidence, window_s),
         )
 
     def _pass_seed(self, assignment: Assignment) -> int:
@@ -204,20 +218,69 @@ class SimulatedExecutor:
         return seed_for_pass(self._station_seed, assignment.assignment_id)
 
 
-def _signal_for(outcome: SimulatedOutcome, assignment: Assignment) -> Signal | None:
-    """The MSP §4.4 signal block, or nothing when nothing was heard.
+def _signal_for(
+    outcome: SimulatedOutcome,
+    evidence: PassEvidence | None,
+    assignment: Assignment,
+) -> Signal | None:
+    """The MSP §4.4 signal block: heard, measured and not heard, or nothing.
 
-    Absent rather than present-and-empty for an unheard pass: the platform
-    refuses a body whose outcome contradicts its signal block, and ``no_signal``
-    carrying a detection is exactly that contradiction.
+    A pass that heard nothing still measured its noise floor and an SNR that
+    never cleared the bar, and says so with ``detected: false`` — the shape the
+    reference client reports for ``no_signal`` (D-122). It is evidence as much
+    as a detection is: a silent satellite and a raised floor look different
+    here and nowhere else. Only a pass with no evidence at all, an aborted one,
+    carries no block.
     """
-    if outcome.outcome not in DETECTED_OUTCOMES:
+    if evidence is None:
         return None
+    detected = outcome.outcome in DETECTED_OUTCOMES
     return Signal(
-        detected=True,
-        first_detection_at=_detection_instant(outcome, assignment),
-        peak_snr_db=outcome.peak_snr_db,
-        doppler_samples=_doppler_samples(outcome, assignment),
+        detected=detected,
+        first_detection_at=(
+            _detection_instant(outcome, assignment) if detected else None
+        ),
+        peak_snr_db=outcome.peak_snr_db if detected else None,
+        doppler_samples=_doppler_samples(outcome, assignment) if detected else None,
+        noise_floor_dbfs=evidence.noise_floor_dbfs,
+        receiver_gain_db=evidence.receiver_gain_db,
+        snr_samples=_snr_samples(evidence, assignment),
+    )
+
+
+def _decode_for(
+    outcome: SimulatedOutcome, evidence: PassEvidence | None, window_s: float
+) -> Decode | None:
+    """The decoder's account, counted for the outcome as reported.
+
+    Recounted here rather than taken from the evidence, because a fault may
+    have changed the outcome after the evidence was drawn: a degraded decoder
+    turns ``decoded`` into ``signal_no_decode``, and D-117 then requires zero
+    frames decoded.
+    """
+    if evidence is None:
+        return None
+    decoded, failed = count_frames(evidence.snr_db, window_s, outcome.outcome)
+    return Decode(
+        decoder=DECODER,
+        decoder_version=DECODER_VERSION,
+        frames_decoded=decoded,
+        frames_failed=failed,
+    )
+
+
+def _snr_samples(
+    evidence: PassEvidence, assignment: Assignment
+) -> tuple[SnrSample, ...]:
+    """The SNR series, spread evenly from the window's start to its end."""
+    span_s = (assignment.end_at - assignment.start_at).total_seconds()
+    steps = max(len(evidence.snr_db) - 1, 1)
+    return tuple(
+        SnrSample(
+            sampled_at=assignment.start_at + timedelta(seconds=span_s * index / steps),
+            snr_db=value,
+        )
+        for index, value in enumerate(evidence.snr_db)
     )
 
 
