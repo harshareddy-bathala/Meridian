@@ -114,6 +114,7 @@ meridian/
 │       ├── api/          public + MSP endpoints
 │       ├── datasets/     snapshot export, labels, completeness, propensity weights
 │       ├── regions/      areas of interest: series, change, coverage, cross-checks
+│       ├── reports/      evaluation reports: a sealed run from a snapshot, a config and a seed
 │       ├── jobs/         the `jobs` service: pass generation and scheduling on a timer
 │       ├── metrics/      Prometheus exposition and the scrape token check
 │       ├── pass_generation.py   the job that fills `passes` from local elements
@@ -131,7 +132,7 @@ meridian/
 ├── dashboard/            web front end, served by the platform
 ├── ingest/               distribution: meridian-ingest
 │   └── src/meridian_ingest/     external archive adapters, raw store, loader
-└── analysis/             (planned) notebooks and evaluation scripts
+└── analysis/             experiment configurations the reports are built from
 ```
 
 **Four Python distributions, `src/` layout, per D-012 and D-138.** `platform/` is a distribution root, not an import package — **never create `platform/__init__.py`**. `platform` is a stdlib module name, and shadowing it produces `AttributeError`s from inside third-party libraries at import time. The client and simulator are separate distributions so the reference client installs on a Pi without `fastapi` or `psycopg`, which enforces "the station client knows nothing about the database" at install time rather than at review time. `meridian-ingest` imports `meridian` and is imported by nothing, and the platform image does not install it, so the machine that must keep receiving with every archive unreachable does not carry the code that talks to one (D-138).

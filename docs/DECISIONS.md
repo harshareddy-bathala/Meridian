@@ -4987,6 +4987,100 @@ It is real-time, so the unmaterialised recent hours are read from raw rows. A re
 
 ---
 
+## D-234 — Evaluation reports are a platform module with their own scope; `analysis/` holds configurations
+
+**2026-09-30 · accepted** · *`platform/src/meridian/reports/`, `meridian/cli_report.py`, `analysis/`, `GIT-WORKFLOW.md` Rule 3, CI's `conventions` job*
+
+The roadmap sketches Stage 22 as scripts under an `analysis/` tree:
+- configs, snapshots, features, models, scheduler, reliability, reports and tests;
+- deterministic commands for the final figures.
+
+**The code is a platform module instead**, `meridian.reports`, behind `meridian report`. A figure the viva defends is then computed by code that is typed, linted, reviewed and tested like the rest of the platform. It also calls the same functions `meridian model evaluate` and `meridian schedule evaluate` call, rather than a second copy of them that can drift. `reports` joins the scope list and the `conventions` pattern, as `regions` did (D-228).
+
+**`analysis/` holds what a person writes:**
+- `README.md`;
+- `configs/`, the experiment configurations whose runs are reported. A configuration behind a reported figure is committed there, so the figure's three inputs are a snapshot's hash, a file in the repository and a number.
+
+The roadmap's other directories are not created:
+- snapshots, models and runs are content-addressed directories under the datasets root, outside the repository;
+- tests live in `tests/`.
+
+An empty directory would read as stalled work.
+
+*Rejected: notebooks as the report.* A notebook's output depends on the order its cells ran in. `EVALUATION.md` §9 says a figure that cannot be regenerated is not a result, and a command that writes a sealed directory is the form in which "regenerated" can be checked.
+
+**`meridian report` was the last command waiting on its stage.** The table of pending commands and the exit code 2 it returned went with it. Exit 2 now means only that no command was given, which is argparse's own meaning for it.
+
+---
+
+## D-235 — A run is a sealed directory; its hash names the result, and the environment is recorded beside it, unhashed
+
+**2026-09-30 · accepted** · *`meridian.reports.{build,verify,render,environment}`, `meridian.datasets.manifest`, `meridian.datasets.manifest_rules`*
+
+**A run is published like every other derived directory**, through `publish_directory`, as a new manifest kind, `evaluation_report`. Its manifest names:
+- the raw snapshot's hash;
+- the report method's version;
+- the configuration's hash and resolved values;
+- the master seed;
+- the evaluation dataset it labelled.
+
+It holds:
+- one `*.jsonl` results file per section, plus `run.jsonl` for the run record;
+- `report.md`;
+- `config.toml`.
+
+The file names a kind may hold moved to `manifest_rules.py`, and a name one kind holds is refused in another. A raw snapshot cannot carry a stray `report.md` and still verify.
+
+**`report.md` is rendered from the results files parsed back**, never from the objects that made them. So every number it prints is in a hashed file, and the report is a function of those files alone, which a test asserts.
+
+**The configuration is kept byte for byte.** `verify` then rebuilds from exactly what was used. The run's hash covers `config.toml`'s bytes, so a comment edited in a configuration gives a different run. The configuration hash in the header is over resolved values, like every other configuration's, and says what was *used*.
+
+**The code version, the Python and dependency versions, the snapshot's path and the runtimes go in an `environment` block that is recorded and not hashed**, as `created_at` already was:
+- **What the hash then means.** The roadmap asks every run to record its code version, and hashing it would make the hash name the machine rather than the result. The same numbers regenerated after an unrelated commit would get a different name, and "regenerates identically" could never be true across a commit.
+- **What changes are caught.** A change of code that changes a number still changes the hash, through the results files.
+- **What `verify` shows.** It prints how this environment differs from the recorded one, beside the hash comparison, so a changed library is the first thing a reader rules out.
+- **The cost, pinned by a test.** An edited environment block still verifies, so the environment is a record, not a claim.
+- **Where the commit comes from.** Git, when the code is a checkout, with whether the tree had uncommitted changes; else `MERIDIAN_COMMIT`; else `unknown`. A dirty tree is reported when a run is built.
+
+**`verify` regenerates; it does not only re-check digests.** `read_directory` already refuses a file edited after publishing, and exits 3 as `snapshot verify` does. A run edited and then resealed passes that check. Only building it again from its recorded snapshot, configuration and seed can tell a forged number from a computed one, and a test makes exactly that forgery and requires `verify` to fail on it.
+
+**The snapshot is found by its hash, never by trust:**
+1. a path given with `--snapshot`;
+2. the recorded path;
+3. any snapshot under the datasets root with that hash prefix.
+
+Each candidate is read through `read_directory` and its whole hash compared.
+
+*Rejected: the environment inside `report.md`.* `report.md` is hashed, so this is the same choice as hashing the environment, made less visibly.
+
+*Rejected: runs as rows in the database.* A report must be computable with every service down and must name its inputs by hash (D-229 made the same choice for regional reports).
+
+---
+
+## D-236 — One master seed, component seeds derived by name, and one configuration with a table per section
+
+**2026-09-30 · accepted** · *`meridian.datasets.seeds`, `meridian.reports.config`, `meridian.regions.change`, `meridian.datasets.label_config`, `analysis/configs/evaluation.toml.example`*
+
+**A run takes one master seed.** Each component that draws a random number draws from `derive(master, name)`, the first eight bytes of `sha256(f"{master}:{name}")`:
+- the fits' folds;
+- the solver;
+- each bootstrap.
+
+Every derived seed is listed in the run record, so a reader sees what each part drew from. That gives:
+- **one number to state**, where one seed per component would give a reader eight to copy;
+- **no two components on the same stream by accident**;
+- **a result that does not depend on the order components ran in.**
+
+The regional report already derived its per-area seeds this way, privately. The function now lives in `meridian.datasets.seeds`, the layer both offline readers already import, rather than in `reports`, which nothing but its command may import. Regions call it, and a test pins that their seeds did not move.
+
+**The seed is not in the configuration file.** It is given with `--seed`, and a `seed` in the file is refused rather than ignored, since a reader who found one would assume it was used. The component configurations' own `seed` fields are refused inside it for the same reason.
+
+**One configuration file, one table per section, each table checked by its owner.** `[labels]` is exactly `meridian snapshot label`'s configuration one level down, checked by `label_config_from_mapping`, which `parse_label_config` now calls too. The tables for the later sections arrive with them. A test holds the example's `[labels]` to `deploy/snapshot.toml.example`, so the two documented defaults cannot drift apart.
+
+*Rejected: a configuration that names other configuration files.* A run could then only be regenerated from several files, one of which may have changed since. One file, copied into the run, is the whole of what was configured.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

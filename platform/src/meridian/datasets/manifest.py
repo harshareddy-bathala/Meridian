@@ -23,11 +23,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
 
 from meridian.datasets.canonical import canonical_bytes, canonical_value
 from meridian.datasets.manifest_parse import (
@@ -40,6 +38,18 @@ from meridian.datasets.manifest_parse import (
     rows_of,
     text,
     whole,
+)
+from meridian.datasets.manifest_rules import (
+    DERIVED,
+    KINDS,
+    WITH_ENVIRONMENT,
+    Kind,
+    check_count,
+    check_digest,
+    check_file_name,
+    check_kind_holds,
+    is_table,
+    unique,
 )
 
 __all__ = [
@@ -59,24 +69,6 @@ __all__ = [
 MANIFEST_FORMAT = 1
 """Bumped when the stored shape changes. An unknown format is refused."""
 
-Kind = Literal["raw_snapshot", "evaluation_dataset", "model", "regions_report"]
-KINDS: tuple[Kind, ...] = (
-    "raw_snapshot",
-    "evaluation_dataset",
-    "model",
-    "regions_report",
-)
-_DERIVED: tuple[Kind, ...] = ("evaluation_dataset", "model", "regions_report")
-"""Kinds made from another directory, which name it and how (D-163, D-229)."""
-
-_FILE_NAME = re.compile(r"^([a-z][a-z0-9_]*\.jsonl|model\.json)$")
-"""Ours, and plain: a file name is a table name, or a model's one file (D-163),
-never a string from a row."""
-
-_COUNT_NAME = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
-
-_SHA256_BYTES = 32
-
 _FIELDS = frozenset(
     (
         "format",
@@ -95,6 +87,8 @@ _FIELDS = frozenset(
         "content_sha256",
     )
 )
+_OPTIONAL = frozenset(("summary", "environment"))
+"""Written only when a manifest has one, so older manifests hash as they did."""
 
 
 class DamagedManifestError(MalformedManifestError):
@@ -115,10 +109,8 @@ class FileEntry:
 
     def __post_init__(self) -> None:
         """Refuse a name, digest or count that could not describe a file."""
-        if not _FILE_NAME.match(self.name):
-            message = f"{self.name!r} is not a snapshot file name"
-            raise MalformedManifestError(message)
-        _check_digest(self.name, self.sha256)
+        check_file_name(self.name)
+        check_digest(self.name, self.sha256)
         if self.rows < 0:
             message = f"{self.name} claims {self.rows} rows"
             raise MalformedManifestError(message)
@@ -177,6 +169,13 @@ class Manifest:
     and weights, per population (D-154). Written, and hashed, only when there
     is one, so a manifest without it hashes as it always did."""
 
+    environment: Mapping[str, object] = field(default_factory=dict)
+    """The machine and code that made an evaluation report — commit, dependency
+    versions, runtimes. Recorded and **never hashed**, like ``created_at``: the
+    hash names the result, so the same numbers regenerated on another commit
+    keep their name, and ``meridian report verify`` shows what differed
+    (D-235)."""
+
     def __post_init__(self) -> None:
         """Refuse a manifest that could not describe one directory."""
         if self.kind not in KINDS:
@@ -185,33 +184,36 @@ class Manifest:
         if self.since > self.as_of:
             message = f"since {self.since} is after as_of {self.as_of}"
             raise MalformedManifestError(message)
-        _unique("file", [one.name for one in self.files])
-        _unique("source", [one.source_id for one in self.sources])
+        unique("file", [one.name for one in self.files])
+        unique("source", [one.source_id for one in self.sources])
+        for one in self.files:
+            check_kind_holds(self.kind, one.name)
+        if self.environment and self.kind not in WITH_ENVIRONMENT:
+            message = f"a {self.kind.replace('_', ' ')} records no environment"
+            raise MalformedManifestError(message)
         for name, count in self.counts.items():
-            if not _COUNT_NAME.match(name) or count < 0:
-                message = f"count {name!r} = {count} is not a count"
-                raise MalformedManifestError(message)
+            check_count(name, count)
         self._check_lineage()
 
     def _check_lineage(self) -> None:
         """A dataset or a model names its inputs; a raw snapshot has none."""
         lineage = (self.derived_from, self.transformation_version, self.config_sha256)
-        if self.kind in _DERIVED:
+        if self.kind in DERIVED:
             if any(one is None for one in lineage):
                 message = (
                     f"a manifest of kind {self.kind} names the directory it was"
                     " made from, its transformation version and its configuration"
                 )
                 raise MalformedManifestError(message)
-            _check_digest("derived_from", self.derived_from)
-            _check_digest("config_sha256", self.config_sha256)
+            check_digest("derived_from", self.derived_from)
+            check_digest("config_sha256", self.config_sha256)
         elif any(one is not None for one in lineage) or self.parameters or self.summary:
             message = "a raw snapshot is read from the database, not derived"
             raise MalformedManifestError(message)
 
 
 def file_entry(name: str, data: bytes) -> FileEntry:
-    """Describe one JSON Lines file from its bytes.
+    """Describe one file from its bytes.
 
     Args:
         name: The file's name in the directory.
@@ -221,11 +223,12 @@ def file_entry(name: str, data: bytes) -> FileEntry:
         Its digest and row count, measured here rather than declared.
 
     Raises:
-        MalformedManifestError: The name is not a snapshot file name, or the
-            last row has no newline — a file cut short would otherwise count
-            one row fewer than it holds and still look whole.
+        MalformedManifestError: The name is not a snapshot file name, or a
+            table's last row has no newline — a table cut short would otherwise
+            count one row fewer than it holds and still look whole. A report or
+            a figure has no rows, so its count is only its newlines.
     """
-    if data and not data.endswith(b"\n"):
+    if data and is_table(name) and not data.endswith(b"\n"):
         message = f"{name} does not end with a newline, so its last row is unfinished"
         raise MalformedManifestError(message)
     return FileEntry(
@@ -255,10 +258,19 @@ def manifest_bytes(manifest: Manifest) -> bytes:
         Canonical JSON with ``created_at`` and the manifest's own hash added,
         and a trailing newline.
     """
-    written = _hashed(manifest) | {
-        "created_at": manifest.created_at,
-        "content_sha256": content_sha256(manifest),
-    }
+    environment = (
+        {"environment": canonical_value(manifest.environment)}
+        if manifest.environment
+        else {}
+    )
+    written = (
+        _hashed(manifest)
+        | environment
+        | {
+            "created_at": manifest.created_at,
+            "content_sha256": content_sha256(manifest),
+        }
+    )
     return canonical_bytes(written) + b"\n"
 
 
@@ -286,9 +298,9 @@ def parse_manifest(raw: bytes) -> Manifest:
     if stored.get("format") != MANIFEST_FORMAT:
         message = f"unknown manifest format {stored.get('format')!r}"
         raise MalformedManifestError(message)
-    if not _FIELDS <= set(stored) <= _FIELDS | {"summary"}:
+    if not _FIELDS <= set(stored) <= _FIELDS | _OPTIONAL:
         missing = sorted(_FIELDS - set(stored))
-        unknown = sorted(set(stored) - _FIELDS - {"summary"})
+        unknown = sorted(set(stored) - _FIELDS - _OPTIONAL)
         message = f"manifest fields missing {missing}, unknown {unknown}"
         raise MalformedManifestError(message)
     manifest = _from_json(stored)
@@ -374,23 +386,8 @@ def _from_json(stored: Mapping[str, object]) -> Manifest:
         config_sha256=optional_digest(stored["config_sha256"], "config_sha256"),
         parameters=dict(mapping(stored["parameters"], "parameters")),
         summary=dict(mapping(stored.get("summary", {}), "summary")),
+        environment=dict(mapping(stored.get("environment", {}), "environment")),
     )
 
 
 _SOURCE_FIELDS = ("source_id", "licence", "terms_url", "attribution_entry", "records")
-
-
-def _check_digest(what: str, value: bytes | None) -> None:
-    """Refuse anything that is not a sha256."""
-    if value is None or len(value) != _SHA256_BYTES:
-        size = "nothing" if value is None else f"{len(value)} bytes"
-        message = f"{what} is {size}, not a sha256"
-        raise MalformedManifestError(message)
-
-
-def _unique(what: str, keys: list[str]) -> None:
-    """Refuse two entries under one name; the second would hide the first."""
-    seen = {one for one in keys if keys.count(one) > 1}
-    if seen:
-        message = f"{what} listed more than once: {sorted(seen)}"
-        raise MalformedManifestError(message)

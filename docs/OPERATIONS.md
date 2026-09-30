@@ -137,7 +137,8 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Why a pass counted as it did | `compose exec api meridian reliability explain <assignment id>` |
 | Classify settled passes now | `compose exec api meridian reliability classify` — the `jobs` service does this every round |
 | Reliability from a dataset | `uv run meridian snapshot reliability <dataset dir>` — needs no database |
-| Generate a report | `meridian report` — not built yet; Stage 22 |
+| Build an evaluation report | `uv run meridian report build --snapshot <raw snapshot> --config analysis/configs/evaluation.toml.example --seed <n>` — needs no database; § Evaluation reports |
+| Check a report regenerates | `uv run meridian report verify <run dir>` — § Evaluation reports |
 
 **Scheduling needs no command.** The `jobs` service generates passes, schedules them, and builds the profiles under `SCHEDULE_CONFIG` (configuration A on the elevation proxy when it is unset, D-170) every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). Each round then expires work nobody took and classifies every pass that has settled (D-182, D-183). The commands above are for filling a horizon by hand. Every task is idempotent, so running them beside the service writes nothing twice.
 
@@ -811,6 +812,67 @@ diff one.txt two.txt                                                          # 
 - The oracle takes at least every scheduler's frames on every day.
 
 `tests/integration/test_scheduler_gate.py` asserts the database half: every decision a round stores, under A to D and with the solver failing, names a recorded run and explains itself, and no antenna is given two passes at once.
+
+---
+
+## Evaluation reports
+
+Every number in a report is regenerable from a raw snapshot, one configuration and one seed (rule 8, `EVALUATION.md` §9). `meridian report build` computes a report from those three and nothing else, and `meridian report verify` proves a report regenerates. Neither opens a database or a socket.
+
+Decisions this section puts into practice: D-234 to D-236.
+
+### Building a run
+
+```sh
+uv run meridian report build \
+  --snapshot data/datasets/snapshots/<raw snapshot> \
+  --config analysis/configs/evaluation.toml.example \
+  --seed 4471
+```
+
+- **The configuration** is one file, one table per section. Copy `analysis/configs/evaluation.toml.example`, whose values are the defaults. An unknown table or key is refused, and so is a `seed`.
+- **The seed** is the master seed. Every component that draws a random number draws from a seed derived from it by name, and the run lists each one (D-236).
+- **The run** goes under `<datasets root>/reports/<hash12>/`, or where `--output` says. Building the same inputs twice names the same directory, and the second build says `already held, identically`. An `--output` that already holds a different run is refused, never overwritten.
+
+### What a run holds
+
+```text
+reports/<hash12>/
+├── report.md       the report, rendered from the results files beside it
+├── run.jsonl       the run record: method, snapshot, configuration, seeds
+├── data.jsonl      the data section's results
+├── config.toml     the configuration, byte for byte as it was given
+└── manifest.json   every file's digest, the inputs, the seeds, and the environment
+```
+
+- **The data section** states:
+  - provenance, and the snapshot's sources with their licences;
+  - every outcome label and exclusion reason, with measured and simulated kept apart;
+  - completeness and weighting for our stations and the archive's;
+  - silent-satellite exclusions and the indeterminate share, each with its interval (`EVALUATION.md` §4, §5).
+- **The environment block** in `manifest.json` records the commit (and whether the tree had uncommitted changes), the Python and dependency versions, where the snapshot was read from, and how long the build took. It is **not part of the hash** (D-235), so the hash names the numbers, not the machine. A run built from uncommitted code says so when it is built. Build reported figures from a clean tree.
+- The evaluation dataset the run labelled is published under `evaluation/` as `meridian snapshot label` would publish it, and the run names it by hash.
+
+### Verifying a run
+
+```sh
+uv run meridian report verify data/datasets/reports/<hash12>
+```
+
+`verify` reads the run's configuration and seed. It finds the raw snapshot by its hash, in this order:
+1. the path given with `--snapshot`;
+2. the path the run recorded;
+3. any snapshot under the datasets root with that hash prefix.
+
+It then builds the run again and compares hashes. It prints any difference between this machine's environment and the recorded one, whether or not the hashes match.
+
+| Exit | Meaning |
+|---|---|
+| 0 | The run regenerated identically |
+| 1 | It did not, and the files that differ are named; or the snapshot could not be found, or the directory is not a run |
+| 3 | The run or the snapshot does not match its own manifest: it was edited after it was written |
+
+A run edited *and resealed* passes its own manifest check but fails verification, because only regeneration can tell a forged number from a computed one.
 
 ---
 

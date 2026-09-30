@@ -52,6 +52,7 @@ The sections below describe each module's responsibility in the finished system.
 | `client`, `simulator` | A station that registers, holds work, executes it and delivers observations from a durable queue, and a deterministic fleet of virtual ones that drives it over real MSP (Stage 10). The receiver and decoder behind the client's execution seam are Stage 13. |
 | `dashboard`, `ingest` | No directory yet — Stages 11 and 14. Ingest widens to environmental and space-weather sources at Stage 31 (D-132). |
 | `platform/regions` | No directory yet — Stage 32, regional monitoring (module 19). |
+| `platform/reports` | Stage 22's evaluation reports: a sealed run built from a raw snapshot, one configuration and a master seed, and regenerated to verify it. Sections arrive one at a time; the data section is built. |
 | `platform/notifications`, `platform/datasets` | No directory yet — Stages 29 and 30, which add the post-reception layer (D-102). |
 | `firmware` | No directory yet, and excluded from the software roadmap: it is built alongside the antenna and rotator rather than in a software stage. |
 
@@ -153,6 +154,11 @@ Regional monitoring (module 19): registered areas of interest, and what the inge
 Reads ingested records through `ingest`'s normalised tables and **never at runtime from a source**. Holds no personal data: an area of interest is a place and a label, and who may register one is open (D-137) — until it is settled, an operator registers one and nothing about it is published (D-227).
 
 Built at Stage 32 as `platform/src/meridian/regions/`. A regional report — series, change against a baseline with its interval, coverage by our own decoded receptions, and two cross-checks — is a pure function of a raw snapshot and a configuration, published as a content-addressed directory (D-229 to D-233). Only areas and recorded alerts are rows. Nothing on the scheduling or reception path imports it.
+
+### `platform/reports`
+Evaluation reports (Stage 22). `meridian report build` reads a raw snapshot, one experiment configuration from `analysis/configs/` and a master seed, and publishes a sealed run directory: `report.md`, one results file per section, the configuration byte for byte, and a manifest. `meridian report verify` rebuilds a run from what it recorded and compares hashes (D-235).
+
+It reads snapshots and the modules that compute from them — `datasets` now, and `prediction`, `scheduler`, `orbit` and `reliability` as their sections arrive — and nothing imports it but `cli_report`. It never opens a database or a socket: a report is computed from a snapshot, never from the live tables (D-143), and never from a service. The code version and dependency versions are recorded beside the result and kept out of its hash, so the hash names the numbers rather than the machine (D-235).
 
 ### `firmware`
 Arduino rotator controller. Stepper control, homing, limit switches, network command interface.

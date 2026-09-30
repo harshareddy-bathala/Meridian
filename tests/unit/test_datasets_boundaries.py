@@ -6,8 +6,9 @@ Two lines, both read from the source rather than from a running import:
   on the labelling path, and Stage 15's gate is that labelling reads a snapshot
   and nothing else (D-143). The gate tests prove that for the fixtures they
   run; this proves it for every line, including the ones no fixture reaches.
-* **Only the ``meridian snapshot`` and ``meridian model`` commands, and
-  prediction's fitting side, import the package.** The scheduler, the API and
+* **Only the ``meridian snapshot``, ``model``, ``regions`` and ``report``
+  commands, prediction's fitting side and the two kinds of report, import the
+  package.** The scheduler, the API and
   the jobs service run on live tables; a snapshot is training and evaluation
   input, and a runtime path that read one would be scheduling on the past
   without saying so.
@@ -63,21 +64,25 @@ MAY_IMPORT_DATASETS = frozenset(
         PLATFORM / "cli_snapshot.py",
         PLATFORM / "cli_model.py",
         PLATFORM / "cli_regions.py",
+        PLATFORM / "cli_report.py",
     }
 )
 PREDICTION = PLATFORM / "prediction"
 REGIONS = PLATFORM / "regions"
 """Regional reports read snapshots offline, as fitting does (D-229); nothing on
 the scheduling path imports them (tests/unit/test_regions_boundaries.py)."""
+REPORTS = PLATFORM / "reports"
+"""Evaluation reports read snapshots offline too (D-234); only ``cli_report``
+imports them (tests/unit/test_reports_boundaries.py)."""
 SCORED_AT_RUNTIME = frozenset({"score.py"})
 """The one prediction module the scheduler will import (D-155). It reads a
 model file, never a dataset, so it is held to the runtime rule."""
 
 
 def may_import_datasets(path: Path) -> bool:
-    """The snapshot, model and regions commands, prediction's fitting side
-    (D-156), and the regional reports (D-229)."""
-    if path in MAY_IMPORT_DATASETS or REGIONS in path.parents:
+    """The snapshot, model, regions and report commands, prediction's fitting
+    side (D-156), and the regional and evaluation reports (D-229, D-234)."""
+    if path in MAY_IMPORT_DATASETS or {REGIONS, REPORTS} & set(path.parents):
         return True
     return PREDICTION in path.parents and path.name not in SCORED_AT_RUNTIME
 

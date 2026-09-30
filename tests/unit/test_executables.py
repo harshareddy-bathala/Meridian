@@ -137,22 +137,25 @@ def test_invite_create_without_a_database_fails_cleanly() -> None:
     assert "Traceback" not in result.stderr
 
 
-@pytest.mark.parametrize(("command", "stage"), [("report", "Stage 22")])
-def test_unbuilt_commands_report_their_stage_instead_of_raising(
-    command: str, stage: str
-) -> None:
-    """Exit 2 with the stage that builds the command, never a traceback.
+def test_report_is_built_and_a_bare_noun_answers_with_its_help() -> None:
+    """``report`` was the last command waiting on its stage, and Stage 22 built it.
 
-    Stage 12 documents every operator command, and ``report`` belongs to a
-    later stage (``snapshot`` arrived with Stage 15). A command that answers
-    "not yet, and here is when" is discovered by reading its output; one that
-    is simply absent reads as a typo.
+    A noun without a verb prints that noun's help rather than guessing, as every
+    other command does, so the command is discovered by running it.
     """
-    result = _run("-m", "meridian.cli", command)
+    result = _run("-m", "meridian.cli", "report")
+
+    assert result.returncode == 0
+    assert "verify" in result.stdout
+    assert "not implemented yet" not in result.stdout + result.stderr
+
+
+def test_no_command_is_a_usage_error_not_a_traceback() -> None:
+    """Exit 2, argparse's own code for being called wrongly, with the help text."""
+    result = _run("-m", "meridian.cli")
 
     assert result.returncode == 2
-    assert "not implemented yet" in result.stderr
-    assert stage in result.stderr
+    assert "<command>" in result.stderr
     assert "Traceback" not in result.stderr
 
 
