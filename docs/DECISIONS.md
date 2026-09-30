@@ -4219,6 +4219,42 @@ Each row is written by the statement that moves the assignment — an `update �
 
 ---
 
+## D-197 — Scale is measured from both sides, and the platform's metrics must not grow with the fleet
+
+**2026-09-29 · accepted** · *`meridian_sim/scale.py` and `--scale-report`; `deploy/tools/scale_probe.py`; `tests/e2e/test_fifty_stations.py`; `docs/SCALE-AND-FAULTS.md`, Stage 21.*
+
+Stage 21 grows the fleet from one station to five, ten and fifty and asks what the platform does under it. Each side reports what only it can see.
+
+- **The fleet's side is `python -m meridian_sim.station --scale-report PATH`.** A recorder, handed to `Supervisor.run` as an observer, counts:
+  - heartbeats answered against heartbeats attempted, and per second against the rate the cadence implies;
+  - rounds that overran the cadence, which is the fleet falling behind rather than the platform;
+  - every station's upload queue on disk, sampled each round.
+
+  A queue that grows under load is the platform failing to keep up in a way no platform metric shows.
+- **The platform's side is `deploy/tools/scale_probe.py`.** It scrapes the API's and the jobs process's `/metrics` every fifteen seconds and compares the first scrape with the last:
+  - request latency per route template, p50 and p95;
+  - heartbeats accepted per second;
+  - the pool's size, fewest idle and most waiting at any sample;
+  - scheduler rounds and solver time p95;
+  - the most `meridian_*` series exposed.
+
+  A quantile is a bucket's upper bound over the run, never an interpolation and never over the process's lifetime. It reads the same endpoints Prometheus scrapes, so no Prometheus is needed to run it.
+
+**The metrics must not grow with the fleet.** Prometheus's cost, and every dashboard's, scales with series, so a label naming a station would make watching fifty stations ten times the work of watching five. `tests/e2e/test_fifty_stations.py` builds the scrape-time collector's families at five stations and again at fifty, doing the same things. It requires the two sets of series to be identical, and non-empty. It also requires that no label value anywhere in the process's registry is a station's id or name. Request metrics are already labelled by route template, never by path.
+
+**Fifty stations through real MSP is a test, in CI.** The same file registers fifty virtual stations through the application, generates passes over the development catalogue, schedules them, and requires:
+- every station heard on every round;
+- none stopped;
+- work held.
+
+It is in process, with D-202's `RATE_LIMITS=off` for accelerated simulations, so it proves function at fifty, not latency.
+
+**Latency is measured against a running platform and recorded, labelled simulated.** It uses `meridian serve` and `meridian jobs run` on the host, the simulator at the real thirty-second cadence, and the probe beside it. `docs/SCALE-AND-FAULTS.md` holds the table, the machine it ran on and the commands that regenerate it. It is a measurement of one machine on one day, and says so; the CI test is what holds at every change.
+
+*Rejected:* a latency threshold in CI, which would measure the CI runner's neighbours. Also rejected: labelling any metric by station, even for the fleet's own dashboard, which the public API already serves per station without a series each.
+
+---
+
 ## D-200 — The threat model is a document mapped to code, and a gap stays a row until it closes
 
 **2026-09-28 · accepted** · *`docs/THREAT-MODEL.md`, Stage 23*
@@ -4792,6 +4828,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-194 platform faults from the host | `deploy/tools/chaos.py`; `pyproject.toml` (its lint set); `.github/workflows/ci.yml` (the compose job's fault step); `tests/msp_conformance/test_platform_restart.py`; `tests/unit/{test_chaos_tool,test_jobs_rounds}.py` |
 | D-195 one heartbeat, one time | `meridian/api/msp/heartbeat.py`; `meridian/store/{heartbeats,assignments}.py`; `DATA-MODEL.md` (heartbeats); `tests/msp_conformance/test_heartbeat_endpoint.py` |
 | D-196 the revocation history | migration 0021; `meridian/store/{revocations,fault_evidence}.py`; `DATA-MODEL.md`; `tests/integration/{test_heartbeat_effects,test_schedule_run,test_migrations,test_migration_lifecycle}.py` |
+| D-197 scale from both sides, series that do not grow | `meridian_sim/{scale,supervisor,station}.py`; `deploy/tools/scale_probe.py`; `pyproject.toml` (its lint set); `tests/e2e/test_fifty_stations.py`; `tests/unit/{test_scale_probe,test_simulator_scale}.py`; `docs/SCALE-AND-FAULTS.md` |
 | — the completion gate | `tests/integration/test_fault_gate.py`: five stations under `chaos` through real MSP on a stated clock, judged, with two positive controls |
 | — the amended entry | D-171, whose revocations are now kept (D-196) |
 

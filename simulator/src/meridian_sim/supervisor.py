@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -51,7 +51,7 @@ from meridian_sim.faults import (
 from meridian_sim.ledger import FaultLedger
 from meridian_sim.virtual_station import VirtualStation, register_or_resume
 
-__all__ = ["RoundOutcome", "Supervisor"]
+__all__ = ["RoundObserver", "RoundOutcome", "Supervisor"]
 
 _log = logging.getLogger(__name__)
 
@@ -83,6 +83,18 @@ class RoundOutcome:
 
     submitted: tuple[str, ...]
     """Assignments the platform acknowledged across the whole fleet."""
+
+    heard: tuple[int, ...] = ()
+    """Stations whose heartbeat the platform answered this round, by index.
+
+    Narrower than :attr:`ticked`: a station that ticked through an outage, or
+    was refused, ran its loop and was not heard.
+    """
+
+
+RoundObserver = Callable[[RoundOutcome, float], None]
+"""Called after every round of :meth:`Supervisor.run` with what it did and how
+many seconds it took — the scale report's only source (Stage 21)."""
 
 
 @dataclass
@@ -168,6 +180,7 @@ class Supervisor:
             What the round did.
         """
         ticked: list[int] = []
+        heard: list[int] = []
         restarted: list[int] = []
         stopped: list[int] = []
         submitted: list[str] = []
@@ -190,6 +203,8 @@ class Supervisor:
             outcome = member.station.tick(station_now)
             self._note_acts(member, member.station.take_faulted(), tick, now)
             ticked.append(member.index)
+            if outcome.heartbeat_sent:
+                heard.append(member.index)
             submitted.extend(outcome.submitted)
             if outcome.stop_reason is not None:
                 self._retire(member, outcome.stop_reason)
@@ -201,14 +216,23 @@ class Supervisor:
             restarted=tuple(restarted),
             stopped=tuple(stopped),
             submitted=tuple(submitted),
+            heard=tuple(heard),
         )
 
-    def run(self, *, stop_after_rounds: int | None = None) -> int:
+    def run(
+        self,
+        *,
+        stop_after_rounds: int | None = None,
+        observe: RoundObserver | None = None,
+    ) -> int:
         """Tick the fleet on the platform's cadence until it has nothing left to do.
 
         Args:
             stop_after_rounds: Stop after this many rounds. For tests and for a
                 commissioning run; ``None`` runs until every station has stopped.
+            observe: Told what each round did and how long it took, for a scale
+                report. Called after the round and before the wait, so a slow
+                observer shortens the wait rather than delaying the next round.
 
         Returns:
             How many rounds were run.
@@ -224,7 +248,10 @@ class Supervisor:
         tick = 0
 
         while self._members and (stop_after_rounds is None or tick < stop_after_rounds):
-            self.tick_round(tick, datetime.now(UTC))
+            began = _monotonic()
+            outcome = self.tick_round(tick, datetime.now(UTC))
+            if observe is not None:
+                observe(outcome, _monotonic() - began)
             tick += 1
             due_at = _next_due_at(due_at, interval_s)
             _sleep(max(0.0, due_at - _monotonic()))

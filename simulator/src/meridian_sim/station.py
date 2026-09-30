@@ -37,6 +37,7 @@ from meridian_sim import __version__
 from meridian_sim.config import RunConfig
 from meridian_sim.faults import SCENARIOS
 from meridian_sim.ledger import FaultLedger
+from meridian_sim.scale import ScaleRecorder
 from meridian_sim.supervisor import Supervisor
 from meridian_sim.virtual_station import RegistrationNeededError
 
@@ -144,6 +145,12 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--scale-report",
+        default=_text_env("SIMULATOR_SCALE_REPORT", ""),
+        metavar="PATH",
+        help="write what the fleet saw of the platform, round by round, as JSON",
+    )
+    parser.add_argument(
         "--invites",
         default=_text_env("SIMULATOR_INVITES_FILE", ""),
         metavar="PATH",
@@ -207,7 +214,11 @@ def _ledger_for(config: RunConfig, path: str) -> FaultLedger:
 
 
 def _run(
-    config: RunConfig, invites: list[str], rounds: int | None, ledger: FaultLedger
+    config: RunConfig,
+    invites: list[str],
+    rounds: int | None,
+    ledger: FaultLedger,
+    scale_report: str = "",
 ) -> int:
     """Bring the fleet up and tick it, reporting anything that stops it."""
     with Supervisor(config, invites, ledger=ledger) as supervisor:
@@ -231,7 +242,12 @@ def _run(
             f"  ledger:   {ledger.path}",
             file=sys.stderr,
         )
-        supervisor.run(stop_after_rounds=rounds)
+        recorder = ScaleRecorder(config, supervisor.interval_s())
+        try:
+            supervisor.run(stop_after_rounds=rounds, observe=recorder)
+        finally:
+            if scale_report:
+                recorder.write(Path(scale_report))
     return 0
 
 
@@ -268,7 +284,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_FAILED
 
     config = _config_from(args)
-    return _run(config, invites, args.rounds, _ledger_for(config, args.ledger))
+    return _run(
+        config,
+        invites,
+        args.rounds,
+        _ledger_for(config, args.ledger),
+        args.scale_report,
+    )
 
 
 if __name__ == "__main__":

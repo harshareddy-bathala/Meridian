@@ -19,6 +19,8 @@ How every claim in this project is tested, and the threats to validity, stated b
 
 **SC-4's pass capture rate** is defined in D-184: decoded passes over every settled, scheduled pass of our station except those whose satellite was silent or indeterminate (§5), over a rolling 30 days. A pass lost while the station was offline counts against it, and is never counted as a miss (D-185). `meridian reliability report` prints it with its interval, and `meridian snapshot reliability` regenerates it from a snapshot.
 
+**SC-5's detection** is checked fault by fault, from the platform's own records, by `meridian reliability faults` against a run's fault ledger (D-192). Stage 21's gate runs it over every station fault at once, and the alert latency, SC-5's measured half, is read from Prometheus when one is running. `docs/SCALE-AND-FAULTS.md` records the faults, the scale runs and what each found, all simulated.
+
 SC-6 is the only criterion that is pass/fail rather than measured, and it is effectively the Phase 1 exit criterion. It is listed here because a methodology document that omits the easiest criterion to verify — and the most visible to an examiner — has the omission the wrong way round.
 
 ### Proposed — to agree with the team
