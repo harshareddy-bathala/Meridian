@@ -159,6 +159,7 @@ def load_replay(
     *,
     root: Path,
     threshold: float | None = None,
+    snapshot: Path | None = None,
 ) -> Replay:
     """Read a dataset's test span, its models' predictions and its outcomes.
 
@@ -167,6 +168,8 @@ def load_replay(
         models: The model directories of A, C and D.
         root: The datasets root, where the raw snapshot is.
         threshold: A completeness threshold in place of the dataset's own.
+        snapshot: The raw snapshot's directory, where it is not under
+            ``root``; checked against the dataset's lineage either way.
 
     Raises:
         ReplayError: A model is missing, another configuration's, or fitted on
@@ -174,7 +177,7 @@ def load_replay(
         DamagedReplayError: A directory is not what its manifest says.
     """
     try:
-        return _load(dataset_path, models, root, threshold)
+        return _load(dataset_path, models, (root, snapshot), threshold)
     except DamagedSnapshotError as exc:
         raise DamagedReplayError(str(exc)) from exc
     except _UNREADABLE as exc:
@@ -194,11 +197,12 @@ _UNREADABLE = (
 def _load(
     dataset_path: Path,
     models: Mapping[str, Path],
-    root: Path,
+    where: tuple[Path, Path | None],
     threshold: float | None,
 ) -> Replay:
     dataset = read_directory(dataset_path)
-    raw = raw_of(dataset, root=root)
+    root, raw_path = where
+    raw = raw_of(dataset, root=root, path=raw_path)
     held, test_from = check_models(models, content_sha256(dataset.manifest))
     parameters = dataset.manifest.parameters
     settle = whole(parameters.get("settle_margin_s"), "settle_margin_s")

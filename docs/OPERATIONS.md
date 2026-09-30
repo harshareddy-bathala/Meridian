@@ -819,7 +819,7 @@ diff one.txt two.txt                                                          # 
 
 Every number in a report is regenerable from a raw snapshot, one configuration and one seed (rule 8, `EVALUATION.md` §9). `meridian report build` computes a report from those three and nothing else, and `meridian report verify` proves a report regenerates. Neither opens a database or a socket.
 
-Decisions this section puts into practice: D-234 to D-237.
+Decisions this section puts into practice: D-234 to D-238.
 
 ### Building a run
 
@@ -844,6 +844,9 @@ reports/<hash12>/
 ├── data.jsonl      the data section's results
 ├── prediction.jsonl                the prediction section's results
 ├── reliability_<model>.svg         one reliability diagram per fitted model
+├── scheduling.jsonl                the scheduling section's results
+├── scheduling_gains.svg            D − B and D − greedy B against the SC-1 target
+├── scheduling_regret.svg           each scheduler's shortfall from the oracle
 ├── config.toml     the configuration, byte for byte as it was given
 └── manifest.json   every file's digest, the inputs, the seeds, and the environment
 ```
@@ -861,6 +864,13 @@ reports/<hash12>/
   - it counts disturbed passes, and says Kp is **untested** below `min_disturbed`.
 
   Every interval is a 95% bootstrap that resamples whole station-days (D-237). A model that could not be fitted is a row that says why, and the report is still built.
+- **The scheduling section** replays the seven schedulers of `meridian schedule evaluate` on the fitted A, C and D models, over every retained station-day of the test span. The seven are greedy A and B, the optimiser under A to D, and the oracle. It reports:
+  - frames, passes taken, frames per station-hour and the unknown share for each scheduler;
+  - SC-1 as D − B, with D − greedy B beside it;
+  - each scheduler's regret against the oracle, with paired intervals;
+  - how many schedules were checked. A schedule that breaks a constraint stops the build, and nothing is published (D-238).
+
+  Settings are under `[scheduling]`, and the solver's seed is derived. Solver runtimes and HiGHS's version are written to the environment block, never to a hashed file. A day the time limit cut short shows in the `Solved` column: only such a day can make a figure depend on the machine.
 - **The environment block** in `manifest.json` records the commit (and whether the tree had uncommitted changes), the Python and dependency versions, where the snapshot was read from, and how long the build took. It is **not part of the hash** (D-235), so the hash names the numbers, not the machine. A run built from uncommitted code says so when it is built. Build reported figures from a clean tree.
 - The evaluation dataset the run labelled is published under `evaluation/` as `meridian snapshot label` would publish it, and the run names it by hash.
 

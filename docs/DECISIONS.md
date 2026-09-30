@@ -5138,6 +5138,39 @@ The criterion does not say which one counts, so the report does not choose.
 
 ---
 
+## D-238 — The scheduling section: the replay `meridian schedule evaluate` runs, on the report's own models, with regret and runtime
+
+**2026-09-30 · accepted** · *`meridian.reports.{scheduling,render_scheduling,svg_intervals}`, `meridian.scheduler.replay` (`DayResult.runtime_s`), `meridian.prediction.replay` (`snapshot`), `meridian.reports.build`*
+
+**The same replay, not a second one.** The section calls `load_replay` and `replay_schedules`, the functions behind `meridian schedule evaluate` (D-172), on the A, C and D models the prediction section just published. So one command fits, judges and schedules on one dataset, and every scheduler still gets the same candidates, constraints, solver and time limit. A test runs those functions itself with the recorded seeds and finds the section's figures.
+
+The `[scheduling]` table holds everything the comparison configuration holds, except:
+- the model paths, since the models are the report's own;
+- the seed, which is derived. The solver's seed is `solver`, taken modulo 2³¹ because HiGHS's seed is 31-bit. The bootstrap's is `bootstrap.scheduling`.
+
+`load_replay` now takes the raw snapshot's path, so a report built from a snapshot kept outside the datasets root is replayed too. It is checked against the dataset's lineage as before.
+
+**What it reports, beyond `schedule evaluate`'s table:**
+- **oracle regret** for each scheduler: the oracle's frames per station-hour minus the scheduler's, as a paired bootstrap over station-days;
+- **SC-1** stated two ways, like SC-2 (D-237): whether the point estimate meets 20%, and whether the whole interval is above it;
+- **the schedules checked**, with violations at 0.
+
+**Violations are 0 by construction.** A violation stops the replay (`ReplayInvalidError`), and `report build` then publishes nothing. A report with a broken schedule in it would be one whose scheduling numbers are about a schedule that could not run.
+
+**Runtime is measured, so it is not hashed.** `DayResult` gains the solver's `runtime_s`, with `compare=False`, so two replays of one problem are still equal. The section summarises it per scheduler: days, total, median and slowest. It goes into the manifest's environment block beside HiGHS's version, as D-235 puts every fact about the machine. The build's environment is now merged into rather than replaced, and `verify` does not compare runtimes.
+
+**The one way a scheduling figure can depend on the machine is a solve the time limit cut short.** So each scheduler's statuses (optimal, time limit, fallback) are hashed and shown in the `Solved` column. A run whose days were all optimal regenerates anywhere, and one that was cut short says so.
+
+**Two figures, one form.** An interval chart puts every estimate on one axis, one row each: a point on its 95% interval, zero solid, and a target dashed and labelled. It shows:
+- the gains against SC-1's target;
+- each scheduler's shortfall from the oracle.
+
+It is drawn by hand like the reliability diagram (D-235), with the drawing primitives now public in `svg.py`.
+
+*Rejected: a new scheduling configuration file referenced from the report's.* D-236 keeps a run to one file.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

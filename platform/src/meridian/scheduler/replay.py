@@ -32,7 +32,7 @@ Reference: docs/DECISIONS.md D-065, D-160, D-166 to D-168, D-172.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from meridian.orbit.uncertainty import timing_uncertainty_at_age
 from meridian.prediction.replay import Replay, ReplayPass
@@ -89,6 +89,10 @@ class DayResult:
 
     status: str
     """``greedy``, or the solver's ``optimal``, ``time_limit`` or ``fallback``."""
+
+    runtime_s: float | None = field(default=None, compare=False)
+    """What the solver reported spending; ``None`` for a greedy schedule.
+    Measured, not derived, so never compared and never in a hashed figure."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,8 +159,9 @@ def replay_schedules(replay: Replay, config: ScheduleConfig) -> ReplayResults:
                     candidates, frames, rules=setting.rules, settings=setting.solver
                 )
                 outcome, status = found.outcome, found.run.status
+                runtime: float | None = found.run.runtime_s
             else:
-                outcome, status = _predicted(
+                outcome, status, runtime = _predicted(
                     name, candidates, replay.predictions, setting
                 )
             broken = violations(problem, outcome)
@@ -164,7 +169,7 @@ def replay_schedules(replay: Replay, config: ScheduleConfig) -> ReplayResults:
                 rules = ", ".join(sorted({one.rule for one in broken}))
                 message = f"{name} broke {rules} on {day.station_id} {day.day}"
                 raise ReplayInvalidError(message)
-            results[name].append(_tally(outcome, frames, status))
+            results[name].append(_tally(outcome, frames, status, runtime))
     return ReplayResults(
         replay=replay,
         config=config,
@@ -178,7 +183,7 @@ def _predicted(
     candidates: Sequence[Candidate],
     predictions: Mapping[str, Mapping[int, Prediction]],
     setting: _Setting,
-) -> tuple[ScheduleOutcome, str]:
+) -> tuple[ScheduleOutcome, str, float | None]:
     """A schedule from what was knowable before the passes: no outcome."""
     if name == "greedy A":
         ranked = rank_by_elevation(candidates)
@@ -201,12 +206,15 @@ def _predicted(
             yields=yields,
         )
         found = optimise(scored, rules=setting.rules, settings=setting.solver)
-        return found.outcome, found.run.status
-    return select_without_conflict(ranked, rules=setting.rules), GREEDY
+        return found.outcome, found.run.status, found.run.runtime_s
+    return select_without_conflict(ranked, rules=setting.rules), GREEDY, None
 
 
 def _tally(
-    outcome: ScheduleOutcome, frames: Mapping[int, int | None], status: str
+    outcome: ScheduleOutcome,
+    frames: Mapping[int, int | None],
+    status: str,
+    runtime_s: float | None,
 ) -> DayResult:
     selected = sorted(one.candidate.pass_id for one in outcome.selected)
     known = [frames.get(pass_id) for pass_id in selected]
@@ -215,4 +223,5 @@ def _tally(
         frames=sum(one for one in known if one is not None),
         unknown=sum(1 for one in known if one is None),
         status=status,
+        runtime_s=runtime_s,
     )

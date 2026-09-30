@@ -111,3 +111,27 @@ disturbed_kp = 5.0
 # it, the report says Kp is untested — never that it does not help
 # (EVALUATION.md §3). Stated here, before any result is seen.
 min_disturbed = 30
+
+# ── [scheduling] — how every scheduler is replayed over the test span, as
+#    deploy/schedule-evaluation.toml.example documents it. The report replays
+#    the A, C and D models [prediction] fitted and derives the solver's seed,
+#    so `models` and `seed` are refused here (D-238).
+[scheduling]
+
+# What a pass is worth besides its yield: "duration" or "none" (D-168).
+frames = "duration"
+
+# The solver's time limit per station-day, the same for every scheduler. A day
+# the limit cuts short is counted in the report, since only then can a figure
+# depend on the machine.
+time_limit_s = 10.0
+
+# Seconds an antenna needs between two passes.
+turnaround_s = 0.0
+
+# Paired bootstrap draws behind D − B, D − greedy B and the oracle regret.
+resamples = 2000
+
+# A completeness threshold in place of the dataset's own (D-151), to read the
+# comparison at another. Leave unset to use the dataset's.
+# threshold = 0.8

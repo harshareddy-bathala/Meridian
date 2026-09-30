@@ -37,13 +37,25 @@ from meridian.datasets.publish import (
 from meridian.datasets.seeds import derive
 from meridian.reports.config import ConfigFile, report_config_sha256
 from meridian.reports.data import DATA_FILE, data_rows
-from meridian.reports.prediction import Destination, Fitted, fit_variants
+from meridian.reports.prediction import (
+    Destination,
+    Fitted,
+    fit_variants,
+    fitted_paths,
+)
 from meridian.reports.prediction_rows import PREDICTION_FILE, prediction_rows
 from meridian.reports.render import render_report
 from meridian.reports.render_prediction import prediction_figures
+from meridian.reports.render_scheduling import scheduling_figures
+from meridian.reports.scheduling import (
+    SCHEDULING_FILE,
+    SOLVER_SEED_RANGE,
+    scheduling_section,
+)
 
 __all__ = [
     "BOOTSTRAP_PREDICTION",
+    "BOOTSTRAP_SCHEDULING",
     "CONFIG_FILE",
     "METHOD_VERSION",
     "REPORTS",
@@ -57,7 +69,7 @@ __all__ = [
     "with_environment",
 ]
 
-METHOD_VERSION = "report-2"
+METHOD_VERSION = "report-3"
 """Bumped whenever a section's method changes, so two runs made under different
 methods can never share a hash."""
 
@@ -66,6 +78,8 @@ REPORTS = "reports"
 
 RUN_FILE = "run.jsonl"
 BOOTSTRAP_PREDICTION = "bootstrap.prediction"
+BOOTSTRAP_SCHEDULING = "bootstrap.scheduling"
+SOLVER = "solver"
 REPORT_FILE = "report.md"
 CONFIG_FILE = "config.toml"
 
@@ -144,6 +158,7 @@ def build_run(
             "evaluation_dataset": content_sha256(dataset.manifest),
             "models": computed.models,
         },
+        environment=computed.measured,
     )
     return Run(manifest=manifest, files=files)
 
@@ -155,6 +170,8 @@ class _Computed:
     rows: Mapping[str, Rows]
     seeds: Mapping[str, int]
     models: Mapping[str, bytes]
+    measured: Mapping[str, object]
+    """What the run measured about the machine: recorded, never hashed."""
 
 
 def _sections(
@@ -170,17 +187,36 @@ def _sections(
         dataset, raw, prediction, seed=seed, destination=destination
     )
     seeds[BOOTSTRAP_PREDICTION] = derive(seed, BOOTSTRAP_PREDICTION)
+    seeds[SOLVER] = derive(seed, SOLVER) % SOLVER_SEED_RANGE
+    seeds[BOOTSTRAP_SCHEDULING] = derive(seed, BOOTSTRAP_SCHEDULING)
+    scheduled = scheduling_section(
+        dataset,
+        raw,
+        fitted_paths(outcomes),
+        config.config.scheduling,
+        seeds=(seeds[SOLVER], seeds[BOOTSTRAP_SCHEDULING]),
+    )
     rows = {
         RUN_FILE: _run_rows(raw.manifest, config, seed, seeds),
         DATA_FILE: data_rows(raw, dataset),
         PREDICTION_FILE: prediction_rows(
             outcomes, inputs, prediction, seed=seeds[BOOTSTRAP_PREDICTION]
         ),
+        SCHEDULING_FILE: scheduled.rows,
     }
     models = {
         one.variant.name: one.sha256 for one in outcomes if isinstance(one, Fitted)
     }
-    return _Computed(rows=rows, seeds=dict(sorted(seeds.items())), models=models)
+    runtimes = dict(scheduled.runtimes)
+    return _Computed(
+        rows=rows,
+        seeds=dict(sorted(seeds.items())),
+        models=models,
+        measured={
+            "solver": runtimes.pop("solver"),
+            "runtime_s": {"scheduling": runtimes.get("schedulers", {})},
+        },
+    )
 
 
 def _files(computed: _Computed, config_text: bytes) -> dict[str, bytes]:
@@ -191,15 +227,31 @@ def _files(computed: _Computed, config_text: bytes) -> dict[str, bytes]:
         run=parsed[RUN_FILE],
         data=parsed[DATA_FILE],
         prediction=parsed[PREDICTION_FILE],
+        scheduling=parsed[SCHEDULING_FILE],
     )
     files |= prediction_figures(parsed[PREDICTION_FILE])
+    files |= scheduling_figures(parsed[SCHEDULING_FILE])
     files[CONFIG_FILE] = config_text
     return files
 
 
 def with_environment(run: Run, environment: Mapping[str, object]) -> Run:
-    """The same run, recording the machine that made it. The hash is unchanged."""
-    return replace(run, manifest=replace(run.manifest, environment=environment))
+    """The same run, recording the machine that made it. The hash is unchanged.
+
+    Merged into what the build itself measured, and ``runtime_s`` merged key
+    by key, so the build's own time sits beside the solver's.
+    """
+    held = dict(run.manifest.environment)
+    runtimes = {
+        **_table(held.get("runtime_s")),
+        **_table(environment.get("runtime_s")),
+    }
+    merged = held | dict(environment) | ({"runtime_s": runtimes} if runtimes else {})
+    return replace(run, manifest=replace(run.manifest, environment=merged))
+
+
+def _table(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def publish_run(run: Run, output: Path) -> PublishedDirectory:

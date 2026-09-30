@@ -43,8 +43,9 @@ __all__ = [
 ]
 
 _SNAPSHOTS = "snapshots"
-_UNCOMPARED = frozenset(("snapshot_path",))
-"""Environment entries that describe where, not what, and are never a cause."""
+_UNCOMPARED = frozenset(("snapshot_path", "runtime_s"))
+"""Environment entries that describe where or how long, not what, and are
+never a cause of a different number."""
 
 
 class NotARunError(ValueError):

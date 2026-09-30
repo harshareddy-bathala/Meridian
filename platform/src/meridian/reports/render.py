@@ -16,6 +16,7 @@ from collections.abc import Mapping, Sequence
 from meridian.reports.markdown import cell, table
 from meridian.reports.render_data import render_data
 from meridian.reports.render_prediction import render_prediction
+from meridian.reports.render_scheduling import render_scheduling
 
 __all__ = ["render_report"]
 
@@ -23,7 +24,11 @@ Row = Mapping[str, object]
 
 
 def render_report(
-    *, run: Sequence[Row], data: Sequence[Row], prediction: Sequence[Row]
+    *,
+    run: Sequence[Row],
+    data: Sequence[Row],
+    prediction: Sequence[Row],
+    scheduling: Sequence[Row],
 ) -> bytes:
     """The whole report, as the bytes written to ``report.md``.
 
@@ -31,8 +36,14 @@ def render_report(
         run: ``run.jsonl``, parsed: the run record.
         data: ``data.jsonl``, parsed: the data section.
         prediction: ``prediction.jsonl``, parsed: the prediction section.
+        scheduling: ``scheduling.jsonl``, parsed: the scheduling section.
     """
-    lines = [*_header(run), *render_data(data), *render_prediction(prediction)]
+    lines = [
+        *_header(run),
+        *render_data(data),
+        *render_prediction(prediction),
+        *render_scheduling(scheduling),
+    ]
     return ("\n".join(lines).rstrip("\n") + "\n").encode("utf-8")
 
 

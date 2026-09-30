@@ -67,6 +67,13 @@ def test_the_hash_is_over_values_not_spelling() -> None:
         (b"[prediction]\nresamples = 5\n", "outside 100..100000"),
         (b"[prediction]\nmin_disturbed = true\n", "must be a number"),
         (b'[prediction]\npopulation = "archive"\nweighting = "x"\n', "weighting"),
+        (b"[scheduling]\nseed = 1\n", "the seed is derived"),
+        (b"[scheduling]\nmodels = {}\n", "unknown settings"),
+        (b'[scheduling]\nframes = "all"\n', "[scheduling]"),
+        (b"[scheduling]\ntime_limit_s = 0\n", "[scheduling]"),
+        (b"[scheduling]\nthreshold = 0\n", "above 0"),
+        (b"[scheduling]\nthreshold = 1.5\n", "outside 0..1"),
+        (b"[scheduling]\nresamples = 10\n", "outside 100..100000"),
         (b"\xff\xfe", "not UTF-8 TOML"),
     ],
 )
@@ -90,3 +97,14 @@ def test_prediction_settings_are_the_models_own_and_the_sections() -> None:
     assert isinstance(shared, dict)
     assert "seed" not in shared
     assert "configuration" not in shared
+
+
+def test_scheduling_settings_reach_the_solver_but_never_its_seed() -> None:
+    config = parse_report_config(
+        b"[scheduling]\ntime_limit_s = 3.0\nturnaround_s = 60.0\nthreshold = 0.7\n"
+    ).config.scheduling
+
+    assert config.schedule.time_limit_s == 3.0
+    assert config.threshold == 0.7
+    assert "seed" not in config.parameters()
+    assert config.parameters()["turnaround_s"] == 60.0

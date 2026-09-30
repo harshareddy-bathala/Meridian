@@ -46,6 +46,7 @@ def test_the_report_is_rendered_from_its_results_files_alone(built: Any) -> None
         run=rows(built.files["run.jsonl"]),
         data=rows(built.files["data.jsonl"]),
         prediction=rows(built.files["prediction.jsonl"]),
+        scheduling=rows(built.files["scheduling.jsonl"]),
     )
 
     assert again == built.files["report.md"]

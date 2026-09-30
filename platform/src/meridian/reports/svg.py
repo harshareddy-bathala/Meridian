@@ -24,7 +24,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from xml.sax.saxutils import escape
 
-__all__ = ["reliability_diagram"]
+__all__ = [
+    "Ink",
+    "Stroke",
+    "badge",
+    "document",
+    "line",
+    "reliability_diagram",
+    "text",
+]
 
 SURFACE = "#fcfcfb"
 INK = "#0b0b0b"
@@ -63,12 +71,34 @@ def reliability_diagram(
     parts = [
         *_frame(title, subtitle, simulated),
         *_grid(),
-        _line((_x(0.0), _y(0.0)), (_x(1.0), _y(1.0)), Stroke(MUTED, dashed=True)),
+        line((_x(0.0), _y(0.0)), (_x(1.0), _y(1.0)), Stroke(MUTED, dashed=True)),
         *_whiskers(bins),
         *_strip(bins),
         "</svg>",
     ]
     return ("\n".join(parts) + "\n").encode("utf-8")
+
+
+def document(size: tuple[int, int], title: str, description: str) -> list[str]:
+    """An SVG's opening: its size, its accessible name and description, its surface."""
+    width, height = size
+    return [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}"'
+        f' height="{height}" viewBox="0 0 {width} {height}"'
+        f' font-family="{FONT}" role="img">',
+        f"<title>{escape(title)}</title>",
+        f"<desc>{escape(description)}</desc>",
+        f'<rect width="{width}" height="{height}" fill="{SURFACE}"/>',
+    ]
+
+
+def badge(right: float) -> list[str]:
+    """The ``SIMULATED`` badge, top right, for a figure of simulated passes."""
+    return [
+        f'<rect x="{right - 84}" y="12" width="84" height="20" rx="4"'
+        f' fill="{SURFACE}" stroke="{CRITICAL}" stroke-width="1.5"/>',
+        text((right - 42, 26), "SIMULATED", Ink(CRITICAL, bold=True)),
+    ]
 
 
 def _frame(title: str, subtitle: str, simulated: bool) -> list[str]:
@@ -79,28 +109,17 @@ def _frame(title: str, subtitle: str, simulated: bool) -> list[str]:
         " passes in each bin."
     )
     head = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{_WIDTH}"'
-        f' height="{_HEIGHT}" viewBox="0 0 {_WIDTH} {_HEIGHT}"'
-        f' font-family="{FONT}" role="img">',
-        f"<title>{escape(title)}: reliability diagram</title>",
-        f"<desc>{escape(description)}</desc>",
-        f'<rect width="{_WIDTH}" height="{_HEIGHT}" fill="{SURFACE}"/>',
-        _text((_LEFT - 40, 24), title, Ink(INK, 14, "start", bold=True)),
-        _text((_LEFT - 40, 42), subtitle, Ink(INK_SECONDARY, anchor="start")),
-        _text((_x(0.5), _TOP + _SIZE + 32), "predicted probability", Ink(MUTED)),
+        *document((_WIDTH, _HEIGHT), f"{title}: reliability diagram", description),
+        text((_LEFT - 40, 24), title, Ink(INK, 14, "start", bold=True)),
+        text((_LEFT - 40, 42), subtitle, Ink(INK_SECONDARY, anchor="start")),
+        text((_x(0.5), _TOP + _SIZE + 32), "predicted probability", Ink(MUTED)),
         *_key(),
         f'<text x="18" y="{_y(0.5):.1f}" fill="{MUTED}" font-size="11"'
         f' text-anchor="middle" transform="rotate(-90 18 {_y(0.5):.1f})">'
         "observed decode frequency</text>",
     ]
     if simulated:
-        head.extend(
-            [
-                f'<rect x="{_WIDTH - 96}" y="12" width="84" height="20" rx="4"'
-                f' fill="{SURFACE}" stroke="{CRITICAL}" stroke-width="1.5"/>',
-                _text((_WIDTH - 54, 26), "SIMULATED", Ink(CRITICAL, bold=True)),
-            ]
-        )
+        head.extend(badge(_WIDTH - 12))
     return head
 
 
@@ -108,27 +127,27 @@ def _key() -> list[str]:
     """What the marks mean, above the plot rather than on top of the data."""
     y = _TOP - 16
     return [
-        _line((_LEFT + 4, y - 10), (_LEFT + 4, y + 3), Stroke(SERIES, 1.5)),
+        line((_LEFT + 4, y - 10), (_LEFT + 4, y + 3), Stroke(SERIES, 1.5)),
         f'<circle cx="{_LEFT + 4:.1f}" cy="{y - 3.5:.1f}" r="4" fill="{SERIES}"'
         f' stroke="{SURFACE}" stroke-width="2"/>',
-        _text((_LEFT + 14, y), "observed, with 95% interval", _SMALL_START),
-        _line(
+        text((_LEFT + 14, y), "observed, with 95% interval", _SMALL_START),
+        line(
             (_LEFT + 180, y - 3.5), (_LEFT + 204, y - 3.5), Stroke(MUTED, dashed=True)
         ),
-        _text((_LEFT + 210, y), "perfect calibration", _SMALL_START),
+        text((_LEFT + 210, y), "perfect calibration", _SMALL_START),
     ]
 
 
 def _grid() -> list[str]:
     lines = []
     for tick in _TICKS:
-        lines.append(_line((_x(tick), _y(0.0)), (_x(tick), _y(1.0)), Stroke(GRID)))
-        lines.append(_line((_x(0.0), _y(tick)), (_x(1.0), _y(tick)), Stroke(GRID)))
+        lines.append(line((_x(tick), _y(0.0)), (_x(tick), _y(1.0)), Stroke(GRID)))
+        lines.append(line((_x(0.0), _y(tick)), (_x(1.0), _y(tick)), Stroke(GRID)))
         label = f"{tick:g}"
-        lines.append(_text((_x(tick), _y(0.0) + 16), label, _SMALL))
-        lines.append(_text((_x(0.0) - 8, _y(tick) + 3.5), label, _SMALL_END))
-    lines.append(_line((_x(0.0), _y(0.0)), (_x(1.0), _y(0.0)), Stroke(AXIS)))
-    lines.append(_line((_x(0.0), _y(0.0)), (_x(0.0), _y(1.0)), Stroke(AXIS)))
+        lines.append(text((_x(tick), _y(0.0) + 16), label, _SMALL))
+        lines.append(text((_x(0.0) - 8, _y(tick) + 3.5), label, _SMALL_END))
+    lines.append(line((_x(0.0), _y(0.0)), (_x(1.0), _y(0.0)), Stroke(AXIS)))
+    lines.append(line((_x(0.0), _y(0.0)), (_x(0.0), _y(1.0)), Stroke(AXIS)))
     return lines
 
 
@@ -141,7 +160,7 @@ def _whiskers(bins: Sequence[Row]) -> list[str]:
             continue
         x = _x(predicted)
         marks.append(
-            _line(
+            line(
                 (x, _y(observed["low"])),
                 (x, _y(observed["high"])),
                 Stroke(SERIES, 1.5),
@@ -159,8 +178,8 @@ def _strip(bins: Sequence[Row]) -> list[str]:
     counts = [one["n"] if isinstance(one["n"], int) else 0 for one in bins]
     largest = max(counts, default=0) or 1
     bars = [
-        _text((_LEFT - 8, _STRIP_TOP + _STRIP - 2), "passes", _SMALL_END),
-        _line(
+        text((_LEFT - 8, _STRIP_TOP + _STRIP - 2), "passes", _SMALL_END),
+        line(
             (_x(0.0), _STRIP_TOP + _STRIP),
             (_x(1.0), _STRIP_TOP + _STRIP),
             Stroke(AXIS),
@@ -178,7 +197,7 @@ def _strip(bins: Sequence[Row]) -> list[str]:
             f" {low:g} to {high:g}</title></rect>"
         )
     bars.append(
-        _text((_x(1.0), _STRIP_TOP - 4), f"most in one bin: {largest}", _SMALL_END)
+        text((_x(1.0), _STRIP_TOP - 4), f"most in one bin: {largest}", _SMALL_END)
     )
     return bars
 
@@ -218,7 +237,8 @@ class Ink:
     bold: bool = False
 
 
-def _line(start: tuple[float, float], end: tuple[float, float], stroke: Stroke) -> str:
+def line(start: tuple[float, float], end: tuple[float, float], stroke: Stroke) -> str:
+    """A line from ``start`` to ``end``, each coordinate to one decimal place."""
     dash = ' stroke-dasharray="4 4"' if stroke.dashed else ""
     return (
         f'<line x1="{start[0]:.1f}" y1="{start[1]:.1f}" x2="{end[0]:.1f}"'
@@ -227,7 +247,8 @@ def _line(start: tuple[float, float], end: tuple[float, float], stroke: Stroke) 
     )
 
 
-def _text(at: tuple[float, float], content: str, ink: Ink) -> str:
+def text(at: tuple[float, float], content: str, ink: Ink) -> str:
+    """``content`` set at ``at``, escaped."""
     bold = ' font-weight="600"' if ink.bold else ""
     return (
         f'<text x="{at[0]:.1f}" y="{at[1]:.1f}" fill="{ink.colour}"'

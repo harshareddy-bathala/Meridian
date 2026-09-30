@@ -156,6 +156,8 @@ def test_every_seed_is_derived_and_recorded(runs: Runs) -> None:
 
     assert set(seeds) == {
         "bootstrap.prediction",
+        "bootstrap.scheduling",
+        "solver",
         "model.A",
         "model.C",
         "model.D",
@@ -236,7 +238,7 @@ def test_each_fitted_model_has_a_reliability_diagram_that_parses(
     runs: Runs,
 ) -> None:
     run = runs.build()
-    figures = sorted(path.name for path in run.glob("*.svg"))
+    figures = sorted(path.name for path in run.glob("reliability_*.svg"))
 
     assert figures == [
         "reliability_a.svg",
@@ -278,7 +280,7 @@ def test_a_world_with_nothing_to_fit_still_reports_why(
     assert {one["status"] for one in refused.values()} == {"refused"}
     assert all(one["reason"] for one in refused.values())
     assert of(rows(run), "sc2")[0]["status"] == "not measured"
-    assert not list(run.glob("*.svg"))
+    assert not list(run.glob("reliability_*.svg"))
 
 
 def test_without_the_fit_extra_it_says_what_to_install(

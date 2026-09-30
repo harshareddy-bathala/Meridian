@@ -9,7 +9,11 @@ validated by the module that owns those settings rather than restated:
 * ``[prediction]`` — the model settings every configuration is fitted under,
   checked by :class:`~meridian.prediction.model_config.ModelConfig`, and the
   section's own: bootstrap resamples, and what counts as a disturbed pass and
-  how many are needed before the Kp feature is judged at all (D-237).
+  how many are needed before the Kp feature is judged at all (D-237);
+* ``[scheduling]`` — how every scheduler is replayed: the frames term, the
+  time limit and turnaround, checked by
+  :class:`~meridian.scheduler.schedule_config.ScheduleConfig`; the bootstrap
+  resamples; and a completeness threshold in place of the dataset's (D-238).
 
 Every table is optional and falls back to its owner's defaults. An unknown
 table is refused, so a misspelt one cannot silently fall back.
@@ -34,28 +38,33 @@ import hashlib
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import UnionType
 
 from meridian.datasets.canonical import canonical_bytes
 from meridian.datasets.config_checks import LabelConfigError
 from meridian.datasets.label_config import LabelConfig, label_config_from_mapping
 from meridian.prediction.model_config import ModelConfig, ModelConfigError
+from meridian.scheduler.schedule_config import ScheduleConfig, ScheduleConfigError
 
 __all__ = [
     "ConfigFile",
     "PredictionConfig",
     "ReportConfig",
     "ReportConfigError",
+    "SchedulingConfig",
     "load_report_config",
     "parse_report_config",
     "report_config_sha256",
 ]
 
-_TABLES = ("labels", "prediction")
+_TABLES = ("labels", "prediction", "scheduling")
 
 _DECIDED_BY_THE_REPORT = ("configuration", "seed", "without")
 """Model settings the report sets itself, for every configuration it fits."""
 
 _RESAMPLES = (100, 100_000)
+_SOLVING = ("frames", "time_limit_s", "turnaround_s")
+"""What ``[scheduling]`` hands ``ScheduleConfig``; its seed is derived."""
 _MAX_KP = 9.0
 
 
@@ -96,17 +105,40 @@ class PredictionConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SchedulingConfig:
+    """How the scheduling section replays every scheduler."""
+
+    schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
+    """The frames term, time limit and turnaround; the seed is derived as
+    ``solver``, and the configuration is not read: every one is run."""
+
+    resamples: int = 2000
+    threshold: float | None = None
+    """A completeness threshold in place of the dataset's own (D-151)."""
+
+    def parameters(self) -> dict[str, object]:
+        """The values the section's numbers depend on."""
+        solving = self.schedule.parameters()
+        return {name: solving[name] for name in _SOLVING} | {
+            "resamples": self.resamples,
+            "threshold": None if self.threshold is None else float(self.threshold),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ReportConfig:
     """The resolved configuration of every section."""
 
     labels: LabelConfig = field(default_factory=LabelConfig)
     prediction: PredictionConfig = field(default_factory=PredictionConfig)
+    scheduling: SchedulingConfig = field(default_factory=SchedulingConfig)
 
     def parameters(self) -> dict[str, object]:
         """The values, for the run's manifest and its header."""
         return {
             "labels": self.labels.parameters(),
             "prediction": self.prediction.parameters(),
+            "scheduling": self.scheduling.parameters(),
         }
 
 
@@ -152,7 +184,9 @@ def parse_report_config(text: bytes) -> ConfigFile:
         message = f"[labels]: {exc}"
         raise ReportConfigError(message) from exc
     config = ReportConfig(
-        labels=labels, prediction=_prediction(stored.get("prediction", {}))
+        labels=labels,
+        prediction=_prediction(stored.get("prediction", {})),
+        scheduling=_scheduling(stored.get("scheduling", {})),
     )
     return ConfigFile(config=config, text=text)
 
@@ -191,19 +225,11 @@ def _prediction(table: object) -> PredictionConfig:
 
 def _check_prediction(config: PredictionConfig) -> None:
     """The section's own settings, each a number inside its range."""
-    low, high = _RESAMPLES
-    checks = (
-        ("resamples", config.resamples, int, low, high),
-        ("min_disturbed", config.min_disturbed, int, 1, 100_000),
-        ("disturbed_kp", config.disturbed_kp, int | float, 0.0, _MAX_KP),
+    _check_number("[prediction] resamples", config.resamples, int, _RESAMPLES)
+    _check_number("[prediction] min_disturbed", config.min_disturbed, int, (1, 100_000))
+    _check_number(
+        "[prediction] disturbed_kp", config.disturbed_kp, int | float, (0.0, _MAX_KP)
     )
-    for name, value, kind, least, most in checks:
-        if isinstance(value, bool) or not isinstance(value, kind):
-            message = f"[prediction] {name} must be a number, not {value!r}"
-            raise ReportConfigError(message)
-        if not least <= value <= most:
-            message = f"[prediction] {name} = {value} is outside {least}..{most}"
-            raise ReportConfigError(message)
 
 
 def load_report_config(path: Path) -> ConfigFile:
@@ -223,3 +249,47 @@ def load_report_config(path: Path) -> ConfigFile:
 def report_config_sha256(config: ReportConfig) -> bytes:
     """The configuration's hash, over its resolved values."""
     return hashlib.sha256(canonical_bytes(config.parameters())).digest()
+
+
+def _scheduling(table: object) -> SchedulingConfig:
+    """``[scheduling]``: the solver's settings, the resamples, a threshold."""
+    if not isinstance(table, dict):
+        message = f"[scheduling] must be a table, not {table!r}"
+        raise ReportConfigError(message)
+    unknown = sorted(set(table) - {*_SOLVING, "resamples", "threshold"})
+    if unknown:
+        message = (
+            f"[scheduling]: unknown settings {unknown}; the seed is derived and"
+            " every configuration and model is replayed (D-236, D-238)"
+        )
+        raise ReportConfigError(message)
+    try:
+        schedule = ScheduleConfig(**{k: v for k, v in table.items() if k in _SOLVING})
+    except ScheduleConfigError as exc:
+        message = f"[scheduling]: {exc}"
+        raise ReportConfigError(message) from exc
+    config = SchedulingConfig(
+        schedule=schedule,
+        resamples=table.get("resamples", 2000),
+        threshold=table.get("threshold"),
+    )
+    _check_number("[scheduling] resamples", config.resamples, int, _RESAMPLES)
+    if config.threshold is not None:
+        _check_number("[scheduling] threshold", config.threshold, int | float, (0, 1))
+        if config.threshold == 0:
+            message = "[scheduling] threshold must be above 0"
+            raise ReportConfigError(message)
+    return config
+
+
+def _check_number(
+    name: str, value: object, kind: type | UnionType, limits: tuple[float, float]
+) -> None:
+    """A number of the right kind, inside ``limits`` inclusive."""
+    low, high = limits
+    if isinstance(value, bool) or not isinstance(value, kind):
+        message = f"{name} must be a number, not {value!r}"
+        raise ReportConfigError(message)
+    if not low <= value <= high:  # type: ignore[operator]
+        message = f"{name} = {value} is outside {low}..{high}"
+        raise ReportConfigError(message)

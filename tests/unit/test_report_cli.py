@@ -90,6 +90,7 @@ def test_a_run_is_built_from_a_snapshot_alone_and_verifies(
         "prediction.jsonl",
         "report.md",
         "run.jsonl",
+        "scheduling.jsonl",
     }
 
 
@@ -237,7 +238,7 @@ def test_verify_refuses_a_directory_that_is_not_a_run(
     "case",
     [
         ("seed = 4471\n", "given with --seed"),
-        ("[scheduling]\n", "unknown tables"),
+        ("[weather]\n", "unknown tables"),
         ("[labels]\nsettle_margin_s = -1\n", "[labels]"),
     ],
 )

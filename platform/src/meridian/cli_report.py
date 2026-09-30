@@ -54,6 +54,7 @@ from meridian.reports.verify import (
     locate_snapshot,
     verify_run,
 )
+from meridian.scheduler.replay import ReplayInvalidError
 
 __all__ = ["add_report_parser", "run_report"]
 
@@ -135,7 +136,7 @@ def _build(args: argparse.Namespace) -> int:
     except DamagedSnapshotError as exc:
         _refuse("build", str(exc))
         return EXIT_CORRUPT
-    except (ValueError, RunExistsError, OSError) as exc:
+    except (ValueError, RunExistsError, ReplayInvalidError, OSError) as exc:
         return _refuse("build", str(exc))
     held = "written" if published.written else "already held, identically"
     _say(f"evaluation report: {published.path} ({held})")

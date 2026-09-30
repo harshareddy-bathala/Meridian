@@ -22,11 +22,14 @@ The sections arrive one at a time:
   weighting, and the silences §5 of ``EVALUATION.md`` counts apart;
 * **prediction** — A, C, D and D∖conditions fitted, published and judged,
   with station-day bootstrap intervals, the comparisons between them, SC-2,
-  and a reliability diagram per model (D-237).
+  and a reliability diagram per model (D-237);
+* **scheduling** — seven schedulers replayed on those models over the test
+  span, SC-1 as D − B with D − greedy B beside it, oracle regret, and every
+  schedule checked; runtimes measured into the environment (D-238).
 
 **Nothing here opens a database or a socket.** The snapshot is the only input
 that holds data, and a report command never fetches anything (rule 8, and the
 roadmap's "no report command may silently fetch mutable external data").
 
-Reference: docs/DECISIONS.md D-234 to D-237.
+Reference: docs/DECISIONS.md D-234 to D-238.
 """
