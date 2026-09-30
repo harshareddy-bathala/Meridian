@@ -46,9 +46,34 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-09-29. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-09-30. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stage 19's software is built.** Its decisions are D-173 through D-178, and `docs/OPERATIONS.md` § Stored measurements and profiles is its runbook. Its migrations are `0023` and `0024`, after Stage 32's `0022`. Stages 20, 23, 31 and 32 are merged, Stage 21 is being built on its own branch, and **Stage 22 is the next stage nothing has claimed.**
+**Stage 21's software is built** (2026-09-30). Its decisions are D-188 through D-198, `docs/OPERATIONS.md` § Fault drills, scale runs and the long run is its runbook, and `docs/SCALE-AND-FAULTS.md` holds its results, all simulated. Its migration is `0025`. **Stage 22 is next.**
+- **The completion gate passes.** *Fifty deterministic stations operate through real MSP, and injected failures are detected and handled without corrupting reliability metrics.*
+  - `tests/e2e/test_fifty_stations.py` runs fifty stations through the application and requires every one heard every round and scheduled.
+  - `tests/integration/test_fault_gate.py` runs every station fault at once and judges the result from the platform's own records, with two positive controls.
+- **Every fault the roadmap names can be injected.** Station faults come from the simulator, now eleven kinds (D-188); platform faults are injected from the host by `deploy/tools/chaos.py` (D-194). What was injected goes to a ledger the platform never sees (D-189).
+- **`meridian reliability faults` judges a run** from stored heartbeats, decisions, revocations and classifications (D-192):
+  - detection within ninety seconds;
+  - no new work to a station while it is offline;
+  - replanning;
+  - no false confirmed misses;
+  - recovery;
+  - and, with Prometheus, when `StationOffline` fired.
+- **Scale is measured from both sides** (D-197). At 1, 5, 10 and 50 stations every heartbeat was answered, p95 latency stayed at or under 50 ms, and the series count did not grow with the fleet. Pass generation, about 16 s a round at fifty stations, is the cost that grows.
+- **The long run is a tool that judges itself** (D-198). Its two-hour rehearsal on the real stack judged 414 faults with none failed, raised no false alert, and measured `StationOffline` at 20 to 80 s after each attributable fault.
+- **Found on the way, each fixed:**
+  - after a database restart, every stale pooled connection failed a request (D-193);
+  - a heartbeat was judged at one clock and stored, expired and delivered at another (D-195);
+  - a reinstatement erased the only record of a revocation, so the migration keeps them (D-196);
+  - the simulator "declined" work the platform had never seen it hold (D-188);
+  - three questions the checker asked wrongly, found only against the real stack (D-192).
+- **Not built, or not yet shown:**
+  - **the seventy-two hour run**, which is Stage 24's acceptance item; the tool and a clean two-hour rehearsal are here;
+  - **SC-5 in the public reliability body**, which still says `not_measured`. Detection is judged per run, from a ledger the platform never holds, so it is not a live figure (D-189);
+  - **a cache for `/api/v1/reliability`**, which the scale runs did not load, so whether it is needed at fifty stations is still open.
+
+**Stage 19's software is built.** Its decisions are D-173 through D-178, and `docs/OPERATIONS.md` § Stored measurements and profiles is its runbook. Its migrations are `0023` and `0024`, after Stage 32's `0022`. Stages 20, 23, 31 and 32 are merged; Stage 21 followed it.
 - **The completion gate passes, and is asserted both ways.** `tests/unit/test_deferred_storage_gate.py` reads the source and the documents and finds, for each deferred table, a producer that writes it and is called at runtime, a consumer that reads it and is called at runtime, `simulated` and the columns naming what made each row, a migration test that writes rows into it, and a stated retention. Each clause has a positive control on a table the roadmap plans and nobody builds. `tests/integration/test_deferred_storage_gate.py` runs a simulated and a measured station through ingest, export, labelling and a build, and finds every row labelled as its station is.
 - **The four tables, each with both ends** (D-173 to D-176):
   - `noise_measurements` — dBFS at a stated gain, never dBm; one row per reception revision, written by ingest in the observation's transaction and backfilled by the same query; exported in every raw snapshot. Stage 25's observation-sourced rows came forward to give it a producer.

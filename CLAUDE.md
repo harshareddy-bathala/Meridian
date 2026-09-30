@@ -97,6 +97,7 @@ meridian/
 │   ├── DECISIONS.md      decisions taken during implementation
 │   ├── GIT-WORKFLOW.md   branching, commits, migration rules
 │   ├── OPERATIONS.md     the runbook: bring-up, commands, backups, alerts
+│   ├── SCALE-AND-FAULTS.md   Stage 21's fault and scale results, simulated
 │   ├── THREAT-MODEL.md   assets, trust boundaries, threats and their mitigations
 │   ├── GLOSSARY.md
 │   ├── PROJECT.md        the full project document
@@ -174,7 +175,7 @@ Key points that constrain implementation:
 
 **Phase 1 — Foundations — is done.** Its exit criterion, a virtual station visible on the public site from outside the college network, was met on 2026-09-14 (D-088).
 
-Work now follows the stage order in `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md`, whose "Where the build has got to" section says which stage is next. Do not scaffold a module ahead of the stage that builds it: failure injection and hardware stay empty stubs with documented interfaces until their stages arrive.
+Work now follows the stage order in `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md`, whose "Where the build has got to" section says which stage is next. Do not scaffold a module ahead of the stage that builds it: hardware stays an empty stub with documented interfaces until its stages arrive.
 
 ---
 

@@ -188,7 +188,11 @@ def mark_assignment_reported(
 
 
 def expire_overdue_assignments(
-    conn: Connection, station_id: str, *, still_held: Sequence[str]
+    conn: Connection,
+    station_id: str,
+    *,
+    still_held: Sequence[str],
+    now: datetime | None = None,
 ) -> int:
     """``(issued|held) -> expired`` for overdue rows the station no longer names.
 
@@ -197,6 +201,8 @@ def expire_overdue_assignments(
         station_id: Whose assignments to sweep.
         still_held: The ``held_assignments`` from the heartbeat driving this
             call. Rows named here are exempt however overdue they are.
+        now: The heartbeat handler's instant, which the rest of the heartbeat
+            is judged at (D-195); omitted, the database's ``now()``.
 
     Returns:
         How many rows expired.
@@ -222,16 +228,20 @@ def expire_overdue_assignments(
             where station_id = %s
               and decision = 'scheduled'
               and state in ('issued', 'held')
-              and end_at < now()
+              and end_at < coalesce(%s, now())
               and not (assignment_id = any(%s))
             """,
-            (station_id, list(still_held)),
+            (station_id, now, list(still_held)),
         )
         return cur.rowcount
 
 
 def find_due_assignments(
-    conn: Connection, station_id: str, *, horizon_end: datetime
+    conn: Connection,
+    station_id: str,
+    *,
+    horizon_end: datetime,
+    now: datetime | None = None,
 ) -> list[DueAssignment]:
     """Every assignment eligible for delivery to ``station_id`` (D-026, D-035, D-067).
 
@@ -254,6 +264,9 @@ def find_due_assignments(
     parameter rather than being computed here (``now() + 2 hours``) — the
     two-hour figure is D-026's reasoning, which this function does not need
     to know to do its job.
+
+    ``now`` is the heartbeat handler's instant, the one every other part of the
+    heartbeat is judged at (D-195); omitted, it is the database's ``now()``.
     """
     with conn.cursor(row_factory=class_row(DueAssignment)) as cur:
         cur.execute(
@@ -279,10 +292,10 @@ def find_due_assignments(
             where a.station_id = %s
               and a.decision = 'scheduled'
               and a.state in ('issued', 'held', 'in_progress')
-              and a.end_at >= now()
+              and a.end_at >= coalesce(%s, now())
               and a.start_at <= %s
             order by a.start_at asc
             """,
-            (station_id, horizon_end),
+            (station_id, now, horizon_end),
         )
         return cur.fetchall()

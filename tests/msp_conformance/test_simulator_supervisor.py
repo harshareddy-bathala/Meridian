@@ -14,7 +14,7 @@ Reference: docs/DECISIONS.md D-024, D-074, D-076, D-080.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,8 +24,12 @@ from fastapi.testclient import TestClient
 from meridian.api.app import create_app
 from meridian.api.dependencies import get_connection
 from meridian.store.invites import hash_invite_token
+from meridian_client import transport as transport_module
 from meridian_sim import supervisor as supervisor_module
-from meridian_sim.config import RunConfig
+from meridian_sim.config import RunConfig, seed_for_station
+from meridian_sim.fault_schedule import partition_for, schedule_for
+from meridian_sim.faults import PARTITION
+from meridian_sim.ledger import FaultLedger, read_ledger
 from meridian_sim.supervisor import Supervisor
 from meridian_sim.virtual_station import RegistrationNeededError, paths_for
 
@@ -42,6 +46,8 @@ def _no_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
     _station_was_given` covers the scheduling separately, in arithmetic.
     """
     monkeypatch.setattr(supervisor_module, "_sleep", lambda _seconds: None)
+    # The client's own retry backoff, which Stage 21's network faults exercise.
+    monkeypatch.setattr(transport_module, "_sleep", lambda _seconds: None)
 
 
 @pytest.fixture
@@ -256,6 +262,64 @@ def test_the_cadence_is_the_shortest_a_station_was_given(
         fleet.bring_up()
 
         assert fleet.interval_s() > 0
+
+
+LEDGER_ROUNDS = 80
+
+
+def test_the_ledger_is_the_schedule_that_was_printed(
+    started: Any, rollback: Any, tmp_path: Path
+) -> None:
+    """Every window a chaos run opens is written down, and nothing else is (D-189).
+
+    Checked against the schedules the run was drawn from, which can be printed
+    before it starts: a ledger that disagreed with them would be grading the
+    platform against faults that never happened.
+    """
+    count = 4
+    tokens = issue(rollback, count)
+    config = run_config(tmp_path, count, scenario="chaos")
+    book = FaultLedger(tmp_path / "faults.jsonl", config.run_id)
+    start = datetime.now(UTC)
+
+    with Supervisor(config, tokens, started._transport, ledger=book) as fleet:
+        station_ids = fleet.bring_up()
+        for tick in range(LEDGER_ROUNDS):
+            fleet.tick_round(tick, start + timedelta(seconds=30 * tick))
+
+    partition = partition_for(MASTER_SEED, "chaos", count)
+    expected = set()
+    for index in range(1, count + 1):
+        schedule = schedule_for(seed_for_station(MASTER_SEED, index), "chaos")
+        windows = schedule.windows(LEDGER_ROUNDS)
+        if index in partition.members:
+            windows += partition.windows(LEDGER_ROUNDS)
+        expected |= {
+            (f"station:{index}", one.kind, one.first_tick, _closed_on(one.last_tick))
+            for one in windows
+        }
+
+    records = read_ledger(book.path)
+    written = {(one.target, one.kind, one.first_tick, one.last_tick) for one in records}
+
+    assert written == expected
+    assert {one.station_id for one in records} <= set(station_ids)
+    assert all(one.run_id == config.run_id for one in records)
+    assert all(
+        one.detail == {"members": sorted(partition.members)}
+        for one in records
+        if one.kind == PARTITION
+    )
+
+
+def _closed_on(last_tick: int | None) -> int | None:
+    """The round a window's close is written on: the first one it is not in force.
+
+    ``None`` for a window still open when the run's rounds ran out.
+    """
+    if last_tick is None or last_tick + 1 >= LEDGER_ROUNDS:
+        return None
+    return last_tick + 1
 
 
 def _first_restart_tick(fleet: Supervisor) -> int:

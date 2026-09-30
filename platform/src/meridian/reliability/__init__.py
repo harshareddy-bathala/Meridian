@@ -15,7 +15,16 @@ Built by Stage 20 of docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md:
   report, from classified passes however they were read (D-184, D-185);
 * :mod:`~meridian.reliability.live` — the report counted from the live record.
 
-Everything but ``accounting`` and ``live`` imports the standard library only,
+And by Stage 21:
+
+* :mod:`~meridian.reliability.faults` — whether an injected fault was detected
+  and handled, judged from the platform's own records against a run's fault
+  ledger (D-192);
+* :mod:`~meridian.reliability.fault_check` — reads that evidence from the
+  database, and when ``StationOffline`` fired from Prometheus.
+
+Everything but ``accounting``, ``live``, ``faults`` and ``fault_check`` imports
+the standard library only,
 because the snapshot path calls it and may reach no database (D-143, D-180).
 This package's ``__init__`` therefore re-exports nothing: importing it must not
 drag in a module that reads the store.

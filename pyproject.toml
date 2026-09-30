@@ -170,6 +170,10 @@ convention = "google"
 "deploy/tools/backup.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/restore.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/compose_db.py" = ["T201", "D", "ANN", "PLR", "C90"]
+# chaos.py is the same kind of host script, and imports compose_db the same way (D-194).
+"deploy/tools/chaos.py" = ["T201", "D", "ANN", "PLR", "C90"]
+"deploy/tools/scale_probe.py" = ["T201", "D", "ANN", "PLR", "C90"]
+"deploy/tools/long_run.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/rotate_secret.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/restore_drill.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/scheduled_backup.py" = ["T201", "D", "ANN", "PLR", "C90"]

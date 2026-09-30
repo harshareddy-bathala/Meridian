@@ -17,29 +17,42 @@ A station that stops — today only a revoked token (D-024) — is retired from 
 round and the others carry on. The run ends when every station has stopped, or
 when the caller's round budget runs out.
 
-Reference: docs/DECISIONS.md D-024, D-069, D-074, D-076, D-080.
+**Every fault is written to the run's ledger as it opens and closes** (D-189),
+along with the assignments it acted on. The supervisor is the one place that
+knows both what is scheduled to break and which station it broke, so it is the
+one place that writes it down.
+
+Reference: docs/DECISIONS.md D-024, D-069, D-074, D-076, D-080, D-188, D-189.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
 from meridian_sim.config import RunConfig, seed_for_station
-from meridian_sim.faults import (
-    FaultInjectingTransport,
+from meridian_sim.fault_notes import FaultNotes
+from meridian_sim.fault_schedule import (
     FaultSchedule,
-    FaultState,
+    FleetPartition,
+    partition_for,
     schedule_for,
 )
+from meridian_sim.faults import (
+    DECLINES,
+    PARTITION,
+    FaultInjectingTransport,
+    FaultState,
+)
+from meridian_sim.ledger import FaultLedger
 from meridian_sim.virtual_station import VirtualStation, register_or_resume
 
-__all__ = ["RoundOutcome", "Supervisor"]
+__all__ = ["RoundObserver", "RoundOutcome", "Supervisor"]
 
 _log = logging.getLogger(__name__)
 
@@ -72,6 +85,18 @@ class RoundOutcome:
     submitted: tuple[str, ...]
     """Assignments the platform acknowledged across the whole fleet."""
 
+    heard: tuple[int, ...] = ()
+    """Stations whose heartbeat the platform answered this round, by index.
+
+    Narrower than :attr:`ticked`: a station that ticked through an outage, or
+    was refused, ran its loop and was not heard.
+    """
+
+
+RoundObserver = Callable[[RoundOutcome, float], None]
+"""Called after every round of :meth:`Supervisor.run` with what it did and how
+many seconds it took — the scale report's only source (Stage 21)."""
+
 
 @dataclass
 class _Member:
@@ -81,6 +106,8 @@ class _Member:
     station: VirtualStation
     schedule: FaultSchedule
     faults: FaultState = field(default_factory=FaultState)
+    previous: frozenset[str] = frozenset()
+    """What was in force on the last round, to see a fault open and close."""
 
 
 class Supervisor:
@@ -95,6 +122,8 @@ class Supervisor:
         http_transport: Where the bytes go beneath the fault injector. Defaults
             to a real network connection; a test supplies one reaching the
             platform in-process.
+        ledger: Where the faults this run injects are written. ``None`` writes
+            nothing, which a clean run and most tests want.
     """
 
     def __init__(
@@ -102,12 +131,15 @@ class Supervisor:
         config: RunConfig,
         invite_tokens: Sequence[str] = (),
         http_transport: httpx.BaseTransport | None = None,
+        ledger: FaultLedger | None = None,
     ) -> None:
         """Prepare a fleet. Nothing registers until :meth:`bring_up`."""
         self._config = config
         self._invite_tokens = tuple(invite_tokens)
         self._http_transport = http_transport
+        self._notes = FaultNotes(ledger)
         self._members: list[_Member] = []
+        self._partition = FleetPartition()
 
     def bring_up(self) -> tuple[str, ...]:
         """Register or resume every station, in index order.
@@ -127,6 +159,14 @@ class Supervisor:
         """
         for index in range(1, self._config.station_count + 1):
             self._members.append(self._member_for(index))
+        self._partition = partition_for(
+            self._config.master_seed,
+            self._config.scenario,
+            self._config.station_count,
+        )
+        self._notes.partition = self._partition
+        if self._notes.ledger is not None:
+            self._notes.ledger.close_dangling(datetime.now(UTC))
         return tuple(one.station.station_id for one in self._members)
 
     def tick_round(self, tick: int, now: datetime) -> RoundOutcome:
@@ -135,24 +175,49 @@ class Supervisor:
         Args:
             tick: Which round, counting from zero. The fault schedules are
                 functions of this.
-            now: The instant to hand each station's loop.
+            now: The true instant. Each station's loop is handed it plus its
+                clock's error, which is zero unless its clock is drifting; the
+                ledger is written in true time, so it can be set against the
+                platform's clock.
 
         Returns:
             What the round did.
         """
         ticked: list[int] = []
+        heard: list[int] = []
         restarted: list[int] = []
         stopped: list[int] = []
         submitted: list[str] = []
 
         for member in list(self._members):
-            member.faults.active = member.schedule.active_at(tick)
+            active = member.schedule.active_at(tick)
+            if self._partition.active_for(member.index, tick):
+                active |= {PARTITION}
+            self._notes.transitions(
+                index=member.index,
+                station=(member.station.station_id, member.station.seed),
+                schedule=member.schedule,
+                was=member.previous,
+                now_active=active,
+                tick=tick,
+                now=now,
+            )
+            member.previous = active
+            member.faults.active = active
             if member.schedule.restarts_at(tick):
                 self._restart(member)
                 restarted.append(member.index)
                 continue
-            outcome = member.station.tick(now)
+            station_now = now + timedelta(seconds=member.schedule.clock_error_s(tick))
+            if DECLINES in active:
+                declined = member.station.decline(station_now)
+                acts = ((DECLINES, one) for one in declined)
+                self._notes.acts(member.index, acts, tick, now)
+            outcome = member.station.tick(station_now)
+            self._notes.acts(member.index, member.station.take_faulted(), tick, now)
             ticked.append(member.index)
+            if outcome.heartbeat_sent:
+                heard.append(member.index)
             submitted.extend(outcome.submitted)
             if outcome.stop_reason is not None:
                 self._retire(member, outcome.stop_reason)
@@ -164,14 +229,23 @@ class Supervisor:
             restarted=tuple(restarted),
             stopped=tuple(stopped),
             submitted=tuple(submitted),
+            heard=tuple(heard),
         )
 
-    def run(self, *, stop_after_rounds: int | None = None) -> int:
+    def run(
+        self,
+        *,
+        stop_after_rounds: int | None = None,
+        observe: RoundObserver | None = None,
+    ) -> int:
         """Tick the fleet on the platform's cadence until it has nothing left to do.
 
         Args:
             stop_after_rounds: Stop after this many rounds. For tests and for a
                 commissioning run; ``None`` runs until every station has stopped.
+            observe: Told what each round did and how long it took, for a scale
+                report. Called after the round and before the wait, so a slow
+                observer shortens the wait rather than delaying the next round.
 
         Returns:
             How many rounds were run.
@@ -187,7 +261,10 @@ class Supervisor:
         tick = 0
 
         while self._members and (stop_after_rounds is None or tick < stop_after_rounds):
-            self.tick_round(tick, datetime.now(UTC))
+            began = _monotonic()
+            outcome = self.tick_round(tick, datetime.now(UTC))
+            if observe is not None:
+                observe(outcome, _monotonic() - began)
             tick += 1
             due_at = _next_due_at(due_at, interval_s)
             _sleep(max(0.0, due_at - _monotonic()))

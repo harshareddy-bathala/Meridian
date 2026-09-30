@@ -112,6 +112,8 @@ def test_all_expected_tables_exist(conn) -> None:
         "pass_classifications",
         # Stage 18's scheduler runs (0018, D-170).
         "schedule_runs",
+        # Stage 21's record of every revocation and reinstatement (0025, D-196).
+        "assignment_revocations",
         # D-018's four deferred tables, built at Stage 19 once each had a
         # producer and a consumer (0023, D-173, D-174, D-176).
         "noise_measurements",

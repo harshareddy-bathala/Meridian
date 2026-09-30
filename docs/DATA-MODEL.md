@@ -184,7 +184,7 @@ The listening block is stored whole — assignment, satellite, frequency **and m
 
 `clock_offset_s` and `clock_uncertainty_s` are both nullable, and `null` means unknown — never conflated with `0.0`. `EVALUATION.md` §6.1 discards any timing error smaller than the reported uncertainty, which needs both numbers (D-016).
 
-Partitioned on `received_at`, the platform's clock, not the station's `sent_at` (D-013).
+Partitioned on `received_at`, the platform's clock, not the station's `sent_at` (D-013). The MSP handler stamps it, and the station's `last_heartbeat_at`, with the one instant it reconciles the heartbeat at, so a heartbeat and every decision taken from it share one time (D-195).
 
 Retention: **none — raw heartbeats are never dropped**, only compressed after 7 days (D-178). `Registry.was_listening`, the snapshot export and Stage 20's reclassification read raw rows for any window a pass can be asked about, and a count per hour cannot answer them. The `heartbeats_hourly` continuous aggregate serves the reads that need coverage rather than evidence. The 90-day figure planned here was withdrawn when the queries were written down; Stage 33 revisits it with measured volume.
 
@@ -197,6 +197,15 @@ What happened to each settled, scheduled pass, and the evidence it was decided f
 - **`classification`** is one of the eight classes of `meridian.reliability.classification` (D-180, D-181). Whether a class counts as captured, or spends the loss budget, is decided in code from the class, and deliberately not stored as a second column that could disagree with it.
 - **`evidence`** is everything the classification read: each assignment and its state, the report and its revision, whether the station was heard, the registry's listening answer for each assignment, and the receptions D-147 judged the satellite by.
 - **Append-only.** Unique on `(assignment_id, method, config_sha256)`, so a changed rule or parameter writes new rows beside the old, and a re-run writes nothing. See D-182.
+
+### `assignment_revocations`
+Every revocation of an assignment and every reinstatement of one (Stage 21).
+
+`(event_id, assignment_id, station_id, event, reason, at)`
+
+- **One row per event**, written by the same statement that moves the assignment, so an event and the change it records cannot disagree. `event` is `revoked` or `reinstated`; `reason` is `declined` or `offline` on a revocation and null on a reinstatement.
+- **`at` is the platform's instant for the decision**: the scheduling round's `now` for an offline revocation, the heartbeat's for a decline or a reinstatement.
+- **Append-only, and the reason it exists.** A reinstatement clears the assignment's `revoked_reason` and `revoked_at` (D-171), which is right for its state and would otherwise leave no record that the platform ever took the work back. `meridian reliability faults` reads it to show the scheduler replanned while a station was offline (D-196).
 
 ### `products`
 What a station declared it holds from one reception — a waterfall, an image, decoded frames — named by `sha256` (migration `0023`, D-176).
@@ -477,6 +486,7 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `heartbeats.state` (reported) | `idle`, `slewing`, `listening`, `processing`, `degraded`, `maintenance` — MSP §4.2 |
 | `assignments.state` | `issued`, `held`, `in_progress`, `reported`, `expired` — D-008 |
 | `assignments.decision` | `scheduled`, `skipped` |
+| `assignment_revocations.event` / `.reason` | `revoked`, `reinstated` / `declined`, `offline` — D-196 |
 | `pass_classifications.classification` | `successful_reception`, `signal_no_decode`, `confirmed_miss`, `satellite_silent`, `satellite_state_indeterminate`, `station_unavailable`, `station_not_confirmed_listening`, `assignment_declined` — D-180 |
 | `observations.outcome` | the five values of MSP §4.4 — D-010 |
 | `observations.provenance` | `station`, `archive`, `manual` |

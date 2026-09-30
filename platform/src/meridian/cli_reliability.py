@@ -1,8 +1,8 @@
-"""``meridian reliability`` — sweep, classify, report, and explain one pass.
+"""``meridian reliability`` — sweep, classify, report, explain, and judge faults.
 
 Four verbs over the live record, each of which the jobs service also runs or
 the API also serves, so an operator can do by hand what the platform does on
-its own and see the same answer:
+its own and see the same answer — and a fifth that judges a fault run:
 
 * ``sweep`` expires every scheduled assignment whose window closed untaken
   (D-183);
@@ -12,12 +12,14 @@ its own and see the same answer:
   or at a stated instant (D-184, D-185);
 * ``explain <assignment id>`` prints every stored classification of that
   assignment's pass, with the evidence it was decided from. It is how any
-  figure the report prints is traced back to its rows (Stage 20's gate).
+  figure the report prints is traced back to its rows (Stage 20's gate);
+* ``faults --ledger PATH`` judges every fault a run's ledger records against
+  what the platform stored, and exits non-zero if any check failed (D-192).
 
 Every verb takes ``--config``, else :data:`RELIABILITY_CONFIG_ENV`, else the
 defaults, which ``deploy/reliability.toml.example`` spells out.
 
-Reference: docs/DECISIONS.md D-182, D-183, D-184, D-185.
+Reference: docs/DECISIONS.md D-182, D-183, D-184, D-185, D-192.
 """
 
 from __future__ import annotations
@@ -40,6 +42,12 @@ from meridian.reliability.config import (
     load_deployed_reliability_config,
     load_reliability_config,
 )
+from meridian.reliability.fault_check import check_faults, prometheus_alert_history
+from meridian.reliability.faults import (
+    FaultLedgerError,
+    FaultVerdict,
+    read_fault_ledger,
+)
 from meridian.reliability.live import read_live_report
 from meridian.reliability.report import report_lines
 from meridian.store.assignment_expiry import expire_untaken_assignments
@@ -59,7 +67,7 @@ EXIT_FAILED = 1
 def add_reliability_parser(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """Wire ``meridian reliability`` and its four actions."""
+    """Wire ``meridian reliability`` and its five actions."""
     reliability = subcommands.add_parser(
         "reliability",
         help="classify settled passes and report reliability from them",
@@ -90,6 +98,24 @@ def add_reliability_parser(
         "explain", help="print a pass's classification and its evidence"
     )
     explain.add_argument("assignment_id", help="any assignment of the pass")
+    faults = actions.add_parser(
+        "faults", help="judge a fault run's ledger against what was stored"
+    )
+    faults.add_argument(
+        "--ledger",
+        type=Path,
+        required=True,
+        help="the run's fault ledger, or - to read it from standard input",
+    )
+    faults.add_argument(
+        "--prometheus",
+        default=None,
+        metavar="URL",
+        help="also read when StationOffline fired, from this Prometheus",
+    )
+    faults.add_argument(
+        "--json", type=Path, default=None, metavar="PATH", help="also write JSON"
+    )
 
 
 def run_reliability(args: argparse.Namespace) -> int:
@@ -107,6 +133,7 @@ def run_reliability(args: argparse.Namespace) -> int:
         "classify": _classify,
         "report": _report,
         "explain": _explain,
+        "faults": _faults,
     }
     now = datetime.now(UTC)
     try:
@@ -178,6 +205,79 @@ def _explain(
         for line in _explained(one):
             _say(line)
     return 0
+
+
+def _faults(
+    conn: Connection,
+    args: argparse.Namespace,
+    _config: ReliabilityConfig,
+    now: datetime,
+) -> int:
+    try:
+        if str(args.ledger) == "-":
+            # So a ledger on the host can be judged inside the API's container,
+            # whose filesystem is read-only (D-206): piped, not copied in.
+            faults = read_fault_ledger(sys.stdin)
+        else:
+            with args.ledger.open(encoding="utf-8") as handle:
+                faults = read_fault_ledger(handle)
+    except (OSError, FaultLedgerError) as exc:
+        return _refuse("faults", f"cannot read {args.ledger}: {exc}")
+    alerts = prometheus_alert_history(args.prometheus) if args.prometheus else None
+    try:
+        verdicts = check_faults(conn, faults, now=now, alerts=alerts)
+    except (OSError, ValueError) as exc:
+        # A Prometheus that is restarting or slow is a refusal to judge the
+        # alerts, said as one, not a traceback with nothing printed.
+        return _refuse("faults", f"Prometheus did not answer: {exc}")
+    for verdict in verdicts:
+        for line in _judged(verdict):
+            _say(line)
+    failed = sum(not one.passed for one in verdicts)
+    _say(f"{len(verdicts)} faults judged, {failed} failed")
+    if args.json is not None:
+        args.json.write_text(
+            json.dumps([_as_json(one) for one in verdicts], indent=2) + "\n",
+            encoding="utf-8",
+        )
+    return EXIT_FAILED if failed else 0
+
+
+_MARKS = {True: "pass", False: "FAIL", None: "  - "}
+
+
+def _judged(verdict: FaultVerdict) -> list[str]:
+    fault = verdict.fault
+    closed = fault.closed_at.isoformat() if fault.closed_at else "still open"
+    return [
+        f"{'ok  ' if verdict.passed else 'FAIL'} {fault.kind} on {fault.target} "
+        f"({fault.station_id or 'platform'}), {fault.opened_at.isoformat()} … {closed}",
+        *(
+            f"       {_MARKS[one.passed]}  {one.name:<18} {one.detail}"
+            for one in verdict.checks
+        ),
+    ]
+
+
+def _as_json(verdict: FaultVerdict) -> dict[str, object]:
+    fault = verdict.fault
+    return {
+        "run_id": fault.run_id,
+        # Injected, and against a station only the simulator drives: a station
+        # fault's verdict is about simulated work (rule 5). A platform fault
+        # was done to the platform itself, which is not simulated.
+        "simulated": not fault.on_platform,
+        "kind": fault.kind,
+        "target": fault.target,
+        "station_id": fault.station_id,
+        "opened_at": fault.opened_at.isoformat(),
+        "closed_at": fault.closed_at.isoformat() if fault.closed_at else None,
+        "passed": verdict.passed,
+        "checks": [
+            {"name": one.name, "passed": one.passed, "detail": one.detail}
+            for one in verdict.checks
+        ],
+    }
 
 
 def _explained(one: StoredClassification) -> list[str]:

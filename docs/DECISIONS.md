@@ -3765,6 +3765,8 @@ Neither is a yield label (D-149), so neither reaches a model as a negative. A re
 
 *Amended by D-181:* these two rules now live in `meridian.reliability.classification`, first in its table, so the live accounting (D-182) reads a revoked pass exactly as the labeller does, and never as a miss.
 
+*Amended by D-196:* every revocation and reinstatement is also written to `assignment_revocations` (migration 0025), because a reinstatement clears the assignment's `revoked_reason` and would otherwise leave no record that the work was ever taken back.
+
 This amends D-022, D-026 and MSP §4.2's reconciliation table. The wire protocol is unchanged: no message is added, and a station that never declines sees no difference.
 
 ---
@@ -4036,6 +4038,281 @@ A figure the platform cannot give is never a zero or a bare null (D-086).
 **The reliability file is read once per process** and kept, as the collector reads it. A request costs no file read, and an edit takes effect when the API and the jobs service restart together, not in one while the other classifies under the old file. A file that is refused is a `server_error` naming the configuration, with the reason in the platform's log.
 
 **Counted on each request, with no cache.** Availability reads every heartbeat in the window, which for one station is tens of thousands of rows. Stage 21 measures API latency at fifty stations. If this endpoint is slow there, a short cache here is the remedy, and Stage 23's per-endpoint rate limits cover it meanwhile.
+
+---
+
+## D-188 — Stage 21's station faults, each injected where the real one happens
+
+**2026-09-29 · accepted** · *`meridian_sim/{faults,supervisor,executor,virtual_station}.py`; `meridian_client/held_assignments.py`, Stage 21.*
+
+Stage 10's five faults already cover four of the roadmap's list: station disconnect (`network_down`), observation upload delay (`upload_blocked`), client restart (`restart`) and invalid token (`token_revoked`). Stage 21 adds six. Each is injected at the layer where the real failure happens, for D-074's reason: a fault faked above the code under test tests a rehearsal of it.
+
+| Roadmap fault | Kind | Injected |
+|---|---|---|
+| heartbeat delay | `heartbeat_delayed` | beneath the client: only `POST /heartbeat` fails, for one to five ticks |
+| network partition | `partition` | beneath the client, like `network_down`, but scheduled for a seeded share of the fleet at once |
+| slow API | `slow_api` | beneath the client: the request is forwarded and committed, then the response is lost to a read timeout |
+| clock drift | `clock_drift` | the station's loop is handed `now` plus an error growing 0.5–3 s per tick; the window closing is a resync |
+| degraded decoder | `decoder_degraded` | in the executor: `decoded` becomes `signal_no_decode`, and the signal block stays |
+| assignment rejection | `declines` | in the held record: 30% of held, not yet begun work is released, drawn from the station's seed and the assignment's id |
+
+**Stage 10's schedules do not move.** Its four recurring kinds share one seeded stream in a fixed order, so a new kind drawn from that stream would change every schedule already drawn from it, and every earlier run's seed would stop meaning that run. Each new kind is drawn from a stream of its own, `"{seed}:{scenario}:{kind}"`. A unit test pins a hash of every Stage 10 scenario's schedule, computed from Stage 10's own code.
+
+**A partition belongs to the fleet.** Its members are drawn from the master seed and the station count, and every member is cut off on the same ticks. The point is correlated loss that the scheduler has to route around. Independent outages that happened to coincide would test that only by accident. Its members depend on the count; station 1's own schedule still does not.
+
+**A decline is a release, not a message.** MSP has no decline message (D-003). A station declines by no longer naming work in `held_assignments`, so the reference client gains `AssignmentRecord.release`, written to disk before it returns, like `accept`. A real station may use it too. Drawing from the station's seed and the assignment's id means a restarted station declines the same work. **Only work a heartbeat has already named can be declined:** MSP §4.2 reads work that was delivered and never named as not yet arrived, and offers it again, so releasing it is not a decline and the ledger must not record it as one. Stage 21's gate found the simulator doing exactly that.
+
+**`chaos` is every recurring fault, and `faulty` is unchanged.** Like `faulty`, `chaos` leaves out `token_revoked`, because a fleet that dies of old age tests nothing after the first hour. It is the scenario the long run injects.
+
+*Rejected:* adding the new kinds to Stage 10's stream, which is simpler and silently re-draws every earlier run. Also rejected: a decline message in MSP, which D-003 already refused. And a clock fault in the client's time source, which the loop does not consult: it takes `now` from its caller, and that is where a real station's wrong clock enters too.
+
+---
+
+## D-189 — The fault ledger: ground truth kept by the run, never by the platform
+
+**2026-09-29 · accepted** · *`meridian_sim/ledger.py`; `python -m meridian_sim.station --ledger`, Stage 21. Extends D-105.*
+
+What a run injected is written to a **ledger** in the run's state directory (`faults.jsonl` by default). The ledger is an append-only JSON-lines file with three kinds of line:
+- **`open`** — a fault came into force on a target;
+- **`close`** — it stopped;
+- **`act`** — it did something to named assignments: work released by a decline, a pass a dead receiver never began, a decode that failed.
+
+Every line carries the format version, the run, the kind, the target (`station:<index>` or `platform:<component>`) and a UTC instant. The instant is the true one, so a drifting clock does not skew it.
+
+**The ledger is never sent over MSP and never stored in the platform's database.** It is D-105's rule for Stage 25's causes, applied from the start. A platform that could read what was done to it would be graded against its own answer key. The platform proves what it detected from its own records, and the verifier joins that proof to the ledger afterwards (D-192).
+
+**It is flushed and synced per line.** A fault is rare next to a heartbeat. A run that dies part-way leaves a ledger that is true up to the moment it died, so it still has the line for the fault that killed the run.
+
+**The ledger agrees with the schedule.** `FaultSchedule.windows` prints a run's faults before it runs. An MSP conformance test runs a four-station `chaos` fleet for eighty rounds, and checks that every window the ledger opened and closed is one the schedules printed, on the rounds they printed. A positive control, deleting the closes, makes that test fail.
+
+**A reader refuses what it does not understand.** A line in another version, an unknown event, a close with no open, or a mistyped field fails the whole read. A verifier that skipped such lines would grade the platform against only part of the truth. The platform parses the format independently, because `meridian-sim` and `meridian` share no code (D-138), and `ledger.py`'s docstring is the definition.
+
+*Rejected:* a `faults` table in the platform database, which is the answer key in the examinee's hands and a migration nothing else needs. Also rejected: faults sent in the heartbeat's `health` object, which is on MSP.
+
+**A restarted run closes what its last process left open.** The simulator appends to one ledger across restarts, under a stable run id. A process that died wrote no `close` for the faults it had in force, and its successor would open the same fault on the same station again, which every reader refuses as a lost line. So the supervisor closes every open window of its run, marked `ended: restart`, before it ticks. A station fault that names no station is refused like any other malformed line, never skipped. (Stage 21's code review.)
+
+---
+
+## D-190 — A fault's expected detection is decided by the verifier, from its length
+
+**2026-09-29 · accepted** · *`meridian_sim/faults.py` (`heartbeat_delayed`), with `meridian.reliability.faults` in Stage 21.*
+
+The ledger records **what was done and for how long**, not what the platform should conclude. A delayed heartbeat of one tick should read `stale` at most and cost the station nothing. A gap of three ticks should read `offline` within ninety seconds, and the station's unbegun work should be revoked. Which case a window is follows from its length, the heartbeat interval and the liveness thresholds.
+
+Those thresholds live in `meridian.registry.liveness`, fixed by SC-5 (D-013). The simulator does not import the platform (D-138), so if it predicted the verdict it would need a second copy of 60 and 90 that could drift from the first. The verifier reads the window from the ledger and applies the platform's own constants.
+
+---
+
+## D-191 — A slow platform is a response lost after the commit
+
+**2026-09-29 · accepted** · *`meridian_sim/faults.py` (`slow_api`), Stage 21.*
+
+In the station fleet, the roadmap's "slow API" is injected as its worst consequence rather than as a delay. The request reaches the platform and is committed, and the response is then lost to `httpx.ReadTimeout`. The station believes a stored request was lost, and resends it on its next tick. That is exactly the case idempotency exists for. An observation is identified by a derived id (D-027), and its revisions are append-only (D-015), so the platform must store it once.
+
+A delay short of the client's timeout changes nothing the platform can observe, except the latency that Stage 21's scale runs already measure. Real latency, from pausing the API container, is injected by the host tool as a platform fault.
+
+---
+
+## D-192 — A fault is judged from the platform's own records, against the ledger, afterwards
+
+**2026-09-29 · accepted** · *`meridian/reliability/{faults,fault_check}.py`; `meridian/store/fault_evidence.py`; `meridian reliability faults`, Stage 21.*
+
+`meridian reliability faults --ledger PATH` reads a run's fault ledger (D-189) and asks, for each fault, the roadmap's questions. Every answer comes from what the platform stored — heartbeats, assignments with their revocations and redecisions, scheduling rounds, and classifications — never from anything the platform was told about the fault.
+
+| Check | Asked of | Passes when |
+|---|---|---|
+| `held` | faults that stop heartbeats | no heartbeat was stored inside the window: the silence the ledger claims is the one the platform saw |
+| `detected` | faults that stop heartbeats | a silence of ninety seconds or more read `offline` within SC-5's ninety seconds of the fault; a shorter one correctly never did (D-190) |
+| `no_new_work` | a station that went offline | nothing was decided for it between going offline and being heard again (D-166) |
+| `replanned` | a station offline while a recorded round ran | every piece of work decided before it went offline, and starting after that round, was revoked as `offline` inside *this* outage (D-171), read from the revocation history (D-196). The verdict reports how many passes were decided again. For a station that was silent but never offline, it fails if anything of its was revoked as offline in the gap |
+| `no_false_miss` | faults that remove listening evidence, withhold a report or decline work | no pass the fault touched is a *false* `confirmed_miss`: one the ledger says the station never listened to (a dead receiver, a decline), or one the platform holds a report of (CLAUDE.md rule 7). A pass the station listened to and never reported, lost to a restart or an unsent queue, was missed, and saying so is true |
+| `declines_honoured` | `declines` | each assignment let go of was revoked as `declined`, where the platform heard the station again before the work's window opened. Later than that, MSP §4.2 makes it `expired`, which is also honoured |
+| `recovered` | faults that stop heartbeats, once closed | a heartbeat within ninety seconds of the end of every silencing fault overlapping this one on the station. For the platform's faults, a heartbeat from any station; for the scheduler, a round within fifteen minutes (`ScheduledTaskStalled`'s own threshold) |
+| `alerted` | with `--prometheus`, a station that went offline | `StationOffline` fired, and how long after the fault |
+
+**A check that does not apply is `None`, not a pass.** A verdict passes when no check failed. The output marks the inapplicable checks with a dash, so a run is never reported as having passed a question it was not asked.
+
+**Detection is derived, and the verdict says so.** Liveness is computed on read (D-054), so a station silent for ninety seconds is offline, to every reader, at the ninetieth second. The `detected` check is therefore arithmetic about stored heartbeats. What it proves is that the silence was real (`held`), and that everything downstream acted on it (`no_new_work`, `replanned`, `no_false_miss`). The measured half of SC-5 is the alert: scrape interval plus rule evaluation on top of the ninety seconds, read from Prometheus.
+
+**Read independently of the simulator.** The platform cannot import `meridian_sim` (D-138), so it has its own ledger reader. A unit test reads a ledger the simulator wrote, so a divergence between the two readers fails a test rather than a run. A line either reader cannot read fails the whole read, for D-189's reason.
+
+**A decision's instant is its run's `decided_at`**, the `now` the scheduler judged liveness at (D-170), and only a decision with no run falls back to `issued_at`. A pass classified under several configurations reads as a miss if any one of them says so.
+
+**A round is on the record when it left one:** a run, because it decided something (D-170), or an offline revocation (D-196). A round that did neither wrote nothing, and the verdict cannot hold the platform to a round it cannot see, so `replanned` does not apply to an outage with no recorded round. A revocation at the very instant a heartbeat arrived belongs to the gap before that heartbeat: the round judged liveness first, when the station had been silent ninety seconds.
+
+**What the real stack corrected** (Stage 21's rehearsal, D-198). Judged against a real stack, the first version failed sixteen faults that the platform had handled correctly. Each failure was a question asked wrongly:
+- **Work is owed a revocation only if it was still the station's.** Work revoked in an earlier outage and never given back had nothing left to revoke. The in-process gate never met this, because its stations always came back holding their work.
+- **A round owes an outage only if the station was still silent when the round finished reading.** A round begins, generates passes, and only then reads liveness: ten seconds, at ten stations. A station heard in between was back, and leaving its work was right. A run's `created_at` says when its reads were done; a round known only by its revocations is allowed sixty seconds.
+- **`StationOffline` times a fault only when it rose for that station.** The alert is summed over the fleet (D-197). If it was already firing, or rose before this station read offline, it was another station's, and the check says "not attributable" instead of reporting a latency of nothing.
+
+With these, the same run's record judged 347 faults and failed none. Where the alert could be attributed, it fired 10 to 80 seconds after the fault: the median was 10 seconds after the station read offline, and the most was 50 seconds after.
+
+**What the code review corrected:**
+- **Evidence reaches the end of the combined outage.** Recovery is measured from the end of every overlapping silencing fault, so its heartbeats are read up to there, not only to five minutes past this fault's close.
+- **A brief offline spell is owed no alert.** A spell shorter than sixty seconds can pass between a scrape and a rule evaluation, each every fifteen seconds, on a platform that is working correctly.
+- **The alert history is read once for the whole run,** in twelve-hour chunks under Prometheus's point limit, and each fault finds its own window in it. Faults are grouped by station once, not searched for per fault.
+- **A Prometheus that does not answer is a refusal,** said as one.
+
+*Rejected:* storing the verdicts in a table, which would put ground truth's shadow in the database D-189 keeps it out of; the verdict is printed and optionally written as JSON beside the ledger. Also rejected: judging detection from the dashboard's liveness at the moment of reading, which answers "is it offline now", not "when did it become so".
+
+---
+
+## D-193 — The pool checks a connection as it lends it
+
+**2026-09-29 · accepted** · *`meridian/store/pool.py`, Stage 21. The pool itself is Stage 2's, and no earlier entry recorded it.*
+
+When the database restarts, every idle connection in the API's pool dies with it. psycopg_pool learns that a connection is dead only when someone uses it. So without a check, each dead connection failed the request that borrowed it — **up to eight refused MSP requests per database restart**, one for each connection `POOL_MAX_SIZE` allows. Stage 21's database-restart fault found this. A probe that terminates the pool's backends shows the first request failing with `AdminShutdown` and the rest succeeding.
+
+The pool is now built with `check=ConnectionPool.check_connection`, which tests a connection before lending it and replaces it if it is dead. The same probe then fails nothing. `tests/integration/test_pool.py` terminates the pool's warm connections and requires every following request to succeed; without the check, that test fails.
+
+**The cost** is one round trip on the local socket per borrow. Against a heartbeat's own transaction that is noise, and it buys a database restart that costs no station a refused request.
+
+*Rejected:* retrying a failed request inside the API, which would need every handler to know which failures are safe to repeat. Also rejected: a short `max_idle` on the pool, which narrows the window but does not close it — a restart can land inside any interval.
+
+---
+
+## D-194 — Platform faults are injected from the host, by an operator's tool
+
+**2026-09-29 · accepted** · *`deploy/tools/chaos.py`; the CI step "The platform survives its own faults"; `tests/msp_conformance/test_platform_restart.py`; `tests/unit/test_jobs_rounds.py`, Stage 21.*
+
+Four of the roadmap's faults are the platform's own, not a station's:
+
+| Fault | Injected as |
+|---|---|
+| platform restart | `docker compose restart api` |
+| database restart | `docker compose restart db` |
+| scheduler failure | `docker compose stop jobs`, a wait, then `start jobs` |
+| slow API | `docker compose pause api`, 20 s by default, then `unpause api` |
+
+For slow API, 20 s is past the client's 10 s read timeout and short of `stale`.
+
+**From the host, not from the simulator.** The simulator speaks only MSP (D-075), and a simulator that could restart the platform could do anything else to it. `chaos.py` is a stdlib host script beside `backup.py` and `restore.py`. It addresses the stack the way they do (D-115), and does what an operator would do by hand.
+
+**The same ledger, in the same format.** Each fault is a window opened before the break and closed after the mend, with target `platform:<service>`, in the run's fault ledger (D-189). The two packages share no code, so a unit test reads every line the tool writes with the simulator's own reader.
+
+**A mend always runs.** Starting the service again sits in a `finally`: a tool that stopped the scheduler and then failed must not leave it stopped. And a window is always closed, even when the break itself failed.
+
+**`run` draws a seeded schedule.** Faults are spaced exponentially, an hour apart on average and never less than fifteen minutes after the previous one ends. The run then injects them in turn. `--plan` prints the schedule and does nothing, so the long run's faults can be read before it starts.
+
+**What CI proves, and where.**
+- **Against the real stack:** CI's `compose` job injects all four faults against the running stack with a simulated station. It then requires:
+  - the simulator still running, and never restarted;
+  - no station registered twice;
+  - heartbeats being stored again;
+  - four closed windows in the ledger.
+- **In process:** a fleet lives through the API process stopping and a new one starting on the same database. A failed scheduling round costs that round and nothing more. D-193's pool test covers the database restart.
+
+*Rejected:* a fault endpoint in the platform, which would be a way to break production shipped in production.
+
+---
+
+## D-195 — One heartbeat has one time: the handler's
+
+**2026-09-29 · accepted** · *`meridian/api/msp/heartbeat.py`; `meridian/store/{heartbeats,assignments}.py`, Stage 21. Amends the reasoning in `insert_heartbeat`'s docstring.*
+
+The heartbeat handler reads the platform's clock once (`platform_clock.utc_now()`) and reconciles held work, revocations and reinstatements at that instant. Until now it stored the heartbeat row, and bumped `stations.last_heartbeat_at`, with the database's `now()` — the transaction's start. Two clocks for one event, a few milliseconds apart in production, and, in a test running inside one transaction, the same frozen instant for every heartbeat.
+
+Both are now stamped with the handler's instant, and so are the two decisions the heartbeat makes from the clock: which overdue work expires, and which work is due for delivery. `insert_heartbeat`, `touch_last_heartbeat`, `expire_overdue_assignments` and `find_due_assignments` take it as an optional argument, and without one they fall back to `now()`, as before. The gate found the last two: on a stated clock, every assignment read as long past and was never delivered. The column is still the platform's clock and never the station's `sent_at`, which was the reason the original docstring gave for leaving it to the default.
+
+**Why Stage 21 needed it.** Its gate drives a fleet through real MSP on a stated clock, so that a ninety-second silence can be judged without waiting ninety seconds. That is only possible if the time the platform stores is the time it was told, and it is the same substitution `platform_clock` was written to allow. A conformance test stamps a heartbeat at a stated instant and requires the row, the station's last-seen instant and the response to carry it. It fails if the handler stops passing its instant.
+
+---
+
+## D-196 — Every revocation and reinstatement is kept, in `assignment_revocations`
+
+**2026-09-29 · accepted** · *`deploy/migrations/sql/0025_assignment_revocations.sql`; `meridian/store/revocations.py`, Stage 21. Extends D-171.*
+
+D-171's reinstatement gives a revoked assignment back to a station that still names it, and clears the assignment's `revoked_reason` and `revoked_at`. That is right for the assignment's state. It also erases the only record that the platform ever took the work back. Stage 21's gate showed the cost: across one run, sixty offline revocations happened, all sixty were reinstated when their stations returned still holding the work, and the stored record could show none of them. "The scheduler replans" could not be proven from the database, and the platform could not say how often it revoked an offline station's work at all.
+
+**Migration 0025 adds `assignment_revocations`**, append-only, with one row per event:
+- `revoked`, with its reason (`declined` or `offline`), when the work was taken back;
+- `reinstated`, when it was given back.
+
+Each row is written by the statement that moves the assignment — an `update … returning` feeding an `insert` — so an event and the change it records cannot disagree. `at` is the platform's instant for the decision: the round's `now` for an offline revocation, the heartbeat's for a decline or a reinstatement.
+
+**How the verdict uses it.** `replanned` judges each outage by the revocations inside it. A revocation from an earlier outage, since given back, does not count for this one. The unit tests pin that, and the gate's positive control removes one revocation from the history and requires the verdict to fail.
+
+**Numbering.** Migrations are linear and gapless (`tests/unit/test_migration_history.py`). This was written as 0021; Stages 31, 32 and 19 merged first with 0021 to 0024, so it was renumbered **0025**, on 0024, before merging, as GIT-WORKFLOW's migration rule requires of a branch behind main.
+
+*Rejected:* keeping `revoked_reason` through a reinstatement, which would make an assignment's columns describe its past rather than its state, and break 0019's check that a revocation is whole. Also rejected: a log line per revocation, which no verdict can read back.
+
+**Reinstatement compares configurations null-safely.** `assignments.model_config` may be null (0012), and `reinstate_named` tested for later decisions with `=`, which never matches two nulls. So a revoked, null-configuration assignment whose pass had been decided again would have been given back beside the newer decision. It is now `is not distinct from`, as `find_station_work` already was, and a heartbeat-effects test pins it. (Stage 21's code review.)
+
+---
+
+## D-197 — Scale is measured from both sides, and the platform's metrics must not grow with the fleet
+
+**2026-09-29 · accepted** · *`meridian_sim/scale.py` and `--scale-report`; `deploy/tools/scale_probe.py`; `tests/e2e/test_fifty_stations.py`; `docs/SCALE-AND-FAULTS.md`, Stage 21.*
+
+Stage 21 grows the fleet from one station to five, ten and fifty and asks what the platform does under it. Each side reports what only it can see.
+
+- **The fleet's side is `python -m meridian_sim.station --scale-report PATH`.** A recorder, handed to `Supervisor.run` as an observer, counts:
+  - heartbeats answered against heartbeats attempted, and per second against the rate the cadence implies;
+  - rounds that overran the cadence, which is the fleet falling behind rather than the platform;
+  - every station's upload queue on disk, sampled each round.
+
+  A queue that grows under load is the platform failing to keep up in a way no platform metric shows.
+- **The platform's side is `deploy/tools/scale_probe.py`.** It scrapes the API's and the jobs process's `/metrics` every fifteen seconds and compares the first scrape with the last:
+  - request latency per route template, p50 and p95;
+  - heartbeats accepted per second;
+  - the pool's size, fewest idle and most waiting at any sample;
+  - scheduler rounds and solver time p95;
+  - the most `meridian_*` series exposed.
+
+  A quantile is a bucket's upper bound over the run, never an interpolation and never over the process's lifetime. It reads the same endpoints Prometheus scrapes, so no Prometheus is needed to run it.
+
+**The metrics must not grow with the fleet.** Prometheus's cost, and every dashboard's, scales with series, so a label naming a station would make watching fifty stations ten times the work of watching five. `tests/e2e/test_fifty_stations.py` builds the scrape-time collector's families at five stations and again at fifty, doing the same things. It requires the two sets of series to be identical, and non-empty. It also requires that no label value anywhere in the process's registry is a station's id or name. Request metrics are already labelled by route template, never by path.
+
+**Fifty stations through real MSP is a test, in CI.** The same file registers fifty virtual stations through the application, generates passes over the development catalogue, schedules them, and requires:
+- every station heard on every round;
+- none stopped;
+- work held.
+
+It is in process, with D-202's `RATE_LIMITS=off` for accelerated simulations, so it proves function at fifty, not latency.
+
+**Latency is measured against a running platform and recorded, labelled simulated.** It uses `meridian serve` and `meridian jobs run` on the host, the simulator at the real thirty-second cadence, and the probe beside it. `docs/SCALE-AND-FAULTS.md` holds the table, the machine it ran on and the commands that regenerate it. It is a measurement of one machine on one day, and says so; the CI test is what holds at every change.
+
+**Rates are over the time the rounds really took.** The recorder times each round from when it began, and a rate is over the span from the first round to a cadence past the last. The supervisor skips rounds it overran (D-076), so a rate over `rounds × interval` would read fastest under exactly the load it exists to measure. The probe's report says `simulated`, as the fleet's does. (Stage 21's code review.)
+
+*Rejected:* a latency threshold in CI, which would measure the CI runner's neighbours. Also rejected: labelling any metric by station, even for the fleet's own dashboard, which the public API already serves per station without a series each.
+
+---
+
+## D-198 — The long run is a tool that judges itself, rehearsed for two hours before it runs for seventy-two
+
+**2026-09-29 · accepted** · *`deploy/tools/long_run.py`; `chaos.plan`'s `mean_gap_s`; `meridian reliability faults --ledger -`, Stage 21.*
+
+The roadmap's long run is seventy-two hours of the complete stack with simulated stations, recording crashes, restarts, alerts, false positives, data loss, queue growth and resource use. `long_run.py` does it unattended, from the host, and ends by judging what it recorded.
+- **Faults.** It brings the stack up with the `sim` and `metrics` profiles and ten stations under `chaos`, and injects platform faults on `chaos.py`'s seeded plan.
+- **Samples,** every `--sample-every-minutes`:
+  - each container's state, restart count and exit code;
+  - the alerts Prometheus has firing;
+  - the simulator's upload queue;
+  - each container's CPU and memory.
+- **The judgement,** after a settling time:
+  - **False positives** are alerts that fired with no fault in either ledger open, or closed within ten minutes. That is a `for:` of five minutes, plus a scrape and an evaluation.
+  - **Data loss** is anything still queued after the faults have stopped and the stations have had time to drain. Every acknowledged report is keyed on its assignment, so none can be stored twice (D-015).
+  - **Crashes** are restart counts above zero, which only Docker's restart policy produces, and any service not running at the end. `migrate` and `sim-seed` count as healthy when they exited cleanly.
+  - **The verdict** is `meridian reliability faults` over both ledgers, run inside the API container against the run's own Prometheus. So SC-5's alert latency is measured, not derived (D-192). The ledger is piped in, because the container's filesystem is read-only (D-206).
+
+**It exits non-zero on any failure it finds,** so a seventy-two hour run that finished is a pass or a fail, not a directory to interpret.
+
+**An alert is explained only by a fault that could cause it.** Under `chaos` some fault is open on some station almost all the time, so "any fault was open" would explain every alert, and the long run could never report a false positive. Each alert rule lists the fault kinds that can raise it: station silences and platform outages for the station alerts, a database restart for `DatabaseUnavailable`, and so on. An alert no injected fault can raise, such as `SchemaMigrationMismatch`, is always a false positive. A host that slept explains any alert, and fails the run on its own account. (Stage 21's code review.)
+
+**Rehearsed for two hours first.** An hour between platform faults is right for three days and meets one or two in two hours, so a rehearsal passes a shorter mean gap to `chaos.plan`. At twenty minutes, two hours of seed 4471 meets all four platform faults. The rehearsal found three defects in the tool before any could spoil a three-day run:
+- the verdict could not read a ledger inside a read-only container;
+- a service that died and stayed down would have vanished from `compose ps -q` rather than show as failed;
+- **the laptop running it suspended 36 minutes in, and the tool slept through it.** Python's `sleep` does not count time the host was asleep, so the run stalled for two hours, silent, with its stack frozen.
+
+**The rehearsal ran three times.** The first stalled when the laptop suspended; the second was cut by a lid close. That second run's record found the three wrongly asked questions D-192 now records, and the tool now stops the fleet before it copies the ledger, so no fault is judged against heartbeats sent after the copy.
+
+**The third ran clean, and its own judgement failed.** The tool stopped the simulator and then read its ledger through `exec`, which needs the container running. So every station fault's alert looked unexplained, and no station fault was judged. The ledger is now read from the simulator's volume by a one-off container, and a ledger that cannot be read stops the judgement. `compose run`'s narration on stderr no longer mixes into what a command returns, and alerts are read only up to the fleet being stopped, whose own heartbeat alert is the judgement's doing. `--judge-only` judged that run again from the stack it left standing: 414 faults, none failed, no false positives.
+
+**A run on a host that slept is not unattended, and the tool now says so.** Every wait is cut into thirty-second sleeps against the wall clock. A sleep the clock says lasted over two minutes longer than asked is recorded as a pause, and a pause fails the run. Alerts raised by the pause itself are attributed to it, not counted as false positives. The rehearsal was rerun under `systemd-inhibit --what=sleep:idle`, and a seventy-two hour run on a laptop needs the same.
+
+**The seventy-two hour run is Stage 24's acceptance item,** and it is not claimed here. `docs/SCALE-AND-FAULTS.md` records the rehearsal, and will record the long run when it has run.
+
+*Rejected:* running the long run in CI, whose jobs end at six hours. Also rejected: an in-process long run, which would test neither the containers, nor the restarts, nor the alerts.
 
 ---
 
@@ -4961,6 +5238,24 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-178 heartbeats never dropped, an hourly aggregate | `heartbeats_hourly` in migration 0024; `meridian/store/heartbeat_coverage.py`; `GET /api/v1/stations/{id}/uptime`; `dashboard/src/UptimeStrip.tsx` |
 | — the amended entries | D-029 and D-031, each with a note naming its amendment |
 | — the completion gate, and how to run it by hand | `tests/unit/test_deferred_storage_gate.py`; `tests/integration/test_deferred_storage_gate.py`; `OPERATIONS.md` § Stored measurements and profiles |
+
+**Landed 2026-09-29**, building Stage 21's failure injection and scale simulation.
+
+| Decision | Applied to |
+|---|---|
+| D-188 six station faults, each where the real one happens | `meridian_sim/{faults,supervisor,executor,virtual_station}.py`; `meridian_client/held_assignments.py` (`release`) |
+| D-189 the fault ledger | `meridian_sim/{ledger,station}.py`; `tests/msp_conformance/test_simulator_supervisor.py` |
+| D-190 expected detection decided by the verifier | `meridian_sim/faults.py` |
+| D-191 slow API as a response lost after commit | `meridian_sim/faults.py` |
+| D-192 a fault judged from the platform's own records | `meridian/reliability/{faults,fault_check}.py`; `meridian/store/fault_evidence.py`; `meridian/cli_reliability.py` (`faults`); `tests/unit/test_reliability_faults.py` |
+| D-193 the pool checks a connection as it lends it | `meridian/store/pool.py`; `tests/integration/test_pool.py` |
+| D-194 platform faults from the host | `deploy/tools/chaos.py`; `pyproject.toml` (its lint set); `.github/workflows/ci.yml` (the compose job's fault step); `tests/msp_conformance/test_platform_restart.py`; `tests/unit/{test_chaos_tool,test_jobs_rounds}.py` |
+| D-195 one heartbeat, one time | `meridian/api/msp/heartbeat.py`; `meridian/store/{heartbeats,assignments}.py`; `DATA-MODEL.md` (heartbeats); `tests/msp_conformance/test_heartbeat_endpoint.py` |
+| D-196 the revocation history | migration 0025; `meridian/store/{revocations,fault_evidence}.py`; `DATA-MODEL.md`; `tests/integration/{test_heartbeat_effects,test_schedule_run,test_migrations,test_migration_lifecycle}.py` |
+| D-197 scale from both sides, series that do not grow | `meridian_sim/{scale,supervisor,station}.py`; `deploy/tools/scale_probe.py`; `pyproject.toml` (its lint set); `tests/e2e/test_fifty_stations.py`; `tests/unit/{test_scale_probe,test_simulator_scale}.py`; `docs/SCALE-AND-FAULTS.md` |
+| D-198 the long run and its rehearsal | `deploy/tools/{long_run,chaos}.py`; `meridian/cli_reliability.py` (`--ledger -`); `pyproject.toml` (its lint set); `tests/unit/test_long_run.py`; `docs/SCALE-AND-FAULTS.md`; `OPERATIONS.md` § Fault drills, scale runs and the long run |
+| — the completion gate | `tests/integration/test_fault_gate.py`: five stations under `chaos` through real MSP on a stated clock, judged, with two positive controls |
+| — the amended entry | D-171, whose revocations are now kept (D-196) |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

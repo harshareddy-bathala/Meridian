@@ -116,6 +116,12 @@ def open_pool(settings: Settings) -> ConnectionPool[Connection[tuple[object, ...
             "connect_timeout": CONNECT_TIMEOUT_S,
             "options": _session_options(),
         },
+        # A connection is checked as it is lent, not only when it comes back.
+        # After the database restarts, every idle connection in the pool is
+        # dead, and without this each one fails the request that borrows it
+        # before the pool learns so — a restart would cost up to eight refused
+        # heartbeats instead of none (D-193).
+        check=ConnectionPool.check_connection,
         # open=False then open(wait=False), rather than opening in the
         # constructor: the constructor form is deprecated in psycopg_pool 3.2,
         # and it is the form that blocks.

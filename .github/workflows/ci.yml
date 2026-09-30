@@ -519,6 +519,46 @@ jobs:
           echo "::error::no simulated station counted online in /metrics"
           exit 1
 
+      - name: The platform survives its own faults
+        # Stage 21's platform faults, injected by the operator's tool against
+        # the real stack (D-194): the API and the database restarted, the API
+        # paused past a station's request timeout, the scheduler stopped and
+        # started. Afterwards the simulator is still running and never
+        # restarted, nobody registered twice, heartbeats are being stored again,
+        # and every fault is a closed window in the ledger.
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          compose="docker compose -f deploy/docker-compose.yml --profile sim"
+          sql() {
+            $compose exec -T db sh -c \
+              "psql -X -tA -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""
+          }
+          ledger="$RUNNER_TEMP/faults.jsonl"
+          stations=$(sql "select count(*) from stations")
+          python3 deploy/tools/chaos.py inject platform_restart --ledger "$ledger"
+          python3 deploy/tools/chaos.py inject database_restart --ledger "$ledger"
+          python3 deploy/tools/chaos.py inject api_paused --duration 12 --ledger "$ledger"
+          python3 deploy/tools/chaos.py inject scheduler_down --duration 5 --ledger "$ledger"
+
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:8000/healthz >/dev/null && break
+            sleep 2
+          done
+          since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          heard=0
+          for _ in $(seq 1 45); do
+            heard=$(sql "select count(*) from heartbeats where received_at > '$since'" || echo 0)
+            if [ "$heard" -ge 1 ]; then break; fi
+            sleep 2
+          done
+          echo "heartbeats since the faults: $heard"
+          test "$heard" -ge 1
+          test "$(sql "select count(*) from stations")" = "$stations"
+          test "$(docker inspect meridian-simulator-1 \
+            --format '{{.State.Running}} {{.RestartCount}}')" = "true 0"
+          test "$(grep -c '"event": "close"' "$ledger")" = 4
+
       - name: A backup restores to the same rows
         # D-115's round trip, with the tools an operator runs. The simulator and
         # the jobs process are stopped first: anything writing between the count

@@ -958,6 +958,14 @@ def test_an_offline_station_s_work_is_revoked_and_decided_again_on_return(
 
     assert away.revoked == 1
     assert _rows_for(rollback, pass_id)[0][3:5] == ("revoked", "offline")
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select event, reason, at from assignment_revocations"
+            " where station_id = %s",
+            (STATION,),
+        )
+        # D-196: kept, at the round's instant, whatever the assignment does next.
+        assert cur.fetchall() == [("revoked", "offline", BEFORE)]
 
     _heard(rollback, BEFORE)
     back = run_schedule(rollback, SkyfieldOrbitService(), a_request(now=BEFORE))

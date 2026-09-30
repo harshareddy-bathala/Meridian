@@ -243,6 +243,17 @@ def _build_pass(cur: Any, station_id: str, now: datetime) -> int:
     return int(pass_id)
 
 
+def events_of(rollback: Any, assignment_id: str) -> list[tuple[str, str | None]]:
+    """The revocation history of one assignment, oldest first (D-196)."""
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select event, reason from assignment_revocations"
+            " where assignment_id = %s order by at, event_id",
+            (assignment_id,),
+        )
+        return [(event, reason) for event, reason in cur.fetchall()]
+
+
 def state_of(rollback: Any, assignment_id: str) -> str:
     """The stored state of one assignment."""
     with rollback.cursor() as cur:
@@ -367,6 +378,7 @@ def test_a_held_assignment_dropped_before_its_window_is_revoked_as_declined(
 
     assert state_of(rollback, "as_dropped") == "revoked"
     assert reason_of(rollback, "as_dropped") == "declined"
+    assert events_of(rollback, "as_dropped") == [("revoked", "declined")]
     assert body["assignments"] == []
 
 
@@ -410,6 +422,31 @@ def test_an_offline_revocation_decided_again_is_not_reinstated(
     assert state_of(rollback, "as_old") == "revoked"
 
 
+def test_a_null_configuration_decided_again_is_not_reinstated_either(
+    client: TestClient, rollback: Any
+) -> None:
+    """`model_config` may be null; two nulls are the same configuration here."""
+    station = register(client, rollback, simulated=False)
+    for name in ("as_old", "as_newer"):
+        issue_assignment(
+            rollback,
+            station["station_id"],
+            Issued(
+                name, state="revoked", starts_in_minutes=30, revoked_reason="offline"
+            ),
+        )
+    with rollback.cursor() as cur:
+        cur.execute(
+            "update assignments set model_config = null,"
+            " revision = case assignment_id when 'as_newer' then 1 else 0 end"
+            " where assignment_id in ('as_old', 'as_newer')"
+        )
+
+    send_heartbeat(client, station, holding=["as_old"])
+
+    assert state_of(rollback, "as_old") == "revoked"
+
+
 def test_a_held_assignment_dropped_once_under_way_is_not_revoked(
     client: TestClient, rollback: Any
 ) -> None:
@@ -443,6 +480,9 @@ def test_an_offline_revocation_the_returning_station_names_is_reinstated(
         "held",
         None,
     )
+    # D-196: the assignment says held again; the history keeps the return.
+    assert events_of(rollback, "as_kept") == [("reinstated", None)]
+    assert events_of(rollback, "as_forgotten") == []
     assert state_of(rollback, "as_forgotten") == "revoked"
     assert [one["assignment_id"] for one in body["assignments"]] == ["as_kept"]
 

@@ -1153,6 +1153,102 @@ Run the restore drill first if there is time, so you restore a dump that is know
 
 ---
 
+## Fault drills, scale runs and the long run
+
+Stage 21's tools. Every result they produce is **simulated** and is labelled so; `docs/SCALE-AND-FAULTS.md` holds the recorded ones. D-188 to D-198 say why each is built the way it is.
+
+### Station faults
+
+The simulator breaks its own stations, from its seed, under a named scenario, and writes every fault to a ledger in its state directory (`faults.jsonl`, or `--ledger PATH`):
+
+```sh
+python -m meridian_sim.station --scenario chaos --count 10 --ledger faults.jsonl
+```
+
+| Scenario | What breaks |
+|---|---|
+| `network`, `upload`, `restart`, `receiver`, `revoked` | Stage 10's five, one at a time |
+| `heartbeat`, `partition`, `slow`, `drift`, `decoder`, `declines` | Stage 21's six, one at a time (D-188) |
+| `faulty` | Stage 10's four recurring faults together |
+| `chaos` | every recurring fault together; never a revoked token |
+
+The ledger is ground truth and stays on the simulator's side: it is never sent over MSP and never stored in the database (D-189).
+
+### Platform faults
+
+`deploy/tools/chaos.py` breaks the platform from the host, as an operator would, and writes to the same ledger format (D-194):
+
+```sh
+python deploy/tools/chaos.py inject database_restart --ledger faults.jsonl
+python deploy/tools/chaos.py inject scheduler_down --duration 300 --ledger faults.jsonl
+python deploy/tools/chaos.py run --seed 4471 --hours 72 --ledger faults.jsonl --plan
+```
+
+`platform_restart` and `database_restart` restart the service; `scheduler_down` stops the jobs process and starts it again; `api_paused` pauses the API past a station's timeout. The mend always runs, even when the break failed. `--plan` prints a seeded schedule and does nothing.
+
+### Judging a run
+
+```sh
+meridian reliability faults --ledger faults.jsonl [--prometheus http://prometheus:9090] [--json verdict.json]
+```
+
+For every fault in the ledger it prints each question, answered from what the platform stored:
+- `held` — was the silence real?
+- `detected` — offline within ninety seconds, or correctly never?
+- `no_new_work` — was nothing decided for the station while it was offline?
+- `replanned` — was its unbegun work revoked inside the outage?
+- `no_false_miss` — is no confirmed miss one the station did not miss?
+- `declines_honoured` — was every decline revoked?
+- `recovered` — was the station heard again afterwards?
+- `alerted` — when did `StationOffline` fire? Only with `--prometheus`.
+
+A dash is a question that did not apply. It exits 1 if any check failed. Inside a container, whose filesystem is read-only, pipe the ledger in:
+
+```sh
+docker compose exec -T api meridian reliability faults --ledger - < faults.jsonl
+```
+
+**When a check fails.** The detail names the assignments or instants.
+- A `held` failure means the fault did not stop the station's heartbeats, which is a broken injection, not a broken platform.
+- A `replanned` failure lists work a round left to a station that was offline. `meridian reliability explain` and `assignment_revocations` show what happened to it (D-196).
+- A `no_false_miss` failure is a reliability figure counting a miss that did not happen, and is the one to look at first.
+
+### Scale runs
+
+The fleet's side and the platform's, side by side (D-197):
+
+```sh
+python deploy/tools/scale_probe.py --api http://127.0.0.1:8000 --jobs http://127.0.0.1:9464 \
+    --seconds 360 --out probe-50.json &
+python -m meridian_sim.station --count 50 --rounds 12 --scale-report sim-50.json
+```
+
+The probe needs `METRICS_TOKEN`. The jobs process's metrics are on `JOBS_METRICS_PORT`, inside the compose network unless published. `docs/SCALE-AND-FAULTS.md` has the whole procedure and the last results.
+
+**Pass generation is the cost that grows** with stations × satellites: about 16 s per round at fifty stations and two satellites. Check it in the probe's `job_tasks` before adding satellites to the catalogue.
+
+### The long run
+
+`deploy/tools/long_run.py` runs the whole stack for hours: stations under `chaos`, platform faults from `chaos.py`'s seeded plan, and a sample of the stack every `--sample-every-minutes`. It then settles, judges and writes `report.json` (D-198):
+
+```sh
+python deploy/tools/long_run.py --hours 72 --seed 4471 --out runs/long-72h --up --stations 10
+```
+
+`--up` brings the stack up with the `sim` and `metrics` profiles. Run it under its own `--project-name`, with `API_PORT` and `GRAFANA_PORT` set, to keep it away from a stack already running.
+
+It exits 1 on any of:
+- an alert with no fault near it;
+- a container that died on its own, or is not running at the end;
+- observations still queued after settling;
+- a failed verdict.
+
+`--fault-gap-minutes` shortens the mean time between platform faults for a rehearsal: an hour is right for three days and too rare for two hours.
+
+`--judge-only` judges a finished run again from `--out` and the stack it left standing, without re-running it: for a judgement lost to anything but the run. On a laptop, keep the host awake with the lid closed and idle sleep inhibited, or the run fails as not unattended.
+
+---
+
 ## Monitoring
 
 ### Where to look

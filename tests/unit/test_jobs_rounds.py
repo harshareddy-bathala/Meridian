@@ -39,10 +39,12 @@ class _Work:
         self,
         *,
         generation_fails: bool = False,
+        schedule_fails: bool = False,
         profiles_fail: bool = False,
         status: str = "optimal",
     ) -> None:
         self.generation_fails = generation_fails
+        self.schedule_fails = schedule_fails
         self.profiles_fail = profiles_fail
         self.status = status
         self.horizons: list[GenerationHorizon] = []
@@ -62,6 +64,8 @@ class _Work:
 
     def schedule(self, request: ScheduleRequest) -> ScheduleReport:
         self.requests.append(request)
+        if self.schedule_fails:
+            raise RuntimeError("the solver process died")
         return ScheduleReport(
             model_config=request.model_config,
             stations_considered=1,
@@ -182,6 +186,30 @@ def test_a_failed_generation_is_counted_and_scheduling_still_runs(
     assert len(work.requests) == 1
     assert sample("meridian_job_failures_total", PASS_GENERATION) == failures + 1
     assert "pass_generation failed" in caplog.text
+
+
+def test_a_failed_schedule_costs_one_round_and_the_next_one_schedules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage 21's scheduler failure: a round is lost, the scheduler is not.
+
+    Scheduling is idempotent over a horizon (D-063, D-066), so the round after a
+    failure decides everything the failed one would have, and stations go on
+    executing the work they already hold meanwhile.
+    """
+    monkeypatch.setattr(logging.getLogger("meridian.jobs.rounds"), "disabled", False)
+    failures = sample("meridian_job_failures_total", SCHEDULE) or 0.0
+    work = _Work(schedule_fails=True)
+
+    failed = run_round(work, PLAN, NOW)
+    work.schedule_fails = False
+    recovered = run_round(work, PLAN, NOW + timedelta(minutes=5))
+
+    assert failed.generated is not None
+    assert failed.scheduled is None
+    assert recovered.scheduled is not None
+    assert sample("meridian_job_failures_total", SCHEDULE) == failures + 1
+    assert [one.now for one in work.requests] == [NOW, NOW + timedelta(minutes=5)]
 
 
 def test_the_loop_repeats_rounds_until_the_stop_event_is_set() -> None:

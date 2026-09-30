@@ -22,7 +22,7 @@ from meridian_client.execution import PassExecutor
 from meridian_client.observation_message import build_observation_body
 from meridian_sim.config import seed_for_station
 from meridian_sim.executor import SimulatedExecutor
-from meridian_sim.faults import RECEIVER_DOWN, FaultState
+from meridian_sim.faults import DECODER_DEGRADED, RECEIVER_DOWN, FaultState
 
 MASTER_SEED = 4471
 STATION_SEED = seed_for_station(MASTER_SEED, 1)
@@ -297,3 +297,56 @@ def _first_detected() -> object:
         if result.signal is not None:  # type: ignore[attr-defined]
             return result
     raise AssertionError("no detected pass in the sweep")
+
+
+def first_decoded_seed() -> int:
+    """A station seed whose pass over :func:`assignment` decodes when healthy."""
+    for index in range(1, 200):
+        seed = seed_for_station(MASTER_SEED, index)
+        (result,) = run_one(seed, assignment())
+        if result.outcome == "decoded":  # type: ignore[attr-defined]
+            return seed
+    raise AssertionError("no seed decodes this pass")
+
+
+def test_a_degraded_decoder_hears_and_cannot_decode() -> None:
+    """Stage 27's negative control: the signal stays, only the frames go."""
+    seed = first_decoded_seed()
+    work = assignment()
+    executor = SimulatedExecutor(seed, FaultState(active=frozenset({DECODER_DEGRADED})))
+
+    executor.begin(work)
+    executor.end(work)
+    (result,) = executor.take_completed()
+
+    assert result.outcome == "signal_no_decode"
+    assert result.signal is not None
+    assert executor.take_faulted() == ((DECODER_DEGRADED, work.assignment_id),)
+
+
+def test_a_degraded_decoder_leaves_an_undecoded_pass_alone() -> None:
+    """Nothing to degrade, so nothing is recorded as the fault's doing."""
+    work = assignment(elevation_deg=0.5)
+    executor = SimulatedExecutor(
+        STATION_SEED, FaultState(active=frozenset({DECODER_DEGRADED}))
+    )
+
+    executor.begin(work)
+    executor.end(work)
+    (result,) = executor.take_completed()
+
+    assert result.outcome != "decoded"
+    assert executor.take_faulted() == ()
+
+
+def test_a_down_receiver_names_the_pass_it_never_began() -> None:
+    """For the run's ledger, which nothing on MSP may carry (D-189)."""
+    work = assignment()
+    executor = SimulatedExecutor(
+        STATION_SEED, FaultState(active=frozenset({RECEIVER_DOWN}))
+    )
+
+    executor.begin(work)
+
+    assert executor.take_faulted() == ((RECEIVER_DOWN, work.assignment_id),)
+    assert executor.take_faulted() == ()

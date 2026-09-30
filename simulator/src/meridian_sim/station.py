@@ -36,6 +36,8 @@ import httpx
 from meridian_sim import __version__
 from meridian_sim.config import RunConfig
 from meridian_sim.faults import SCENARIOS
+from meridian_sim.ledger import FaultLedger
+from meridian_sim.scale import ScaleRecorder
 from meridian_sim.supervisor import Supervisor
 from meridian_sim.virtual_station import RegistrationNeededError
 
@@ -134,6 +136,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="which faults to inject",
     )
     parser.add_argument(
+        "--ledger",
+        default=_text_env("SIMULATOR_LEDGER", ""),
+        metavar="PATH",
+        help=(
+            "where the faults this run injects are written, one JSON line each; "
+            "defaults to faults.jsonl in the state directory"
+        ),
+    )
+    parser.add_argument(
+        "--scale-report",
+        default=_text_env("SIMULATOR_SCALE_REPORT", ""),
+        metavar="PATH",
+        help="write what the fleet saw of the platform, round by round, as JSON",
+    )
+    parser.add_argument(
         "--invites",
         default=_text_env("SIMULATOR_INVITES_FILE", ""),
         metavar="PATH",
@@ -181,9 +198,30 @@ def _config_from(args: argparse.Namespace) -> RunConfig:
     )
 
 
-def _run(config: RunConfig, invites: list[str], rounds: int | None) -> int:
+LEDGER_FILE = "faults.jsonl"
+"""The ledger's name in the state directory, when ``--ledger`` does not say.
+
+Beside the stations' own directories rather than inside any one of them: a
+partition is the fleet's fault, not a station's (D-189).
+"""
+
+
+def _ledger_for(config: RunConfig, path: str) -> FaultLedger:
+    """The ledger this run appends to."""
+    return FaultLedger(
+        Path(path) if path else config.state_dir / LEDGER_FILE, config.run_id
+    )
+
+
+def _run(
+    config: RunConfig,
+    invites: list[str],
+    rounds: int | None,
+    ledger: FaultLedger,
+    scale_report: str = "",
+) -> int:
     """Bring the fleet up and tick it, reporting anything that stops it."""
-    with Supervisor(config, invites) as supervisor:
+    with Supervisor(config, invites, ledger=ledger) as supervisor:
         try:
             station_ids = supervisor.bring_up()
         except RegistrationNeededError as exc:
@@ -200,10 +238,16 @@ def _run(config: RunConfig, invites: list[str], rounds: int | None) -> int:
             f"{len(station_ids)} station(s) up against {config.base_url}\n"
             f"  run id:   {config.run_id}\n"
             f"  seed:     {config.master_seed}\n"
-            f"  scenario: {config.scenario}",
+            f"  scenario: {config.scenario}\n"
+            f"  ledger:   {ledger.path}",
             file=sys.stderr,
         )
-        supervisor.run(stop_after_rounds=rounds)
+        recorder = ScaleRecorder(config, supervisor.interval_s())
+        try:
+            supervisor.run(stop_after_rounds=rounds, observe=recorder)
+        finally:
+            if scale_report:
+                recorder.write(Path(scale_report))
     return 0
 
 
@@ -239,7 +283,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"meridian_sim.station: {exc}", file=sys.stderr)  # noqa: T201
         return EXIT_FAILED
 
-    return _run(_config_from(args), invites, args.rounds)
+    config = _config_from(args)
+    return _run(
+        config,
+        invites,
+        args.rounds,
+        _ledger_for(config, args.ledger),
+        args.scale_report,
+    )
 
 
 if __name__ == "__main__":
