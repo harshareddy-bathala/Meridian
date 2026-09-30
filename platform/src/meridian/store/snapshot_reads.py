@@ -263,7 +263,7 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
     SnapshotTable(
         "transmitters",
         "select id, satellite_id, centre_freq_hz, mode, polarisation, bandwidth_hz,"
-        " active, source, deleted_at"
+        " active, source, deleted_at, frame_interval_s"
         f" from satellite_transmitters where satellite_id in ({_SCOPED_SATELLITES})"
         " order by id",
     ),

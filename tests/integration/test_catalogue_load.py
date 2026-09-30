@@ -161,6 +161,90 @@ def test_a_repeat_load_does_not_rewrite_a_renamed_satellite(
         assert cur.fetchone()[0] == "Meteor-M2-3"
 
 
+def interval(conn: Any) -> Any:
+    """The frame interval this satellite's one downlink holds."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "select frame_interval_s from satellite_transmitters"
+            " where satellite_id = %s",
+            (SATELLITE_ID,),
+        )
+        return cur.fetchone()[0]
+
+
+def with_interval(seconds: float | None) -> list[dict[str, Any]]:
+    """The one downlink, stating ``seconds`` as its frame interval."""
+    return [{"centre_freq_hz": 137100000, "mode": "lrpt", "frame_interval_s": seconds}]
+
+
+def test_a_new_downlink_is_written_with_its_frame_interval(
+    rollback: Any, tmp_path: Path
+) -> None:
+    load_document(rollback, document(tmp_path, transmitters=with_interval(0.113778)))
+
+    assert interval(rollback) == 0.113778
+
+
+def test_a_repeat_load_fills_an_interval_nobody_had_stated(
+    rollback: Any, tmp_path: Path
+) -> None:
+    """How a deployment loaded before migration 0026 gets its intervals (D-250).
+
+    The downlink is already held, so no row is new; the one column that was
+    unknown is filled, and the tally says so rather than reporting nothing.
+    """
+    load_document(rollback, document(tmp_path))
+    assert interval(rollback) is None
+
+    tally = load_document(
+        rollback, document(tmp_path, transmitters=with_interval(0.113778))
+    )
+
+    assert tally.transmitters_written == 0
+    assert tally.frame_intervals_filled == 1
+    assert not tally.wrote_nothing
+    assert interval(rollback) == 0.113778
+    assert counts(rollback) == (1, 1, 1)
+
+
+def test_a_repeat_load_never_replaces_an_interval_already_held(
+    rollback: Any, tmp_path: Path
+) -> None:
+    """Every ratio computed since rests on it; changing it is an operator's call."""
+    load_document(rollback, document(tmp_path, transmitters=with_interval(0.113778)))
+
+    tally = load_document(
+        rollback, document(tmp_path, transmitters=with_interval(0.1024))
+    )
+
+    assert tally.frame_intervals_filled == 0
+    assert tally.wrote_nothing
+    assert interval(rollback) == 0.113778
+
+
+def test_a_document_stating_no_interval_leaves_a_held_one_alone(
+    rollback: Any, tmp_path: Path
+) -> None:
+    load_document(rollback, document(tmp_path, transmitters=with_interval(0.113778)))
+
+    load_document(rollback, document(tmp_path, transmitters=with_interval(None)))
+
+    assert interval(rollback) == 0.113778
+
+
+def test_the_table_refuses_an_interval_that_is_not_positive(
+    rollback: Any, tmp_path: Path
+) -> None:
+    """The reader refuses one first; the CHECK is there for every other writer."""
+    load_document(rollback, document(tmp_path, transmitters=with_interval(0.113778)))
+    with pytest.raises(psycopg.errors.CheckViolation), rollback.transaction():
+        rollback.execute(
+            "update satellite_transmitters set frame_interval_s = 0"
+            " where satellite_id = %s",
+            (SATELLITE_ID,),
+        )
+
+
 def test_the_shipped_development_catalogue_loads(rollback: Any) -> None:
     """`docker compose --profile sim up` depends on this file reaching the archive.
 
@@ -175,6 +259,7 @@ def test_the_shipped_development_catalogue_loads(rollback: Any) -> None:
     assert tally.transmitters_written == 2
     assert tally.element_sets_written == 2
     assert len(find_active_transmitters(rollback)) >= 2
+    assert interval(rollback) == 0.113778
 
 
 def _checksum_digit(body: str) -> str:

@@ -371,6 +371,24 @@ def test_the_alert_is_the_measured_half_of_sc_5() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "kind", ["signal_degradation", "obstruction", "interference", "satellite_silent"]
+)
+def test_a_ground_truth_fault_asks_none_of_the_liveness_questions(kind: str) -> None:
+    """Stage 25's faults change what a station measures, never whether it is heard.
+
+    A sky run's ledger can go through this judge unchanged: its questions are
+    about a station falling silent, so none that asks about the fault applies,
+    and the verdict passes rather than failing a fault it was never built to
+    score. Stage 27 scores these (D-253).
+    """
+    verdict = judge_station_fault(fault(kind, closed=None), evidence())
+
+    assert verdict.passed
+    for name in ("held", "detected", "no_false_miss", "recovered"):
+        assert check(verdict, name)[0] is None
+
+
 def test_a_verdict_passes_when_nothing_failed() -> None:
     """A check that did not apply is not a failure."""
     assert judge_station_fault(fault(), evidence()).passed

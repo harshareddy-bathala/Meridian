@@ -153,6 +153,12 @@ class RunConfig:
     scenario: str = "clean"
     """Which fault schedule to run under. ``clean`` injects nothing."""
 
+    silent_satellite: str | None = None
+    """The satellite a ``silent`` or ``sky`` run switches off, as the platform's
+    catalogue names it (``norad:57166``). The simulator never sees the catalogue,
+    so the operator names it; a run that must silence one and was given none is
+    refused (D-253)."""
+
 
 def seed_for_station(master_seed: int, index: int) -> int:
     """The seed everything about station ``index`` is derived from.

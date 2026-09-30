@@ -5247,6 +5247,106 @@ The section reports each as a distribution by fault kind: minimum, median, p95 a
 
 ---
 
+## D-250 — A transmitter's nominal frame interval, and frames expected from the pass
+
+**2026-09-30 · accepted** · *Migration 0026; `meridian/catalogue_file.py`, `meridian/store/satellites.py`, `meridian/cli_catalogue.py`, `meridian/observations/frames_expected.py`, `meridian/datasets/frames_expected.py`, Stage 25. Builds what D-104 planned.*
+
+D-103 keeps frames expected off the wire: the platform computes it, so every station's frames ratio has one definition. D-104 said what that needs, a nominal frame interval per transmitter, and left it planned. Four choices make it concrete.
+
+**The column.** `satellite_transmitters.frame_interval_s`, `double precision`, nullable, with no default and a `CHECK` that it is positive. Null means nobody has stated the interval. Existing downlinks stay null through the migration, because a default would put a number nobody looked up into the denominator of every ratio for their passes. It is in seconds, as a float: rounding LRPT's interval to whole milliseconds would put two tenths of a percent of error into every ratio.
+
+**Meteor LRPT's value is derived, not measured.** LRPT sends 72 ksym/s QPSK with rate-½ convolutional coding, which is 72 kbit/s of frames. A frame, the 1024-byte CADU a decoder counts, is 8192 bits. So one frame arrives every 8192 / 72000 = **0.113778 s**, and a ten-minute pass expects 5273. The development catalogue states this value for both Meteor downlinks. Two things could make it wrong, and neither is assumed away:
+- an operator may switch a satellite to its 80 ksym/s mode, where the interval is 0.1024 s. A catalogue that still said 72k would then read every ratio about ten percent high;
+- a decoder may count frames in some other unit.
+
+Both are checked the same way. On station 001, SatDump's frame count for a clean high pass is compared with this denominator, and the comparison is recorded when it is made. Until then the figure is a derivation, and the verdict (Stage 26) learns what a good reception's ratio looks like rather than assuming 1.0.
+
+**A repeat load fills an unknown interval and never replaces a known one.** `meridian catalogue load` never updates a held row (D-079). This column needs one exception, because a deployment that loaded its catalogue before 0026 has to get its intervals by re-running the load it already runs. `fill_frame_interval` writes the column only where it is null, and the tally reports it as `frame intervals: N filled`. An interval already held is not overwritten. Every ratio computed since the interval was set rests on it, so correcting one is an operator's decision with that consequence, taken deliberately.
+
+**"The pass" is acquisition to loss as the platform predicted it.** It is not the assignment's window, which the platform widened by its own timing uncertainty (D-021). Nor is it the station's recording. If the denominator grew with element-set age, an older element set would make every reception look worse. Frames expected rounds down, since a frame cut off by loss of signal was never sent whole. It is an upper bound on purpose, because nothing below the horizon mask is heard. The count is computed by one pure function in `meridian.observations`. The snapshot exports the interval with its transmitter, and `meridian.datasets.frames_expected` reads the count for each assignment from a raw snapshot, which is where Stage 26 will read it. A snapshot exported before 0026 reads as every interval unknown. It is not refused, and its ratios are absent, exactly as for a downlink with no interval today.
+
+*Rejected: storing frames expected on the observation or the pass.* It is arithmetic over two stored facts. A stored copy would disagree with them the first time an interval was filled.
+
+*Rejected: letting a repeat load overwrite the interval.* That is simpler, and it would let an edited file silently change the denominator of every past ratio.
+
+---
+
+## D-251 — Virtual stations report MSP 0.3's evidence, derived from the outcome and drawn apart from it
+
+**2026-09-30 · accepted** · *`meridian_sim/{evidence,executor}.py`, Stage 25. Applies D-103, D-117 and D-122 to the simulator.*
+
+Until now a virtual station sent MSP 0.2's evidence: an outcome, a detection, a peak SNR and Doppler. Stage 25's faults change the evidence a diagnosis reads, so the simulator first has to send that evidence: a noise floor at a gain, SNR across the pass, and the decoder's frame counts. Three rules govern it.
+
+**The outcome decides, and the evidence follows.** `outcomes.decide_outcome` is unchanged. `evidence.evidence_for` takes the outcome and produces what a receiver would have measured, for example:
+- SNR rising from the window's edges to the outcome's own `peak_snr_db` at the middle, and held under the detection bar before the reported first detection;
+- a noise floor that belongs to the station, drawn once from its seed, with half a decibel of jitter per pass;
+- a fixed gain of 30 dB;
+- frames counted from the time SNR spent above each of two bars.
+
+Nothing here can turn one outcome into another. That is a fault's job, and a fault does it by degrading this evidence and recounting by `count_frames`, the same rule. So the evidence cannot contradict the outcome, and D-117's checks hold by construction.
+
+**Drawn from a stream of its own, in a fixed order.** The stream is seeded on the pass seed plus `evidence`, and makes the same number of draws whatever the outcome. Every outcome any seed already gave is unchanged. Only the wire body grew, which moves the executor's regression digest once, deliberately. A fault that later changes an outcome moves no sample.
+
+**The reference client's shape for a pass that heard nothing.** A `no_signal` pass reports `detected: false` with its floor, gain and SNR series, plus a decode block that counted zero frames. This is what `outcome_rules` sends for a real station (D-122). A silent satellite and a raised floor then look different in the evidence, which is the only place they can. An `aborted` pass still reports nothing, because its decoder never finished.
+
+**The decoder is `meridian-sim`, and its version is the model's, `evidence-1`.** Calibration is segmented by decoder and version (EVALUATION.md §11.1). The new decoder name keeps simulated statistics out of every real decoder's segment. The version means a later change to this model reads as a new decoder rather than a drift in the old one.
+
+**Every figure is illustrative, and D-078 still binds.** The 5 dB decoding bar, the 20 dB fall to the window's edges and the range of floors are shapes chosen to be legible, not measurements. A simulated observation stays excluded from every training and evaluation set, and its evidence does too. What the evidence may be used for is the narrower claim D-105 allows.
+
+*Rejected: deriving the outcome from a simulated link budget.* It would be a better model, and it would change every outcome every existing seed gave. The Stage 10 to 21 results depend on those outcomes. It would also make the simulator's truth a second prediction model beside the real one.
+
+---
+
+## D-252 — The simulator computes its own pass track with Skyfield, in one exempted module
+
+**2026-09-30 · accepted** · *`simulator/pyproject.toml`, `meridian_sim/sky_track.py`, `pyproject.toml` (the per-file exemption), `ARCHITECTURE.md` rule 2, Stage 25. Amends rule 2's reach; does not relax it for the platform.*
+
+Two of Stage 25's faults happen in a part of the sky. An obstruction blocks a sector below an elevation, and an interference source raises the floor in a sector for some hours. A virtual station can only apply them if it knows where in its sky each sample of a pass was. The assignment carries the element set inline (MSP §4.3), and the station knows its own site, so the direction is computable. The question is with what.
+
+**Skyfield, as the platform uses it, in one module.** `meridian_sim/sky_track.py` is the only simulator module that imports it. The ruff ban on `sgp4` and `skyfield` stays global, with one more per-file exemption beside `platform/src/meridian/orbit/**`, so CI still enforces the boundary. The timescale comes from Skyfield's bundled data, so nothing is fetched. `tests/unit/test_simulator_sky_track.py` checks it against `SkyfieldOrbitService.pass_windows` at rise, culmination and set, to 0.01°. That test is what makes the ground truth trustworthy: an obstruction the simulator injected is in the sector the platform's profiles will look at.
+
+**Why not the platform's orbit service.** `meridian-sim` shares no code with `meridian` (D-138), for the same reason the client does not. A virtual station is a station, and it speaks MSP rather than importing the platform. Stage 10's own claim, that the simulator is not a mock, rests on that line.
+
+**Why rule 2 still reads as it did.** Rule 2 exists so that a propagator change inside the platform never ripples beyond `meridian.orbit`. The simulator is outside the platform, and a real station that points an antenna has always had to propagate. The rule now says so in `ARCHITECTURE.md` rather than being quietly broken. The reference client does not gain the dependency: it still installs with `httpx` alone.
+
+*Rejected: a hand-written track from the pass's rise and set azimuths.* It would break hard rule 1 in spirit, since it amounts to a second, cruder propagator. The obstruction's ground truth would then be wherever that approximation put the satellite.
+
+*Rejected: sending azimuths in the assignment.* That is a protocol change made for the simulator's convenience, and a microcontroller station would carry it for nothing.
+
+---
+
+## D-253 — Four faults with ground-truth causes, specified before the diagnosis that will be scored on them
+
+**2026-09-30 · accepted** · *`meridian_sim/{faults,sky_faults,sky_effects,fleet_faults,fault_notes,fault_schedule,supervisor,executor}.py`; `docs/SCALE-AND-FAULTS.md` § Ground-truth faults, the specification; Stage 25. Applies D-105 and D-189.*
+
+The roadmap asks for four faults whose causes are known, for Stage 27's diagnosis and Stage 28's health watch to be scored against:
+- a gradual signal degradation;
+- a new obstruction;
+- interference;
+- a silent satellite.
+
+Their effects are specified in `docs/SCALE-AND-FAULTS.md` § Ground-truth faults. That document, not this entry, is the text the independent review reads. The decisions behind it:
+
+**They act on evidence, and the outcome follows.** Each fault changes the SNR samples or the noise floor D-251 draws. The outcome is then derived again from what survives, by the same frame count every pass uses. A fault cannot lose a pass without leaving the evidence of how, and that evidence is exactly what the diagnosis has to read.
+
+**Persistent, with an onset.** A degradation, a new obstruction and an interference source arrive and stay. That is what makes them causes a station's history can reveal, and not noise. Only a silent satellite ends. Onsets are ticks drawn from the seed, like every other fault's, and a degradation's loss is measured from the true instant its window opened. The supervisor keeps that instant across a station's restarts.
+
+**A silence is the fleet's, opened on every station.** That is how a partition is recorded (D-188), and it keeps every ledger target a station or the platform. The `detail` says `fleet_wide`, so a reader counts one cause. The simulator never sees the catalogue, so the operator names the satellite with `--silent-satellite` or `SIMULATOR_SILENT_SATELLITE`. A `silent` or `sky` run given none is refused before any station registers, because a silent run that silenced nothing would look like a clean one.
+
+**Only a pass a fault changed is named against it.** Ground truth is what a fault *did*. A pass that began before a degradation had accrued any loss, or never crossed the obstruction, or fell outside the interference hours, is not a case of that cause. It may still be lost for another reason, and it is scored as such.
+
+**What was in force when the pass began decides.** This is the rule a dead receiver already follows. A silence is named at that moment, because its window may close before the pass ends, and the ledger refuses an act on a window that has closed.
+
+**Kept out of `chaos`.** `chaos` is Stage 21's long run of network and process faults, and a new kind in it would move every schedule its seeds give. `sky` is Stage 25's four together.
+
+**The review D-105 requires is owed, not done.** The specification is marked *review pending*, for a team member other than Stage 27's author to sign before that stage begins. Writing it before the diagnoser exists is the half of the mitigation this stage can do alone.
+
+*Rejected: the faults as cycles like Stage 21's.* An interference source that came and went on a random cycle would have no history for a profile to learn. A degradation that reset every few minutes would never be gradual.
+
+*Rejected: one ledger target for the silent satellite, `satellite:<id>`.* It is truer to the cause, but every existing reader of the ledger, `meridian reliability faults` among them, knows only station and platform targets and would have to learn a third. The detail says it all without that.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5530,6 +5630,16 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-240 the reliability section and sealed fault runs | `meridian/reports/{reliability,fault_rows,render_reliability}.py`; `meridian/reliability/{fault_model,fault_offline,faults,fault_check,fault_record}.py`; `meridian/datasets/fault_runs.py`; `meridian/cli_reliability.py` (`--publish`); `tests/unit/{test_report_faults,test_datasets_boundaries}.py`; `tests/integration/test_cli_reliability.py` |
 | — the completion gate, and how to run it by hand | `tests/unit/test_report_gate.py`; `OPERATIONS.md` § Evaluation reports |
 | — the amended entry | D-224, whose leave-one-group-out key is `without` (D-237) |
+
+**Landed 2026-09-30**, building Stage 25's reception evidence and ground-truth faults.
+
+| Decision | Applied to |
+|---|---|
+| D-250 frame interval and frames expected | migration 0026; `meridian/{catalogue_file,cli_catalogue}.py`; `meridian/store/{satellites,snapshot_reads}.py`; `meridian/observations/frames_expected.py`; `meridian/datasets/frames_expected.py`; `deploy/catalogue/development.json`; `DATA-MODEL.md`; `tests/unit/{test_frames_expected,test_catalogue_file}.py`; `tests/integration/{test_catalogue_load,test_migration_lifecycle}.py` |
+| D-251 the simulator's MSP 0.3 evidence | `meridian_sim/{evidence,executor,report_blocks}.py`; `tests/unit/{test_simulator_evidence,test_simulator_executor}.py`; `tests/e2e/test_simulated_station_round_trip.py` |
+| D-252 Skyfield in one simulator module | `meridian_sim/sky_track.py`; `simulator/pyproject.toml`; `pyproject.toml` (its exemption); `ARCHITECTURE.md` rule 2; `tests/unit/test_simulator_sky_track.py` |
+| D-253 four faults with ground-truth causes | `meridian_sim/{faults,sky_faults,sky_effects,fleet_faults,fault_notes,fault_schedule,supervisor,station,config,virtual_station}.py`; `deploy/{docker-compose.yml,.env.example}`; `docs/SCALE-AND-FAULTS.md` § Ground-truth faults; `OPERATIONS.md` § Ground-truth faults; `tests/unit/{test_simulator_sky_faults,test_simulator_sky_ground_truth,test_simulator_cli,test_reliability_faults}.py` |
+| — the completion gate | `tests/integration/test_ground_truth_gate.py`: three stations under `sky` over a day of real passes, read from the ledger and from every table, with a planted label as the positive control |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

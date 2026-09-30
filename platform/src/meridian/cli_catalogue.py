@@ -32,7 +32,11 @@ from meridian.catalogue_file import (
 from meridian.config import load_settings
 from meridian.store.element_sets import insert_element_set
 from meridian.store.pool import DatabaseUnreachableError, connect_once
-from meridian.store.satellites import insert_satellite, insert_transmitter
+from meridian.store.satellites import (
+    fill_frame_interval,
+    insert_satellite,
+    insert_transmitter,
+)
 from meridian.store.stations import Connection
 
 __all__ = ["LoadTally", "load_document", "run_catalogue"]
@@ -54,14 +58,23 @@ class LoadTally:
     satellites_written: int
     transmitters_written: int
     element_sets_written: int
+    frame_intervals_filled: int = 0
+    """Downlinks already held whose unknown frame interval this load supplied.
+
+    Counted apart from new transmitters because it is an update, not a row: a
+    deployment that loaded its catalogue before migration 0026 gets its
+    intervals this way, and nothing else about a held row is ever written
+    (D-250).
+    """
 
     @property
     def wrote_nothing(self) -> bool:
-        """Whether the database already held every row in the document."""
+        """Whether the database already held everything in the document."""
         return not (
             self.satellites_written
             or self.transmitters_written
             or self.element_sets_written
+            or self.frame_intervals_filled
         )
 
 
@@ -96,11 +109,15 @@ def load_document(conn: Connection, document: CatalogueDocument) -> LoadTally:
         element_sets = sum(
             insert_element_set(conn, one) for one in document.element_sets
         )
+        # After the inserts, so a downlink written just now already carries its
+        # interval and is not counted twice.
+        intervals = sum(fill_frame_interval(conn, one) for one in document.transmitters)
 
     return LoadTally(
         satellites_written=satellites,
         transmitters_written=transmitters,
         element_sets_written=element_sets,
+        frame_intervals_filled=intervals,
     )
 
 
@@ -109,6 +126,11 @@ def _print_tally(tally: LoadTally) -> None:
     print(f"  satellites:   {tally.satellites_written} new")  # noqa: T201
     print(f"  transmitters: {tally.transmitters_written} new")  # noqa: T201
     print(f"  element sets: {tally.element_sets_written} new")  # noqa: T201
+    if tally.frame_intervals_filled:
+        print(  # noqa: T201
+            f"  frame intervals: {tally.frame_intervals_filled} filled"
+            " on downlinks already held"
+        )
     if tally.wrote_nothing:
         # Said out loud because it is the expected result of a re-run and the
         # alarming result of a first load, and three zeroes look the same either

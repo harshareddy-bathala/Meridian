@@ -181,6 +181,10 @@ convention = "google"
 # The ban below is global; this is the one module exempt from it, so the boundary
 # is checked by CI rather than remembered by a reviewer.
 "platform/src/meridian/orbit/**" = ["TID251"]
+# D-252: the simulator's one module that places a pass in a virtual station's
+# sky. The simulator shares no code with the platform (D-138), so it cannot go
+# through meridian.orbit; it is exempt here by name, and nowhere else in it.
+"simulator/src/meridian_sim/sky_track.py" = ["TID251"]
 # Alembic fixes the shape of a revision file: module-level `revision`,
 # `down_revision`, and an `upgrade`/`downgrade` pair it calls by name. The
 # docstrings are present; D103 fires on the two functions in every one of the six

@@ -1374,6 +1374,28 @@ It exits 1 on any of:
 
 `--judge-only` judges a finished run again from `--out` and the stack it left standing, without re-running it: for a judgement lost to anything but the run. On a laptop, keep the host awake with the lid closed and idle sleep inhibited, or the run fails as not unattended.
 
+### Ground-truth faults
+
+Stage 25's four faults change what a station *measures*, not whether it can reach the platform. They are the ground truth Stage 27's diagnosis and Stage 28's health watch will be scored against (D-253). Their effects are specified in `docs/SCALE-AND-FAULTS.md` § Ground-truth faults.
+
+```sh
+python -m meridian_sim.station --scenario sky --count 5 --silent-satellite norad:57166 --ledger faults.jsonl
+```
+
+| Scenario | What breaks |
+|---|---|
+| `degradation` | the receive chain loses signal at 1 to 8 dB a day from an onset |
+| `obstruction` | a sector of sky below an elevation is blocked, and never declared in `horizon_mask` |
+| `interference` | the noise floor rises in a sector for a few hours each day |
+| `silent` | the named satellite stops transmitting, at every station, for a while |
+| `sky` | all four together |
+
+`silent` and `sky` need the satellite named, as the catalogue names it, with `--silent-satellite` or `SIMULATOR_SILENT_SATELLITE`. The simulator never sees the catalogue, and a run that names none is refused before any station registers.
+
+The ledger records each fault with the parameters it was drawn with, and every pass it changed. None of it reaches MSP or the database (D-105). `meridian reliability faults` reads such a ledger without complaint, and answers each question with a dash, since none of these faults silences a station. Scoring them is Stage 27's job.
+
+**The effects need the element set, and the site the station registered with.** The simulator computes where in its sky each pass is with Skyfield, the only simulator module allowed to (D-252). The development catalogue carries the frame interval, 0.113778 s, from which the platform computes frames expected (D-250). A deployment whose catalogue was loaded before migration 0026 gets the interval by running `meridian catalogue load` again, which fills an interval that is unknown and never replaces one that is set.
+
 ---
 
 ## Monitoring

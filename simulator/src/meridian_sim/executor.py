@@ -31,7 +31,6 @@ Reference: docs/MSP-SPEC.md §4.3, §4.4; docs/DECISIONS.md D-073, D-077, D-078.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timedelta
 
 from meridian_client.assignment_message import Assignment
 from meridian_client.execution import (
@@ -40,19 +39,26 @@ from meridian_client.execution import (
     assignment_capture_window,
     assignment_status,
 )
-from meridian_client.observation_message import (
-    DopplerSample,
-    ObservationResult,
-    Signal,
-)
+from meridian_client.observation_message import ObservationResult
 from meridian_sim.config import seed_for_pass
-from meridian_sim.faults import DECODER_DEGRADED, RECEIVER_DOWN, FaultState
-from meridian_sim.outcomes import SimulatedOutcome, decide_outcome
+from meridian_sim.evidence import (
+    SNR_SAMPLE_COUNT,
+    evidence_for,
+    station_noise_floor_dbfs,
+)
+from meridian_sim.faults import (
+    DECODER_DEGRADED,
+    RECEIVER_DOWN,
+    SATELLITE_SILENT,
+    FaultState,
+)
+from meridian_sim.outcomes import decide_outcome
+from meridian_sim.report_blocks import decode_for, sample_instants, signal_for
+from meridian_sim.sky_effects import PassContext, apply_sky_faults
+from meridian_sim.sky_faults import ActiveSkyFault, Silence
+from meridian_sim.sky_track import Site, SkyPoint, track
 
 __all__ = ["SimulatedExecutor"]
-
-DETECTED_OUTCOMES = frozenset({"decoded", "signal_no_decode"})
-"""Outcomes that assert something was heard, and so carry a signal block."""
 
 
 class SimulatedExecutor:
@@ -78,7 +84,12 @@ class SimulatedExecutor:
         dishonest one would be a `no_signal` nothing listened for.
     """
 
-    def __init__(self, station_seed: int, faults: FaultState | None = None) -> None:
+    def __init__(
+        self,
+        station_seed: int,
+        faults: FaultState | None = None,
+        site: Site | None = None,
+    ) -> None:
         """Build a receiver for one station. Nothing is decided until a pass ends.
 
         Args:
@@ -86,8 +97,14 @@ class SimulatedExecutor:
             faults: What is currently broken, written by the supervisor each
                 tick. ``None`` is a receiver that always works, which is what a
                 clean run and most tests want.
+            site: Where the station stands, which an obstruction or an
+                interference source needs to know where in its sky a pass was.
+                ``None`` for a receiver that is never given one.
         """
         self._station_seed = station_seed
+        self._site = site
+        self._sky_at_begin: dict[str, tuple[ActiveSkyFault, ...]] = {}
+        self._noise_floor_dbfs = station_noise_floor_dbfs(station_seed)
         self._faults = faults if faults is not None else FaultState()
         self._begun: set[str] = set()
         self._held_but_not_begun: set[str] = set()
@@ -120,6 +137,16 @@ class SimulatedExecutor:
             self._faulted.append((RECEIVER_DOWN, assignment.assignment_id))
             return
         self._begun.add(assignment.assignment_id)
+        self._sky_at_begin[assignment.assignment_id] = self._faults.sky
+        # A silence is written down as the pass begins, while its window is
+        # certainly open: it may close before this pass ends, and the ledger
+        # refuses an act on a window that has closed.
+        if any(
+            isinstance(one.fault.shape, Silence)
+            and one.fault.shape.satellite_id == assignment.satellite_id
+            for one in self._faults.sky
+        ):
+            self._faulted.append((SATELLITE_SILENT, assignment.assignment_id))
 
     def end(self, assignment: Assignment) -> None:
         """Stop receiving, and decide what the pass produced.
@@ -190,71 +217,56 @@ class SimulatedExecutor:
             # negative control).
             outcome = replace(outcome, outcome="signal_no_decode")
             self._faulted.append((DECODER_DEGRADED, assignment.assignment_id))
+        window_s = (assignment.end_at - assignment.start_at).total_seconds()
+        evidence = evidence_for(seed, outcome, window_s, self._noise_floor_dbfs)
+        affected = apply_sky_faults(
+            outcome,
+            evidence,
+            self._sky_at_begin.pop(assignment.assignment_id, ()),
+            self._context(assignment, seed, window_s),
+        )
+        outcome, evidence = affected.outcome, affected.evidence
+        self._faulted.extend(
+            (kind, assignment.assignment_id)
+            for kind in affected.kinds
+            if kind != SATELLITE_SILENT
+        )
         return ObservationResult(
             assignment_id=assignment.assignment_id,
             started_at=assignment.start_at,
             ended_at=assignment.end_at,
             outcome=outcome.outcome,
-            signal=_signal_for(outcome, assignment),
+            signal=signal_for(outcome, evidence, assignment),
             client_notes=_notes_for(seed),
+            decode=decode_for(outcome, evidence, window_s),
         )
 
     def _pass_seed(self, assignment: Assignment) -> int:
         """The seed deciding this station's experience of this assignment."""
         return seed_for_pass(self._station_seed, assignment.assignment_id)
 
+    def _context(
+        self, assignment: Assignment, seed: int, window_s: float
+    ) -> PassContext:
+        """The pass as a sky fault sees it: its samples' instants and directions."""
+        instants = sample_instants(assignment, SNR_SAMPLE_COUNT)
+        site = self._site
 
-def _signal_for(outcome: SimulatedOutcome, assignment: Assignment) -> Signal | None:
-    """The MSP §4.4 signal block, or nothing when nothing was heard.
+        def directions() -> tuple[SkyPoint, ...]:
+            if site is None:
+                raise ValueError(
+                    "a fault in a sector of the sky needs the station's site"
+                )
+            elements = assignment.element_set
+            return track(elements.line1, elements.line2, site, instants)
 
-    Absent rather than present-and-empty for an unheard pass: the platform
-    refuses a body whose outcome contradicts its signal block, and ``no_signal``
-    carrying a detection is exactly that contradiction.
-    """
-    if outcome.outcome not in DETECTED_OUTCOMES:
-        return None
-    return Signal(
-        detected=True,
-        first_detection_at=_detection_instant(outcome, assignment),
-        peak_snr_db=outcome.peak_snr_db,
-        doppler_samples=_doppler_samples(outcome, assignment),
-    )
-
-
-def _detection_instant(outcome: SimulatedOutcome, assignment: Assignment) -> datetime:
-    """When the station first heard the transmitter.
-
-    Clamped inside the window. The offset is drawn from a range that suits an
-    eight-to-fifteen minute pass, and a short window would otherwise place the
-    detection after the pass ended — a body nothing downstream validates and
-    every reader would have to puzzle over.
-    """
-    offset_s = outcome.detection_offset_s or 0.0
-    detected_at = assignment.start_at + timedelta(seconds=offset_s)
-    return min(detected_at, assignment.end_at)
-
-
-def _doppler_samples(
-    outcome: SimulatedOutcome, assignment: Assignment
-) -> tuple[DopplerSample, ...] | None:
-    """The Doppler series, spread evenly from the window's start to its end.
-
-    Order is preserved and is significant: the series is a time series, and the
-    platform's content hash treats two orderings as two different measurements
-    (D-070).
-    """
-    offsets = outcome.doppler_offsets_hz
-    if offsets is None:
-        return None
-    span_s = (assignment.end_at - assignment.start_at).total_seconds()
-    steps = max(len(offsets) - 1, 1)
-    return tuple(
-        DopplerSample(
-            sampled_at=assignment.start_at + timedelta(seconds=span_s * index / steps),
-            offset_hz=offset,
+        return PassContext(
+            pass_seed=seed,
+            satellite_id=assignment.satellite_id,
+            instants=instants,
+            window_s=window_s,
+            track=directions,
         )
-        for index, offset in enumerate(offsets)
-    )
 
 
 def _notes_for(seed: int) -> str:

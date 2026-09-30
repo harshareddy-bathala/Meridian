@@ -36,19 +36,28 @@ docs/DECISIONS.md D-024, D-074, D-075, D-188, D-189.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from meridian_sim.sky_faults import ActiveSkyFault
 
 __all__ = [
     "CLOCK_DRIFT",
     "DECLINES",
     "DECODER_DEGRADED",
     "HEARTBEAT_DELAYED",
+    "INTERFERENCE",
     "NETWORK_DOWN",
+    "OBSTRUCTION",
     "PARTITION",
     "RECEIVER_DOWN",
     "RESTART",
+    "SATELLITE_SILENT",
     "SCENARIOS",
+    "SIGNAL_DEGRADATION",
+    "SKY_FAULTS",
     "SLOW_API",
     "TOKEN_REVOKED",
     "UPLOAD_BLOCKED",
@@ -149,6 +158,49 @@ assignments go is drawn from the station's seed and the assignment's id
 declines the same ones.
 """
 
+SIGNAL_DEGRADATION = "signal_degradation"
+"""The receive chain loses signal at a steady rate from an onset, and keeps losing it.
+
+A connector corroding, an LNA failing, water in a cable: every pass after the
+onset is received that many decibels weaker, growing by a configured rate in dB
+per day (Stage 25). The noise floor does not move, because the loss is ahead of
+the receiver's own noise.
+"""
+
+OBSTRUCTION = "obstruction"
+"""Something new blocks a sector of the sky below an elevation, from an onset.
+
+A tree in leaf, a new building, a neighbour's antenna. It is **never declared in
+``horizon_mask``**: a station that knew would have declared it, and the platform
+would then have stopped scheduling into it (D-175). Samples inside it hear
+nothing.
+"""
+
+INTERFERENCE = "interference"
+"""The noise floor rises in a sector of the sky and a window of hours each day.
+
+A neighbour's switching supply at night, a pager transmitter in one direction.
+Samples inside both the sector and the hours lose SNR by the rise, and the
+pass's floor rises with the share of it they are.
+"""
+
+SATELLITE_SILENT = "satellite_silent"
+"""A transmitter stops, at every station at once, while the catalogue says it is on.
+
+The fault is the satellite's rather than any station's, so it is drawn once for
+the fleet and opened on every station, as a partition is. A station listening to
+it hears exactly what it would hear with nothing there.
+"""
+
+SKY_FAULTS = (SIGNAL_DEGRADATION, OBSTRUCTION, INTERFERENCE, SATELLITE_SILENT)
+"""Stage 25's four faults with ground-truth causes (D-253).
+
+They change what a station *measures*, not whether it can talk to the platform,
+so none of them is injected in the transport: they act in the executor, on the
+evidence of one pass. Kept out of ``chaos``, which is Stage 21's long run of
+network and process faults and whose schedules must not move.
+"""
+
 SCENARIOS: dict[str, tuple[str, ...]] = {
     "clean": (),
     "network": (NETWORK_DOWN,),
@@ -175,6 +227,11 @@ SCENARIOS: dict[str, tuple[str, ...]] = {
         DECODER_DEGRADED,
         DECLINES,
     ),
+    "degradation": (SIGNAL_DEGRADATION,),
+    "obstruction": (OBSTRUCTION,),
+    "interference": (INTERFERENCE,),
+    "silent": (SATELLITE_SILENT,),
+    "sky": SKY_FAULTS,
 }
 """Which faults each named scenario may inject.
 
@@ -185,7 +242,8 @@ that dies of old age tests nothing after the first hour. It gets its own
 scenario, where a station stopping is the observation being made.
 
 ``faulty`` is Stage 10's set and keeps its exact schedules; ``chaos`` is every
-recurring fault, and is what Stage 21's long run injects.
+recurring fault, and is what Stage 21's long run injects. ``sky`` is Stage 25's
+four faults together, whose ground truth Stage 27's diagnosis is scored against.
 """
 
 
@@ -201,6 +259,12 @@ class FaultState:
     """
 
     active: frozenset[str] = field(default_factory=frozenset)
+    sky: tuple[ActiveSkyFault, ...] = ()
+    """The sky faults in force, each with the instant it came into force.
+
+    Read by the receiver when a pass begins, not by the transport: they change
+    what a station measures, never whether it can reach the platform.
+    """
 
 
 class FaultInjectingTransport(httpx.BaseTransport):

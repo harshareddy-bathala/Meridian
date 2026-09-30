@@ -22,7 +22,8 @@ Format, with every field shown::
           "orbital_regime": "leo",
           "transmitters": [
             {"centre_freq_hz": 137100000, "mode": "lrpt",
-             "polarisation": "rhcp", "bandwidth_hz": 150000}
+             "polarisation": "rhcp", "bandwidth_hz": 150000,
+             "frame_interval_s": 0.113778}
           ],
           "element_sets": [
             {"line1": "1 57166U ...", "line2": "2 57166 ..."}
@@ -31,11 +32,14 @@ Format, with every field shown::
       ]
     }
 
-``orbital_regime`` defaults to ``leo``; ``polarisation`` and ``bandwidth_hz`` are
-optional. An element set carries no epoch — it is read out of ``line1``, because
-the epoch is a property of the set rather than a claim the file gets to make.
+``orbital_regime`` defaults to ``leo``; ``polarisation``, ``bandwidth_hz`` and
+``frame_interval_s`` are optional. ``frame_interval_s`` is the downlink's nominal
+time between frames, in seconds, from which the platform computes how many frames
+a pass should have produced (D-250). An element set carries no epoch — it is read
+out of ``line1``, because the epoch is a property of the set rather than a claim
+the file gets to make.
 
-Reference: docs/DECISIONS.md D-079; docs/DATA-MODEL.md.
+Reference: docs/DECISIONS.md D-079, D-250; docs/DATA-MODEL.md.
 """
 
 from __future__ import annotations
@@ -174,6 +178,9 @@ def _read_transmitter(entry: object, satellite_id: str, where: str) -> NewTransm
         bandwidth_hz=_optional_whole(
             fields.get("bandwidth_hz"), f"{where}.bandwidth_hz"
         ),
+        frame_interval_s=_optional_positive(
+            fields.get("frame_interval_s"), f"{where}.frame_interval_s"
+        ),
     )
 
 
@@ -257,3 +264,20 @@ def _optional_whole(value: object, where: str) -> int | None:
     if value is None:
         return None
     return _require_whole(value, where)
+
+
+def _optional_positive(value: object, where: str) -> float | None:
+    """``value`` as a positive number of seconds, or ``None`` when absent.
+
+    A whole number is accepted as well as a fraction, because an interval of two
+    seconds written as ``2`` is not a different claim from ``2.0``. Zero and
+    negatives are refused: a frame interval of zero would make every pass expect
+    infinitely many frames, and the table refuses it too.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise MalformedCatalogueError(f"{where} is not a number: {value!r}")
+    if not value > 0:
+        raise MalformedCatalogueError(f"{where} is not positive: {value!r}")
+    return float(value)

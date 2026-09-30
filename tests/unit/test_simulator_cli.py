@@ -92,3 +92,23 @@ def test_a_named_invites_file_that_cannot_be_read_is_reported(tmp_path: Path) ->
     about registration rather than about the file that was missing.
     """
     assert main(["--invites", str(tmp_path / "absent.txt")]) == 1
+
+
+def test_the_silent_satellite_reaches_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Named by flag or by variable, since the simulator never sees the catalogue."""
+    monkeypatch.setenv("SIMULATOR_SILENT_SATELLITE", "norad:59051")
+    parser = _build_parser()
+
+    assert _config_from(parser.parse_args([])).silent_satellite == "norad:59051"
+    flagged = parser.parse_args(["--silent-satellite", "norad:57166"])
+    assert _config_from(flagged).silent_satellite == "norad:57166"
+
+
+def test_a_silent_run_that_names_no_satellite_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Refused before any station registers: it would silence nothing (D-253)."""
+    code = main(["--scenario", "silent", "--state-dir", str(tmp_path), "--rounds", "1"])
+
+    assert code == 1
+    assert "satellite" in capsys.readouterr().err

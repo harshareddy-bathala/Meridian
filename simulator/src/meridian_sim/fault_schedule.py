@@ -31,6 +31,7 @@ from meridian_sim.faults import (
     TOKEN_REVOKED,
     UPLOAD_BLOCKED,
 )
+from meridian_sim.sky_faults import SkyFault, sky_faults_for
 
 __all__ = [
     "DECLINE_PERCENT",
@@ -149,8 +150,8 @@ class _Cycle:
 class FaultWindow:
     """One stretch of ticks over which one fault is in force, both ends included.
 
-    ``last_tick`` is ``None`` for a fault that never ends, which today is only a
-    revoked token.
+    ``last_tick`` is ``None`` for a fault that never ends: a revoked token, and
+    Stage 25's degradation, obstruction and interference.
     """
 
     kind: str
@@ -171,6 +172,9 @@ class FaultSchedule:
     revoked_from: int | None = None
     drift_s_per_tick: float = 0.0
     """How fast this station's clock runs away while :data:`CLOCK_DRIFT` holds."""
+    sky: tuple[SkyFault, ...] = ()
+    """Stage 25's faults on this station's own sky and chain (D-253). A silent
+    satellite is the fleet's, and the supervisor adds it."""
 
     def active_at(self, tick: int) -> frozenset[str]:
         """Which faults are in force on ``tick``.
@@ -184,6 +188,7 @@ class FaultSchedule:
             as an instruction rather than a condition.
         """
         active = {one.kind for one in self.cycles if one.active_at(tick)}
+        active |= {one.kind for one in self.sky if one.active_at(tick)}
         if self.revoked_from is not None and tick >= self.revoked_from:
             active.add(TOKEN_REVOKED)
         return frozenset(active)
@@ -216,6 +221,11 @@ class FaultSchedule:
         found = [window for one in self.cycles for window in one.windows(until_tick)]
         if self.revoked_from is not None and self.revoked_from < until_tick:
             found.append(FaultWindow(TOKEN_REVOKED, self.revoked_from, None))
+        found.extend(
+            FaultWindow(one.kind, one.first_tick, one.last_tick)
+            for one in self.sky
+            if one.first_tick < until_tick
+        )
         return tuple(sorted(found, key=lambda one: (one.first_tick, one.kind)))
 
 
@@ -274,6 +284,7 @@ def schedule_for(station_seed: int, scenario: str) -> FaultSchedule:
         cycles=cycles + later,
         revoked_from=revoked_from,
         drift_s_per_tick=round(drift, 3),
+        sky=sky_faults_for(station_seed, scenario),
     )
 
 

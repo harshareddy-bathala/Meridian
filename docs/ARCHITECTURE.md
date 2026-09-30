@@ -179,7 +179,7 @@ One subsystem, whatever the payload. Every source records the same provenance â€
 ## Rules
 
 1. Module boundaries are firm. Cross-module access goes through interfaces, not database queries.
-2. Only `platform/orbit` imports propagation libraries.
+2. Only `platform/orbit` imports propagation libraries. The simulator is a station, not part of the platform, and has one module that does too â€” `meridian_sim/sky_track.py`, exempted by name in `pyproject.toml` (D-252).
 3. Only `platform/reliability` decides what counts as a miss.
 4. The `simulated` flag propagates from MSP registration to every derived record and every API response.
 5. The station client never assumes connectivity. Reception is never blocked on the platform being reachable.

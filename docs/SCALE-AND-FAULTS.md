@@ -159,3 +159,75 @@ python deploy/tools/long_run.py --hours 2 --seed 4471 --sample-every-minutes 15 
 ```
 
 The laptop was kept awake with its lid closed (a user-level `handle-lid-switch` inhibitor) and idle sleep inhibited. A seventy-two hour run on a laptop needs both.
+
+---
+
+## Ground-truth faults
+
+*Stage 25, D-253. This section is the **specification of the four faults' effects**, written before Stage 27's diagnosis exists. D-105 asks for it to be reviewed by a team member who is not the diagnosis author, to guard against the two agreeing by construction.*
+
+**Review:** pending. Record here who reviewed it and when, before Stage 27 begins.
+
+Each fault is injected into a virtual station's receiver, `meridian_sim/sky_effects.py`, and changes what that station *measures*. Nothing about the fault travels anywhere else:
+- the MSP body carries only the evidence it changed;
+- the fault itself, its parameters and the passes it acted on go to the run's ledger, beside the seed, and never into a platform table (D-105, D-189);
+- `tests/unit/test_simulator_sky_ground_truth.py` holds both halves.
+
+### What each fault does
+
+The evidence it acts on is D-251's: 25 SNR samples across the window, and a noise floor at a fixed gain.
+
+| Fault | Scenario | Shape, drawn from the seed | Effect on a pass that began while it held |
+|---|---|---|---|
+| `signal_degradation` | `degradation` | a rate, 1 to 8 dB/day, from an onset tick of 5 to 60 | every sample of a heard pass loses *rate × days since onset*, measured at the pass's start; the floor does not move |
+| `obstruction` | `obstruction` | a sector 30° to 90° wide from a random azimuth, blocked below 15° to 35°, from an onset tick of 5 to 60; **never declared** in `horizon_mask` | a sample whose direction is inside the sector and above the horizon but below the elevation hears nothing, and its SNR becomes noise; the floor does not move |
+| `interference` | `interference` | a sector 45° to 120° wide, a daily window of 2 to 6 hours from a random UTC hour, a rise of 6 to 15 dB, from an onset tick of 5 to 60 | a sample inside both the sector and the hours has its floor raised by the rise, and loses that much SNR if the pass was heard. The pass's floor is the mean power of its samples' floors, so it rises with the share of the pass affected |
+| `satellite_silent` | `silent` | the satellite the operator names, silent from tick 10 to 60 for 20 to 120 ticks, **at every station** | every sample of a pass of that satellite is noise; the floor does not move |
+
+`sky` runs all four together.
+
+A sample's direction comes from the element set in the assignment, at the station's registered site, computed with Skyfield. `tests/unit/test_simulator_sky_track.py` checks it against the platform's own pass prediction, to 0.01°.
+
+### How the outcome follows
+
+The outcome is derived again from the surviving evidence, by the frame count every pass uses (D-251):
+- **`decoded`** stays decoded while frames above the 5 dB bar remain, or while none of the ones it had were lost;
+- **a heard pass** that still has a sample at or above 3 dB is `signal_no_decode`;
+- **otherwise** it is `no_signal`.
+
+First detection and peak SNR are re-read from the samples. `aborted` and `not_attempted` passes are never changed, because they measured nothing.
+
+**A pass counts as touched only if a fault changed something about it.** Examples of passes that are not touched:
+- one that began before a degradation's onset;
+- one that never crossed an obstruction;
+- one outside an interference source's hours;
+- one of a different satellite from the silent one.
+
+Each touched pass is named in an `act` line against its fault. A silence is named when the pass begins, because its window may close before the pass ends.
+
+### What the ledger records
+
+The four kinds open on the station they act on, as every station fault does, with the seed and the true instant of onset.
+
+The `detail` holds the shape, for example:
+- `rate_db_per_day`;
+- `azimuth_from_deg`, `width_deg` and `below_elevation_deg`;
+- `start_hour_utc`, `hours` and `rise_db`;
+- `satellite_id`.
+
+A silence opens on every station with `"fleet_wide": true`, so a reader counts one cause rather than one per station. Only a silence closes. The other three persist, and a station process that restarts opens them again at its restart, so the ledger's onset stays the one the effect is measured from.
+
+### What a diagnosis can and cannot see
+
+This is the evidence Stage 27's tests will find, stated so the specification and the diagnoser can be compared.
+- **Degradation** shows as a shortfall in SNR against the station's own history at the same elevation. It shows on every heard pass, whatever its direction or hour.
+- **Obstruction** shows as signal lost in one sector at low elevation, pass after pass, while the rest of each pass is unchanged. The declared mask does not explain it.
+- **Interference** shows as a raised floor, at the same gain, in one sector and a band of hours.
+- **A silent satellite** shows as every station listening and hearing nothing from one satellite at the same time, while their floors are normal.
+
+The negative control is Stage 21's `decoder_degraded`, which has no cause category. Stage 27 should call it *undetermined*.
+
+**Known limits, stated rather than hidden:**
+- a decoded pass whose peak was under the 5 dB bar counts no decodable frames, so it has none to lose and stays `decoded` for as long as it is still heard. The outcome model said it decoded, and nothing in the evidence contradicts that until the signal is gone;
+- the effects are shapes, not a link budget (D-251);
+- the claim they support is D-105's narrow one: given evidence of this shape, the diagnoser names the fault.

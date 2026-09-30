@@ -37,19 +37,11 @@ import httpx
 
 from meridian_sim.config import RunConfig, seed_for_station
 from meridian_sim.fault_notes import FaultNotes
-from meridian_sim.fault_schedule import (
-    FaultSchedule,
-    FleetPartition,
-    partition_for,
-    schedule_for,
-)
-from meridian_sim.faults import (
-    DECLINES,
-    PARTITION,
-    FaultInjectingTransport,
-    FaultState,
-)
+from meridian_sim.fault_schedule import FaultSchedule, schedule_for
+from meridian_sim.faults import DECLINES, FaultInjectingTransport, FaultState
+from meridian_sim.fleet_faults import fleet_faults_for
 from meridian_sim.ledger import FaultLedger
+from meridian_sim.sky_faults import SkyInForce
 from meridian_sim.virtual_station import VirtualStation, register_or_resume
 
 __all__ = ["RoundObserver", "RoundOutcome", "Supervisor"]
@@ -109,6 +101,8 @@ class _Member:
     previous: frozenset[str] = frozenset()
     """What was in force on the last round, to see a fault open and close."""
 
+    sky: SkyInForce = field(default_factory=SkyInForce)
+
 
 class Supervisor:
     """A fleet of virtual stations sharing one thread.
@@ -133,13 +127,18 @@ class Supervisor:
         http_transport: httpx.BaseTransport | None = None,
         ledger: FaultLedger | None = None,
     ) -> None:
-        """Prepare a fleet. Nothing registers until :meth:`bring_up`."""
+        """Prepare a fleet. Nothing registers until :meth:`bring_up`.
+
+        Raises:
+            ValueError: The scenario silences a satellite and ``config`` names
+                none — refused here, before any station registers.
+        """
         self._config = config
         self._invite_tokens = tuple(invite_tokens)
         self._http_transport = http_transport
-        self._notes = FaultNotes(ledger)
+        self._fleet = fleet_faults_for(config)
+        self._notes = FaultNotes(ledger, self._fleet)
         self._members: list[_Member] = []
-        self._partition = FleetPartition()
 
     def bring_up(self) -> tuple[str, ...]:
         """Register or resume every station, in index order.
@@ -159,12 +158,6 @@ class Supervisor:
         """
         for index in range(1, self._config.station_count + 1):
             self._members.append(self._member_for(index))
-        self._partition = partition_for(
-            self._config.master_seed,
-            self._config.scenario,
-            self._config.station_count,
-        )
-        self._notes.partition = self._partition
         if self._notes.ledger is not None:
             self._notes.ledger.close_dangling(datetime.now(UTC))
         return tuple(one.station.station_id for one in self._members)
@@ -191,8 +184,7 @@ class Supervisor:
 
         for member in list(self._members):
             active = member.schedule.active_at(tick)
-            if self._partition.active_for(member.index, tick):
-                active |= {PARTITION}
+            active |= self._fleet.active_for(member.index, tick)
             self._notes.transitions(
                 index=member.index,
                 station=(member.station.station_id, member.station.seed),
@@ -204,6 +196,9 @@ class Supervisor:
             )
             member.previous = active
             member.faults.active = active
+            member.faults.sky = member.sky.update(
+                member.schedule.sky + self._fleet.sky, active, now
+            )
             if member.schedule.restarts_at(tick):
                 self._restart(member)
                 restarted.append(member.index)
