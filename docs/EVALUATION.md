@@ -207,7 +207,7 @@ The effect being measured is small. Public element sets are roughly 1 km accurat
 
 `first_detection_at` can vary by far more than that for reasons unrelated to the orbit: the horizon and obstructions in the acquisition direction, link margin, and the detector's threshold. Near the horizon an overhead pass at 850 km rises about one degree every 14 seconds, so a detection elevation that varies by two degrees between passes moves first detection by roughly half a minute. If that spread dominates, timing error regressed against element-set age measures the station's horizon rather than the element set.
 
-**Open question, tested before it is answered.**
+**Open question, tested before it is answered.** The test in the three steps below now runs in every evaluation report, with the minimum number of young element sets stated in the configuration in advance (D-239). Its answer on archive data is still owed.
 
 1. On archive data, take receptions whose element set was under a day old — where the orbital contribution is known to be sub-second — and measure the spread of first-detection offset.
 2. If that spread exceeds the effect SC-3 exists to detect, §6.1 is not fit as written, and that finding is reported rather than worked around.
@@ -252,6 +252,15 @@ Every reported figure is regenerable from:
 3. A random seed
 
 Analysis scripts write these three things into their output alongside the result. A figure that cannot be regenerated is not a result and does not go in the report.
+
+**This is `meridian report build`** (Stage 22, D-234 to D-240). It takes a raw snapshot, one configuration from `analysis/configs/` and a master seed, and writes a sealed run:
+- every section's results;
+- the report rendered from them;
+- the figures;
+- the configuration byte for byte;
+- a manifest naming the snapshot's hash, every derived seed, and the code and dependency versions it was built with.
+
+`meridian report verify <run>` rebuilds the run from those and compares hashes. A figure in the project report is one a run holds, and the run's hash is quoted beside it. Fault-detection figures come from fault runs sealed by `meridian reliability faults --publish`, which the report judges again.
 
 ---
 

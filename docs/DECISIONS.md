@@ -5515,6 +5515,20 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the completion gate | `tests/integration/test_fault_gate.py`: five stations under `chaos` through real MSP on a stated clock, judged, with two positive controls |
 | — the amended entry | D-171, whose revocations are now kept (D-196) |
 
+**Landed 2026-09-30**, building reproducible evaluation and reports and Stage 22's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-234 a platform module with its own scope; `analysis/` holds configurations | `meridian/reports/`; `meridian/cli_report.py`, `cli.py` (the pending-command table removed); `analysis/`; `GIT-WORKFLOW.md` Rule 3; `.github/workflows/ci.yml`; `tests/unit/{test_reports_boundaries,test_executables}.py` |
+| D-235 a sealed run whose hash names the result; the environment recorded unhashed | `meridian/reports/{build,verify,render,markdown,environment,svg}.py`; `meridian/datasets/{manifest,manifest_rules}.py`; `tests/unit/{test_report_cli,test_report_data,test_datasets_manifest}.py` |
+| D-236 one master seed, one configuration | `meridian/datasets/seeds.py`; `meridian/regions/change.py`; `meridian/reports/config.py`; `meridian/datasets/label_config.py`; `analysis/configs/evaluation.toml.example`; `tests/unit/{test_datasets_seeds,test_report_config}.py` |
+| D-237 the prediction section, `without`, station-day intervals | `meridian/reports/{prediction,prediction_rows,bootstrap,render_prediction}.py`; `meridian/prediction/{model_config,configurations,fit}.py`; `meridian/scheduler/comparison.py`; `meridian/cli_model.py`; `deploy/model.toml.example`; `tests/unit/{test_report_prediction,test_report_bootstrap,test_prediction_configurations}.py` |
+| D-238 the scheduling section | `meridian/reports/{scheduling,render_scheduling,svg_intervals}.py`; `meridian/scheduler/replay.py` (`runtime_s`); `meridian/prediction/replay.py` (`snapshot`); `tests/unit/test_report_scheduling.py` |
+| D-239 the orbit-uncertainty section | `meridian/reports/{detections,orbit,render_orbit,svg_scatter}.py`; `tests/unit/test_report_orbit.py` |
+| D-240 the reliability section and sealed fault runs | `meridian/reports/{reliability,fault_rows,render_reliability}.py`; `meridian/reliability/{fault_model,fault_offline,faults,fault_check,fault_record}.py`; `meridian/datasets/fault_runs.py`; `meridian/cli_reliability.py` (`--publish`); `tests/unit/{test_report_faults,test_datasets_boundaries}.py`; `tests/integration/test_cli_reliability.py` |
+| — the completion gate, and how to run it by hand | `tests/unit/test_report_gate.py`; `OPERATIONS.md` § Evaluation reports |
+| — the amended entry | D-224, whose leave-one-group-out key is `without` (D-237) |
+
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.

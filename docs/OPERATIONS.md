@@ -913,6 +913,19 @@ It then builds the run again and compares hashes. It prints any difference betwe
 
 A run edited *and resealed* passes its own manifest check but fails verification, because only regeneration can tell a forged number from a computed one.
 
+### The completion gate, at a prompt
+
+Stage 22's gate is that every number and figure can be regenerated from a snapshot, a configuration, a seed and a code version. `tests/unit/test_report_gate.py` asserts it clause by clause, with every socket and database refused. To see it by hand:
+
+```sh
+uv run meridian report build --snapshot <raw snapshot> --config analysis/configs/evaluation.toml.example --seed 4471
+uv run meridian report build --snapshot <raw snapshot> --config analysis/configs/evaluation.toml.example --seed 4471
+```
+
+The second build says `already held, identically`. Then run `uv run meridian report verify <run>`, which exits 0.
+
+Build again with `--seed 4472`. Every interval moves, and no Brier score, frame count, slope or capture rate does.
+
 ---
 
 ## Rate limits
