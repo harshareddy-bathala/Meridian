@@ -185,6 +185,56 @@ def test_measured_and_simulated_are_counted_apart(rollback: Any, root: Path) -> 
 
 
 @pytest.mark.usefixtures("seeded")
+def test_a_receptions_floor_and_products_travel_with_it(
+    rollback: Any, root: Path
+) -> None:
+    """D-173, D-176: exported with their observation, and the uri left behind.
+
+    A survey reading from before ``since`` is out of scope, as any other row
+    from before the interval is.
+    """
+    rollback.execute(
+        "insert into noise_measurements (station_id, measured_at, source,"
+        " assignment_id, revision, centre_freq_hz, noise_floor_dbfs,"
+        " receiver_gain_db, simulated)"
+        " select station_id, started_at, 'observation', assignment_id, revision,"
+        " 137900000, -52.3, 32.8, simulated"
+        " from observations where assignment_id = 'as_done'"
+    )
+    rollback.execute(
+        "insert into noise_measurements (station_id, measured_at, source,"
+        " centre_freq_hz, azimuth_deg, noise_floor_dbfs, receiver_gain_db,"
+        " simulated)"
+        " values ('st_export', %s, 'survey', 137900000, 90, -60, 20, false)",
+        (SINCE - timedelta(days=1),),
+    )
+    rollback.execute(
+        "insert into products (assignment_id, revision, observation_started_at,"
+        " station_id, element_index, kind, sha256, size_bytes, uri, simulated)"
+        " select assignment_id, revision, started_at, station_id, 0, 'waterfall',"
+        " %s, 2048, 'station:products/ab', simulated"
+        " from observations where assignment_id = 'as_done'",
+        (bytes(32),),
+    )
+
+    published = export(rollback, RecordingRegistry(), root)
+    directory = read_directory(published.path)
+
+    noise = lines(directory, "noise_measurements.jsonl")
+    assert [(one["assignment_id"], one["source"]) for one in noise] == [
+        ("as_done", "observation")
+    ]
+    (product,) = lines(directory, "products.jsonl")
+    assert product["assignment_id"] == "as_done"
+    assert product["kind"] == "waterfall"
+    assert "uri" not in product
+    counts = published.manifest.counts
+    assert counts["noise_measurements.measured"] == 1
+    assert counts["noise_measurements.simulated"] == 0
+    assert counts["products.measured"] == 1
+
+
+@pytest.mark.usefixtures("seeded")
 def test_exporting_twice_in_one_transaction_is_one_snapshot(
     rollback: Any, root: Path
 ) -> None:

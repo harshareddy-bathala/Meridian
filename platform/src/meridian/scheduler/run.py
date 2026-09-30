@@ -93,6 +93,10 @@ class ScheduleReport:
     and so did not consider — on a re-run over an unchanged horizon, all of
     them (D-165)."""
 
+    passes_below_the_declared_horizon: tuple[int, ...]
+    """Passes left undecided because their track never clears the declared
+    horizon of any chain that could receive them (D-175)."""
+
     passes_without_a_usable_transmitter: tuple[int, ...]
     """Passes dropped before valuing because no live downlink of that satellite
     matches the station's declared hardware.
@@ -148,6 +152,7 @@ class _Gathered:
     stations: int = 0
     already_decided: int = 0
     unusable: list[int] = field(default_factory=list)
+    masked: list[int] = field(default_factory=list)
     unavailable: list[str] = field(default_factory=list)
     deferred: int = 0
     revoked: int = 0
@@ -182,6 +187,7 @@ def _gather(
             )
         work = work_for_station(conn, orbit, station, catalogue, request)
         gathered.unusable.extend(work.passes_without_a_usable_transmitter)
+        gathered.masked.extend(work.passes_below_the_declared_horizon)
         gathered.already_decided += work.already_decided
         if not available:
             gathered.unavailable.append(station.station_id)
@@ -261,6 +267,7 @@ def run_schedule(
         skipped=0,
         rows_written=0,
         passes_without_a_usable_transmitter=tuple(gathered.unusable),
+        passes_below_the_declared_horizon=tuple(gathered.masked),
         already_decided=gathered.already_decided,
         stations_unavailable=tuple(gathered.unavailable),
         passes_deferred=gathered.deferred,

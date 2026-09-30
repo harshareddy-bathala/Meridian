@@ -305,7 +305,7 @@ def test_verify_accepts_an_intact_snapshot(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert run(datasets_root, "verify", str(raw_snapshot(world))) == 0
-    assert "is intact: a raw snapshot of 15 files" in capsys.readouterr().out
+    assert "is intact: a raw snapshot of 18 files" in capsys.readouterr().out
 
 
 def test_verify_exits_3_on_a_changed_byte(

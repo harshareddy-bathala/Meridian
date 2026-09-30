@@ -21,6 +21,7 @@ from meridian_client.held_assignments import AssignmentRecord
 from meridian_client.observation_queue import ObservationQueue
 from meridian_client.reception.capture_folder import CaptureFolders
 from meridian_client.reception.null_rotator import NullRotator
+from meridian_client.reception.product_store import ProductStore
 from meridian_client.reception.protocols import Receiver, StationClocks
 from meridian_client.reception.reception_executor import (
     ReceptionExecutor,
@@ -80,6 +81,9 @@ def build_setup(config: StationConfig, clocks: StationClocks) -> ReceptionSetup:
         policy=config.policy,
         disk=config.disk,
         keep_recordings=config.keep_recordings,
+        products=ProductStore(
+            config.paths.products, max_bytes=config.products_max_bytes
+        ),
     )
 
 

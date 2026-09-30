@@ -169,6 +169,7 @@ def _report(rows: Rows, predicted: Mapping[str, object], frames: int | None) -> 
             "outcome": "decoded" if decoded else "signal_no_decode",
             "first_detection_at": None,
             "noise_floor_dbfs": None,
+            "receiver_gain_db": None,
             "simulated": False,
         }
         | ({} if frames is None else {"frames_decoded": frames})

@@ -355,5 +355,10 @@ def test_a_labelled_pass_missing_from_the_snapshot_is_refused() -> None:
 
 
 def test_every_feature_is_in_a_known_group_and_named_once() -> None:
-    assert {one.group for one in FEATURES} == {"elevation", "geometry", "ours"}
+    assert {one.group for one in FEATURES} == {
+        "elevation",
+        "geometry",
+        "ours",
+        "conditions",
+    }
     assert len({one.name for one in FEATURES}) == len(FEATURES)

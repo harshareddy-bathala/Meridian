@@ -27,11 +27,17 @@ this, and the two are kept apart.
 settle margin has passed, as in :mod:`meridian.prediction.history`. **Never
 missing** (D-161): an empty cell is at its prior, beside a count of zero.
 
+**Persisted by the same functions** (D-174):
+:mod:`meridian.prediction.profile_cells` calls this module's placement, quartile
+and shrinkage to give every sector and cell a stored profile holds, so a stored
+profile is the profile a feature read.
+
 Which report of a physical pass is read: the most informative of its
 assignments' latest revisions, as D-146 pools them. A simulated report is
 never read (D-078).
 
-Reference: docs/DECISIONS.md D-031, D-078, D-146, D-148, D-157, D-159, D-161.
+Reference: docs/DECISIONS.md D-031, D-078, D-146, D-148, D-157, D-159, D-161,
+D-174.
 """
 
 from __future__ import annotations
@@ -49,13 +55,23 @@ from meridian.prediction.feature_rows import FeatureRows, PassGeometry, Reading
 from meridian.prediction.geometry import peak_and_sweep, sector, track_at
 from meridian.prediction.history import RECENT
 
-__all__ = ["ENVIRONMENT", "Environment"]
+__all__ = [
+    "ENVIRONMENT",
+    "HORIZON_SECTOR_DEG",
+    "HOUR_BAND_H",
+    "NOISE_SECTOR_DEG",
+    "PROFILE_METHOD",
+    "Environment",
+]
 
 HORIZON_SECTOR_DEG = 10.0
 NOISE_SECTOR_DEG = 45.0
 HOUR_BAND_H = 4
 SHRINK = 5
 """Pseudo-count: a cell of five readings is trusted halfway."""
+PROFILE_METHOD = "d159-v1"
+"""The version of this module's horizon and interference, as a stored row names
+it (D-060, D-174). A change to either rule changes this."""
 _LOWER_QUARTILE = 0.25
 _A_SPREAD = 2
 """Predictions needed before their rises can disagree."""
@@ -83,6 +99,9 @@ class _Heard:
     timing_error_s: float | None
     noise_dbfs: float | None
     noise_cell: tuple[int, int]
+    gain_db: float | None = None
+    """The gain ``noise_dbfs`` was measured at. Read only by the persisted
+    profile (D-174)."""
 
 
 class Environment:
@@ -198,6 +217,7 @@ def _place(
         else (detected - one.aos).total_seconds(),
         noise_dbfs=report.noise_floor_dbfs,
         noise_cell=_noise_cell(one, geometry, rows.longitudes),
+        gain_db=report.receiver_gain_db,
     )
 
 
@@ -243,7 +263,12 @@ def _interference(heard: Sequence[_Heard], cell: tuple[int, int]) -> tuple[float
     if not in_cell:
         return 0.0, 0
     overall = median(one.noise_dbfs for one in readings if one.noise_dbfs is not None)
-    lift = median(value for value in in_cell if value is not None) - overall
+    return _shrunk_lift([value for value in in_cell if value is not None], overall)
+
+
+def _shrunk_lift(in_cell: Sequence[float], overall: float) -> tuple[float, int]:
+    """A cell's median over the station's, shrunk towards 0 dB by its count."""
+    lift = median(in_cell) - overall
     return len(in_cell) / (len(in_cell) + SHRINK) * lift, len(in_cell)
 
 

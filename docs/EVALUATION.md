@@ -101,7 +101,7 @@ All seven get the same candidates, constraints, solver and time limit. The candi
 
 ### Isolating the public conditions
 
-The public features of §2 join configurations **C** and **D** as one named group, and their own contribution is isolated by **leaving that group out of the shipped model**: a fifth run, D without the group, reported beside the four configurations as **D − D∖conditions**. A fifth *configuration* is not added, because the four answer questions about what we contribute and this asks a question about one feature group inside it.
+The public features of §2 join configuration **D** as one named group, `conditions` — C is our own features only (D-160), so the group does not join it (D-224) — and their own contribution is isolated by **leaving that group out of the shipped model**: a fifth run, D without the group, reported beside the four configurations as **D − D∖conditions**. A fifth *configuration* is not added, because the four answer questions about what we contribute and this asks a question about one feature group inside it.
 
 **SC-1 does not move.** It stays D − B: the shipped system against what existing practice achieves. If the public group ships, it is part of D and part of the headline honestly; if it does not earn its place, D is the model without it. Either way the headline is not recomputed to flatter the group, and the group's own effect is the leave-one-out number, stated with its confidence interval.
 

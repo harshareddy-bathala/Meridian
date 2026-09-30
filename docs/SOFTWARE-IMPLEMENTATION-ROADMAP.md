@@ -46,7 +46,60 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-09-28. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-09-29. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stage 19's software is built.** Its decisions are D-173 through D-178, and `docs/OPERATIONS.md` § Stored measurements and profiles is its runbook. Its migrations are `0023` and `0024`, after Stage 32's `0022`. Stages 20, 23, 31 and 32 are merged, Stage 21 is being built on its own branch, and **Stage 22 is the next stage nothing has claimed.**
+- **The completion gate passes, and is asserted both ways.** `tests/unit/test_deferred_storage_gate.py` reads the source and the documents and finds, for each deferred table, a producer that writes it and is called at runtime, a consumer that reads it and is called at runtime, `simulated` and the columns naming what made each row, a migration test that writes rows into it, and a stated retention. Each clause has a positive control on a table the roadmap plans and nobody builds. `tests/integration/test_deferred_storage_gate.py` runs a simulated and a measured station through ingest, export, labelling and a build, and finds every row labelled as its station is.
+- **The four tables, each with both ends** (D-173 to D-176):
+  - `noise_measurements` — dBFS at a stated gain, never dBm; one row per reception revision, written by ingest in the observation's transaction and backfilled by the same query; exported in every raw snapshot. Stage 25's observation-sourced rows came forward to give it a producer.
+  - `products` — a manifest of what a station holds, by hash. A decoder names its products in its report; the reference client keeps them in a store addressed by hash, under a cap, and declares only what it holds; the platform records a row per valid element and publishes kind, hash and size, never the station-local uri. **No transfer**: MSP 0.x has none (D-029).
+  - `horizon_profiles` and `interference_profiles` — the Stage 17 profiles persisted, by the functions the features call, once per labelled dataset; declared masks written when they change. `meridian profiles build`, a jobs task, `GET /api/v1/stations/{id}/profiles` and a sky plot on the dashboard. Nothing reads them back into a prediction.
+- **The declared horizon now constrains scheduling; the learned one does not** (D-175). A pass whose track clears the declared mask nowhere is left undecided, not skipped, so a corrected mask gives it back. The learned floor stays a feature, because as a constraint it could never come down.
+- **Two views and an aggregate** (D-177, D-178): `timing_error`, corrected by the station's clock offset as `EVALUATION.md` §6.1 requires, with its exclusions named and not applied; `scheduler_performance`; and `heartbeats_hourly`, a real-time continuous aggregate behind `GET /api/v1/stations/{id}/uptime`. `meridian passes timing` and `meridian schedule runs` read the views. The roadmap's other three views are answered elsewhere: completeness by snapshot, divergence by the orbit service, and the indicators by Stage 20.
+- **Retention was decided by writing the queries down first, and the answer is none** (D-178). `was_listening`, the snapshot export and Stage 20's reclassification read raw heartbeats for any window a pass can be asked about, so nothing is dropped on a timer; the aggregate serves coverage. A test compared the aggregate with raw counts before anything relied on it.
+- **Found on the way, each fixed:**
+  - every declared horizon mask had been lost: the reference client sent it where the platform ignored it, and both packages' tests passed because each agreed with itself. A conformance test now reads it back from the table (D-175);
+  - a mask entry could be any number; it is now a direction in the sky, or `malformed`;
+  - five hand-built test snapshots carried a noise floor without its gain, which no export writes;
+  - the migration lifecycle test's scratch database could fail to drop while TimescaleDB's worker reconnected, which had failed three runs.
+- **Not built:**
+  - product transfer, which needs an object store and an MSP 0.4 decision (D-029, D-176);
+  - survey sweeps, which the `source` column admits and nothing produces;
+  - the retrospective comparison does not apply declared masks, because no live run did before this stage (D-175).
+- **Known limits, each stated rather than hidden:**
+  - an observation's noise floor covers a whole pass, so it has no azimuth; the sector is the pass's peak, assigned when a profile is derived (D-173);
+  - a product evicted from a station's store is not reported, so a row says where a product was declared held, not that it is still there (D-176);
+  - a heartbeat restored into an hour the aggregate has already refreshed is counted at its next refresh, within 30 minutes (D-178);
+  - the views answer differently each time they are read, which is why no reported figure comes from them (D-177).
+  - at a station that declares a mask, each candidate's track is propagated once for the mask and again for scoring; one computation could serve both, and at this network's size the second costs little (found in review).
+
+**Stage 32's software is built** (2026-09-29), on top of Stage 31 and in the same change. Its decisions are D-227 through D-233, and `docs/OPERATIONS.md` § Regional monitoring is its runbook.
+- **The completion gate passes, and is demonstrable at a prompt.** `meridian regions add` registers an area; `meridian regions report --snapshot …` computes its record and coverage from the snapshot alone and publishes them, naming the same directory when run again. `tests/unit/test_regions_gate.py` builds a snapshot by hand — an area over Bengaluru and a retired one, a vegetation index that falls, rain that does not, fires that appear, a tile, and decoded, far-away, undecoded and simulated receptions — and asserts each clause of the stage's test list with the network refused.
+- **`platform/src/meridian/regions/`** with its own commit scope (D-228), sharing no name with Prometheus or Grafana, imported by nothing on the scheduling path.
+- **Areas** (migration 0022, D-227): a place and a label, operator-registered, unpublished until D-137 is settled; a label that looks like a person's contact is refused.
+- **Series as files, not rows** (D-229): pixels inside, cells inside or nearest, detections on covered days — each point citing its sources, products, records and retrieval time. `area_series` is not built.
+- **Coverage** (D-230): decoded receptions whose ground track, frozen at export by the new `OrbitService.ground_track`, came within half a swath; simulated only when asked for by name.
+- **Change and alerts** (D-231, D-232): baseline against current with a seeded bootstrap interval; an alert only when the whole interval is past the threshold; recorded in `region_alerts` behind a delivery interface that records only until Stage 29.
+- **Cross-checks** (D-233): public-product gaps on the days we imaged an area, and decode rates on wet and dry days at a station inside it.
+- **Not built:** any presentation outside the operator's report — no endpoint or dashboard view shows an area until D-137 is settled; notification channels (Stage 29).
+- **Known limits:** distances and areas use a local equirectangular projection, under a percent off at the scale an area is registered at; the swath is one number for every satellite.
+
+**Stage 31's software is built** (2026-09-29), ahead of its place in the sequence, because it depends only on Stages 14 and 15. Its decisions are D-220 through D-226, and `docs/OPERATIONS.md` § External archive ingest, *Public environmental and space-weather sources*, is its runbook.
+- **The completion gate passes, and is demonstrable at a prompt.** `tests/unit/test_conditions_gate.py` publishes synthetic artefacts in the providers' formats as a fetch would, deletes them, and then — with every socket and database connection refused — normalises, freezes a raw snapshot and reads the features three times, identically. The Kp product is fetched twice a day apart with one interval revised: a pass between the fetches reads the first value, a pass after reads the revision, and every value names the artefact it came from.
+- **Nine sources, one per class** (D-220): Kp from NOAA SWPC, cloud cover and aerosol from Open-Meteo (CAMS), fires from NASA FIRMS, NDVI from the ORNL DAAC subsets, precipitation from NASA POWER, night-time lights from NASA Black Marble, and display-only imagery from NASA GIBS and ISRO Bhuvan — Bhuvan display-only because its terms say so. Each is registered off, asks about places from the settings file, and rounds a point before sending it.
+- **`environment_samples`** (migration 0021, D-221): one row per published value, append-only and content-hashed; a missing value is a row with a reason, never a zero; a tile is never a row.
+- **Published before the pass** (D-222): `published_at` is the artefact's declared production time where that precedes our fetch, otherwise our fetch. A revision is a new row, and `value_before` reads only rows published before the pass.
+- **Keys and limits** (D-223): a key is a placeholder until the socket and is redacted from every error; each source's published limits are honoured at 90% by a ledger that survives between runs.
+- **The `conditions` feature group** (D-224): Kp and cloud cover with their indicators, read by configuration D only, from snapshots only.
+- **Near real time** is `meridian-ingest follow` on the ingest machine (D-225); HDF5 is the `hdf5` extra (D-226).
+- **Not built:**
+  - any live retrieval: every adapter is exercised against synthetic fixtures, and each source's terms page is re-read before its first real fetch (D-220);
+  - D-131's leave-one-group-out run, which waits on a model of real data (D-224);
+  - the minimum count of disturbed passes `EVALUATION.md` §3 asks to be stated in advance;
+  - a GFZ definitive Kp as the reanalysis column, which D-131 keeps apart from the feature and which nothing yet reads.
+- **Known limits, each stated rather than hidden:**
+  - a backfill never supplies features for passes already flown, because a value we fetched after a pass cannot be shown to have existed before it;
+  - the terms in `ATTRIBUTION.md` were read from quotations of the providers' pages, because the build environment could not reach them.
 
 **Stage 23's software is built, ahead of its turn; Stage 19 is still next.** It was built beside Stages 18 and 20, both merged first, and touches none of their files. Its decisions are D-200 through D-211, `docs/THREAT-MODEL.md` is its threat model, and `docs/OPERATIONS.md` § Rate limits, § Rotating secrets, § Security scanning, § Backup and restore and § Failure recovery are its runbook. It added no migration.
 - **The completion gate passes, clause by clause:**

@@ -1,6 +1,6 @@
-"""Revision 0021 - every revocation and reinstatement, kept after it is undone.
+"""Revision 0021 - published environmental and space-weather values.
 
-Applies sql/0021_assignment_revocations.sql. See deploy/migrations/_sql.py.
+Applies sql/0021_environment_samples.sql. See deploy/migrations/_sql.py.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    apply("0021_assignment_revocations")
+    apply("0021_environment_samples")
 
 
 def downgrade() -> None:

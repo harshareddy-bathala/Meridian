@@ -1,0 +1,68 @@
+# meridian regions report — settings. Copy to regions.toml and pass it with
+# --config. Every value below is a default except the two periods, which have
+# none: without them a report has series and coverage and no change or alert.
+#
+# A report is a pure function of a raw snapshot, this file and the seed in it
+# (CLAUDE.md rule 8): the same three always publish the same directory. Unknown
+# keys are refused, so a typo is a message rather than a setting that did
+# nothing. See docs/DECISIONS.md D-229 to D-233.
+
+# The bootstrap that gives every change its interval. Seeded, so the interval
+# is the same every run; a different seed is a different report.
+seed = 0
+resamples = 2000
+confidence = 0.95
+
+# Fewer values than this in either period is "insufficient": never a change of
+# zero, never an alert.
+min_points = 3
+
+# A point product (precipitation, aerosol, cloud) is read from the model cells
+# inside an area, or else from the nearest cell within this distance.
+nearest_km = 50.0
+
+# The ground a reception images, across track. A decoded reception covers an
+# area when the ground beneath the satellite came within half of this (D-230).
+# 2800 km is Meteor-M's MSU-MR.
+swath_km = 2800.0
+
+# A day with at least this much precipitation is wet, for the receiving-chain
+# cross-check: at 137 MHz rain should not change the decode rate (D-233).
+wet_day_mm = 1.0
+
+# Simulated receptions are left out of coverage unless asked for here, and are
+# then counted apart and labelled (rule 5).
+include_simulated = false
+
+# The two periods a change is measured between, half-open. Both or neither.
+# [baseline]
+# from = 2026-06-01T00:00:00Z
+# until = 2026-08-01T00:00:00Z
+#
+# [current]
+# from = 2026-09-01T00:00:00Z
+# until = 2026-09-29T00:00:00Z
+
+# One rule per quantity: kind "relative" (a fraction of the baseline mean) or
+# "absolute" (in the quantity's unit), and a signed threshold — negative
+# watches for a fall, positive for a rise. An alert needs the whole interval
+# beyond the threshold (D-231). These are the defaults, restated.
+[rules.ndvi]
+kind = "relative"
+threshold = -0.15
+
+[rules.fire_count]
+kind = "absolute"
+threshold = 3.0
+
+[rules.precipitation]
+kind = "relative"
+threshold = -0.5
+
+[rules.aerosol_optical_depth]
+kind = "relative"
+threshold = 0.5
+
+[rules.night_lights_radiance]
+kind = "relative"
+threshold = -0.3

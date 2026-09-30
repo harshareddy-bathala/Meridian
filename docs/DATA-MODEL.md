@@ -2,7 +2,7 @@
 
 PostgreSQL with TimescaleDB. Observations and heartbeats are hypertables.
 
-> **Phase 1 scope.** D-018 builds eight of the tables below plus `invite_tokens` (D-020) and `satellite_transmitters` (D-021). `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles` are deferred — see D-018 for why each one waits. The derived views wait with them; Phase 1 does not produce the data they read.
+> **Phase 1 scope.** D-018 builds eight of the tables below plus `invite_tokens` (D-020) and `satellite_transmitters` (D-021). `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles` were deferred — see D-018 for why each one waited — and Stage 19 built them once each had a producer and a consumer (migration `0023`, D-173 to D-176). Two derived views and an hourly heartbeat aggregate followed (migration `0024`, D-177, D-178).
 >
 > **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below and are **planned, not built**. Nothing here is a migration; the rules they share are D-104.
 
@@ -36,7 +36,7 @@ A station may have several: a VHF fixed antenna and a UHF tracking antenna are d
 
 `min_elevation_deg` is the station's **declared** floor, not its measured horizon — the platform learns the real obstruction profile from outcome history and may override this downward per azimuth.
 
-`horizon_mask_json` holds the optional azimuth-resolved obstruction an operator declared at registration, defaulting to `[]`. **It is never merged into a learned profile.** The Phase 2 `horizon_profiles` table carries `source in ('declared', 'learned')` and the scheduler takes `max(declared, learned)` per bin, so a declaration constrains scheduling without ever becoming an input to the model that would otherwise be predicting it. See D-031.
+`horizon_mask_json` holds the optional azimuth-resolved obstruction an operator declared at registration, defaulting to `[]`. **It is never merged into a learned profile.** `horizon_profiles` carries `source in ('declared', 'learned')`, and only the declared mask constrains scheduling: a pass whose track clears it nowhere is left undecided (D-175, amending D-031's `max(declared, learned)`). A declaration therefore constrains scheduling without ever becoming an input to the model that would otherwise be predicting it. The mask travels inside each capability (MSP §4.1); the reference client once sent it where it was ignored, which D-175 records and fixed.
 
 ### `invite_tokens`
 `(token_sha256, label, created_at, expires_at, consumed_at, consumed_by_station_id, issued_for_station_id)`
@@ -167,7 +167,7 @@ Derived, because an idempotent retry must return the *same* id as the original s
 
 A `supersedes_id` pointer would have been the obvious shape and is rejected on modelling grounds: `revision` orders the lineage explicitly instead of requiring a chain walk, and `(assignment_id, revision)` must exist as the key regardless. `content_sha256` over the canonical body makes a byte-identical resubmission — the queued-retry case of MSP §6 — a no-op rather than a new revision. See D-015. **What "canonical" means is D-070**: a rendering of the stored record with sorted keys, no whitespace, timestamps normalised to UTC milliseconds and arrays in submitted order — not the received bytes, which could not be regenerated from a dataset snapshot. Only the platform ever computes it; the hash appears in no MSP message.
 
-This table also carries `products_json`, holding the MSP §4.4 `products` array verbatim until O-1 is resolved and the `products` table exists (D-018).
+This table also carries `products_json`, holding the MSP §4.4 `products` array verbatim (D-018). It stays the record of what was sent now that `products` holds its normalised rows (D-176).
 
 **MSP 0.3's reception evidence** (migration `0015`, D-119) is seven nullable columns: the noise floor in dBFS with the receiver gain it was measured at, `snr_samples` as sent, and the flattened `decode` block — `decoder`, `decoder_version`, `frames_decoded`, `frames_failed`. **Null is "not measured"**, which is every observation stored before 0.3, and no column has a default that would put a measurement into a row that never had one. `CHECK`s restate D-117: counts are non-negative, a floor carries its gain, statistics name their decoder, frames agree with the outcome, and `not_attempted` measured nothing. The 512-sample cap is enforced by the request model, as for `doppler_samples`. The new keys enter `content_sha256`'s canonical body only when present, so every digest stored before them still matches its row (D-118).
 
@@ -186,7 +186,7 @@ The listening block is stored whole — assignment, satellite, frequency **and m
 
 Partitioned on `received_at`, the platform's clock, not the station's `sent_at` (D-013). The MSP handler stamps it, and the station's `last_heartbeat_at`, with the one instant it reconciles the heartbeat at, so a heartbeat and every decision taken from it share one time (D-195).
 
-Retention: full resolution 90 days, then downsampled. **The retention policy is not created in Phase 1** — dropping chunks before the continuous aggregate that downsamples them exists is just data loss on a timer. It lands in Phase 3 with the aggregate.
+Retention: **none — raw heartbeats are never dropped**, only compressed after 7 days (D-178). `Registry.was_listening`, the snapshot export and Stage 20's reclassification read raw rows for any window a pass can be asked about, and a count per hour cannot answer them. The `heartbeats_hourly` continuous aggregate serves the reads that need coverage rather than evidence. The 90-day figure planned here was withdrawn when the queries were written down; Stage 33 revisits it with measured volume.
 
 ### `pass_classifications`
 What happened to each settled, scheduled pass, and the evidence it was decided from. Every reliability figure is counted from these rows (Stage 20).
@@ -208,30 +208,44 @@ Every revocation of an assignment and every reinstatement of one (Stage 21).
 - **Append-only, and the reason it exists.** A reinstatement clears the assignment's `revoked_reason` and `revoked_at` (D-171), which is right for its state and would otherwise leave no record that the platform ever took the work back. `meridian reliability faults` reads it to show the scheduler replanned while a station was offline (D-196).
 
 ### `products`
-Artifacts from an observation — waterfalls, images, decoded frames. Content-addressed by hash, referenced here.
+What a station declared it holds from one reception — a waterfall, an image, decoded frames — named by `sha256` (migration `0023`, D-176).
 
-O-1 is now resolved (D-029): transfer is a **pre-signed PUT to object storage**, off the MSP path, not an inline upload — a waterfall is megabytes and an observation body is capped at 256 KiB. The table therefore stores a storage location rather than bytes, and is created at the stage where a receiver first produces a product. Until then MSP §4.4's `products` array lives verbatim in `observations.products_json`, so nothing a station sends is lost.
+`(id, assignment_id, revision, observation_started_at, station_id, element_index, kind, sha256, size_bytes, uri, created_at, simulated)`, with a foreign key to the observation revision it came from.
+
+- **Producer:** observation ingest, from each element of `products_json` with a non-empty `kind` and a 64-hex `sha256`, in the transaction that writes the revision. Migration `0023` backfilled every earlier observation by the same rule. The reference client declares only files its decoder named and its product store holds.
+- **Consumers:** the public observation list, which serves kind, hash and size, never `uri`; the raw snapshot's `products.jsonl`, without `uri` — though the snapshot's `observations` still carry it inside `products_json`, verbatim, and a raw snapshot is private; Stage 30's evidence dataset, by hash.
+- **No transfer.** MSP 0.x defines none (D-029); `uri` is `station:products/<sha256>` for the reference client, meaning held by the station, not fetchable. An element outside the rule stays in `products_json` and gets no row.
+- **Retention:** as long as the observation it belongs to — never dropped. The bytes live on the station under its store's cap, oldest evicted first, and an eviction is not reported.
 
 ### `horizon_profiles`
-Derived per station: usable elevation floor by azimuth bin, with the sample count and confidence behind each bin. Recomputed on a schedule; versioned so a prediction can be traced to the profile that produced it.
+A station's horizon by azimuth bin: what a capability's mask **declared**, and what the station's detections **learned**. Two `source` values, never merged (D-031, D-174).
+
+`(id, station_id, source, method, capability_id, dataset_sha256, trained_from, trained_until, azimuth_deg, azimuth_width_deg, min_elevation_deg, sample_count, built_at, simulated)`. A declared row names its capability and nothing learned; a learned row names its dataset, its span and its sample count. A bin holds its floor from `azimuth_deg` for `azimuth_width_deg`, clockwise.
+
+- **Producer:** `meridian profiles build`, and the jobs service's `profiles` task every round. A declared profile is written when a capability's mask changes. A learned profile is built once per labelled dataset by the same functions Stage 17's features call, 36 sectors of 10°.
+- **Consumers:** `GET /api/v1/stations/{id}/profiles` and the dashboard's sky plot; Stage 27's obstruction evidence. The scheduler constrains on the capability's mask directly, which is what these declared rows record.
+- **Nothing here feeds prediction.** Live scoring computes its environment from the dataset in memory (D-157, D-169).
+- **Retention:** append-only and never dropped: a new dataset or mask writes new rows, and an earlier profile stays so a diagnosis can cite the one it read.
 
 ### `noise_measurements` *(hypertable)*
-Measured noise floor per station, azimuth bin and time.
+Measured noise floor, one row per reception revision or survey reading (migration `0023`, D-173).
 
-`(station_id, measured_at, azimuth_bin_deg, centre_freq_hz, noise_floor_dbm, source, simulated)`
+`(id, station_id, measured_at, source, assignment_id, revision, centre_freq_hz, bandwidth_hz, azimuth_deg, noise_floor_dbfs, receiver_gain_db, simulated, recorded_at)`, keyed `(id, measured_at)`.
 
-`source` distinguishes a measurement taken during an observation from one taken by a dedicated survey sweep — the two have different duty cycles and the model should be able to weight them differently.
+**dBFS at a stated gain**, never dBm: RF calibration is outside what a station can honestly claim (D-103, D-104). `source` is `observation` or `survey`; an observation's row names its assignment and revision and has no azimuth, because one floor covers a whole pass and an unpointed antenna pointed nowhere. The sector is assigned where a profile is derived.
 
-**Observation-sourced rows are how loss diagnosis sees interference.** Each reception's noise floor lands here with `source` marking it as taken during that observation, and a floor raised against the station's `interference_profiles` cell is the evidence for the interference cause. That needs a noise floor in the observation body, which MSP 0.3 carries (D-103, D-117).
-
-*A unit gap, recorded before the migration is written.* `noise_floor_dbm` presumes absolute calibration, and RF calibration is outside the software roadmap. A station can honestly report dBFS at a stated receiver gain, and interference is judged against the same station's own history, where a relative figure suffices. D-103 is accepted, so the stored value is dBFS with its gain and the column is named for what it holds; Stage 19 writes that migration (D-104).
+- **Producer:** observation ingest, from each revision carrying a floor, by the query migration `0023` backfilled with. Nothing produces a survey row yet; the `CHECK` admits one.
+- **Consumers:** the raw snapshot, and so every labelled dataset; Stage 25's verdict and Stage 27's interference cause.
+- Partitioned on `measured_at`, the observation's `started_at`, under the same ingest bound as `observations` (D-013). No foreign key to `observations`: TimescaleDB refuses one between hypertables, so ingest writes both in one transaction and a test checks every row against its observation.
+- **Retention:** never dropped (D-178), no compression policy: its volume is the observation count.
 
 ### `interference_profiles`
-Derived per station: noise floor by azimuth bin **and hour of day**, with the sample count behind each cell.
+A station's noise floor by 45° sector of the pass's peak and 4-hour band of local solar hour, over the station's median, with the gains behind each cell (migration `0023`, D-174).
 
-`docs/EVALUATION.md` §2 lists the interference profile as one of our own features, and the prediction module consumes it — but nothing held the underlying measurement, so the feature had no source. `noise_measurements` is that source and this is the profile derived from it.
+`(id, station_id, method, dataset_sha256, trained_from, trained_until, azimuth_deg, azimuth_width_deg, hour_start, hour_width, noise_lift_db, station_median_dbfs, sample_count, gain_min_db, gain_max_db, built_at, simulated)`. All 48 cells are written, an empty one at its prior with no gains (D-161).
 
-Versioned exactly as `horizon_profiles` is, and for the same reason: a prediction must be traceable to the profile that produced it. See `docs/DECISIONS.md` D-009.
+- **Producer and consumers:** as `horizon_profiles`' learned rows: built once per dataset, served by the profiles endpoint, cited by Stage 27, which compares "at the same gain" and can refuse a cell whose gains differ.
+- **Retention:** append-only and never dropped, as `horizon_profiles`.
 
 *Hour of day matters and a single aggregate would hide it — a rooftop in a city has a different noise floor at 8 a.m. than at 8 p.m., which is the whole reason this feature exists.*
 
@@ -296,7 +310,7 @@ One row per evidence-dataset package; the package itself is files, as `products`
 
 ## Ingest and archive tables
 
-Seven tables and a view, for modules 18 and 19. **Four are built**, by migration `0016`: `ingest_sources` and `ingest_records` — the provenance pair, created here and reused unchanged by Stage 31 rather than duplicated (D-140) — and `archive_stations` and `archive_observations`, which hold what an archive published about somebody else's receptions (D-139). The remaining three are **planned**, and their column tuples are the intent until Stages 31 and 32 write their migrations. What all of them share is decided in D-132, D-133, D-134 and D-140:
+Seven tables and a view, for modules 18 and 19. **Five are built.** Migration `0016` built `ingest_sources` and `ingest_records` — the provenance pair, reused unchanged by Stage 31 rather than duplicated (D-140) — and `archive_stations` and `archive_observations`, which hold what an archive published about somebody else's receptions (D-139). Migration `0021` built `environment_samples`, Stage 31's published values (D-221), and migration `0022` built Stage 32's `areas_of_interest` with the two regional alert tables below. `area_series` is not built: series are published as files (D-229). What all of them share is decided in D-132, D-133, D-134 and D-140:
 
 - **Raw arrivals are append-only.** A re-fetch that differs is a new row, never an overwrite — the discipline D-015 applies to observations, applied to data we did not author either.
 - **Provenance is complete or the record is refused.** Source, original identifier, source version, retrieval time, licence and checksum, for every record, whatever it carries. The version of the transformation that produced a value sits on the normalised row rather than on the arrival (D-140): an artefact is retrieved once and may be normalised many times.
@@ -344,24 +358,33 @@ Every stored artefact beside the terms it arrived under, joining `ingest_records
 
 **None of these four is a hypertable, and none is compressed.** `element_sets` is the precedent: append-only, time-stamped, read in bulk rather than in recent windows. Making one a hypertable later is supported and cheap; undoing it is not, and `downgrade()` always raises. Compression would also be perverse — archive receptions are months old when they load, so a policy on `started_at` would compress a chunk on creation and every backfill would write into a compressed one.
 
-### `environment_samples` *(planned)*
-`(sample_id, record_id, quantity, observed_at, published_at, value, value_unit, area_id, method)`
+### `environment_samples`
+`(sample_id, record_id, source_id, transformation_version, series_key, content_sha256, quantity, value, missing_reason, value_unit, observed_from, observed_to, published_at, published_basis, product, lat_deg, lon_deg, footprint_m, quality, loaded_at)`
 
-The normalised scalar values features are read from — an index, a condition, a composite's value over an area. `area_id` is null for a global or point value.
+The normalised values features and regional series are read from — an index, a condition, a composite's pixel, a detection — built by migration `0021` (D-221). One row per value per artefact, keyed `(record_id, series_key, transformation_version)` and content-hashed, so re-normalising appends and a disagreeing normaliser is refused, as for archive receptions (D-140, D-142).
 
-**`published_at` is the load-bearing column.** It is when the value became available, and the pre-pass rule reads it: the value used for a pass is the latest one whose `published_at` precedes the pass (D-131). A later revision of the same `observed_at` is a new row with a later `published_at`, and a model that selects on `observed_at` alone has read the future.
+**`published_at` is the load-bearing column.** It is when the value became available: the artefact's own production time where it declares one earlier than our fetch (`published_basis = 'source_declared'`), otherwise our retrieval (`'retrieved'`), and never later than the retrieval (D-222). The value used for a pass is chosen among rows published before it (D-131). A later revision of the same interval is a new row with a later `published_at`, and a model that selects on `observed_from` alone has read the future.
 
-### `areas_of_interest` *(planned)*
-`(area_id, label, geometry, centroid_lat_deg, centroid_lon_deg, area_km2, created_at, active, notes)`
+**A missing value is a row**: `value` null and `missing_reason` saying why, exactly one of the two present by CHECK. It is never a zero, and the pre-pass rule never falls back to an older value across one (D-221).
 
-A place and a label — nothing else. **No owner, no contact, no address**: an area of interest describes ground, and the moment it describes a person it becomes personal data the project does not hold (`PROJECT.md` §16). Who may register one, and whether a registration is public, is open (D-137).
+`observed_from`/`observed_to` is the interval described, closed, equal for an instantaneous detection. Location is `lat_deg`/`lon_deg` as a pair, null for a global value, with `footprint_m` the side of the square it stands for. `product` names the source's product and version and `quality` its own flag, verbatim. No `area_id`: which area a value falls in is Stage 32's computation over these rows.
 
-`geometry` is the registered extent; the centroid and area are derived and stored so a listing does not need the geometry. `active` retires an area without deleting its series, because a series that vanishes cannot be checked against what was published from it.
+### `areas_of_interest`
+`(area_id, label, geometry, geometry_sha256, centroid_lat_deg, centroid_lon_deg, area_km2, created_at, active, notes)`
 
-### `area_series` *(planned)*
-`(area_id, quantity, observed_at, value, value_unit, record_id, method, computed_at)`
+Built by migration `0022` with Stage 32. A place and a label — nothing else. **No owner, no contact, no address**: an area of interest describes ground, and the moment it describes a person it becomes personal data the project does not hold (`PROJECT.md` §16). Who may register one, and whether a registration is public, is open (D-137); until it is settled an operator registers one at the command line, nothing about an area is published, and a label or note that looks like an email address, a phone number or a street address is refused (D-227).
 
-What the ingested products say about a registered area over time. **Every point names the `record_id` it was computed from** and the `method` version that computed it, so a chart on the dashboard can be traced to an artefact with a checksum and a licence. Recomputing with a new method appends; it never rewrites an earlier series.
+`geometry` is a GeoJSON Polygon with one ring, CHECKed as a Polygon; the centroid and area are derived by `meridian.regions.geometry` and stored so a listing does not need the geometry. `geometry_sha256` is unique, so one shape is one area and a changed shape is a new area. `active` retires an area without deleting it, because a series that vanishes cannot be checked against what was published from it. `notes` is never exported into a snapshot.
+
+### `area_series` *(not built — D-229)*
+
+Planned as a table of what the ingested products say about each area. **A series is a pure function of a raw snapshot and a configuration**, so it is published as files in a regional report instead (`data/datasets/regions/`, below), where every point names its sources, products, record ids and retrieval time. A table would be a cache of that function that could drift from it.
+
+### `region_alerts` and `region_alert_deliveries`
+`region_alerts (alert_id, area_id, quantity, rule, baseline_from, baseline_until, current_from, current_until, baseline_value, current_value, change, change_low, change_high, threshold, report_sha256, summary, recorded_at)`
+`region_alert_deliveries (delivery_id, alert_id, channel, outcome, detail, attempted_at)`
+
+Built by migration `0022`. A regional alert is a change in an area against its baseline whose whole interval lay beyond its threshold (D-231), recorded from a regional report. `alert_id` is `ra_` and 24 hex digits derived from what the alert is about and the snapshot and configuration it came from, so recording a report twice writes nothing; a CHECK holds the interval in order — not the change inside it, which a percentile bootstrap does not promise. Every delivery attempt is appended; the only channel is `record_only` until Stage 29 builds notifications (D-232). Neither table shares a name with the platform's Prometheus alerting (D-228).
 
 ---
 
@@ -373,10 +396,13 @@ Stage 15's two artefacts, and Stage 17's models, are directories on disk, not ro
 
 Written by `meridian snapshot export`, the only step that reads the database, inside one `REPEATABLE READ, READ ONLY` transaction. `as_of` is that transaction's time and cannot be chosen, because several columns are current state rather than history (D-143). It holds, for passes from `--since` to `as_of`:
 
-- `passes`, `assignments`, and every `observations` revision submitted by `as_of`;
+- `passes`, `assignments`, and every `observations` revision submitted by `as_of`, with the `noise_measurements` and `products` recorded from them *(Stage 19)* — `products` without its `uri` column, which names a place on one station, though `products_json` still holds it verbatim (D-173, D-176);
 - `listening` — per settled scheduled assignment, `listening_confirmed` as `Registry.was_listening()` answered it at export (D-145) — and the `heartbeats` overlapping those windows;
 - the `element_sets` the passes were computed from, `satellites` with their `transmitters`, and `stations` with their `capabilities`, effective from `registered_at` until `deleted_at`;
 - `archive_stations`, `archive_observations` and `ingest_provenance`, kept in their own files and their own vocabulary;
+- `environment_samples` *(Stage 31)* — every published value made public before `as_of` that describes time from a week before `since`, with the artefacts it cites added to `ingest_records` and their sources' terms to the manifest (D-222). A snapshot from before Stage 31 has no such file and reads as holding none;
+- `areas_of_interest` *(Stage 32)* — every area registered before `as_of`, active or retired, without its notes (D-227). `ingest_records` also carries every public artefact fetched about time near the scope — a FIRMS day with no detections, a tile — with its `spatial_extent` (D-229);
+- `pass_ground_tracks` *(Stage 32)* — per pass with a report, measured or simulated and flagged: the sub-satellite point every 30 s over `[aos, los)`, to three decimals of a degree, propagated at export so no regional computation propagates (D-230);
 - `archive_passes` *(Stage 16)* — the passes our orbit service says each archive station could have received, for the satellites it was seen receiving, propagated at export so labelling never propagates (D-150). What could not be computed is counted in the manifest, not left out.
 - `pass_tracks` *(Stage 17)* — per measured pass, where it was in the sky: `pass_id`, `start` (its `aos`), `step_s` (30), and `azimuth_deg` and `elevation_deg` sampled every 30 s over `[aos, los)`, to a hundredth of a degree with azimuth folded into `[0, 360)`. Propagated at export from the pass's own element set over its own station, after the snapshot transaction has read everything and closed, so that no feature propagates and no hash rests on `sgp4` agreeing to the last bit (D-158). Simulated passes get no track, and a pass whose station or element set is not in the snapshot is counted under `pass_tracks.*` in the manifest, never dropped.
 
@@ -409,6 +435,18 @@ Written by `meridian model fit` from an evaluation dataset, its raw snapshot and
 - `manifest.json` — kind `model`; the dataset's hash as `derived_from`, `model-1` as the transformation version, the configuration's hash and resolved values as `parameters`; the archive `sources` the dataset carried, with their licences and terms, so a model fitted on archive receptions still names whose they were; and counts: `examples.train`, `.validate` and `.test` with their `_decoded`, `examples.simulated` (usable passes left out, D-078) and `examples.without_weight` (left out of an `ipw` fit for want of a weight).
 
 **A model holds no example.** Examples are rebuilt from the dataset and its raw snapshot whenever they are needed, since they are a pure function of both (D-157), and `meridian model evaluate` follows `derived_from` to find them, checking each hash.
+
+### Regional report — `data/datasets/regions/<hash prefix>/` *(Stage 32)*
+
+Written by `meridian regions report` from a raw snapshot and a regional configuration (`deploy/regions.toml.example`), with no database, network or clock, so the same two inputs always name the same directory (D-229). Published and read by the same rules as a snapshot.
+
+- `areas.jsonl` — every area in the snapshot: id, label, area, active, bounding box and the shape's digest.
+- `series.jsonl` — per active area, quantity and period: the value or a `missing_reason`, how many published values it combines, its unit, the `method` that placed the product on the area (`regions-1: …`), and the `sources`, `products`, `record_ids` and newest `retrieved_at` behind it.
+- `changes.jsonl` — per area and quantity with a rule: both periods' counts and means, the change, its bootstrap interval, and a verdict of `alert`, `within` or `insufficient` with the reason (D-231). `alerts.jsonl` is the `alert` rows, each with its derived `alert_id`.
+- `coverage.jsonl` — each decoded reception whose ground track came within half a swath of an area, with the closest approach and `simulated` (D-230).
+- `ingest_agreement.jsonl` and `weather_agreement.jsonl` — the two cross-checks, as rates with Wilson intervals and counts (D-233).
+- `imagery.jsonl` — tiles overlapping each area, by record id, each labelled as imagery that is never read for a value (D-133).
+- `manifest.json` — kind `regions_report`; the raw snapshot as `derived_from`, `regions-1` as the transformation version, the configuration's hash and values; the sources' terms; and counts, coverage measured and simulated apart.
 ---
 
 ## Conventions
@@ -428,7 +466,7 @@ Written by `meridian model fit` from an evaluation dataset, its raw snapshot and
   puts `client.impl` on the wire. The protocol's spelling is carried by a
   Pydantic alias in `api/models/`, which is the single place the two vocabularies
   are allowed to meet.
-- **`simulated boolean not null default false`** on every table that can hold simulated data — `stations`, `passes`, `assignments`, `observations`, `heartbeats`. Never nullable: an unknown provenance is a bug. Always copied from the station's registry record, never read from a payload.
+- **`simulated boolean not null default false`** on every table that can hold simulated data — `stations`, `passes`, `assignments`, `observations`, `heartbeats`, and without the default on `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles`. Never nullable: an unknown provenance is a bug. Always copied from the station's registry record, never read from a payload.
 - **Satellite identity** is `norad:NNNNN` as text, not a bare integer. Objects without NORAD IDs exist.
 - **Soft delete only.** Nothing in the observation lineage is ever hard-deleted.
 
@@ -453,6 +491,8 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `observations.outcome` | the five values of MSP §4.4 — D-010 |
 | `observations.provenance` | `station`, `archive`, `manual` |
 | `element_sets.source` | `celestrak`, `spacetrack`, `manual`, `simulator` |
+| `noise_measurements.source` | `observation`, `survey` — D-173 |
+| `horizon_profiles.source` | `declared`, `learned` — D-031, D-174 |
 | `satellites.orbital_regime` | `leo`, `meo`, `geo`, `heo`, `other` — `EVALUATION.md` §6.1 segments by it |
 | `station_capabilities.band` | `vhf`, `uhf`, `l`, `s`, `other` |
 | `station_capabilities.polarisation` | `rhcp`, `lhcp`, `linear_v`, `linear_h`, `linear`, `none` |
@@ -460,22 +500,28 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `loss_diagnoses.cause` *(planned)* | `satellite_silent`, `station_not_listening`, `obstruction`, `interference`, `timing_fault`, `undetermined` — D-104 |
 | `report_deliveries.kind` *(planned)* | `pass`, `weekly` — D-098 |
 | `report_deliveries.channel` *(planned)* | `email`, `telegram` — D-098 |
-| `ingest_sources.access_constraint` *(planned)* | `none`, `key_counted`, `registration` — D-132 |
-| `ingest_records.payload_kind` *(planned)* | `data`, `tile` — a `tile` is never read for a value, D-133 |
-| `environment_samples.quantity` *(planned)* | free-text lowercase at first, as `station_capabilities.modes` is — index and product naming varies too much between sources to freeze |
+| `ingest_sources.access_constraint` | `none`, `key_counted`, `registration` — D-132 |
+| `ingest_records.payload_kind` | `data`, `tile` — a `tile` is never read for a value, D-133 |
+| `environment_samples.quantity` | lowercase words, `^[a-z][a-z0-9_]{0,63}$`: `kp_index`, `cloud_cover`, `aerosol_optical_depth`, `fire_radiative_power`, `ndvi`, `precipitation`, `night_lights_radiance` so far — free text, as `station_capabilities.modes` is, because naming varies too much between sources to freeze |
+| `environment_samples.published_basis` | `source_declared`, `retrieved` — D-222 |
 
 ---
 
 ## Derived views
 
-`observations_current` is the only one built. It exposes the highest revision per assignment, and it ships alongside the `observations` table because appending corrections rather than overwriting them is meaningless without something that reads the current one.
+`observations_current` exposes the highest revision per assignment, and it ships alongside the `observations` table because appending corrections rather than overwriting them is meaningless without something that reads the current one.
 
-`pass_completeness` is not a view. Completeness is `station_days.jsonl` in every evaluation dataset (D-149, D-154): a view over live tables would give a different answer each time it was read, and the ratio must be regenerable from a snapshot (rule 8).
+Two more are built (migration `0024`, D-177). **They are operators' reads, not reported numbers**: a view over live tables answers differently each time it is read, and every published figure comes from a snapshot (rule 8).
 
-`sli_current` is not a view either. The service level indicators are counted in `meridian.reliability` from `pass_classifications` (D-184), because whether a class counts as captured or lost is a rule in code (D-182), and a snapshot must be able to count the same figures without a database.
+- `timing_error` — first detection against predicted AOS for each current observation, **corrected by the station's clock offset** from its nearest heartbeat (`EVALUATION.md` §6.1, D-025), with the uncorrected figure and element-set age beside it. §6.1's exclusions are named in `excluded` — `clock_offset_unknown`, `within_clock_uncertainty` — and not applied. `meridian passes timing` reads it.
+- `scheduler_performance` — each schedule run with its solver status and what became of its assignments: revoked, expired, each outcome, still owed, frames decoded. `meridian schedule runs` reads it.
 
-The rest wait on data Phase 1 does not yet produce:
+`heartbeats_hourly` is a real-time continuous aggregate: heartbeats and listening heartbeats per station and hour, refreshed every 30 minutes from the first heartbeat (D-178). `GET /api/v1/stations/{id}/uptime` reads it. A row written below its refresh watermark — only a hand-written or restored one can be — is counted at the next refresh.
 
-- `timing_error` — first detection minus predicted AOS, joined to element-set age.
+**Not views, and why** (D-177):
+
+- `pass_completeness` — completeness is `station_days.jsonl` in every evaluation dataset (D-149, D-154), regenerable from a snapshot.
+- element-set divergence — it needs the propagator, so it lives in `meridian.orbit`, and Stage 17 reads its own from a rise's predictions (D-159).
+- `sli_current` — the service level indicators are counted in `meridian.reliability` from `pass_classifications` (D-184), because whether a class counts as captured or lost is a rule in code (D-182), and a snapshot must be able to count the same figures without a database.
 
 Views, not materialised tables, until profiling proves otherwise.

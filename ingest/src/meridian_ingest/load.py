@@ -35,21 +35,17 @@ from meridian.store.archive_observations import (
 )
 from meridian.store.archive_stations import NewArchiveStation, insert_archive_station
 from meridian.store.ingest_records import (
-    NewIngestRecord,
     find_ingest_record_by_id,
     find_ingest_records_for_source,
     insert_ingest_record,
     mark_ingest_record_superseded,
 )
-from meridian.store.ingest_sources import (
-    NewIngestSource,
-    find_ingest_source,
-    insert_ingest_source,
-)
+from meridian.store.ingest_sources import find_ingest_source, insert_ingest_source
 from meridian.store.stations import Connection
 from meridian_ingest.adapters import adapter_for, normaliser_for
 from meridian_ingest.adapters.protocol import Normaliser, SourceDescriptor
 from meridian_ingest.load_report import ArtefactLoad, LoadReport
+from meridian_ingest.load_rows import load_samples, new_record, new_source
 from meridian_ingest.normalise.records import NormalisedBatch
 from meridian_ingest.raw_manifest import RawManifest
 from meridian_ingest.raw_store import RawStore
@@ -110,7 +106,7 @@ def register_source(conn: Connection, descriptor: SourceDescriptor) -> bool:
     """
     stored = find_ingest_source(conn, descriptor.source_id)
     if stored is None:
-        insert_ingest_source(conn, _new_source(descriptor))
+        insert_ingest_source(conn, new_source(descriptor))
         return True
     differing = [
         f"{name}: stored {getattr(stored, name)!r}, adapter says "
@@ -129,13 +125,20 @@ def register_source(conn: Connection, descriptor: SourceDescriptor) -> bool:
     return False
 
 
-def load_source(conn: Connection, store: RawStore, source_id: str) -> LoadReport:
-    """Load every artefact held for one source.
+def load_source(
+    conn: Connection, store: RawStore, source_id: str, *, new_only: bool = False
+) -> LoadReport:
+    """Load every artefact held for one source, or only those never recorded.
 
     Args:
         conn: An open connection.
         store: The raw store holding the retrieved artefacts.
         source_id: A registered source.
+        new_only: Skip artefacts already in ``ingest_records``. ``follow`` sets
+            it, so a round costs what arrived rather than all ever held; an
+            artefact commits with everything derived from it, so a recorded one
+            is a loaded one. ``load`` leaves it unset, to re-apply a bumped
+            normaliser to what is already held.
 
     Returns:
         What each artefact did.
@@ -156,9 +159,15 @@ def load_source(conn: Connection, store: RawStore, source_id: str) -> LoadReport
     """
     registered = register_source(conn, adapter_for(source_id).descriptor)
     normaliser = normaliser_for(source_id)
+    recorded = (
+        {one.raw_path for one in find_ingest_records_for_source(conn, source_id)}
+        if new_only
+        else set()
+    )
     loads = tuple(
         load_artefact(conn, store, normaliser, raw_path)
         for raw_path in store.scan(source_id)
+        if raw_path not in recorded
     )
     return LoadReport(
         source_id=source_id, source_registered=registered, artefacts=loads
@@ -195,7 +204,7 @@ def load_artefact(
     stored = store.read(raw_path)
     manifest = stored.manifest
     with conn.transaction():
-        arrival = insert_ingest_record(conn, _new_record(manifest, raw_path))
+        arrival = insert_ingest_record(conn, new_record(manifest, raw_path))
         superseded = (
             _supersede(conn, manifest, arrival.record_id) if arrival.written else ()
         )
@@ -216,6 +225,7 @@ def load_artefact(
         receptions = _load_receptions(
             conn, manifest, arrival.record_id, batch, stations
         )
+        samples = load_samples(conn, manifest, arrival.record_id, batch)
     return ArtefactLoad(
         raw_path=raw_path,
         record_id=arrival.record_id,
@@ -226,6 +236,8 @@ def load_artefact(
         stations_already_held=stations.already_held,
         receptions_written=receptions.written,
         receptions_already_held=receptions.already_held,
+        samples_written=samples.written,
+        samples_already_held=samples.already_held,
     )
 
 
@@ -357,40 +369,3 @@ def _superseded_by(conn: Connection, record_id: int) -> int | None:
     """What replaced an already-recorded artefact, or None if nothing has."""
     stored = find_ingest_record_by_id(conn, record_id)
     return None if stored is None else stored.superseded_by
-
-
-def _new_source(descriptor: SourceDescriptor) -> NewIngestSource:
-    """The descriptor in insertable form."""
-    return NewIngestSource(
-        source_id=descriptor.source_id,
-        source_class=descriptor.source_class,
-        name=descriptor.name,
-        licence=descriptor.licence,
-        terms_url=descriptor.terms_url,
-        attribution_entry=descriptor.attribution_entry,
-        access_constraint=descriptor.access_constraint,
-    )
-
-
-def _new_record(manifest: RawManifest, raw_path: str) -> NewIngestRecord:
-    """The manifest in insertable form.
-
-    Every value comes from the manifest written beside the bytes, never from
-    this run's clock or its idea of what it fetched. A load happening days
-    after the retrieval records the retrieval, not the load (D-141).
-    """
-    origin = manifest.provenance
-    return NewIngestRecord(
-        source_id=origin.source_id,
-        original_identifier=origin.original_identifier,
-        source_version=origin.source_version,
-        payload_kind=origin.payload_kind,
-        retrieved_at=origin.retrieved_at,
-        sha256=manifest.sha256,
-        raw_path=raw_path,
-        media_type=origin.media_type,
-        byte_count=manifest.byte_count,
-        valid_from=origin.valid_from,
-        valid_to=origin.valid_to,
-        spatial_extent=origin.spatial_extent,
-    )

@@ -28,6 +28,10 @@ from meridian.store.archive_stations import (  # noqa: E402
     NewArchiveStation,
     insert_archive_station,
 )
+from meridian.store.environment_samples import (  # noqa: E402
+    NewEnvironmentSample,
+    insert_environment_sample,
+)
 from meridian.store.ingest_records import (  # noqa: E402
     NewIngestRecord,
     insert_ingest_record,
@@ -39,10 +43,10 @@ from meridian.store.ingest_sources import (  # noqa: E402
 from meridian.store.snapshot_reads import (  # noqa: E402
     SNAPSHOT_TABLES,
     SnapshotScope,
-    read_source_terms,
     read_table,
     snapshot_instant,
 )
+from meridian.store.snapshot_source_terms import read_source_terms  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -324,3 +328,72 @@ def test_an_archive_satellite_keyed_by_name_brings_no_element_set(
     held = rows(rollback, "element_sets")
 
     assert [one for one in held if one["satellite_id"] == satellite] == []
+
+
+def _published(conn: Any, published_at: datetime, observed: datetime) -> int:
+    """One Kp value published at ``published_at`` about the interval at ``observed``."""
+    insert_ingest_source(
+        conn,
+        NewIngestSource(
+            source_id="noaa_swpc_kp",
+            source_class="space_weather",
+            name="Kp",
+            licence="US Government work",
+            terms_url="https://www.swpc.noaa.gov/disclaimer",
+            access_constraint="none",
+            attribution_entry="NOAA SWPC planetary K index",
+        ),
+    )
+    record = insert_ingest_record(
+        conn,
+        NewIngestRecord(
+            source_id="noaa_swpc_kp",
+            original_identifier="noaa-planetary-k-index.json",
+            source_version="served now",
+            payload_kind="data",
+            retrieved_at=published_at,
+            sha256=bytes([9]) * 32,
+            raw_path="noaa_swpc_kp/20260814T120000Z-abc",
+            media_type="application/json",
+            byte_count=64,
+        ),
+    ).record_id
+    insert_environment_sample(
+        conn,
+        NewEnvironmentSample(
+            record_id=record,
+            source_id="noaa_swpc_kp",
+            transformation_version="swpc-kp-1",
+            series_key=f"kp:{observed.isoformat()}",
+            content_sha256=bytes([1]) * 32,
+            quantity="kp_index",
+            value_unit="Kp (0-9)",
+            observed_from=observed,
+            observed_to=observed + timedelta(hours=3),
+            published_at=published_at,
+            published_basis="retrieved",
+            product="SWPC",
+            value=2.33,
+        ),
+    )
+    return record
+
+
+def test_a_value_published_before_as_of_comes_with_its_record_and_terms(
+    rollback: Any,
+) -> None:
+    record = _published(rollback, INSIDE, INSIDE - timedelta(hours=3))
+    within = scope()
+
+    samples = rows(rollback, "environment_samples", within)
+    assert [one["record_id"] for one in samples] == [record]
+    assert record in [one["record_id"] for one in rows(rollback, "ingest_records")]
+    terms = read_source_terms(rollback, within)
+    assert [one.source_id for one in terms] == ["noaa_swpc_kp"]
+
+
+def test_a_value_published_after_as_of_is_not_in_the_snapshot(rollback: Any) -> None:
+    """D-222: a snapshot cannot hold what nobody had published by its instant."""
+    _published(rollback, INSIDE, INSIDE - timedelta(hours=3))
+    assert rows(rollback, "environment_samples", scope(as_of=INSIDE)) == []
+    assert rows(rollback, "ingest_records", scope(as_of=INSIDE)) == []

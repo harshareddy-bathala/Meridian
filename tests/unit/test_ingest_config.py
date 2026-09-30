@@ -151,7 +151,7 @@ def test_an_unknown_source_key_is_refused(tmp_path: Path) -> None:
 
 def test_a_source_nothing_is_registered_for_is_refused(tmp_path: Path) -> None:
     """A typo'd id would otherwise be settings that do nothing, silently."""
-    with pytest.raises(ConfigurationError, match="registered: reference_archive"):
+    with pytest.raises(ConfigurationError, match=r"registered: .*reference_archive"):
         load_settings(written(tmp_path, "[sources.recption_archive]\nenabled = true\n"))
 
 

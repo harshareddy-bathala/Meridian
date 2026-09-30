@@ -211,3 +211,45 @@ def _refuses(what: str) -> Any:
         raise NetworkAccessError(message)
 
     return refuse
+
+
+PUBLIC_FIXTURES = TESTS_ROOT / "unit" / "public_fixtures"
+"""Stage 31's synthetic fixtures, one per public source, in each provider's
+format and written by us (D-142)."""
+
+
+@pytest.fixture
+def publish_public() -> Any:
+    """Publish one planned artefact of a public source from a fixture file.
+
+    Shared by the unit and integration halves of Stage 31, as
+    :func:`network_guard` is by Stage 14's, so both publish the same way.
+
+    Returns:
+        ``publish(store, source_id, remote, file, retrieved_at)`` →
+        the :class:`~meridian_ingest.raw_store.StoredArtefact`.
+    """
+    from meridian_ingest.adapters import REGISTRY
+    from meridian_ingest.provenance import Provenance
+    from meridian_ingest.retrieval import MappedFixtureRetriever
+
+    def publish(store: Any, source_id: str, remote: Any, file: Path, at: Any) -> Any:
+        adapter = REGISTRY[source_id].adapter
+        retrieved = MappedFixtureRetriever({remote.url: file}).retrieve(remote)
+        published = store.publish(
+            Provenance(
+                source_id=source_id,
+                original_identifier=remote.original_identifier,
+                source_version=adapter.source_version(retrieved),
+                payload_kind=remote.payload_kind,
+                retrieved_at=at,
+                media_type=retrieved.media_type,
+                valid_from=remote.valid_from,
+                valid_to=remote.valid_to,
+                spatial_extent=remote.spatial_extent,
+            ),
+            retrieved.chunks,
+        )
+        return store.read(published.raw_path)
+
+    return publish

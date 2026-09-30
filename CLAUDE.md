@@ -113,9 +113,11 @@ meridian/
 │       ├── store/        SQL access layer
 │       ├── api/          public + MSP endpoints
 │       ├── datasets/     snapshot export, labels, completeness, propensity weights
+│       ├── regions/      areas of interest: series, change, coverage, cross-checks
 │       ├── jobs/         the `jobs` service: pass generation and scheduling on a timer
 │       ├── metrics/      Prometheus exposition and the scrape token check
 │       ├── pass_generation.py   the job that fills `passes` from local elements
+│       ├── profile_build.py     the job that writes the horizon and interference profiles
 │       └── cli.py        the `meridian` command; `cli_*.py` beside it
 ├── client/               distribution: meridian-client
 │   └── src/meridian_client/     reference station client

@@ -105,9 +105,17 @@ class StationProfile:
     """
 
 
-def _capability_payload(chain: ReceiveChain) -> dict[str, object]:
-    """One receive chain, in MSP §4.1's wire shape."""
-    return {
+def _capability_payload(
+    chain: ReceiveChain, horizon_mask: tuple[tuple[float, float], ...]
+) -> dict[str, object]:
+    """One receive chain, in MSP §4.1's wire shape.
+
+    The declared mask travels inside each capability, which is where §4.1 puts
+    it. It is the station's site, so every chain carries the same one. Sent at
+    the top level, as it once was, it was ignored and every declaration was
+    lost (D-175).
+    """
+    payload: dict[str, object] = {
         "band": chain.band,
         "freq_min_hz": chain.freq_min_hz,
         "freq_max_hz": chain.freq_max_hz,
@@ -116,6 +124,12 @@ def _capability_payload(chain: ReceiveChain) -> dict[str, object]:
         "tracking": chain.tracking,
         "min_elevation_deg": chain.min_elevation_deg,
     }
+    if horizon_mask:
+        payload["horizon_mask"] = [
+            {"az_deg": azimuth_deg, "min_el_deg": min_elevation_deg}
+            for azimuth_deg, min_elevation_deg in horizon_mask
+        ]
+    return payload
 
 
 def build_register_body(
@@ -156,17 +170,15 @@ def build_register_body(
         # stating it on every registration means the row records the operator's
         # choice rather than whatever the platform's default happened to be.
         "location_precision_decimals": profile.location_precision_decimals,
-        "capabilities": [_capability_payload(one) for one in profile.capabilities],
+        "capabilities": [
+            _capability_payload(one, profile.horizon_mask)
+            for one in profile.capabilities
+        ],
         "client": {"impl": CLIENT_IMPLEMENTATION, "version": __version__},
     }
     if profile.simulated:
         body["simulator_run_id"] = profile.simulator_run_id
         body["seed"] = profile.seed
-    if profile.horizon_mask:
-        body["horizon_mask"] = [
-            {"az_deg": azimuth_deg, "min_el_deg": min_elevation_deg}
-            for azimuth_deg, min_elevation_deg in profile.horizon_mask
-        ]
     return body
 
 

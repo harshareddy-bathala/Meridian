@@ -54,6 +54,8 @@ class ArtefactLoad:
     stations_already_held: int = 0
     receptions_written: int = 0
     receptions_already_held: int = 0
+    samples_written: int = 0
+    samples_already_held: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +103,16 @@ class LoadReport:
         """
         return sum(one.receptions_already_held for one in self.artefacts)
 
+    @property
+    def samples_written(self) -> int:
+        """Published values this run stored for the first time (D-221)."""
+        return sum(one.samples_written for one in self.artefacts)
+
+    @property
+    def samples_already_held(self) -> int:
+        """Published values that were already stored, identically."""
+        return sum(one.samples_already_held for one in self.artefacts)
+
     def wrote_nothing(self) -> bool:
         """Whether this run added no rows at all.
 
@@ -111,4 +123,5 @@ class LoadReport:
             self.records_written == 0
             and self.stations_written == 0
             and self.receptions_written == 0
+            and self.samples_written == 0
         )

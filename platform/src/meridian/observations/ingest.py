@@ -2,7 +2,10 @@
 
 The service behind MSP §4.4. It takes the facts a station submitted, resolves the
 two the station is not trusted for, decides whether the submission is a first
-report, an unchanged retry or a correction, and writes at most one row.
+report, an unchanged retry or a correction, and writes at most one revision.
+In the same transaction, a revision that reports a noise floor also writes that
+floor's ``noise_measurements`` row (D-173), and one declaring products writes a
+``products`` row for each (D-176).
 
 It speaks no HTTP: the errors below are domain errors, and ``meridian.api``
 translates them into MSP §6 codes — the same division
@@ -15,7 +18,7 @@ is the one piece of Stage 9 that has to be right and is cheapest to be sure of
 away from a database.
 
 Reference: docs/MSP-SPEC.md §4.4, §6; docs/DECISIONS.md D-015, D-027, D-048,
-D-070, D-071.
+D-070, D-071, D-173, D-176.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from datetime import datetime
 
 from meridian.observations.canonical_body import content_sha256
 from meridian.store.assignments import mark_assignment_reported
+from meridian.store.noise_measurements import record_observation_floor
 from meridian.store.observations import (
     AssignmentForReport,
     DecodeStatistics,
@@ -38,6 +42,7 @@ from meridian.store.observations import (
     insert_observation,
     lock_assignment_for_report,
 )
+from meridian.store.products import record_observation_products
 from meridian.store.stations import Connection, find_station_provenance
 
 __all__ = [
@@ -271,12 +276,35 @@ def _write_unless_unchanged(
     decision: RevisionDecision,
     digest: bytes,
 ) -> str:
-    """Append the revision, or answer an unchanged retry without writing."""
+    """Append the revision, or answer an unchanged retry without writing.
+
+    A revision carrying a noise floor is also a noise measurement, and each
+    product it declares is a ``products`` row, both recorded from the row just
+    stored (D-173, D-176). A retry writes none of them: they already exist.
+    """
     if decision.existing_observation_id is not None:
         return decision.existing_observation_id
-    return insert_observation(
+    observation_id = insert_observation(
         conn, record, revision=decision.revision, content_sha256=digest
     )
+    record_observation_floor(
+        conn, assignment_id=record.assignment_id, revision=decision.revision
+    )
+    recorded = record_observation_products(
+        conn,
+        assignment_id=record.assignment_id,
+        revision=decision.revision,
+        submitted=len(record.products),
+    )
+    if recorded.skipped:
+        _log.info(
+            "%s revision %d declared %d products without a kind and a sha256;"
+            " kept in products_json only (D-176)",
+            record.assignment_id,
+            decision.revision,
+            recorded.skipped,
+        )
+    return observation_id
 
 
 def _report_assignment(

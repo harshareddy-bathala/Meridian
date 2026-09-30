@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from tempfile import SpooledTemporaryFile
 from types import TracebackType
@@ -38,13 +39,20 @@ from meridian_ingest.politeness import (
     is_retryable,
     parse_retry_after,
 )
-from meridian_ingest.retrieval import RemoteArtefact, RetrievalError, RetrievedArtefact
+from meridian_ingest.rate_ledger import RateLimiter
+from meridian_ingest.retrieval import (
+    KEY_PLACEHOLDER,
+    RemoteArtefact,
+    RetrievalError,
+    RetrievedArtefact,
+)
 
 __all__ = [
     "DEFAULT_TIMEOUT_S",
     "SPOOL_MAX",
     "USER_AGENT",
     "HttpRetriever",
+    "SourceAccess",
     "open_client",
 ]
 
@@ -107,6 +115,22 @@ class _Again(Exception):  # noqa: N818 — a control-flow signal, not a reportab
         self.retry_after_s = retry_after_s
 
 
+@dataclass(frozen=True, slots=True)
+class SourceAccess:
+    """What one source needs beyond politeness: its key, and its published limits.
+
+    ``key`` is held for the length of one fetch and never printed: its
+    ``repr`` is suppressed, and every message this module raises has it
+    replaced by :data:`REDACTED` (D-223).
+    """
+
+    key: str | None = field(default=None, repr=False)
+    limiter: RateLimiter | None = None
+
+
+REDACTED = "<key withheld>"
+
+
 class HttpRetriever:
     """Fetches artefacts over HTTP, within a budget and a backoff policy.
 
@@ -117,6 +141,7 @@ class HttpRetriever:
         budget: The ceiling on requests. Shared across every artefact in one
             fetch, because the archive counts them all together.
         policy: How long to wait between attempts.
+        access: The source's key and published rate limits, if it has either.
     """
 
     def __init__(
@@ -124,11 +149,13 @@ class HttpRetriever:
         client: httpx.Client,
         budget: RequestBudget,
         policy: RetryPolicy | None = None,
+        access: SourceAccess | None = None,
     ) -> None:
         """Hold the client and the rules. Nothing is fetched yet."""
         self._client = client
         self._budget = budget
         self._policy = policy or RetryPolicy()
+        self._access = access or SourceAccess()
         self._spools: list[IO[bytes]] = []
 
     def __enter__(self) -> HttpRetriever:
@@ -169,9 +196,24 @@ class HttpRetriever:
                 "four attempts failed" without saying how is the report that
                 makes an operator run it again to find out.
         """
+        if remote.needs_key and self._access.key is None:
+            message = (
+                f"{remote.original_identifier} is presented with a key, and none "
+                "was supplied; set the variable its api_key_env names"
+            )
+            raise RetrievalError(message)
+        try:
+            return self._attempts(remote)
+        except RetrievalError as exc:
+            raise type(exc)(self._redact(str(exc))) from None
+
+    def _attempts(self, remote: RemoteArtefact) -> RetrievedArtefact:
+        """Every attempt one artefact is allowed, each paid for before it is made."""
         met: list[str] = []
         for attempt in range(1, self._policy.attempts + 1):
             self._budget.spend(remote.original_identifier)
+            if self._access.limiter is not None:
+                self._access.limiter.acquire(remote.original_identifier)
             try:
                 return self._once(remote)
             except _Again as again:
@@ -189,15 +231,30 @@ class HttpRetriever:
         """One attempt: ask, judge the status, and read the body in full."""
         try:
             with self._client.stream(
-                "GET", remote.url, headers=dict(remote.headers)
+                "GET", self._present(remote.url), headers=self._headers(remote)
             ) as response:
-                self._judge(response)
+                self._judge(response, remote)
                 return self._read(remote, response)
         except httpx.RequestError as exc:
             reason = f"{type(exc).__name__}: {exc}"
             raise _Again(reason) from exc
 
-    def _judge(self, response: httpx.Response) -> None:
+    def _present(self, text: str) -> str:
+        """``text`` with the key in place of its placeholder, at the socket only."""
+        if self._access.key is None:
+            return text
+        return text.replace(KEY_PLACEHOLDER, self._access.key)
+
+    def _headers(self, remote: RemoteArtefact) -> dict[str, str]:
+        return {name: self._present(value) for name, value in remote.headers.items()}
+
+    def _redact(self, text: str) -> str:
+        """``text`` with any trace of the key removed, before anyone sees it."""
+        if not self._access.key:
+            return text
+        return text.replace(self._access.key, REDACTED)
+
+    def _judge(self, response: httpx.Response, remote: RemoteArtefact) -> None:
         """Turn a status into success, a retry, or a permanent refusal."""
         if response.status_code == httpx.codes.OK:
             return
@@ -207,8 +264,10 @@ class HttpRetriever:
                 response.headers.get("Retry-After"), datetime.now(tz=UTC)
             )
             raise _Again(f"HTTP {response.status_code}", after)
+        # remote.url, not response.request.url: the request's URL carries the
+        # key where a source takes one in its path, and this message is printed.
         message = (
-            f"{response.request.url} returned HTTP {response.status_code}, which "
+            f"{remote.url} returned HTTP {response.status_code}, which "
             "asking again would return as well"
         )
         raise RetrievalError(message)

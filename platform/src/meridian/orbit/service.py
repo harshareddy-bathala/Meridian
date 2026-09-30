@@ -1,8 +1,9 @@
 """The orbit module's interface to the rest of the platform.
 
-Five questions the platform asks about a satellite: when is it visible, where do
-I point, how far off frequency will it be, how much do we trust the timing, and
-how much have two element sets for the same object drifted apart.
+Six questions the platform asks about a satellite: when is it visible, where do
+I point, how far off frequency will it be, how much do we trust the timing, how
+much have two element sets for the same object drifted apart, and what ground
+is it over.
 
 Everything outside this package calls these methods rather than a propagator
 directly, so swapping the propagator is a change to one implementation and to
@@ -28,6 +29,7 @@ from meridian.orbit.types import (
     LookAngle,
     PassSearch,
     PassWindow,
+    SubPoint,
     TimingUncertainty,
 )
 
@@ -104,6 +106,17 @@ class OrbitService(Protocol):
 
         Phase 2 replaces the prior with a model fitted to measured timing error.
         The returned ``method`` string is what lets SC-3 compare the two.
+        """
+        ...
+
+    def ground_track(
+        self, element_set: ElementSet, start: datetime, end: datetime, *, step_s: float
+    ) -> list[SubPoint]:
+        """Where the satellite is over the ground, sampled over ``[start, end)``.
+
+        The sub-satellite point on the WGS84 ellipsoid, for a regional coverage
+        check that asks whether a pass crossed an area (Stage 32). Needs no
+        station: it is a property of the orbit alone.
         """
         ...
 

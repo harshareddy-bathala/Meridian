@@ -25,9 +25,12 @@ NEVER_EXPORTED = (
     "operator",
     "token_issued_at",
     "token_revoked_at",
+    "uri",
 )
-"""Credentials, a column that may name a person, and current state no label
-may use (D-143)."""
+"""Credentials, a column that may name a person, current state no label may
+use (D-143), and the ``products.uri`` column (D-176). The verbatim
+``observations.products_json`` still holds each uri, as it holds everything a
+station sent; a raw snapshot is private, and this pins columns, not contents."""
 
 
 def test_every_table_is_a_file_the_manifest_accepts() -> None:
@@ -44,6 +47,9 @@ def test_the_snapshot_holds_what_d_143_lists() -> None:
         "passes",
         "assignments",
         "observations",
+        # Recorded from each observation revision (D-173, D-176).
+        "noise_measurements",
+        "products",
         "heartbeats",
         "element_sets",
         "stations",
@@ -53,6 +59,8 @@ def test_the_snapshot_holds_what_d_143_lists() -> None:
         "archive_observations",
         "archive_stations",
         "ingest_records",
+        "environment_samples",
+        "areas_of_interest",
     }
 
 

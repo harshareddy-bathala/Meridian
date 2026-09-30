@@ -17,7 +17,7 @@ Reference: docs/DECISIONS.md D-133, D-141, D-142.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -27,7 +27,9 @@ from meridian_ingest.raw_layout import digest_on_disk
 
 __all__ = [
     "FIXTURE_MEDIA_TYPES",
+    "KEY_PLACEHOLDER",
     "FixtureRetriever",
+    "MappedFixtureRetriever",
     "RemoteArtefact",
     "RetrievalError",
     "RetrievedArtefact",
@@ -38,6 +40,8 @@ FIXTURE_MEDIA_TYPES = {
     ".json": "application/json",
     ".csv": "text/csv",
     ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".h5": "application/x-hdf5",
 }
 """What a fixture file's suffix says it is.
 
@@ -47,6 +51,17 @@ had said it.
 """
 
 _READ_BLOCK = 1 << 16
+
+KEY_PLACEHOLDER = "{key}"
+"""Where a source's key goes, written into a planned URL or header value.
+
+An adapter plans *where* a key is presented — a path segment for one archive,
+an ``Authorization`` header for another — and never *what* it is. The
+placeholder is replaced by the retriever at the moment of the request, from
+the environment, and redacted from anything it says afterwards (D-223). So the
+key is never on a :class:`RemoteArtefact`, never in a manifest and never in a
+row: those hold the placeholder, which is safe to print.
+"""
 
 
 class RetrievalError(Exception):
@@ -83,9 +98,9 @@ class RemoteArtefact:
 
     headers: Mapping[str, str] = field(default_factory=dict)
     """Request headers this artefact needs, such as a conditional ``If-None-
-    Match``. Never credentials: a source that needs a key is
-    ``access_constraint = 'key_counted'`` and the key comes from configuration,
-    not from an adapter's literal."""
+    Match``. Never credentials: a source that needs a key writes
+    :data:`KEY_PLACEHOLDER` where it goes, and the retriever substitutes the
+    key from the environment at the socket (D-223)."""
 
     valid_from: datetime | None = None
     valid_to: datetime | None = None
@@ -119,6 +134,13 @@ class RemoteArtefact:
             message = f"payload_kind {self.payload_kind!r} is not one of {kinds}"
             raise RetrievalError(message)
         check_interval(self.valid_from, self.valid_to)
+
+    @property
+    def needs_key(self) -> bool:
+        """Whether a key must be substituted before this can be asked for."""
+        return KEY_PLACEHOLDER in self.url or any(
+            KEY_PLACEHOLDER in value for value in self.headers.values()
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,3 +273,46 @@ def _blocks(path: Path) -> Iterator[bytes]:
     with path.open("rb") as handle:
         while block := handle.read(_READ_BLOCK):
             yield block
+
+
+class MappedFixtureRetriever:
+    """Serves each planned URL from a named file, with nothing reachable.
+
+    Args:
+        files: Each URL an adapter will plan, exactly as it plans it, and the
+            file that stands in for the response.
+
+    Note:
+        For sources whose URLs carry a query string or a key placeholder, which
+        :class:`FixtureRetriever`'s last-segment rule cannot name a file by. An
+        unplanned URL is refused rather than guessed at, so a test proves the
+        adapter planned *these* requests and not merely some.
+    """
+
+    def __init__(self, files: Mapping[str, Path]) -> None:
+        """Hold the table. Nothing is read yet."""
+        self._files = dict(files)
+
+    def retrieve(self, remote: RemoteArtefact) -> RetrievedArtefact:
+        """Read the file standing in for one URL.
+
+        Args:
+            remote: What the adapter asked for.
+
+        Returns:
+            The bytes as a stream, typed by the file's suffix, with an ``ETag``
+            over the content.
+
+        Raises:
+            RetrievalError: No file stands in for this URL.
+        """
+        path = self._files.get(remote.url)
+        if path is None:
+            message = f"{remote.url} was not expected by this fixture table"
+            raise RetrievalError(message)
+        stand_in = RemoteArtefact(
+            url=f"https://fixture.invalid/{path.name}",
+            original_identifier=remote.original_identifier,
+            payload_kind=remote.payload_kind,
+        )
+        return replace(FixtureRetriever(path.parent).retrieve(stand_in), remote=remote)

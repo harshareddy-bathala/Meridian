@@ -55,6 +55,7 @@ reserve_bytes = 2147483648
 
 [retention]
 keep_recordings = true
+products_max_bytes = 1048576
 """
 
 REPLAY = """
@@ -99,6 +100,7 @@ def test_every_setting_is_read_as_written(tmp_path: Path) -> None:
     assert config.policy.minimum_coverage == 0.6
     assert config.disk.bytes_per_second == 4_096_000
     assert config.keep_recordings is True
+    assert config.products_max_bytes == 1_048_576
 
 
 def test_an_empty_file_is_a_station_with_defaults(tmp_path: Path) -> None:
@@ -112,6 +114,7 @@ def test_an_empty_file_is_a_station_with_defaults(tmp_path: Path) -> None:
     assert config.policy.snr_threshold_db == 3.0
     assert config.disk.reserve_bytes == 1024**3
     assert config.keep_recordings is False
+    assert config.products_max_bytes == 2 * 1024**3
 
 
 def test_paths_are_resolved_against_the_configuration_file(tmp_path: Path) -> None:
@@ -142,6 +145,7 @@ def test_paths_are_resolved_against_the_configuration_file(tmp_path: Path) -> No
         ("[receiver]\nsample_rate_hz = true\n", "positive whole number"),
         ("[station]\nbase_url = 8000\n", "non-empty string"),
         ("[retention]\nkeep_recordings = 'yes'\n", "true or false"),
+        ("[retention]\nproducts_max_bytes = 0\n", "positive whole number"),
         ("[policy]\nminimum_coverage = 0\n", "minimum_coverage"),
         ("[policy]\nsnr_threshold_db = 'loud'\n", "must be a number"),
         ("[disk]\nmargin = 0.5\n", "margin of 1 or more"),
@@ -233,6 +237,12 @@ def test_the_setup_carries_the_policy_disk_and_retention_it_was_given(
     assert setup.keep_recordings is True
     assert setup.decoder.supports("lrpt")
     assert setup.folders.folder_for("as_a") == tmp_path / "state" / "captures" / "as_a"
+    assert setup.products is not None
+    source = tmp_path / "waterfall.png"
+    source.write_bytes(b"png")
+    kept = setup.products.keep(source)
+    assert kept is not None
+    assert (tmp_path / "state" / "products" / kept).is_file()
 
 
 def test_a_station_that_did_not_register_as_simulated_refuses_a_synthetic_receiver(

@@ -14,17 +14,19 @@ be testing the fixture.
 
 Marked ``msp_conformance`` by the directory hook in ``tests/conftest.py``.
 
-Reference: docs/MSP-SPEC.md §3, §4.1; docs/DECISIONS.md D-012, D-023, D-034.
+Reference: docs/MSP-SPEC.md §3, §4.1; docs/DECISIONS.md D-012, D-023, D-034, D-175.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from meridian.api.app import create_app
 from meridian.api.dependencies import get_connection
@@ -164,6 +166,60 @@ def test_a_station_registers_and_gets_credentials_it_can_persist(
     assert credentials.bearer_token
     assert credentials.heartbeat_interval_s > 0
     assert load_credentials(tmp_path / "credentials.json") == credentials
+
+
+def test_a_declared_horizon_mask_reaches_the_station_s_capabilities(
+    transport: MspTransport, rollback: Any, tmp_path: Path
+) -> None:
+    """D-175: the mask a station declares is the one the scheduler reads.
+
+    The client once sent it where the platform ignored it, and both packages'
+    own tests passed, because each agreed with itself. Only a registration
+    through the real platform, read back from the table, shows it arrived.
+    """
+    issue_invite(rollback, "invite-mask")
+    masked = replace(PROFILE, horizon_mask=((0.0, 25.0), (180.0, 8.0)))
+
+    credentials = register(
+        transport,
+        masked,
+        invite_token="invite-mask",
+        registration_key_path=tmp_path / "registration_key",
+    )
+
+    with rollback.cursor() as cur:
+        cur.execute(
+            "select horizon_mask_json from station_capabilities"
+            " where station_id = %s and deleted_at is null",
+            (credentials.station_id,),
+        )
+        stored = [row[0] for row in cur.fetchall()]
+    assert stored == [
+        [{"az_deg": 0.0, "min_el_deg": 25.0}, {"az_deg": 180.0, "min_el_deg": 8.0}]
+    ]
+
+
+def test_a_mask_outside_the_sky_is_refused() -> None:
+    """An azimuth past 360 would constrain scheduling for no reason (D-175)."""
+    body = build_register_body(
+        replace(PROFILE, horizon_mask=((400.0, 10.0),)), "an-invite", "a-key"
+    )
+
+    with pytest.raises(ValidationError):
+        RegisterRequestBody.model_validate(body)
+
+
+def test_a_mask_closed_at_360_is_accepted() -> None:
+    """360 is north again, where a closed mask often ends."""
+    body = build_register_body(
+        replace(PROFILE, horizon_mask=((0.0, 10.0), (360.0, 10.0))),
+        "an-invite",
+        "a-key",
+    )
+
+    parsed = RegisterRequestBody.model_validate(body)
+
+    assert parsed.capabilities[0].horizon_mask[1].azimuth_deg == 360.0
 
 
 def test_the_key_is_on_disk_before_the_platform_is_asked(

@@ -20,6 +20,7 @@ __all__ = [
     "LookAngle",
     "PassSearch",
     "PassWindow",
+    "SubPoint",
     "TimingUncertainty",
     "require_utc",
 ]
@@ -51,6 +52,20 @@ class GroundSite:
     lat_deg: float
     lon_deg: float
     alt_m: float
+
+
+@dataclass(frozen=True, slots=True)
+class SubPoint:
+    """The point on the ground directly beneath a satellite at one instant.
+
+    Geodetic, on the WGS84 ellipsoid: what "the satellite is over this place"
+    means when an area of interest asks which passes crossed it (Stage 32).
+    """
+
+    t: datetime
+    lat_deg: float
+    lon_deg: float
+    """ISO 6709, −180 to +180."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = REPO_ROOT / "deploy" / "alembic.ini"
-HEAD_REVISION = "0021"
+HEAD_REVISION = "0025"
 """The newest revision, written out rather than read from the script directory.
 
 Deriving it would make these tests assert that alembic agrees with itself. Pinned,
@@ -63,7 +63,10 @@ def scratch_database(database_url: str) -> Iterator[str]:
                 "where datname = %s",
                 (name,),
             )
-            cur.execute(f'drop database if exists "{name}"')
+            # `with (force)` as well as the terminate above: TimescaleDB's
+            # background worker can connect again in between, and the drop
+            # then fails the test on a race that has nothing to do with it.
+            cur.execute(f'drop database if exists "{name}" with (force)')
 
 
 def _upgrade_to_head(url: str) -> None:
@@ -368,3 +371,178 @@ def test_0015_adds_reception_evidence_across_a_compressed_chunk(
                 " 'satdump', 5)",
                 (bytes(32),),
             )
+
+
+def test_0023_backfills_noise_and_products_from_a_compressed_chunk(
+    scratch_database: str, monkeypatch
+) -> None:
+    """D-173, D-176: every floor and product already held gets its row.
+
+    Stops at 0022 and stores two observations old enough to be compressed, as a
+    deployment that has run for a week holds them. The first has an assignment,
+    a floor and four `products` elements, of which only two are valid. The
+    second has a floor but no assignment row, so there is no frequency to file
+    it under, and it gets no noise row. Both are then compressed before
+    upgrading.
+    """
+    monkeypatch.setenv("DATABASE_URL", scratch_database)
+    _upgrade_to(scratch_database, "0022")
+
+    waterfall = "ab" * 32
+    frames = "CD" * 32
+    products = (
+        f'[{{"kind": "waterfall", "uri": "station:products/{waterfall}",'
+        f' "sha256": "{waterfall}", "size_bytes": 2048}},'
+        ' {"kind": "image", "uri": "x"},'
+        f' {{"kind": "frames", "sha256": "{frames}", "size_bytes": "big"}},'
+        ' "not-an-object"]'
+    )
+    with psycopg.connect(scratch_database, autocommit=True) as conn:
+        conn.execute(
+            "insert into satellites (satellite_id, name) values ('norad:1', 'T')"
+        )
+        conn.execute(INSERT_STATION, ("st-old", "Old", 77.5, TOKEN_HASH, KEY_HASH))
+        conn.execute(
+            "insert into satellite_transmitters (satellite_id, centre_freq_hz,"
+            " mode, bandwidth_hz) values ('norad:1', 137100000, 'lrpt', 120000)"
+        )
+        element_set = conn.execute(
+            "insert into element_sets (satellite_id, epoch, line1, line2, source)"
+            " values ('norad:1', now() - interval '41 days', '1 1U', '2 1', 'manual')"
+            " returning id"
+        ).fetchone()
+        assert element_set is not None
+        pass_row = conn.execute(
+            "insert into passes (satellite_id, station_id, aos, los,"
+            " max_elevation_deg, max_elevation_at, aos_azimuth_deg,"
+            " los_azimuth_deg, element_set_id, min_elevation_deg)"
+            " values ('norad:1', 'st-old', now() - interval '40 days',"
+            " now() - interval '40 days' + interval '10 minutes', 40,"
+            " now() - interval '40 days' + interval '5 minutes', 10, 200, %s, 10)"
+            " returning id",
+            (element_set[0],),
+        ).fetchone()
+        assert pass_row is not None
+        conn.execute(
+            "insert into assignments (assignment_id, pass_id, station_id, start_at,"
+            " end_at, centre_freq_hz, mode, timing_uncertainty_s, reason)"
+            " values ('as-old', %s, 'st-old', now() - interval '40 days',"
+            " now() - interval '40 days' + interval '12 minutes', 137100000,"
+            " 'lrpt', 0.5, 'test')",
+            (pass_row[0],),
+        )
+        for assignment_id, products_json in (("as-old", products), ("as-orphan", "[]")):
+            conn.execute(
+                "insert into observations (assignment_id, revision, started_at,"
+                " ended_at, station_id, satellite_id, outcome, content_sha256,"
+                " noise_floor_dbfs, receiver_gain_db, products_json, simulated)"
+                " values (%s, 1, now() - interval '40 days',"
+                " now() - interval '40 days' + interval '12 minutes', 'st-old',"
+                " 'norad:1', 'no_signal', %s, -52.3, 32.8, %s::jsonb, true)",
+                (assignment_id, bytes(32), products_json),
+            )
+        for (chunk,) in conn.execute(
+            "select show_chunks('observations', older_than => interval '7 days')"
+        ).fetchall():
+            conn.execute("select compress_chunk(%s)", (chunk,))
+
+    _upgrade_to_head(scratch_database)
+
+    with psycopg.connect(scratch_database, autocommit=True) as conn:
+        noise = conn.execute(
+            "select assignment_id, revision, source, centre_freq_hz, bandwidth_hz,"
+            " azimuth_deg, noise_floor_dbfs, receiver_gain_db, simulated"
+            " from noise_measurements"
+        ).fetchall()
+        assert noise == [
+            ("as-old", 1, "observation", 137100000, 120000, None, -52.3, 32.8, True)
+        ]
+
+        stored = conn.execute(
+            "select element_index, kind, encode(sha256, 'hex'), size_bytes, uri,"
+            " simulated from products order by element_index"
+        ).fetchall()
+        assert stored == [
+            (0, "waterfall", waterfall, 2048, f"station:products/{waterfall}", True),
+            (2, "frames", frames.lower(), None, None, True),
+        ]
+
+        # products_json is still the verbatim record, invalid elements included.
+        kept = conn.execute(
+            "select jsonb_array_length(products_json) from observations"
+            " where assignment_id = 'as-old'"
+        ).fetchone()
+        assert kept == (4,)
+
+
+def test_0024_s_hourly_aggregate_agrees_with_the_raw_heartbeats(
+    scratch_database: str, monkeypatch
+) -> None:
+    """D-178's check before anything relies on it: the aggregate loses nothing.
+
+    Hours the policy has refreshed and hours it has not are compared with
+    ``count(*)`` over the raw rows, and agree. The refresh runs outside a
+    transaction, as the policy's own job does.
+
+    The limit, asserted rather than discovered: a row written into an hour
+    *below* the watermark is not seen until the next refresh, because a
+    real-time aggregate reads raw rows only above it. A heartbeat is stamped
+    with the platform's clock as it is received (D-013) and the policy stops an
+    hour short of now, so only a hand-written or restored row can land there.
+    """
+    monkeypatch.setenv("DATABASE_URL", scratch_database)
+    _upgrade_to_head(scratch_database)
+
+    insert = (
+        "insert into heartbeats (station_id, sent_at, received_at, state,"
+        " listening_assignment_id, listening_satellite_id, listening_freq_hz,"
+        " listening_mode, simulated)"
+        " select 'st-hb', t, t, 'listening', %s, %s, %s, %s, false"
+        " from generate_series(%s::timestamptz, %s::timestamptz,"
+        " interval '30 seconds') as t"
+    )
+    listening = ("as-1", "norad:1", 137100000, "lrpt")
+    idle = (None, None, None, None)
+    refresh = (
+        "call refresh_continuous_aggregate('heartbeats_hourly', null, %s::timestamptz)"
+    )
+
+    def totals(conn: Any) -> tuple[Any, Any]:
+        raw = conn.execute(
+            "select count(*), count(listening_assignment_id) from heartbeats"
+        ).fetchone()
+        summed = conn.execute(
+            "select sum(heartbeats)::bigint, sum(listening)::bigint"
+            " from heartbeats_hourly"
+        ).fetchone()
+        return raw, summed
+
+    with psycopg.connect(scratch_database, autocommit=True) as conn:
+        conn.execute(
+            "insert into satellites (satellite_id, name) values ('norad:1', 'T')"
+        )
+        conn.execute(INSERT_STATION, ("st-hb", "HB", 77.5, TOKEN_HASH, KEY_HASH))
+        conn.execute(
+            insert, (*listening, "2026-09-01T00:00:00Z", "2026-09-01T02:59:30Z")
+        )
+        conn.execute(refresh, ("2026-09-02T00:00:00Z",))
+        # Hours above the watermark, as every received heartbeat is.
+        conn.execute(insert, (*idle, "2026-09-03T00:00:00Z", "2026-09-03T00:59:30Z"))
+
+        raw, summed = totals(conn)
+        assert raw == summed == (480, 360)
+
+        # Below the watermark: unseen until the next refresh, then counted.
+        conn.execute(insert, (*idle, "2026-09-01T01:00:15Z", "2026-09-01T01:10:15Z"))
+        raw, summed = totals(conn)
+        assert raw == (501, 360)
+        assert summed == (480, 360)
+
+        conn.execute(refresh, ("2026-09-04T00:00:00Z",))
+        raw, summed = totals(conn)
+        assert raw == summed == (501, 360)
+        hour = conn.execute(
+            "select heartbeats, listening from heartbeats_hourly"
+            " where hour = '2026-09-01T01:00:00Z'"
+        ).fetchone()
+        assert hour == (141, 120)

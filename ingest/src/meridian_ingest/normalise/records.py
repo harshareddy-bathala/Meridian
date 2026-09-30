@@ -29,8 +29,12 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from meridian_ingest.raw_manifest import canonical_sha256, instant
+
+if TYPE_CHECKING:  # the sample module imports this one's error
+    from meridian_ingest.normalise.samples import NormalisedSample
 
 __all__ = [
     "ARCHIVE_OUTCOMES",
@@ -234,6 +238,9 @@ class NormalisedBatch:
 
     stations: tuple[NormalisedStation, ...] = ()
     receptions: tuple[NormalisedReception, ...] = field(default_factory=tuple)
+    samples: tuple[NormalisedSample, ...] = field(default_factory=tuple)
+    """Stage 31's published values (D-221). A source publishes receptions or
+    values; nothing stops one artefact holding both, and nothing needs it to."""
 
     def __post_init__(self) -> None:
         """Refuse a batch the load could only half apply."""
@@ -247,6 +254,7 @@ class NormalisedBatch:
             "reception",
             [reception.source_observation_id for reception in self.receptions],
         )
+        _no_duplicates("sample", [sample.series_key for sample in self.samples])
         described = {station.source_station_key for station in self.stations}
         dangling = sorted(
             {

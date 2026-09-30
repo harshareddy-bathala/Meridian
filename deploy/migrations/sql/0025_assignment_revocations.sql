@@ -1,4 +1,4 @@
--- 0021 — every revocation and reinstatement, kept after the assignment moves on
+-- 0025 — every revocation and reinstatement, kept after the assignment moves on
 --
 -- An assignment's `revoked_reason` and `revoked_at` describe its state now, and
 -- D-171's reinstatement clears them when a station that was offline comes back

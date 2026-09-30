@@ -6,7 +6,7 @@ window, paging, and that a simulator run is labelled and carries no seed.
 
 Marked ``integration`` by the directory hook in ``tests/conftest.py``.
 
-Reference: docs/DECISIONS.md D-088, D-093.
+Reference: docs/DECISIONS.md D-088, D-093, D-176.
 """
 
 from __future__ import annotations
@@ -41,6 +41,8 @@ PUBLISHED_KEYS = {
     "provenance",
     "submitted_at",
     "simulated",
+    # By hash, size and a checked kind; never the station-local uri (D-176).
+    "products",
 }
 
 
@@ -104,3 +106,33 @@ def test_a_simulator_run_is_labelled_and_carries_no_seed(client: TestClient) -> 
     assert run["station_count"] == 1
     assert run["simulated"] is True
     assert not any("seed" in key for key in run)
+
+
+def test_a_product_is_published_by_hash_and_never_by_location(
+    client: TestClient, rollback: Any
+) -> None:
+    """D-176: kind, sha256 and size, in the declared order, and no uri.
+
+    A kind that is not a short lowercase token is text the station chose, and is
+    published as ``other``.
+    """
+    for index, kind in enumerate(("waterfall", "Image <b>", "frames")):
+        rollback.execute(
+            "insert into products (assignment_id, revision, observation_started_at,"
+            " station_id, element_index, kind, sha256, size_bytes, uri, simulated)"
+            " select assignment_id, revision, started_at, station_id, %s, %s, %s,"
+            " %s, 'station:products/x', simulated"
+            " from observations where assignment_id = 'as_o_0'",
+            (index, kind, bytes([index]) * 32, None if index == 2 else 2048),
+        )
+
+    items = client.get("/api/v1/observations").json()["items"]
+
+    (reported,) = [one for one in items if one["assignment_id"] == "as_o_0"]
+    assert reported["products"] == [
+        {"kind": "waterfall", "sha256": "00" * 32, "size_bytes": 2048},
+        {"kind": "other", "sha256": "01" * 32, "size_bytes": 2048},
+        {"kind": "frames", "sha256": "02" * 32, "size_bytes": None},
+    ]
+    (other,) = [one for one in items if one["assignment_id"] == "as_o_1"]
+    assert other["products"] == []

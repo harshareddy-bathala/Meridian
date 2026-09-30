@@ -71,6 +71,8 @@ Provides: `P(decode | station, pass)`; learned per-azimuth horizon profile; cali
 
 **Must support running any of the four ablation configurations by config flag** — see `docs/EVALUATION.md`. Must degrade to geometry-only for stations with no history.
 
+**The learned horizon and interference are also persisted** (D-174), computed by the same functions the features call and written by `meridian.profile_build` into `horizon_profiles` and `interference_profiles`, versioned by the dataset they came from. The stored rows are for showing and for loss diagnosis to cite; nothing reads them back into a prediction. The build reaches datasets through this module, as the scheduler does.
+
 **The reception verdict** is a calibrated probability that a finished reception is usable, computed for every observation revision — including one that received nothing. It is a different quantity from yield: yield is estimated *before* a pass for the scheduler, the verdict *after* it from what was received. Its inputs are stored observation fields (outcome, `peak_snr_db`, decoder statistics, frames decoded against frames expected), read through `platform/observations`, and listening evidence, read through `platform/registry`. It is held to the same discipline as yield — temporal splits, a reliability diagram and a Brier score against a base rate — and is trained and evaluated on measured receptions only (D-078, D-105). A pass's own verdict is never a feature of that pass's yield prediction. It does not decide whether a pass was captured; reliability does, using it. See D-102.
 
 Knows nothing about MSP or HTTP.
@@ -78,7 +80,7 @@ Knows nothing about MSP or HTTP.
 ### `platform/scheduler`
 Constrained optimisation over candidate passes.
 
-Consumes predictions; **does not read the observation store directly.** Enforces non-overlap including slew and settling time, per-station capability limits, and operator priority weights. Produces assignments and the reasoning behind each — the dashboard shows *why* a pass was chosen or skipped, so the justification must be a first-class output, not reconstructed later.
+Consumes predictions; **does not read the observation store directly.** Enforces non-overlap including slew and settling time, per-station capability limits, the horizon each capability **declared** (D-175), and operator priority weights. The learned horizon reaches it only as a feature of the yield: a learned floor used as a constraint could never come down. Produces assignments and the reasoning behind each — the dashboard shows *why* a pass was chosen or skipped, so the justification must be a first-class output, not reconstructed later.
 
 Also computes the retrospective oracle schedule for the schedule-efficiency metric, by replaying a dataset's test span under every configuration (D-172). It reads that dataset only through `platform/prediction`, and the outcomes it holds only for the oracle and the tally: no scheduler that could be deployed reads one.
 
@@ -91,6 +93,8 @@ The authority on whether a station was listening at a given moment. Every reliab
 Ingest, normalisation, deduplication, the system of record.
 
 Records are immutable once written; corrections are additive. Every record carries provenance (which station or archive, when retrieved) and a `simulated` flag propagated from MSP registration.
+
+A revision that reports a noise floor also writes a `noise_measurements` row, and each product it declares a `products` row, in the same transaction and from the row just stored (D-173, D-176).
 
 ### `platform/reliability`
 SLI computation, SLO evaluation, irrecoverable-loss budget, failure injection.
@@ -125,7 +129,7 @@ Must survive: network loss mid-pass (continue, queue results), power loss (rejoi
 
 **The loop sees reception through one protocol**, `execution.PassExecutor`. It asks the executor for each assignment's capture window, begins and ends captures by it, drains finished results into the upload queue, and reports whatever state the executor gives it (D-121). `NullExecutor` has no radio; the simulator's executor decides outcomes from a seed.
 
-**`meridian_client/reception/` is the executor that receives** (D-120). `ReceptionExecutor` is built from three narrower protocols:
+**`meridian_client/reception/` is the executor that receives** (D-120). A decoder names its products in its report, and the executor keeps them in a store addressed by hash before it settles the result, so the observation declares only what the station holds (D-176). `ReceptionExecutor` is built from three narrower protocols:
 - a **`Receiver`**: the simulated and file-replay receivers ship; a physical SDR adapter does not yet;
 - a **`Decoder`**: `SubprocessDecoder` runs whichever program a station configures for each mode and reads the JSON report it writes;
 - a **`RotatorController`**: only `NullRotator`, for a fixed antenna (D-126).
@@ -146,7 +150,9 @@ Regional monitoring (module 19): registered areas of interest, and what the inge
 
 **Not the platform's own monitoring.** Prometheus, Grafana and the alert rules watch Meridian; this module watches places on the ground, and the two never share a name in code (the same separation D-013 made for "health").
 
-Reads ingested records through `ingest`'s normalised tables and **never at runtime from a source**. Holds no personal data: an area of interest is a place and a label, and who may register one is open (D-137).
+Reads ingested records through `ingest`'s normalised tables and **never at runtime from a source**. Holds no personal data: an area of interest is a place and a label, and who may register one is open (D-137) — until it is settled, an operator registers one and nothing about it is published (D-227).
+
+Built at Stage 32 as `platform/src/meridian/regions/`. A regional report — series, change against a baseline with its interval, coverage by our own decoded receptions, and two cross-checks — is a pure function of a raw snapshot and a configuration, published as a content-addressed directory (D-229 to D-233). Only areas and recorded alerts are rows. Nothing on the scheduling or reception path imports it.
 
 ### `firmware`
 Arduino rotator controller. Stepper control, homing, limit switches, network command interface.
@@ -154,7 +160,7 @@ Arduino rotator controller. Stepper control, homing, limit switches, network com
 Target is an Arduino Uno R4 WiFi — **Renesas RA4M1, not AVR.** AVR-targeted stepper libraries will not port unchanged.
 
 ### `ingest`
-External archive adapters, and — from Stage 31 — adapters for published environmental and space-weather products (D-132). **Optional path.** Failure here degrades model quality; it never blocks scheduling or reception.
+External archive adapters, and adapters for published environmental and space-weather products — nine source classes since Stage 31, into `environment_samples` (D-132, D-220, D-221). **Optional path.** Failure here degrades model quality; it never blocks scheduling or reception. Near-real-time ingest is `meridian-ingest follow`, run beside the platform and never inside its jobs service (D-225); features read what it loaded from a snapshot, never live (D-224).
 
 One subsystem, whatever the payload. Every source records the same provenance — source, original identifier, retrieval time, source version, licence, checksum, transformation version — and every adapter downloads into immutable raw storage, validates, hashes and normalises separately. Access constraints differ per source and are recorded per source: some need a free key and count requests, some need registration before a download, at least one needs neither. Keys are secrets and are never committed.
 

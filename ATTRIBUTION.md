@@ -35,6 +35,7 @@ Libraries used as dependencies rather than reimplemented. Not attribution in the
 | `sgp4` | MIT | Orbit propagation |
 | `skyfield` | MIT | Coordinate frames, look angles |
 | `highspy` (HiGHS) | MIT; bundled parts BSD-3, Apache-2.0, zlib, MIT | The scheduler's mixed-integer solver (D-167) |
+| `h5py` | BSD-3-Clause | Reading HDF5 night-time lights granules, the `meridian-ingest[hdf5]` extra only (D-226) |
 | Hamlib | LGPL-2.1 | Rotator control protocol |
 | GNU Radio | GPL-3.0 | Demodulation (invoked as a separate process) |
 | SatDump | GPL-3.0 | Decoding (invoked as a separate process) |
@@ -54,24 +55,28 @@ Data we take rather than code we read, recorded here for the same reasons (D-134
 
 **Licence and terms are recorded separately.** A licence says what the data is; terms of use often constrain redistribution independently of it, and that constraint is what decides whether the evidence dataset may republish a record or must reference it by identifier and checksum (D-104, D-136).
 
-**Nothing has been retrieved yet.** Stage 14 builds the ingest subsystem against a reference adapter of our own (D-142), so no row below has been fetched from. The classes are the candidates Stages 14 and 31 will implement, named as classes rather than as a commitment to any vendor (D-132). Each row's licence and terms are filled in from the source's own published statement, by the commit that adds its adapter and before it fetches anything — deliberately left unfilled here rather than guessed, because an unverified licence in this file is worse than an empty one.
+**Nothing has been retrieved yet.** Stage 14 built the ingest subsystem against a reference adapter of our own (D-142), and Stage 31 added an adapter per source class below, each exercised only against synthetic fixtures we wrote in the provider's documented format. No row below has been fetched from; each entry lands before the first retrieval, as D-134 requires.
 
-| Source class | Used for | Access constraint | Licence and terms |
-|---|---|---|---|
-| An **archive of amateur ground-station receptions** | Training and evaluation input, simulator outcome distributions, and Stage 16's observed count (D-138) | Varies by archive; registration or a free key | *to record before first retrieval* |
-| Published **geomagnetic and solar activity indices** | Ionospheric disturbance as a candidate feature (D-131) | Typically no key | *to record before first retrieval* |
-| A **local atmospheric conditions** service | Cloud cover, for the reception verdict | Free key, requests counted | *to record before first retrieval* |
-| **Near-real-time global imagery tiles** | Display only — never sampled for a value (D-133) | Typically no key | *to record before first retrieval* |
-| **Active fire detections** | Regional monitoring | Free key, requests counted | *to record before first retrieval* |
-| **Vegetation index composites** | Regional monitoring | Registration for downloads | *to record before first retrieval* |
-| **Precipitation** products | Regional monitoring | Registration for downloads | *to record before first retrieval* |
-| **Aerosol** products | Regional monitoring, candidate context | Registration for downloads | *to record before first retrieval* |
-| **Night-time lights** composites | Regional monitoring | Registration for downloads | *to record before first retrieval* |
-| A **national geoportal for India** | Regional products for our own region | Registration for downloads | *to record before first retrieval* |
+**How the terms were read.** On 2026-09-29, while writing the adapters, from the provider's published statements as quoted by a search index: the build environment's network policy refused direct requests to every provider's host, so no page was fetched from its own server. Each entry names the page it summarises, and **an operator re-reads that page before the first live `meridian-ingest fetch` of the source** — a licence recorded from a quotation is a claim to verify, not a fact to rely on (D-220).
+
+| Source class | Adopted source (entry name) | Used for | Access | Licence and terms |
+|---|---|---|---|---|
+| An **archive of amateur ground-station receptions** | none yet | Training and evaluation input, simulator outcome distributions, and Stage 16's observed count (D-138) | Varies by archive | *to record before first retrieval* |
+| Published **geomagnetic and solar activity indices** | NOAA SWPC planetary K index | The disturbance feature (D-131) | none | US Government work. SWPC states its products carry no copyright or other restrictions; NOAA asks that unaltered data be attributed and that no endorsement be implied. Terms: https://www.swpc.noaa.gov/disclaimer |
+| A **local atmospheric conditions** service | Open-Meteo cloud cover | Cloud cover, a candidate feature and a verdict input (D-131) | none; 600 a minute, 5 000 an hour, 10 000 a day per client | CC BY 4.0, with a link beside anything displayed. The free API is for non-commercial use only — public research at a public institution is named as such. Terms: https://open-meteo.com/en/terms |
+| **Near-real-time global imagery tiles** | NASA GIBS imagery tiles | Display only — never sampled for a value (D-133) | none | NASA open data. GIBS asks for the acknowledgement: "We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Observing System Data and Information System (EOSDIS)." Terms: https://nasa-gibs.github.io/gibs-api-docs/ |
+| **Active fire detections** | NASA FIRMS active fire detections | Regional monitoring (Stage 32) | free `MAP_KEY`, 5 000 transactions per ten minutes | NASA open data: no restrictions on use; NASA asks to be cited and acknowledged as the source. Terms: https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-use-guidance |
+| **Vegetation index composites** | ORNL DAAC MODIS NDVI subsets | Regional monitoring | none | NASA open data through the ORNL DAAC, citation requested ("ORNL DAAC. MODIS Collection 6 Land Product Subsets Web Service. ORNL DAAC, Oak Ridge, Tennessee, USA"). Terms: https://daac.ornl.gov/LAND_VAL/guides/MODIS_Web_Service_C6_V2.html |
+| **Precipitation** products | NASA POWER precipitation | Regional monitoring | none | No restrictions on use; the POWER Project asks for the acknowledgement: "The data was obtained from the National Aeronautics and Space Administration (NASA) Langley Research Center (LaRC) Prediction of Worldwide Energy Resource (POWER) Project funded through the NASA Earth Science/Applied Science Program." Terms: https://power.larc.nasa.gov/docs/services/api/ |
+| **Aerosol** products | Open-Meteo aerosol optical depth (CAMS) | Regional monitoring, candidate context | none; the Open-Meteo limits above, shared with cloud cover | CC BY 4.0 from Open-Meteo, non-commercial free tier as above; the values are Copernicus Atmosphere Monitoring Service forecasts, credited to CAMS. Terms: https://open-meteo.com/en/terms |
+| **Night-time lights** composites | NASA Black Marble night-time lights | Regional monitoring | registration: an Earthdata Login token | NASA open data: no restrictions on use, citation requested. Terms: https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-use-guidance |
+| A **national geoportal for India** | ISRO Bhuvan geoportal | **Display only**: map images behind Indian areas | none for viewing; registration for downloads | DOS/ISRO/NRSC grant a non-exclusive, non-transferable licence to access the portal; its image and map data are "provided for viewing purposes only", with no other use unless NRSC permits it. So no number is derived from it (D-220). Terms: https://bhuvan.nrsc.gov.in/wiki/index.php/Information_for_Users |
+
+**What may be republished.** Nothing here is bundled into the repository: every fixture is synthetic. Whether any source's records may be republished inside the evidence dataset is D-136, still open; Open-Meteo's non-commercial condition and Bhuvan's viewing-only terms are the two that most constrain it.
 
 **The reference adapter's fixtures are ours.** Stage 14's first adapter reads synthetic artefacts written by us for the purpose, not a recording of any real source, so nothing in this repository redistributes anyone's data and D-136 stays open until a real source is adopted (D-142).
 
-**Keys and registration credentials are secrets** and appear nowhere in this repository, per `GIT-WORKFLOW.md` Rule 4. Which of these sources is actually adopted is Stage 31's to settle; a class listed here and never used is removed rather than left implying a relationship we do not have.
+**Keys and registration credentials are secrets** and appear nowhere in this repository, per `GIT-WORKFLOW.md` Rule 4. A source listed here and later dropped is removed rather than left implying a relationship we do not have.
 
 ## Log
 

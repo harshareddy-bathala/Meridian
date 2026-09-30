@@ -29,6 +29,7 @@ from pathlib import Path
 
 from meridian_client.reception.disk_guard import DiskGuard
 from meridian_client.reception.outcome_rules import OutcomePolicy
+from meridian_client.reception.product_store import DEFAULT_MAX_BYTES
 from meridian_client.reception.subprocess_decoder import DecoderCommand
 from meridian_client.reception.synthetic_receivers import RecordingSource
 
@@ -68,6 +69,7 @@ class StationPaths:
     held_assignments: Path
     outbox: Path
     captures: Path
+    products: Path
 
     @classmethod
     def under(cls, state_dir: Path) -> StationPaths:
@@ -79,6 +81,7 @@ class StationPaths:
             held_assignments=state_dir / "held.json",
             outbox=state_dir / "outbox",
             captures=state_dir / "captures",
+            products=state_dir / "products",
         )
 
 
@@ -106,6 +109,8 @@ class StationConfig:
     policy: OutcomePolicy
     disk: DiskGuard
     keep_recordings: bool
+    products_max_bytes: int = DEFAULT_MAX_BYTES
+    """How much the product store may hold before it evicts the oldest (D-176)."""
 
 
 def load_station_config(path: Path) -> StationConfig:
@@ -134,6 +139,7 @@ def load_station_config(path: Path) -> StationConfig:
     beside = path.parent
     station = _table(stored, "station", {"base_url", "state_dir"})
     receiver = _table(stored, "receiver", {"kind", "sample_rate_hz", "recordings"})
+    retention = _table(stored, "retention", {"keep_recordings", "products_max_bytes"})
     return StationConfig(
         base_url=_text(station, "base_url", default="http://localhost:8000"),
         paths=StationPaths.under(
@@ -147,8 +153,9 @@ def load_station_config(path: Path) -> StationConfig:
         disk=_disk(
             _table(stored, "disk", {"bytes_per_second", "margin", "reserve_bytes"})
         ),
-        keep_recordings=_flag(
-            _table(stored, "retention", {"keep_recordings"}), "keep_recordings"
+        keep_recordings=_flag(retention, "keep_recordings"),
+        products_max_bytes=_whole(
+            retention, "products_max_bytes", default=DEFAULT_MAX_BYTES
         ),
     )
 

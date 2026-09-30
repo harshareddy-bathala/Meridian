@@ -68,7 +68,42 @@ enabled = true
 # out the command says which artefact it stopped before, and you resume there.
 request_budget = 50
 
-# An example of a real source, once one is adopted. Adding it here is refused
+# Stage 31's public sources (D-220). Every one is off until enabled here or named
+# with --source, and each asks about the places given here — never an adapter's
+# literal. Re-read the terms page ATTRIBUTION.md names before the first fetch.
+#
+# [sources.noaa_swpc_kp]
+# enabled = true
+#
+# [sources.open_meteo_cloud]
+# enabled = true
+# points = [[12.97, 77.59]]          # [latitude, longitude]; sent rounded to 0.01°
+#
+# [sources.open_meteo_aerosol]
+# points = [[12.97, 77.59]]
+#
+# [sources.nasa_firms]
+# bbox = [74.0, 11.5, 78.6, 18.5]    # west, south, east, north
+# api_key_env = "FIRMS_MAP_KEY"      # the default; shown for the shape
+#
+# [sources.ornl_modis_ndvi]
+# points = [[12.97, 77.59]]
+#
+# [sources.nasa_power_precipitation]
+# points = [[12.97, 77.59]]
+#
+# [sources.nasa_black_marble]
+# bbox = [74.0, 11.5, 78.6, 18.5]    # needs the hdf5 extra and $EARTHDATA_TOKEN
+#
+# [sources.nasa_gibs]
+# bbox = [74.0, 11.5, 78.6, 18.5]
+# layers = ["MODIS_Terra_CorrectedReflectance_TrueColor"]
+#
+# [sources.isro_bhuvan]
+# bbox = [74.0, 11.5, 78.6, 18.5]
+# layers = ["<a Bhuvan layer name>"] # display only; there is no default
+
+# An example of a real archive source, once one is adopted. Adding it here is refused
 # until an adapter carries its licence, its terms and its ATTRIBUTION.md entry
 # (D-134) — the entry lands before the first retrieval, not after it.
 #

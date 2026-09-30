@@ -42,6 +42,7 @@ from skyfield.api import EarthSatellite, load, wgs84
 
 from meridian.orbit.azimuth_continuity import unwrap_azimuth_deg
 from meridian.orbit.doppler import doppler_offset_hz
+from meridian.orbit.ground_track import sub_satellite_track
 from meridian.orbit.pass_search import (
     ElevationPass,
     ElevationScan,
@@ -55,6 +56,7 @@ from meridian.orbit.types import (
     LookAngle,
     PassSearch,
     PassWindow,
+    SubPoint,
     TimingUncertainty,
     require_utc,
 )
@@ -98,7 +100,7 @@ class SkyfieldOrbitService:
     building it parses a leap-second table, so a service per request would
     repeat that work on every prediction for no benefit.
 
-    Complete: all five ``OrbitService`` methods are implemented here, so a
+    Complete: all six ``OrbitService`` methods are implemented here, so a
     caller annotated to take an ``OrbitService`` type-checks against this class
     without it having to say so.
     """
@@ -244,6 +246,12 @@ class SkyfieldOrbitService:
             self._geocentric_position_km(a, instant),
             self._geocentric_position_km(b, instant),
         )
+
+    def ground_track(
+        self, element_set: ElementSet, start: datetime, end: datetime, *, step_s: float
+    ) -> list[SubPoint]:
+        """See :meth:`meridian.orbit.service.OrbitService.ground_track`."""
+        return sub_satellite_track(self._timescale, element_set, start, end, step_s)
 
     def _geocentric_position_km(
         self, element_set: ElementSet, t: datetime

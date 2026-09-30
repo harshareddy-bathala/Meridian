@@ -30,8 +30,11 @@ input to scheduling or reception, and never a published comparison against
 another network — D-053 rejects that, because it imports the other network's
 selection bias along with its totals.
 
-The modules arrive over Stage 14; this package holds only its own description
-until they do.
+**Since Stage 31 it also takes published environmental and space-weather
+values** — an index, cloud cover, fire detections, composites — through the same
+adapters and provenance rules, into ``environment_samples`` (D-132, D-221).
+They are candidate features and regional context, read from snapshots and never
+live; a missing or late value never stops a pass being scheduled (D-131).
 """
 
 __version__ = "0.1.0"
