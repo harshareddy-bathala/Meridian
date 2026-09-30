@@ -5297,6 +5297,56 @@ Nothing here can turn one outcome into another. That is a fault's job, and a fau
 
 ---
 
+## D-252 — The simulator computes its own pass track with Skyfield, in one exempted module
+
+**2026-09-30 · accepted** · *`simulator/pyproject.toml`, `meridian_sim/sky_track.py`, `pyproject.toml` (the per-file exemption), `ARCHITECTURE.md` rule 2, Stage 25. Amends rule 2's reach; does not relax it for the platform.*
+
+Two of Stage 25's faults happen in a part of the sky. An obstruction blocks a sector below an elevation, and an interference source raises the floor in a sector for some hours. A virtual station can only apply them if it knows where in its sky each sample of a pass was. The assignment carries the element set inline (MSP §4.3), and the station knows its own site, so the direction is computable. The question is with what.
+
+**Skyfield, as the platform uses it, in one module.** `meridian_sim/sky_track.py` is the only simulator module that imports it. The ruff ban on `sgp4` and `skyfield` stays global, with one more per-file exemption beside `platform/src/meridian/orbit/**`, so CI still enforces the boundary. The timescale comes from Skyfield's bundled data, so nothing is fetched. `tests/unit/test_simulator_sky_track.py` checks it against `SkyfieldOrbitService.pass_windows` at rise, culmination and set, to 0.01°. That test is what makes the ground truth trustworthy: an obstruction the simulator injected is in the sector the platform's profiles will look at.
+
+**Why not the platform's orbit service.** `meridian-sim` shares no code with `meridian` (D-138), for the same reason the client does not. A virtual station is a station, and it speaks MSP rather than importing the platform. Stage 10's own claim, that the simulator is not a mock, rests on that line.
+
+**Why rule 2 still reads as it did.** Rule 2 exists so that a propagator change inside the platform never ripples beyond `meridian.orbit`. The simulator is outside the platform, and a real station that points an antenna has always had to propagate. The rule now says so in `ARCHITECTURE.md` rather than being quietly broken. The reference client does not gain the dependency: it still installs with `httpx` alone.
+
+*Rejected: a hand-written track from the pass's rise and set azimuths.* It would break hard rule 1 in spirit, since it amounts to a second, cruder propagator. The obstruction's ground truth would then be wherever that approximation put the satellite.
+
+*Rejected: sending azimuths in the assignment.* That is a protocol change made for the simulator's convenience, and a microcontroller station would carry it for nothing.
+
+---
+
+## D-253 — Four faults with ground-truth causes, specified before the diagnosis that will be scored on them
+
+**2026-09-30 · accepted** · *`meridian_sim/{faults,sky_faults,sky_effects,fleet_faults,fault_notes,fault_schedule,supervisor,executor}.py`; `docs/SCALE-AND-FAULTS.md` § Ground-truth faults, the specification; Stage 25. Applies D-105 and D-189.*
+
+The roadmap asks for four faults whose causes are known, for Stage 27's diagnosis and Stage 28's health watch to be scored against:
+- a gradual signal degradation;
+- a new obstruction;
+- interference;
+- a silent satellite.
+
+Their effects are specified in `docs/SCALE-AND-FAULTS.md` § Ground-truth faults. That document, not this entry, is the text the independent review reads. The decisions behind it:
+
+**They act on evidence, and the outcome follows.** Each fault changes the SNR samples or the noise floor D-251 draws. The outcome is then derived again from what survives, by the same frame count every pass uses. A fault cannot lose a pass without leaving the evidence of how, and that evidence is exactly what the diagnosis has to read.
+
+**Persistent, with an onset.** A degradation, a new obstruction and an interference source arrive and stay. That is what makes them causes a station's history can reveal, and not noise. Only a silent satellite ends. Onsets are ticks drawn from the seed, like every other fault's, and a degradation's loss is measured from the true instant its window opened. The supervisor keeps that instant across a station's restarts.
+
+**A silence is the fleet's, opened on every station.** That is how a partition is recorded (D-188), and it keeps every ledger target a station or the platform. The `detail` says `fleet_wide`, so a reader counts one cause. The simulator never sees the catalogue, so the operator names the satellite with `--silent-satellite` or `SIMULATOR_SILENT_SATELLITE`. A `silent` or `sky` run given none is refused before any station registers, because a silent run that silenced nothing would look like a clean one.
+
+**Only a pass a fault changed is named against it.** Ground truth is what a fault *did*. A pass that began before a degradation had accrued any loss, or never crossed the obstruction, or fell outside the interference hours, is not a case of that cause. It may still be lost for another reason, and it is scored as such.
+
+**What was in force when the pass began decides.** This is the rule a dead receiver already follows. A silence is named at that moment, because its window may close before the pass ends, and the ledger refuses an act on a window that has closed.
+
+**Kept out of `chaos`.** `chaos` is Stage 21's long run of network and process faults, and a new kind in it would move every schedule its seeds give. `sky` is Stage 25's four together.
+
+**The review D-105 requires is owed, not done.** The specification is marked *review pending*, for a team member other than Stage 27's author to sign before that stage begins. Writing it before the diagnoser exists is the half of the mitigation this stage can do alone.
+
+*Rejected: the faults as cycles like Stage 21's.* An interference source that came and went on a random cycle would have no history for a profile to learn. A degradation that reset every few minutes would never be gradual.
+
+*Rejected: one ledger target for the silent satellite, `satellite:<id>`.* It is truer to the cause, but every existing reader of the ledger, `meridian reliability faults` among them, knows only station and platform targets and would have to learn a third. The detail says it all without that.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

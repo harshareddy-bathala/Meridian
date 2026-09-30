@@ -136,6 +136,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="which faults to inject",
     )
     parser.add_argument(
+        "--silent-satellite",
+        default=_text_env("SIMULATOR_SILENT_SATELLITE", ""),
+        metavar="ID",
+        help="the satellite the silent and sky scenarios switch off, e.g. norad:57166",
+    )
+    parser.add_argument(
         "--ledger",
         default=_text_env("SIMULATOR_LEDGER", ""),
         metavar="PATH",
@@ -195,6 +201,7 @@ def _config_from(args: argparse.Namespace) -> RunConfig:
         base_url=args.base_url,
         state_dir=Path(args.state_dir),
         scenario=args.scenario,
+        silent_satellite=args.silent_satellite or None,
     )
 
 
@@ -221,7 +228,12 @@ def _run(
     scale_report: str = "",
 ) -> int:
     """Bring the fleet up and tick it, reporting anything that stops it."""
-    with Supervisor(config, invites, ledger=ledger) as supervisor:
+    try:
+        supervisor = Supervisor(config, invites, ledger=ledger)
+    except ValueError as exc:
+        print(f"meridian_sim.station: {exc}", file=sys.stderr)  # noqa: T201
+        return EXIT_FAILED
+    with supervisor:
         try:
             station_ids = supervisor.bring_up()
         except RegistrationNeededError as exc:

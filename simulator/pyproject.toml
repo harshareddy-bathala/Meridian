@@ -8,8 +8,15 @@ license = { text = "Apache-2.0" }
 # Built on meridian-client, because ARCHITECTURE.md says the simulator is a
 # client implementation and not a mock. Sharing the transport is what makes that
 # true rather than aspirational.
+#
+# skyfield for one module, `sky_track`: Stage 25's obstruction and interference
+# happen in a part of the sky, so a virtual station has to know where in its sky
+# a pass is — which it computes from the element set the assignment carries,
+# with the library rather than a hand-written propagator (CLAUDE.md rule 1,
+# D-252). The reference client does not gain it.
 dependencies = [
     "meridian-client",
+    "skyfield>=1.49",
 ]
 
 [build-system]

@@ -43,10 +43,12 @@ __all__ = [
     "DECODE_SNR_DB",
     "DETECT_SNR_DB",
     "FRAME_INTERVAL_S",
+    "NOISE_ONLY_SNR_DB",
     "RECEIVER_GAIN_DB",
     "SNR_SAMPLE_COUNT",
     "PassEvidence",
     "count_frames",
+    "decodable_frames",
     "evidence_for",
     "station_noise_floor_dbfs",
 ]
@@ -194,16 +196,27 @@ def count_frames(
     it decoded and D-117 refuses ``decoded`` with none: at the lowest peaks the
     samples may sit under the bar the outcome's own draw cleared.
     """
+    decodable = decodable_frames(snr_db, window_s)
     slot_s = window_s / len(snr_db) if snr_db else 0.0
-    above = sum(1 for one in snr_db if one >= DECODE_SNR_DB) * slot_s
     between = sum(1 for one in snr_db if DETECT_SNR_DB <= one < DECODE_SNR_DB) * slot_s
-    decodable = math.floor(above / FRAME_INTERVAL_S)
     heard_only = math.floor(between / FRAME_INTERVAL_S)
     if outcome == "decoded":
         return max(1, decodable), heard_only
     if outcome == "signal_no_decode":
         return 0, decodable + heard_only
     return 0, 0
+
+
+def decodable_frames(snr_db: tuple[float, ...], window_s: float) -> int:
+    """Frames sent while SNR was above :data:`DECODE_SNR_DB`, before any floor.
+
+    The raw count :func:`count_frames` builds on, and the one a fault's effect
+    compares before and after: a pass that lost none of these lost nothing a
+    decoder could have used.
+    """
+    slot_s = window_s / len(snr_db) if snr_db else 0.0
+    above = sum(1 for one in snr_db if one >= DECODE_SNR_DB) * slot_s
+    return math.floor(above / FRAME_INTERVAL_S)
 
 
 def _pass_shape(

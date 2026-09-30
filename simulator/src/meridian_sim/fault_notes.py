@@ -14,8 +14,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from meridian_sim.fault_schedule import FaultSchedule, FleetPartition
-from meridian_sim.faults import CLOCK_DRIFT, PARTITION
+from meridian_sim.fault_schedule import FaultSchedule
+from meridian_sim.faults import CLOCK_DRIFT, PARTITION, SATELLITE_SILENT
+from meridian_sim.fleet_faults import FleetFaults
 from meridian_sim.ledger import FaultLedger
 
 __all__ = ["FaultNotes", "target_of"]
@@ -28,10 +29,10 @@ def target_of(index: int) -> str:
 
 @dataclass
 class FaultNotes:
-    """The ledger a fleet writes to, or none, and the partition it is under."""
+    """The ledger a fleet writes to, or none, and the faults it suffers together."""
 
     ledger: FaultLedger | None
-    partition: FleetPartition = field(default_factory=FleetPartition)
+    fleet: FleetFaults = field(default_factory=FleetFaults)
 
     def transitions(  # noqa: PLR0913 — one station's round, named at the call
         self,
@@ -86,5 +87,10 @@ class FaultNotes:
         if kind == CLOCK_DRIFT:
             return {"drift_s_per_tick": schedule.drift_s_per_tick}
         if kind == PARTITION:
-            return {"members": sorted(self.partition.members)}
-        return {}
+            return {"members": sorted(self.fleet.partition.members)}
+        if kind == SATELLITE_SILENT and self.fleet.silence is not None:
+            # The fleet's fault, opened on each station it reaches: the detail
+            # says so, so a reader counts one cause and not one per station.
+            return {**self.fleet.silence.detail(), "fleet_wide": True}
+        sky = {one.kind: one.detail() for one in schedule.sky}
+        return sky.get(kind, {})

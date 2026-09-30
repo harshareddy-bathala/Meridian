@@ -47,6 +47,7 @@ from meridian_sim.config import (
 from meridian_sim.executor import SimulatedExecutor
 from meridian_sim.fault_schedule import declines_assignment
 from meridian_sim.faults import FaultState
+from meridian_sim.sky_track import Site
 
 __all__ = [
     "RegistrationNeededError",
@@ -340,10 +341,18 @@ def _assemble(
         http_transport=wiring.http_transport,
     )
     seed = seed_for_station(config.master_seed, index)
+    # The site it registered with, derived again from the seed rather than read
+    # back from the platform: the platform computed its passes from the same
+    # coordinates, so the two agree on where in the sky each pass was.
+    profile = profile_for_station(index, seed, config.run_id)
     parts = StationParts(
         seed=seed,
         record=AssignmentRecord(wiring.paths.held_assignments),
-        executor=SimulatedExecutor(seed, wiring.faults),
+        executor=SimulatedExecutor(
+            seed,
+            wiring.faults,
+            Site(profile.lat_deg, profile.lon_deg, profile.alt_m),
+        ),
     )
     loop = StationLoop(
         transport,
