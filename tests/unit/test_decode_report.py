@@ -6,18 +6,19 @@ can be wrong is refused here, and every refusal becomes a failed decode — an
 
 Marked as a unit test by living in ``tests/unit``.
 
-Reference: docs/DECISIONS.md D-117, D-122, D-124.
+Reference: docs/DECISIONS.md D-117, D-122, D-124, D-176.
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
 from meridian_client.reception import decode_report
 from meridian_client.reception.decode_report import (
+    DeclaredProduct,
     DecodeReport,
     DecodeReportError,
     SnrPoint,
@@ -134,7 +135,9 @@ def test_a_report_file_is_read_and_checked(tmp_path: Path) -> None:
     path = tmp_path / "decode_report.json"
     path.write_text(json.dumps(FULL), encoding="utf-8")
 
-    report = read_decode_report(path, recording_duration_s=DURATION_S)
+    report = read_decode_report(
+        path, recording_duration_s=DURATION_S, output_dir=tmp_path
+    )
 
     assert report.frames_decoded == 412
 
@@ -145,7 +148,7 @@ def test_a_non_finite_token_in_the_file_is_refused(tmp_path: Path) -> None:
     path.write_text('{"format": 1, "decoder": "x", "noise_floor_dbfs": -Infinity}')
 
     with pytest.raises(DecodeReportError, match="finite"):
-        read_decode_report(path, recording_duration_s=DURATION_S)
+        read_decode_report(path, recording_duration_s=DURATION_S, output_dir=tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -160,7 +163,7 @@ def test_a_missing_or_unparseable_file_is_refused(
         path.write_bytes(contents)
 
     with pytest.raises(DecodeReportError, match=message):
-        read_decode_report(path, recording_duration_s=DURATION_S)
+        read_decode_report(path, recording_duration_s=DURATION_S, output_dir=tmp_path)
 
 
 def test_an_oversized_file_is_refused_unread(
@@ -171,4 +174,115 @@ def test_an_oversized_file_is_refused_unread(
     path.write_text(json.dumps(FULL), encoding="utf-8")
 
     with pytest.raises(DecodeReportError, match="over 10"):
-        read_decode_report(path, recording_duration_s=DURATION_S)
+        read_decode_report(path, recording_duration_s=DURATION_S, output_dir=tmp_path)
+
+
+# --- products (D-176) ---------------------------------------------------------
+
+
+def test_named_products_are_read_in_order() -> None:
+    report = parse(
+        with_(
+            products=[
+                {"kind": "waterfall", "path": "waterfall.png"},
+                {"kind": "frames", "path": "cadu/frames.cadu"},
+            ]
+        )
+    )
+
+    assert report.products == (
+        DeclaredProduct("waterfall", PurePosixPath("waterfall.png")),
+        DeclaredProduct("frames", PurePosixPath("cadu/frames.cadu")),
+    )
+
+
+def test_a_report_naming_no_products_has_none() -> None:
+    assert parse(FULL).products == ()
+
+
+@pytest.mark.parametrize(
+    ("product", "message"),
+    [
+        ({"kind": "waterfall"}, "must be {kind, path}"),
+        ({"kind": "waterfall", "path": "a.png", "size": 1}, "must be {kind, path}"),
+        ({"kind": "Waterfall", "path": "a.png"}, "lowercase token"),
+        ({"kind": "", "path": "a.png"}, "lowercase token"),
+        ({"kind": "x" * 33, "path": "a.png"}, "lowercase token"),
+        ({"kind": "waterfall", "path": ""}, "relative path"),
+        ({"kind": "waterfall", "path": "/etc/passwd"}, "stay inside"),
+        ({"kind": "waterfall", "path": "../credentials.json"}, "stay inside"),
+        ({"kind": "waterfall", "path": "a\\..\\b"}, "relative path"),
+    ],
+)
+def test_a_malformed_product_refuses_the_report(
+    product: dict[str, object], message: str
+) -> None:
+    with pytest.raises(DecodeReportError, match=message):
+        parse(with_(products=[product]))
+
+
+def test_one_file_named_twice_is_refused() -> None:
+    twice = {"kind": "waterfall", "path": "a.png"}
+
+    with pytest.raises(DecodeReportError, match="twice"):
+        parse(with_(products=[twice, twice]))
+
+
+def test_a_runaway_product_list_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(decode_report, "MAX_PRODUCTS", 1)
+    one = {"kind": "waterfall", "path": "a.png"}
+
+    with pytest.raises(DecodeReportError, match="over 1"):
+        parse(with_(products=[one, {"kind": "image", "path": "b.png"}]))
+
+
+def _written(tmp_path: Path, products: list[dict[str, str]]) -> Path:
+    path = tmp_path / "decode_report.json"
+    path.write_text(json.dumps(with_(products=products)), encoding="utf-8")
+    return path
+
+
+def test_a_product_the_decoder_wrote_is_accepted(tmp_path: Path) -> None:
+    output = tmp_path / "decoder_output"
+    output.mkdir()
+    (output / "waterfall.png").write_bytes(b"png")
+    path = _written(tmp_path, [{"kind": "waterfall", "path": "waterfall.png"}])
+
+    report = read_decode_report(
+        path, recording_duration_s=DURATION_S, output_dir=output
+    )
+
+    assert [one.kind for one in report.products] == ["waterfall"]
+
+
+def test_a_product_that_is_missing_refuses_the_report(tmp_path: Path) -> None:
+    output = tmp_path / "decoder_output"
+    output.mkdir()
+    path = _written(tmp_path, [{"kind": "waterfall", "path": "waterfall.png"}])
+
+    with pytest.raises(DecodeReportError, match="not a file"):
+        read_decode_report(path, recording_duration_s=DURATION_S, output_dir=output)
+
+
+def test_a_directory_is_not_a_product(tmp_path: Path) -> None:
+    output = tmp_path / "decoder_output"
+    (output / "images").mkdir(parents=True)
+    path = _written(tmp_path, [{"kind": "image", "path": "images"}])
+
+    with pytest.raises(DecodeReportError, match="not a file"):
+        read_decode_report(path, recording_duration_s=DURATION_S, output_dir=output)
+
+
+def test_a_link_out_of_the_output_directory_refuses_the_report(
+    tmp_path: Path,
+) -> None:
+    """The decoder cannot have the station keep a file it was never given."""
+    output = tmp_path / "decoder_output"
+    output.mkdir()
+    secret = tmp_path / "credentials.json"
+    secret.write_text("{}")
+    (output / "waterfall.png").symlink_to(secret)
+    path = _written(tmp_path, [{"kind": "waterfall", "path": "waterfall.png"}])
+
+    with pytest.raises(DecodeReportError, match="leaves the output directory"):
+        read_decode_report(path, recording_duration_s=DURATION_S, output_dir=output)

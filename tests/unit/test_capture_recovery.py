@@ -6,7 +6,7 @@ the same recovery end to end.
 
 Marked as a unit test by living in ``tests/unit``.
 
-Reference: docs/DECISIONS.md D-073, D-074, D-122, D-123.
+Reference: docs/DECISIONS.md D-073, D-074, D-122, D-123, D-176.
 """
 
 from __future__ import annotations
@@ -26,10 +26,13 @@ from meridian_client.reception.capture_recovery import (
     PRUNE_AFTER,
     discard_recording,
     facts_for,
+    keep_products,
     recover,
 )
 from meridian_client.reception.decode_report import DecodeFailure, DecodeReport
 from meridian_client.reception.manifest import Manifest, RecordingStamp
+from meridian_client.reception.outcome_rules import OutcomePolicy, derive_result
+from meridian_client.reception.product_store import ProductStore
 from meridian_client.reception.protocols import Recording, Tuning
 from meridian_client.reception.subprocess_decoder import decode_paths
 
@@ -310,6 +313,106 @@ def test_the_facts_of_a_refused_reception_carry_only_the_reason(
     assert facts.reason == "not enough disk"
 
 
+def _decoded_with_products(folders: CaptureFolders) -> Path:
+    """A decoded reception whose decoder named a waterfall and an image."""
+    folder = folders.folder_for("as_44b2")
+    output = decode_paths(folder).output_dir
+    output.mkdir(parents=True)
+    (output / "waterfall.png").write_bytes(b"waterfall")
+    (output / "image.png").write_bytes(b"image")
+    decode_paths(folder).report.write_text(
+        json.dumps(
+            {
+                "format": 1,
+                "decoder": "satdump",
+                "frames_decoded": 3,
+                "first_frame_offset_s": 2.0,
+                "products": [
+                    {"kind": "waterfall", "path": "waterfall.png"},
+                    {"kind": "image", "path": "image.png"},
+                ],
+            }
+        )
+    )
+    return folder
+
+
+def test_only_products_the_store_holds_are_declared(
+    folders: CaptureFolders, tmp_path: Path
+) -> None:
+    """D-176: a product the store could not keep is never claimed."""
+    folder = _decoded_with_products(folders)
+    store = ProductStore(tmp_path / "products")
+    kept = store.keep(decode_paths(folder).output_dir / "waterfall.png")
+    manifest = Manifest(
+        assignment(), "reported", NOW, recording=recording(tmp_path / "r.u8")
+    )
+
+    facts = facts_for(manifest, folder, store)
+
+    assert [(one.kind, one.sha256, one.size_bytes) for one in facts.products] == [
+        ("waterfall", kept, len(b"waterfall"))
+    ]
+
+
+def test_a_station_with_no_store_declares_nothing(
+    folders: CaptureFolders, tmp_path: Path
+) -> None:
+    folder = _decoded_with_products(folders)
+    manifest = Manifest(
+        assignment(), "reported", NOW, recording=recording(tmp_path / "r.u8")
+    )
+
+    assert facts_for(manifest, folder).products == ()
+
+
+def test_kept_products_travel_on_the_result_and_rebuild_identically(
+    folders: CaptureFolders, tmp_path: Path
+) -> None:
+    """The body built at hand-over and after a restart are the same bytes (D-123)."""
+    folder = _decoded_with_products(folders)
+    store = ProductStore(tmp_path / "products")
+    facts = facts_for(
+        Manifest(assignment(), "reported", NOW, recording=recording(tmp_path / "r.u8")),
+        folder,
+        store,
+    )
+    assert isinstance(facts.decode, DecodeReport)
+    keep_products(facts.decode, folder, store)
+    manifest = Manifest(
+        assignment(), "reported", NOW, recording=recording(tmp_path / "r.u8")
+    )
+
+    first = derive_result(facts_for(manifest, folder, store), OutcomePolicy())
+    again = derive_result(facts_for(manifest, folder, store), OutcomePolicy())
+
+    assert first == again
+    assert [one["kind"] for one in first.products] == ["waterfall", "image"]
+    assert all(
+        one["uri"] == f"station:products/{one['sha256']}" for one in first.products
+    )
+
+
+def test_a_failed_decode_declares_no_products(
+    folders: CaptureFolders, tmp_path: Path
+) -> None:
+    folder = _decoded_with_products(folders)
+    store = ProductStore(tmp_path / "products")
+    store.keep(decode_paths(folder).output_dir / "waterfall.png")
+    manifest = Manifest(
+        assignment(),
+        "reported",
+        NOW,
+        recording=recording(tmp_path / "r.u8"),
+        reason="the decoder timed out after 900 s",
+    )
+
+    facts = facts_for(manifest, folder, store)
+
+    assert facts.products == ()
+    assert derive_result(facts, OutcomePolicy()).products == ()
+
+
 def test_a_stamp_taken_at_recovery_matches_the_file(folders: CaptureFolders) -> None:
     manifest = capturing(folders, recording_bytes=200)
 
@@ -318,3 +421,32 @@ def test_a_stamp_taken_at_recovery_matches_the_file(folders: CaptureFolders) -> 
     path = manifest.tuning.recording_path  # type: ignore[union-attr]
     assert recovered.recording_stamp == RecordingStamp.of(path)
     assert replace(recovered, recording_stamp=None).recording_unchanged() is False
+
+
+def test_a_product_gone_since_the_decode_settled_is_dropped_not_fatal(
+    folders: CaptureFolders, tmp_path: Path
+) -> None:
+    """The decode stands; only the missing product is left undeclared."""
+    folder = _decoded_with_products(folders)
+    store = ProductStore(tmp_path / "products")
+    keep_products(facts_decode(folder, tmp_path, store), folder, store)
+    (decode_paths(folder).output_dir / "image.png").unlink()
+    manifest = Manifest(
+        assignment(), "reported", NOW, recording=recording(tmp_path / "r.u8")
+    )
+
+    facts = facts_for(manifest, folder, store)
+
+    assert isinstance(facts.decode, DecodeReport)
+    assert facts.decode.frames_decoded == 3
+    assert [one.kind for one in facts.products] == ["waterfall"]
+
+
+def facts_decode(folder: Path, tmp_path: Path, store: ProductStore) -> DecodeReport:
+    decode = facts_for(
+        Manifest(assignment(), "reported", NOW, recording=recording(tmp_path / "r.u8")),
+        folder,
+        store,
+    ).decode
+    assert isinstance(decode, DecodeReport)
+    return decode

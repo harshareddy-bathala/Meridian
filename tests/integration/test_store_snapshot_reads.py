@@ -43,10 +43,10 @@ from meridian.store.ingest_sources import (  # noqa: E402
 from meridian.store.snapshot_reads import (  # noqa: E402
     SNAPSHOT_TABLES,
     SnapshotScope,
-    read_source_terms,
     read_table,
     snapshot_instant,
 )
+from meridian.store.snapshot_source_terms import read_source_terms  # noqa: E402
 
 pytestmark = pytest.mark.integration
 

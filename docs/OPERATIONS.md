@@ -121,6 +121,9 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Generate passes now | `compose exec api meridian passes generate --from <ISO-8601 Z> --to <ISO-8601 Z>` |
 | Schedule now | `compose exec jobs meridian schedule --from <ISO-8601 Z> --to <ISO-8601 Z> [--config /datasets/schedule.toml]` — A on the elevation proxy without `--config` (D-168) |
 | One scheduling round now | `compose exec jobs meridian jobs run --once` |
+| How recent schedule runs fared | `compose exec api meridian schedule runs [--limit 20]` — § Stored measurements and profiles |
+| Pass timing error, clock-corrected | `compose exec api meridian passes timing [--station <id>]` — § Stored measurements and profiles |
+| Build the horizon and interference profiles now | `compose exec jobs meridian profiles build` — the jobs service does it each round |
 | Run the simulator | `compose --profile sim up -d` — `SIMULATOR_*` in `deploy/.env` set count, seed and scenario |
 | Check the public surface | `python deploy/tools/verify_public_surface.py https://<hostname>` |
 | Fetch and load an external archive | `uv run meridian-ingest …` — its own binary, not in the image; § External archive ingest |
@@ -136,7 +139,7 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Reliability from a dataset | `uv run meridian snapshot reliability <dataset dir>` — needs no database |
 | Generate a report | `meridian report` — not built yet; Stage 22 |
 
-**Scheduling needs no command.** The `jobs` service generates passes and schedules them under `SCHEDULE_CONFIG` (configuration A on the elevation proxy when it is unset, D-170) every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). Each round then expires work nobody took and classifies every pass that has settled (D-182, D-183). The commands above are for filling a horizon by hand. Both tasks are idempotent, so running them beside the service writes nothing twice.
+**Scheduling needs no command.** The `jobs` service generates passes, schedules them, and builds the profiles under `SCHEDULE_CONFIG` (configuration A on the elevation proxy when it is unset, D-170) every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). Each round then expires work nobody took and classifies every pass that has settled (D-182, D-183). The commands above are for filling a horizon by hand. Every task is idempotent, so running them beside the service writes nothing twice.
 
 ---
 
@@ -175,6 +178,7 @@ reserve_bytes = 1073741824
 
 [retention]
 keep_recordings = false   # true keeps each recording after its result is sent
+products_max_bytes = 2147483648   # the product store's cap; oldest evicted first
 ```
 
 To replay recordings instead of receiving, name one per assignment:
@@ -751,6 +755,10 @@ Decisions this section puts into practice: D-165 to D-172.
 - **`time_limit`** means the best found when time ran out.
 - **`fallback`** means the solver gave no usable answer, and greedy under the same constraints decided instead. `detail` says why.
 
+### Passes behind a declared horizon
+
+A station's capability may declare a horizon mask: a building, a ridge. A pass whose track clears the declared floor nowhere is **not scheduled and not skipped**. It is left undecided, so correcting the mask gives it back on the next round, and the run's report counts it (`below the declared horizon, left undecided`). Only the declared mask does this; the learned horizon informs the yield prediction instead (D-175). A mask is re-sent by registering again, and an entry outside `[0, 360]` for azimuth or `[-90, 90]` for elevation is refused as `malformed`.
+
 ### Declined and offline work
 
 A station that stops naming a `held` assignment before its window has declined it. The assignment becomes `revoked` with reason `declined`, and the next round gives its time to another of that station's passes. When a round finds a station `offline`, its work not yet begun becomes `revoked` with reason `offline`. If the station returns still holding such an assignment, it goes back to `held`, because MSP has no message that takes work back. If it returns without it, the pass is decided again (D-171). A revoked assignment is never delivered and never counted as a miss. The public lists show each pass's latest decision.
@@ -967,6 +975,70 @@ meridian regions record-alerts --report data/datasets/regions/<dir>
 ```
 
 Each alert is recorded in `region_alerts` once — recording the same report again writes nothing — and handed to the delivery interface, which **records only** until Stage 29 builds notifications: each attempt is a `region_alert_deliveries` row with channel `record_only` saying so (D-232). An alert recorded by a run that stopped before its delivery was recorded is delivered by the next run, not passed by. Nothing is emailed or messaged.
+
+---
+
+## Stored measurements and profiles
+
+What Stage 19 keeps, where each comes from, and how to read it (D-173 to D-178). Nothing here is dropped on a timer: raw heartbeats and observations are compressed after 7 days and kept (D-178).
+
+### Noise floors
+
+Every observation revision reporting a noise floor also writes a `noise_measurements` row in the same transaction: dBFS at the stated receiver gain, at the assignment's frequency, with no azimuth. They travel in every raw snapshot as `noise_measurements.jsonl`. Nothing writes a survey row yet.
+
+### Products
+
+A decoder names its products in its report, as `{kind, path}` relative to `{output_dir}`. The station keeps each one in `<state_dir>/products/<sha256>` and declares it as `station:products/<sha256>` (D-176):
+
+```toml
+[retention]
+products_max_bytes = 2147483648   # the store's cap; the oldest products go first
+```
+
+The platform records each declared product as a `products` row. `/api/v1/observations` publishes kind, sha256 and size, never the uri. **No product is uploaded**: MSP defines no transfer yet (D-029), so the bytes stay on the station, and one evicted there is not reported.
+
+### Horizon and interference profiles
+
+The `jobs` service builds them each round, and `meridian profiles build` does the same now:
+
+- **Declared** — each capability's mask, written when it changes. The earlier one is kept.
+- **Learned** — built once from the newest labelled dataset, by the functions the model's features use: 36 horizon sectors and 48 interference cells a station. A second build from the same dataset prints `already held, identically`. A simulated station's profile is built from its own reports and says so.
+
+`GET /api/v1/stations/{id}/profiles` serves the newest of each, and a station's dashboard page draws the declared horizon dashed and the learned one shaded. **Nothing here feeds prediction**: live scoring reads the dataset itself (D-174). New learned profiles need a new labelled dataset (§ Dataset snapshots).
+
+A failing `profiles` task raises `ScheduledTaskNeverSucceeded` or `ScheduledTaskStalled` at warning, not critical: receiving and scheduling do not wait on it.
+
+### Reading the views
+
+```bash
+compose exec api meridian schedule runs --limit 10
+compose exec api meridian passes timing --station <station_id>
+```
+
+- `schedule runs` reads `scheduler_performance`: each run's solver status (`*` marks a fallback to greedy) and what became of its assignments, including those still owed.
+- `passes timing` reads `timing_error`: first detection against predicted rise, raw and **corrected by the station's clock offset** (`EVALUATION.md` §6.1), with element-set age. The `excluded` column names what §6.1 would drop: `clock_offset_unknown` or `within_clock_uncertainty`.
+
+These are for an operator at a prompt. **A reported figure comes from a snapshot**, never from these views (rule 8, D-177).
+
+### Uptime
+
+`GET /api/v1/stations/{id}/uptime?hours=48` gives heartbeats per hour, 1 to 168 whole hours, from the `heartbeats_hourly` continuous aggregate; the dashboard draws it as a strip. It is coverage, not evidence: whether a station was listening for a pass is decided from raw heartbeats.
+
+The aggregate refreshes every 30 minutes and reads raw rows for anything newer. A heartbeat restored into an hour it has already refreshed is counted at the next refresh, not before (D-178).
+
+### The completion gate, at a prompt
+
+Stage 19's gate is that **every deferred table has an active producer, consumer, provenance policy, migration test, and retention decision.**
+
+```bash
+compose exec api meridian db status                          # at 0024
+compose exec jobs meridian profiles build                    # declared masks, and the newest dataset
+compose exec jobs meridian profiles build                    # already held, identically
+curl -s localhost:8000/api/v1/stations/<id>/profiles | python -m json.tool
+curl -s localhost:8000/api/v1/stations/<id>/uptime | python -m json.tool
+```
+
+`tests/unit/test_deferred_storage_gate.py` asserts each clause for each table from the source and the documents, with positive controls. `tests/integration/test_deferred_storage_gate.py` runs a simulated and a measured station through ingest, export, labelling and a build, and finds every row labelled as its station is.
 
 ---
 
@@ -1187,7 +1259,7 @@ If every station was switched off on purpose, this is expected.
 
 ### ScheduledTaskStalled
 
-**Critical.** A task (`task` label: `pass_generation`, `schedule`, `expiry_sweep` or `reliability`) has not completed in over 15 minutes, which is three rounds at the default interval. One failed round is logged and retried; three in a row is a problem.
+**Critical** for every task but `profiles`, which is a **warning**. A task (`task` label: `pass_generation`, `schedule`, `profiles`, `expiry_sweep` or `reliability`) has not completed in over 15 minutes, which is three rounds at the default interval. One failed round is logged and retried; three in a row is a problem.
 
 1. `compose logs --since 30m jobs`. Each failed round logs `<task> failed; the next round will try again` with the exception.
 2. The *Task failures per hour* panel shows whether it fails every round or only some.
@@ -1195,11 +1267,11 @@ If every station was switched off on purpose, this is expected.
 
 ### ScheduledTaskNeverSucceeded
 
-**Critical.** The jobs process has been up for 15 minutes and the named task has not completed once. After a restart there is no earlier success to measure a stall from, so this alert covers that case.
+**Critical** for every task but `profiles`, which is a **warning**. The jobs process has been up for 15 minutes and the named task has not completed once. After a restart there is no earlier success to measure a stall from, so this alert covers that case.
 
 The first checks are the same as `ScheduledTaskStalled`. A failure on every round from start-up usually means a database the jobs process cannot reach, or one at a migration it does not expect (`meridian db status`).
 
-An empty catalogue is not a failure: rounds complete with zero passes, and `meridian_passes_computed` reads 0.
+An empty catalogue is not a failure: rounds complete with zero passes, and `meridian_passes_computed` reads 0. Nor is having no labelled dataset: `profiles` completes having written only the declared masks. A `profiles` task that fails every round usually means a newest dataset that no longer matches its manifest; `uv run meridian snapshot verify <dir>` says which.
 
 A failing `reliability` task stops new passes being classified, and so freezes every reliability figure where it was. It reads the file `MERIDIAN_RELIABILITY_CONFIG` names, and refuses to start on one it cannot obey; the log says which setting.
 

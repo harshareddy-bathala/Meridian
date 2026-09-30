@@ -10,7 +10,8 @@ amortize.
 metrics directory several workers need (``cli_serve``); ``jobs`` and ``db`` are
 the scheduled work and the migration check beside it; ``snapshot`` exports,
 labels and verifies Stage 15's datasets (``cli_snapshot``); ``model`` fits,
-evaluates and shows Stage 17's models (``cli_model``). A command whose stage
+evaluates and shows Stage 17's models (``cli_model``); ``profiles`` writes the
+horizon and interference profiles (``cli_profiles``). A command whose stage
 has not arrived yet — ``report`` — reports which stage of
 docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md builds it and exits
 :data:`EXIT_NOT_IMPLEMENTED`, so a caller gets an answer rather than a
@@ -39,6 +40,7 @@ from meridian.cli_invite import run_invite
 from meridian.cli_jobs import add_jobs_parser, run_jobs
 from meridian.cli_model import add_model_parser, run_model
 from meridian.cli_passes import run_passes
+from meridian.cli_profiles import add_profiles_parser, run_profiles
 from meridian.cli_regions import add_regions_parser, run_regions
 from meridian.cli_reliability import add_reliability_parser, run_reliability
 from meridian.cli_schedule import add_schedule_parser, run_scheduler
@@ -47,6 +49,7 @@ from meridian.cli_snapshot import (
     add_snapshot_parser,
     run_snapshot,
 )
+from meridian.cli_views import add_timing_arguments
 from meridian.config import load_settings
 from meridian.store import station_tokens, stations
 from meridian.store.pool import DatabaseUnreachableError, connect_once
@@ -247,7 +250,7 @@ def _add_station_parser(
 def _add_passes_parser(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """Wire ``meridian passes`` and its one action."""
+    """Wire ``meridian passes`` and its two actions."""
     passes = subcommands.add_parser(
         "passes",
         help="generate pass windows",
@@ -264,6 +267,16 @@ def _add_passes_parser(
     )
     generate.add_argument("--from", dest="start", required=True, help="ISO-8601 UTC")
     generate.add_argument("--to", dest="end", required=True, help="ISO-8601 UTC")
+    add_timing_arguments(
+        passes_actions.add_parser(
+            "timing",
+            help="first detection against predicted rise, clock-corrected",
+            description=(
+                "Reads the timing_error view (D-177, EVALUATION.md §6.1). An"
+                " operator's read; the reported figure comes from a snapshot."
+            ),
+        )
+    )
 
 
 def _add_pending_parsers(
@@ -301,6 +314,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_model_parser(subcommands)
     add_reliability_parser(subcommands)
     add_regions_parser(subcommands)
+    add_profiles_parser(subcommands)
     _add_pending_parsers(subcommands)
 
     return parser
@@ -316,6 +330,7 @@ NEEDS_ACTION = frozenset(
         "passes",
         "regions",
         "reliability",
+        "profiles",
         "snapshot",
         "station",
     }
@@ -337,6 +352,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "passes": run_passes,
     "regions": run_regions,
     "reliability": run_reliability,
+    "profiles": run_profiles,
     "schedule": run_scheduler,
     "serve": run_serve,
     "snapshot": run_snapshot,

@@ -1,7 +1,8 @@
 """``/api/v1/stations`` — the directory, and what is known about one station.
 
-Five read endpoints: the paged list, one station, the hardware it declared, its
-liveness on its own, and the heartbeats it has sent. Every one of them is thin by
+Seven read endpoints: the paged list, one station, the hardware it declared,
+its liveness on its own, the heartbeats it has sent, its hourly uptime (D-178),
+and its horizon and interference profiles (D-174). Every one of them is thin by
 rule — it reads through ``meridian.store``, hands the rows to a model in
 ``meridian.api.public.models``, and returns. No decision about what a station
 *is* is made here.
@@ -11,17 +12,19 @@ classified against the same instant (D-054). Paging is keyset: the route asks fo
 one row more than the page needs and trims, which is how "is there another page"
 is answered by evidence rather than by guessing from a full page (D-085).
 
-Reference: docs/DECISIONS.md D-082, D-083, D-084, D-085; docs/PROJECT.md §13.
+Reference: docs/DECISIONS.md D-082, D-083, D-084, D-085, D-174, D-178;
+docs/PROJECT.md §13.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from meridian.api import platform_clock
-from meridian.api.dependencies import get_connection
+from meridian.api.dependencies import get_connection, get_settings
 from meridian.api.public.envelope import INVALID_QUERY, NOT_FOUND, PublicError
 from meridian.api.public.models import (
     Page,
@@ -29,14 +32,19 @@ from meridian.api.public.models import (
     PublicHeartbeat,
     PublicStation,
 )
+from meridian.api.public.models.profiles import PublicStationProfiles
 from meridian.api.public.models.stations import StationLiveness
+from meridian.api.public.models.uptime import PublicHourlyUptime, PublicStationUptime
 from meridian.api.public.pagination import (
     PageRequest,
     encode_cursor,
     page_request,
     trim_overfetch,
 )
+from meridian.config import Settings
+from meridian.store.heartbeat_coverage import find_hourly_coverage
 from meridian.store.heartbeats import find_heartbeats_before
+from meridian.store.profile_reads import find_station_profiles
 from meridian.store.station_capabilities import find_capabilities_for_station
 from meridian.store.station_directory import (
     DirectoryStation,
@@ -157,6 +165,65 @@ def get_station_capabilities(
         PublicCapability.from_row(row)
         for row in find_capabilities_for_station(conn, station_id)
     ]
+
+
+@router.get("/stations/{station_id}/profiles")
+def get_station_profiles(
+    station_id: str, conn: Connection = Depends(get_connection, scope="function")
+) -> PublicStationProfiles:
+    """The station's declared and learned horizon, and its interference.
+
+    Args:
+        station_id: The station to look up.
+        conn: A pooled connection, injected.
+
+    Returns:
+        The newest of each, with null for a learned profile not yet built and
+        an empty list when no capability declares a mask.
+
+    Raises:
+        PublicError: ``not_found`` when there is no such station.
+    """
+    station = _station_or_404(conn, station_id)
+    return PublicStationProfiles.from_row(
+        station.station_id, station.simulated, find_station_profiles(conn, station_id)
+    )
+
+
+@router.get("/stations/{station_id}/uptime")
+def get_station_uptime(
+    station_id: str,
+    hours: Annotated[int, Query(ge=1, le=168)] = 48,
+    conn: Connection = Depends(get_connection, scope="function"),
+    settings: Settings = Depends(get_settings),
+) -> PublicStationUptime:
+    """How much of each of the last ``hours`` whole hours the station was heard.
+
+    Args:
+        station_id: The station to look up.
+        hours: How many whole hours, 1 to 168, ending at the current hour's start.
+        conn: A pooled connection, injected.
+        settings: For the heartbeat interval the station was told to keep.
+
+    Returns:
+        Every hour, oldest first, an hour with no heartbeat at zero. The current
+        hour is left out: it is not over, and would read as a drop.
+
+    Raises:
+        PublicError: ``not_found`` when there is no such station.
+    """
+    station = _station_or_404(conn, station_id)
+    end = platform_clock.utc_now().replace(minute=0, second=0, microsecond=0)
+    expected = max(1, 3600 // settings.heartbeat_interval_s)
+    rows = find_hourly_coverage(
+        conn, station_id, start=end - timedelta(hours=hours), end=end
+    )
+    return PublicStationUptime(
+        station_id=station.station_id,
+        simulated=station.simulated,
+        heartbeat_interval_s=settings.heartbeat_interval_s,
+        hours=[PublicHourlyUptime.from_row(one, expected=expected) for one in rows],
+    )
 
 
 @router.get("/stations/{station_id}/liveness")

@@ -160,6 +160,7 @@ def _report(
             "outcome": "decoded" if decoded else "signal_no_decode",
             "first_detection_at": None,
             "noise_floor_dbfs": None,
+            "receiver_gain_db": None,
             "simulated": False,
         }
     )

@@ -148,9 +148,19 @@ groups:
       - alert: ScheduledTaskStalled
         # 900 s is three rounds at the default SCHEDULE_INTERVAL_S=300: one
         # failed round is logged and retried, three in a row is a problem.
-        expr: time() - meridian_job_last_success_timestamp_seconds > 900
+        expr: time() - meridian_job_last_success_timestamp_seconds{task!="profiles"} > 900
         labels:
           severity: critical
+        annotations:
+          summary: "The {{ $labels.task }} task has not completed in over 15 minutes."
+          runbook: docs/OPERATIONS.md#scheduledtaskstalled
+
+      # The profiles task at warning: it builds what is shown and cited, and a
+      # round that cannot build it still receives and schedules (D-174).
+      - alert: ScheduledTaskStalled
+        expr: time() - meridian_job_last_success_timestamp_seconds{task="profiles"} > 900
+        labels:
+          severity: warning
         annotations:
           summary: "The {{ $labels.task }} task has not completed in over 15 minutes."
           runbook: docs/OPERATIONS.md#scheduledtaskstalled
@@ -205,4 +215,18 @@ groups:
           task: reliability
         annotations:
           summary: The reliability task has not completed once since the jobs process started.
+          runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+      # Warning, not critical: profiles are for showing and for diagnosis, and a
+      # round that cannot build them still receives and schedules (D-174).
+      - alert: ScheduledTaskNeverSucceeded
+        expr: >-
+          time() - process_start_time_seconds{job="meridian-jobs"} > 900
+          unless on(job, instance)
+          meridian_job_last_success_timestamp_seconds{task="profiles"}
+        labels:
+          severity: warning
+          task: profiles
+        annotations:
+          summary: The profiles task has not completed once since the jobs process started.
           runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded

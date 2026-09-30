@@ -7,7 +7,7 @@ below can be worked out from that.
 
 With a 24 h settle margin, the pass on day ``k`` sees days ``0 .. k-2``.
 
-Reference: docs/DECISIONS.md D-146, D-148, D-157, D-159, D-161.
+Reference: docs/DECISIONS.md D-146, D-148, D-157, D-159, D-161, D-174.
 """
 
 from __future__ import annotations
@@ -26,6 +26,11 @@ from meridian.prediction.feature_rows import (
     PassTrack,
     Reading,
     read_feature_rows,
+)
+from meridian.prediction.profile_cells import (
+    HorizonSector,
+    StationProfiles,
+    station_profiles,
 )
 from meridian.prediction.profiles import ENVIRONMENT, SHRINK, Environment
 
@@ -388,6 +393,7 @@ def test_readings_are_each_assignment_s_latest_revision(
         "revision": 2,
         "first_detection_at": detected,
         "noise_floor_dbfs": -97.5,
+        "receiver_gain_db": 32.8,
     }
     tables = dict(world) | {
         "observations": [first, second, *world["observations"][1:]],
@@ -400,3 +406,105 @@ def test_readings_are_each_assignment_s_latest_revision(
     assert latest.first_detection_at == detected
     assert latest.noise_floor_dbfs == -97.5
     assert rows.longitudes == {"st_a": 77.6}
+
+
+# --- the persisted profiles (D-174) ------------------------------------------------
+
+
+def _sector(profile: StationProfiles, azimuth_deg: float) -> HorizonSector:
+    (found,) = [one for one in profile.horizon if one.azimuth_deg == azimuth_deg]
+    return found
+
+
+def test_every_sector_is_stored_and_the_heard_one_carries_its_detections() -> None:
+    """Five detections at 20° in the 40–50° sector: 10° after shrinkage."""
+    passes = daily(5)
+    rows = world(passes, {one.pass_id: (reading(one),) for one in passes})
+
+    (profile,) = station_profiles(
+        passes, rows, settle_margin_s=MARGIN_S, as_of=DAY0 + timedelta(days=30)
+    )
+
+    assert len(profile.horizon) == 36
+    assert _sector(profile, 40.0) == HorizonSector(40.0, 10.0, 10.0, 5)
+    assert _sector(profile, 50.0) == HorizonSector(50.0, 10.0, 0.0, 0)
+    assert profile.simulated is False
+
+
+def test_a_stored_profile_is_the_one_a_feature_read_at_the_same_instant() -> None:
+    """D-174: the same functions, so the counts agree at ``as_of``."""
+    passes = daily(7)
+    rows = world(passes, {one.pass_id: (reading(one),) for one in passes})
+    target = passes[6]
+
+    (profile,) = station_profiles(
+        passes, rows, settle_margin_s=MARGIN_S, as_of=target.aos
+    )
+
+    assert _sector(profile, 40.0).count == values(target, passes, rows)["horizon_n"]
+
+
+def test_a_report_not_settled_by_as_of_is_not_read() -> None:
+    passes = daily(5)
+    rows = world(passes, {one.pass_id: (reading(one),) for one in passes})
+
+    (profile,) = station_profiles(
+        passes, rows, settle_margin_s=MARGIN_S, as_of=DAY0 + timedelta(days=2)
+    )
+
+    assert _sector(profile, 40.0).count == 1
+
+
+def test_an_interference_cell_states_its_lift_and_the_gains_behind_it() -> None:
+    """Every pass peaks in 45–90° at 06:00: one cell, the rest at their prior."""
+    passes = daily(4)
+    floors = (-100.0, -100.0, -94.0, -94.0)
+    gains = (20.0, 32.8, 32.8, 20.0)
+    rows = world(
+        passes,
+        {
+            one.pass_id: (reading(one, noise=noise, receiver_gain_db=gain),)
+            for one, noise, gain in zip(passes, floors, gains, strict=True)
+        },
+    )
+
+    (profile,) = station_profiles(
+        passes, rows, settle_margin_s=MARGIN_S, as_of=DAY0 + timedelta(days=30)
+    )
+
+    heard = [one for one in profile.interference if one.count]
+    assert len(profile.interference) == 48
+    assert profile.median_dbfs == -97.0
+    (cell,) = heard
+    assert (cell.azimuth_deg, cell.hour_start, cell.count) == (0.0, 4, 4)
+    assert (cell.gain_min_db, cell.gain_max_db) == (20.0, 32.8)
+    empty = [one for one in profile.interference if not one.count]
+    assert all(one.lift_db == 0.0 and one.gain_min_db is None for one in empty)
+
+
+def test_a_simulated_station_is_profiled_from_its_own_reports() -> None:
+    """Features never read them; the stored profile does, and says so."""
+    passes = [replace(one, simulated=True) for one in daily(5)]
+    rows = world(
+        passes, {one.pass_id: (reading(one, simulated=True),) for one in passes}
+    )
+
+    (profile,) = station_profiles(
+        passes, rows, settle_margin_s=MARGIN_S, as_of=DAY0 + timedelta(days=30)
+    )
+
+    assert profile.simulated is True
+    assert _sector(profile, 40.0).count == 5
+
+
+def test_a_measured_station_never_reads_a_simulated_report() -> None:
+    passes = daily(5)
+    rows = world(
+        passes, {one.pass_id: (reading(one, simulated=True),) for one in passes}
+    )
+
+    (profile,) = station_profiles(
+        passes, rows, settle_margin_s=MARGIN_S, as_of=DAY0 + timedelta(days=30)
+    )
+
+    assert _sector(profile, 40.0).count == 0

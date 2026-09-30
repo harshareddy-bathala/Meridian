@@ -19,7 +19,12 @@ polled; the only waits are the bounded seconds of stopping one.
 **A synthetic receiver cannot report for a real station.** The executor refuses
 that pairing on construction, before any pass (D-125, hard rule 5).
 
-Reference: docs/DECISIONS.md D-069, D-073, D-120 to D-126.
+**Products are kept before a result is settled.** The files a decoder names are
+copied into the station's product store before the manifest says ``reported``.
+A restart between the two decodes again and keeps them again, which the store
+makes harmless (D-176).
+
+Reference: docs/DECISIONS.md D-069, D-073, D-120 to D-126, D-176.
 """
 
 from __future__ import annotations
@@ -40,12 +45,14 @@ from meridian_client.reception.capture_folder import (
 from meridian_client.reception.capture_recovery import (
     discard_recording,
     facts_for,
+    keep_products,
     recover,
 )
-from meridian_client.reception.decode_report import DecodeFailure
+from meridian_client.reception.decode_report import DecodeFailure, DecodeReport
 from meridian_client.reception.disk_guard import DiskGuard
 from meridian_client.reception.manifest import Manifest, RecordingStamp, advance
 from meridian_client.reception.outcome_rules import OutcomePolicy, derive_result
+from meridian_client.reception.product_store import ProductStore
 from meridian_client.reception.protocols import (
     CapturePlan,
     CaptureRefusedError,
@@ -79,6 +86,9 @@ class ReceptionSetup:
     keep_recordings: bool = False
     """Leave each recording in place after its result is handed over. Off by
     default: a pass is about a gigabyte, and a Pi's disk is not an archive."""
+    products: ProductStore | None = None
+    """Where the products a decoder names are kept. ``None`` keeps and declares
+    none (D-176)."""
 
 
 @dataclass(slots=True)
@@ -235,7 +245,9 @@ class ReceptionExecutor:
         return tuple(
             derive_result(
                 facts_for(
-                    manifest, folders.folder_for(manifest.assignment.assignment_id)
+                    manifest,
+                    folders.folder_for(manifest.assignment.assignment_id),
+                    self._setup.products,
                 ),
                 policy,
             )
@@ -317,6 +329,12 @@ class ReceptionExecutor:
                 return
             self._decoding = None
             reason = outcome.reason if isinstance(outcome, DecodeFailure) else None
+            products = self._setup.products
+            if isinstance(outcome, DecodeReport) and products is not None:
+                folder = self._setup.folders.folder_for(
+                    manifest.assignment.assignment_id
+                )
+                keep_products(outcome, folder, products)
             self._report(manifest, reason)
         if self._decode_queue:
             self._start_decode(self._decode_queue.popleft())

@@ -171,21 +171,32 @@ def test_capabilities_are_a_list_of_objects_with_modes_as_a_list() -> None:
     ]
 
 
-def test_a_declared_horizon_mask_uses_the_short_wire_names() -> None:
-    """§4.1 spells them `az_deg` and `min_el_deg` (D-031)."""
+def test_a_declared_horizon_mask_travels_inside_each_capability() -> None:
+    """§4.1 puts it in the capability and spells it `az_deg`, `min_el_deg`.
+
+    At the top level of the body, where it was once sent, the platform ignored
+    it, so no declaration ever reached the scheduler (D-031, D-175).
+    """
     body = build_register_body(
         profile(horizon_mask=((0.0, 25.0), (180.0, 8.0))), "an-invite", "a-key"
     )
 
-    assert body["horizon_mask"] == [
-        {"az_deg": 0.0, "min_el_deg": 25.0},
-        {"az_deg": 180.0, "min_el_deg": 8.0},
+    assert "horizon_mask" not in body
+    capabilities = body["capabilities"]
+    assert isinstance(capabilities, list)
+    assert [one["horizon_mask"] for one in capabilities] == [
+        [{"az_deg": 0.0, "min_el_deg": 25.0}, {"az_deg": 180.0, "min_el_deg": 8.0}]
     ]
 
 
 def test_a_station_with_no_declared_obstruction_omits_the_mask() -> None:
     """An empty mask and no mask are the same claim; only one needs sending."""
-    assert "horizon_mask" not in build_register_body(profile(), "an-invite", "a-key")
+    body = build_register_body(profile(), "an-invite", "a-key")
+
+    assert "horizon_mask" not in body
+    capabilities = body["capabilities"]
+    assert isinstance(capabilities, list)
+    assert all("horizon_mask" not in one for one in capabilities)
 
 
 def test_the_client_identifies_itself_and_its_version() -> None:

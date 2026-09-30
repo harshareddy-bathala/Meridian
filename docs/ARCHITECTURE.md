@@ -71,6 +71,8 @@ Provides: `P(decode | station, pass)`; learned per-azimuth horizon profile; cali
 
 **Must support running any of the four ablation configurations by config flag** — see `docs/EVALUATION.md`. Must degrade to geometry-only for stations with no history.
 
+**The learned horizon and interference are also persisted** (D-174), computed by the same functions the features call and written by `meridian.profile_build` into `horizon_profiles` and `interference_profiles`, versioned by the dataset they came from. The stored rows are for showing and for loss diagnosis to cite; nothing reads them back into a prediction. The build reaches datasets through this module, as the scheduler does.
+
 **The reception verdict** is a calibrated probability that a finished reception is usable, computed for every observation revision — including one that received nothing. It is a different quantity from yield: yield is estimated *before* a pass for the scheduler, the verdict *after* it from what was received. Its inputs are stored observation fields (outcome, `peak_snr_db`, decoder statistics, frames decoded against frames expected), read through `platform/observations`, and listening evidence, read through `platform/registry`. It is held to the same discipline as yield — temporal splits, a reliability diagram and a Brier score against a base rate — and is trained and evaluated on measured receptions only (D-078, D-105). A pass's own verdict is never a feature of that pass's yield prediction. It does not decide whether a pass was captured; reliability does, using it. See D-102.
 
 Knows nothing about MSP or HTTP.
@@ -78,7 +80,7 @@ Knows nothing about MSP or HTTP.
 ### `platform/scheduler`
 Constrained optimisation over candidate passes.
 
-Consumes predictions; **does not read the observation store directly.** Enforces non-overlap including slew and settling time, per-station capability limits, and operator priority weights. Produces assignments and the reasoning behind each — the dashboard shows *why* a pass was chosen or skipped, so the justification must be a first-class output, not reconstructed later.
+Consumes predictions; **does not read the observation store directly.** Enforces non-overlap including slew and settling time, per-station capability limits, the horizon each capability **declared** (D-175), and operator priority weights. The learned horizon reaches it only as a feature of the yield: a learned floor used as a constraint could never come down. Produces assignments and the reasoning behind each — the dashboard shows *why* a pass was chosen or skipped, so the justification must be a first-class output, not reconstructed later.
 
 Also computes the retrospective oracle schedule for the schedule-efficiency metric, by replaying a dataset's test span under every configuration (D-172). It reads that dataset only through `platform/prediction`, and the outcomes it holds only for the oracle and the tally: no scheduler that could be deployed reads one.
 
@@ -91,6 +93,8 @@ The authority on whether a station was listening at a given moment. Every reliab
 Ingest, normalisation, deduplication, the system of record.
 
 Records are immutable once written; corrections are additive. Every record carries provenance (which station or archive, when retrieved) and a `simulated` flag propagated from MSP registration.
+
+A revision that reports a noise floor also writes a `noise_measurements` row, and each product it declares a `products` row, in the same transaction and from the row just stored (D-173, D-176).
 
 ### `platform/reliability`
 SLI computation, SLO evaluation, irrecoverable-loss budget, failure injection.
@@ -125,7 +129,7 @@ Must survive: network loss mid-pass (continue, queue results), power loss (rejoi
 
 **The loop sees reception through one protocol**, `execution.PassExecutor`. It asks the executor for each assignment's capture window, begins and ends captures by it, drains finished results into the upload queue, and reports whatever state the executor gives it (D-121). `NullExecutor` has no radio; the simulator's executor decides outcomes from a seed.
 
-**`meridian_client/reception/` is the executor that receives** (D-120). `ReceptionExecutor` is built from three narrower protocols:
+**`meridian_client/reception/` is the executor that receives** (D-120). A decoder names its products in its report, and the executor keeps them in a store addressed by hash before it settles the result, so the observation declares only what the station holds (D-176). `ReceptionExecutor` is built from three narrower protocols:
 - a **`Receiver`**: the simulated and file-replay receivers ship; a physical SDR adapter does not yet;
 - a **`Decoder`**: `SubprocessDecoder` runs whichever program a station configures for each mode and reads the JSON report it writes;
 - a **`RotatorController`**: only `NullRotator`, for a fixed antenna (D-126).

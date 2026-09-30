@@ -142,6 +142,7 @@ def _rounds(settings: Settings, scorers: ScorerSource) -> DatabaseRoundWork:
         lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
         SkyfieldOrbitService(),
         scorers.current,
+        datasets_root(None),
     )
 
 
@@ -216,6 +217,7 @@ def run_jobs(args: argparse.Namespace) -> int:
         return None not in (
             outcome.generated,
             outcome.scheduled,
+            outcome.profiled,
             checked.expired,
             checked.classified,
         )

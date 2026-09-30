@@ -48,6 +48,31 @@ flowchart TD
 
 *Snapshot taken 2026-09-29. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
+**Stage 19's software is built.** Its decisions are D-173 through D-178, and `docs/OPERATIONS.md` § Stored measurements and profiles is its runbook. Its migrations are `0023` and `0024`, after Stage 32's `0022`. Stages 20, 23, 31 and 32 are merged, Stage 21 is being built on its own branch, and **Stage 22 is the next stage nothing has claimed.**
+- **The completion gate passes, and is asserted both ways.** `tests/unit/test_deferred_storage_gate.py` reads the source and the documents and finds, for each deferred table, a producer that writes it and is called at runtime, a consumer that reads it and is called at runtime, `simulated` and the columns naming what made each row, a migration test that writes rows into it, and a stated retention. Each clause has a positive control on a table the roadmap plans and nobody builds. `tests/integration/test_deferred_storage_gate.py` runs a simulated and a measured station through ingest, export, labelling and a build, and finds every row labelled as its station is.
+- **The four tables, each with both ends** (D-173 to D-176):
+  - `noise_measurements` — dBFS at a stated gain, never dBm; one row per reception revision, written by ingest in the observation's transaction and backfilled by the same query; exported in every raw snapshot. Stage 25's observation-sourced rows came forward to give it a producer.
+  - `products` — a manifest of what a station holds, by hash. A decoder names its products in its report; the reference client keeps them in a store addressed by hash, under a cap, and declares only what it holds; the platform records a row per valid element and publishes kind, hash and size, never the station-local uri. **No transfer**: MSP 0.x has none (D-029).
+  - `horizon_profiles` and `interference_profiles` — the Stage 17 profiles persisted, by the functions the features call, once per labelled dataset; declared masks written when they change. `meridian profiles build`, a jobs task, `GET /api/v1/stations/{id}/profiles` and a sky plot on the dashboard. Nothing reads them back into a prediction.
+- **The declared horizon now constrains scheduling; the learned one does not** (D-175). A pass whose track clears the declared mask nowhere is left undecided, not skipped, so a corrected mask gives it back. The learned floor stays a feature, because as a constraint it could never come down.
+- **Two views and an aggregate** (D-177, D-178): `timing_error`, corrected by the station's clock offset as `EVALUATION.md` §6.1 requires, with its exclusions named and not applied; `scheduler_performance`; and `heartbeats_hourly`, a real-time continuous aggregate behind `GET /api/v1/stations/{id}/uptime`. `meridian passes timing` and `meridian schedule runs` read the views. The roadmap's other three views are answered elsewhere: completeness by snapshot, divergence by the orbit service, and the indicators by Stage 20.
+- **Retention was decided by writing the queries down first, and the answer is none** (D-178). `was_listening`, the snapshot export and Stage 20's reclassification read raw heartbeats for any window a pass can be asked about, so nothing is dropped on a timer; the aggregate serves coverage. A test compared the aggregate with raw counts before anything relied on it.
+- **Found on the way, each fixed:**
+  - every declared horizon mask had been lost: the reference client sent it where the platform ignored it, and both packages' tests passed because each agreed with itself. A conformance test now reads it back from the table (D-175);
+  - a mask entry could be any number; it is now a direction in the sky, or `malformed`;
+  - five hand-built test snapshots carried a noise floor without its gain, which no export writes;
+  - the migration lifecycle test's scratch database could fail to drop while TimescaleDB's worker reconnected, which had failed three runs.
+- **Not built:**
+  - product transfer, which needs an object store and an MSP 0.4 decision (D-029, D-176);
+  - survey sweeps, which the `source` column admits and nothing produces;
+  - the retrospective comparison does not apply declared masks, because no live run did before this stage (D-175).
+- **Known limits, each stated rather than hidden:**
+  - an observation's noise floor covers a whole pass, so it has no azimuth; the sector is the pass's peak, assigned when a profile is derived (D-173);
+  - a product evicted from a station's store is not reported, so a row says where a product was declared held, not that it is still there (D-176);
+  - a heartbeat restored into an hour the aggregate has already refreshed is counted at its next refresh, within 30 minutes (D-178);
+  - the views answer differently each time they are read, which is why no reported figure comes from them (D-177).
+  - at a station that declares a mask, each candidate's track is propagated once for the mask and again for scoring; one computation could serve both, and at this network's size the second costs little (found in review).
+
 **Stage 32's software is built** (2026-09-29), on top of Stage 31 and in the same change. Its decisions are D-227 through D-233, and `docs/OPERATIONS.md` § Regional monitoring is its runbook.
 - **The completion gate passes, and is demonstrable at a prompt.** `meridian regions add` registers an area; `meridian regions report --snapshot …` computes its record and coverage from the snapshot alone and publishes them, naming the same directory when run again. `tests/unit/test_regions_gate.py` builds a snapshot by hand — an area over Bengaluru and a retired one, a vegetation index that falls, rain that does not, fires that appear, a tile, and decoded, far-away, undecoded and simulated receptions — and asserts each clause of the stage's test list with the network refused.
 - **`platform/src/meridian/regions/`** with its own commit scope (D-228), sharing no name with Prometheus or Grafana, imported by nothing on the scheduling path.

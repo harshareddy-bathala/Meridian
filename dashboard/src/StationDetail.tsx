@@ -1,4 +1,8 @@
 import { formatAge, formatFrequency, formatWindow } from "./format";
+import { HorizonPlot } from "./HorizonPlot";
+import type { StationProfiles } from "./profiles";
+import type { StationUptime } from "./uptime";
+import { UptimeStrip } from "./UptimeStrip";
 import { describeValue, type Assignment, type LatestHeartbeat } from "./schedule";
 import type { Station } from "./stations";
 import { useStationDetail } from "./useStationDetail";
@@ -84,13 +88,32 @@ function Assignments({ assignments, showStation }: { assignments: Assignment[]; 
   );
 }
 
+function StationSky({ profiles, uptime }: { profiles: StationProfiles | null; uptime: StationUptime | null }) {
+  return (
+    <>
+      {uptime !== null && (
+        <>
+          <h3>Uptime</h3>
+          <UptimeStrip uptime={uptime} />
+        </>
+      )}
+      {profiles !== null && (
+        <>
+          <h3>Horizon</h3>
+          <HorizonPlot profiles={profiles} />
+        </>
+      )}
+    </>
+  );
+}
+
 interface DetailProps {
   station: Station | null;
   onClear: () => void;
 }
 
 export function StationDetail({ station, onClear }: DetailProps) {
-  const { heartbeat, assignments, error } = useStationDetail(station?.stationId ?? null);
+  const { heartbeat, assignments, profiles, uptime, error } = useStationDetail(station?.stationId ?? null);
   return (
     <section aria-labelledby="detail-heading" className="station-detail">
       <h2 id="detail-heading">
@@ -110,6 +133,7 @@ export function StationDetail({ station, onClear }: DetailProps) {
       ) : (
         <Assignments assignments={assignments} showStation={station === null} />
       )}
+      <StationSky profiles={profiles} uptime={uptime} />
     </section>
   );
 }

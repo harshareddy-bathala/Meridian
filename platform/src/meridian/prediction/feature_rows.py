@@ -90,6 +90,9 @@ class Reading:
     first_detection_at: datetime | None
     noise_floor_dbfs: float | None
     simulated: bool
+    receiver_gain_db: float | None = None
+    """The gain the floor was measured at. Read by the persisted profile, which
+    states the gains behind each cell (D-174), and by no feature."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +188,7 @@ def _readings(files: Mapping[str, bytes]) -> dict[int, tuple[Reading, ...]]:
                 first_detection_at=optional_instant(report, "first_detection_at"),
                 noise_floor_dbfs=optional_number(report, "noise_floor_dbfs"),
                 simulated=flag(report, "simulated"),
+                receiver_gain_db=optional_number(report, "receiver_gain_db"),
             )
         )
     return {pass_id: tuple(held) for pass_id, held in by_pass.items()}

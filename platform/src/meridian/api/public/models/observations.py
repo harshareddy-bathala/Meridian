@@ -1,14 +1,16 @@
 """Observations and simulator runs, as the public API states them.
 
 An observation's window is widened to the minute on the way here (D-093). What it
-does not carry — detection instant, Doppler curve, notes, products — was never
-selected by ``store.observation_history``, so there is nothing to drop.
+does not carry — detection instant, Doppler curve, notes, and the verbatim
+products array with its station-local uris — was never selected by
+``store.observation_history``, so there is nothing to drop. Its products are
+published as their kind, sha256 and size (D-176).
 
 A simulator run carries ``simulated: true`` as a constant. It is still a field:
 every applicable body states its provenance (CLAUDE.md rule 5), and a run is
 never anything else.
 
-Reference: docs/DECISIONS.md D-015, D-077, D-093.
+Reference: docs/DECISIONS.md D-015, D-077, D-093, D-176.
 """
 
 from __future__ import annotations
@@ -19,10 +21,24 @@ from typing import Literal, Self
 from pydantic import BaseModel
 
 from meridian.api.public.window_privacy import publish_window
-from meridian.store.observation_history import HistoricObservation
+from meridian.store.observation_history import HistoricObservation, PublishedProduct
 from meridian.store.simulator_runs import SimulatorRun
 
-__all__ = ["PublicObservation", "PublicSimulatorRun"]
+__all__ = ["PublicObservation", "PublicProduct", "PublicSimulatorRun"]
+
+
+class PublicProduct(BaseModel):
+    """A product the station declared it holds. Named by hash; not fetchable."""
+
+    kind: str
+    """As declared when a short lowercase token, otherwise ``other``."""
+    sha256: str
+    size_bytes: int | None
+
+    @classmethod
+    def from_row(cls, row: PublishedProduct) -> Self:
+        """Publish one product."""
+        return cls(kind=row.kind, sha256=row.sha256, size_bytes=row.size_bytes)
 
 
 class PublicObservation(BaseModel):
@@ -42,6 +58,9 @@ class PublicObservation(BaseModel):
     provenance: str
     submitted_at: datetime
     simulated: bool
+    products: list[PublicProduct]
+    """What the station holds from this reception, by hash. Held on the
+    station, not here: MSP defines no transfer yet (D-029, D-176)."""
 
     @classmethod
     def from_row(cls, row: HistoricObservation) -> Self:
@@ -61,6 +80,7 @@ class PublicObservation(BaseModel):
             provenance=row.provenance,
             submitted_at=row.submitted_at,
             simulated=row.simulated,
+            products=[PublicProduct.from_row(one) for one in row.products],
         )
 
 

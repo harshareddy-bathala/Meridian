@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -39,9 +40,9 @@ def rollback(conn: Any) -> Iterator[Any]:
 
 
 def test_a_round_completes_both_tasks_against_the_schema(
-    rollback: Any, schedule_rows: Any
+    rollback: Any, schedule_rows: Any, tmp_path: Path
 ) -> None:
-    """Both tasks return a report; neither raised on the real queries."""
+    """Every task returns a report; none raised on the real queries."""
     schedule_rows.station("st_jobs_round", simulated=True)
     schedule_rows.satellite()
 
@@ -50,7 +51,9 @@ def test_a_round_completes_both_tasks_against_the_schema(
         with rollback.transaction():
             yield rollback
 
-    work = DatabaseRoundWork(connect, SkyfieldOrbitService(), lambda: None)
+    work = DatabaseRoundWork(
+        connect, SkyfieldOrbitService(), lambda: None, tmp_path / "datasets"
+    )
     plan = RoundPlan(horizon=timedelta(hours=6), config=ScheduleConfig())
 
     outcome = run_round(work, plan, datetime.now(UTC))
@@ -58,3 +61,5 @@ def test_a_round_completes_both_tasks_against_the_schema(
     assert outcome.generated is not None
     assert outcome.scheduled is not None
     assert outcome.scheduled.model_config == "A"
+    assert outcome.profiled is not None
+    assert outcome.profiled.dataset is None

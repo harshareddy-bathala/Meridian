@@ -27,14 +27,14 @@ nothing above the threshold reaches the last row: it could not establish absence
 came with no timing is ``aborted``, not ``decoded`` at a made-up time.
 
 Reference: docs/MSP-SPEC.md §4.4; docs/DECISIONS.md D-032, D-072, D-100, D-117,
-D-122.
+D-122, D-176.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from meridian_client.assignment_message import Assignment
@@ -50,6 +50,7 @@ from meridian_client.reception.decode_report import (
     DecodeReport,
     SnrPoint,
 )
+from meridian_client.reception.product_store import HeldProduct
 from meridian_client.reception.protocols import Recording
 
 __all__ = [
@@ -95,6 +96,9 @@ class ReceptionFacts:
     reason: str | None = None
     """Why it never started, or why nothing could be decoded."""
 
+    products: tuple[HeldProduct, ...] = ()
+    """What the decoder named and the station's store holds (D-176)."""
+
 
 @dataclass(frozen=True, slots=True)
 class _Detection:
@@ -121,8 +125,18 @@ def derive_result(facts: ReceptionFacts, policy: OutcomePolicy) -> ObservationRe
         policy: The threshold and coverage the table applies.
 
     Returns:
-        A result every rule of MSP §4.4 accepts.
+        A result every rule of MSP §4.4 accepts. It declares the products the
+        station holds whatever its outcome, since a decoder can write a
+        waterfall of a pass it decoded nothing from (D-176).
     """
+    result = _outcome(facts, policy)
+    if not facts.products:
+        return result
+    return replace(result, products=tuple(one.as_declared() for one in facts.products))
+
+
+def _outcome(facts: ReceptionFacts, policy: OutcomePolicy) -> ObservationResult:
+    """The result without its products, by D-122's table."""
     if facts.recording is None:
         return _not_attempted(facts)
     if not isinstance(facts.decode, DecodeReport):

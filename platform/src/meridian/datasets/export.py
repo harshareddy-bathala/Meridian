@@ -78,10 +78,10 @@ from meridian.store.schema_revision import find_current_revision
 from meridian.store.snapshot_reads import (
     SNAPSHOT_TABLES,
     SnapshotScope,
-    read_source_terms,
     read_table,
     snapshot_instant,
 )
+from meridian.store.snapshot_source_terms import read_source_terms
 from meridian.store.stations import Connection
 
 __all__ = [
@@ -102,7 +102,15 @@ SNAPSHOTS = "snapshots"
 LISTENING = "listening"
 """The frozen ``was_listening`` answers, ``listening.jsonl``."""
 
-SIMULATED_SPLIT = ("passes", "assignments", "observations", "heartbeats", "stations")
+SIMULATED_SPLIT = (
+    "passes",
+    "assignments",
+    "observations",
+    "noise_measurements",
+    "products",
+    "heartbeats",
+    "stations",
+)
 """Tables counted in the manifest as measured and simulated, apart — never one
 total across both populations (rule 5)."""
 

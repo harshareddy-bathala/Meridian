@@ -31,6 +31,7 @@ from meridian.cli_snapshot import (
     EXIT_CORRUPT,
     datasets_root,
 )
+from meridian.cli_views import add_runs_arguments, run_schedule_runs
 from meridian.config import load_settings
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.prediction.live import LiveScorer, LiveScoringError
@@ -103,7 +104,17 @@ def add_schedule_parser(
             f"${DATASETS_ROOT_ENV}, else {DEFAULT_DATASETS_ROOT})"
         ),
     )
-    actions = schedule.add_subparsers(dest="action", metavar="[evaluate]")
+    actions = schedule.add_subparsers(dest="action", metavar="[evaluate|runs]")
+    add_runs_arguments(
+        actions.add_parser(
+            "runs",
+            help="how recent runs fared: solver, decisions and their outcomes",
+            description=(
+                "Reads the scheduler_performance view (D-177). An operator's"
+                " read; schedulers are compared by replay, not here."
+            ),
+        )
+    )
     evaluate = actions.add_parser(
         "evaluate",
         help="compare every scheduler and the oracle on a dataset's test span",
@@ -159,10 +170,20 @@ def print_schedule_report(report: ScheduleReport) -> None:
         )
         if solver.detail is not None:
             _say(f"  fell back because:   {solver.detail}")
+    _print_left_out(report)
+
+
+def _print_left_out(report: ScheduleReport) -> None:
+    """The passes this run did not decide, and why each group was left."""
     if report.stations_unavailable:
         _say(
             f"  offline, left undecided: {', '.join(report.stations_unavailable)}"
             f" ({report.passes_deferred} passes)"
+        )
+    if report.passes_below_the_declared_horizon:
+        _say(
+            f"  below the declared horizon, left undecided: "
+            f"{len(report.passes_below_the_declared_horizon)} passes"
         )
     if report.passes_without_a_usable_transmitter:
         # Normally empty — pass generation applies the same capability test. It
@@ -204,8 +225,11 @@ def run_scheduler(args: argparse.Namespace) -> int:
         horizon, the configuration or its model is refused, the database cannot
         be reached, or the schedule broke a constraint.
     """
-    if getattr(args, "action", None) == "evaluate":
+    action = getattr(args, "action", None)
+    if action == "evaluate":
         return run_schedule_evaluate(args)
+    if action == "runs":
+        return run_schedule_runs(args)
     return _run_horizon(args)
 
 

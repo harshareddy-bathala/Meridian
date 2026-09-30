@@ -17,14 +17,23 @@ migration adding a column changes no snapshot until someone decides it should.
 and no feature needs it. The token timestamps are current state that D-143
 says no label may use. None of them is read, so none can reach a file.
 
+**A product's ``uri`` is left out of ``products.jsonl``**, since it is where one
+station keeps a file and no snapshot reader needs it (D-176). It is not absent
+from the snapshot: ``observations.products_json`` carries the array verbatim, as
+it carries everything a station sent, and a raw snapshot is private for that
+reason among others. What an evidence dataset may publish is Stage 30's to
+decide.
+
 **What a raw snapshot is not.** Coordinates are kept at full precision, because
 Stage 17 computes geometry from them. That makes a raw snapshot private: it is
 not published as-is, and Stage 30's evidence dataset decides what may be.
 
 **Scope.** Passes whose ``aos`` falls in ``[since, as_of)``, and what they
 depend on: their assignments, every observation revision submitted by
-``as_of``, the heartbeats received inside each assignment's window, and the
-element sets, stations, capabilities, satellites and transmitters they name.
+``as_of`` with the noise floor and products recorded from it, the heartbeats
+received inside each assignment's window, and the element sets, stations,
+capabilities, satellites and transmitters they name. A survey's noise reading
+names no assignment and is scoped by when it was measured.
 Archive receptions are scoped by ``started_at`` over the same interval, and
 bring the element sets current at each UTC day's start for every satellite
 they name, so the export can compute an archive station's denominator (D-150). Nothing
@@ -32,7 +41,7 @@ outside the interval is read, so a pass near ``since`` has less contemporaneous
 evidence than one in the middle — which the labeller reports as indeterminate,
 not as a miss (D-147).
 
-Reference: docs/DECISIONS.md D-139, D-143, D-144, D-145, D-150.
+Reference: docs/DECISIONS.md D-139, D-143, D-144, D-145, D-150, D-173, D-176.
 """
 
 from __future__ import annotations
@@ -49,8 +58,6 @@ __all__ = [
     "SNAPSHOT_TABLES",
     "SnapshotScope",
     "SnapshotTable",
-    "SourceTerms",
-    "read_source_terms",
     "read_table",
     "snapshot_instant",
 ]
@@ -184,6 +191,26 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         " order by assignment_id, revision, started_at",
     ),
     SnapshotTable(
+        "noise_measurements",
+        "select id, station_id, measured_at, source, assignment_id, revision,"
+        " centre_freq_hz, bandwidth_hz, azimuth_deg, noise_floor_dbfs,"
+        " receiver_gain_db, simulated, recorded_at"
+        " from noise_measurements where recorded_at <= %(as_of)s"
+        f" and (assignment_id in ({_SCOPED_ASSIGNMENTS})"
+        "  or (source = 'survey' and measured_at >= %(since)s"
+        "   and measured_at < %(as_of)s"
+        f"   and station_id in ({_SCOPED_STATIONS})))"
+        " order by id, measured_at",
+    ),
+    SnapshotTable(
+        "products",
+        "select id, assignment_id, revision, observation_started_at, station_id,"
+        " element_index, kind, sha256, size_bytes, created_at, simulated"
+        f" from products where assignment_id in ({_SCOPED_ASSIGNMENTS})"
+        " and created_at <= %(as_of)s"
+        " order by id",
+    ),
+    SnapshotTable(
         "heartbeats",
         "select h.id, h.station_id, h.sent_at, h.received_at, h.state,"
         " h.held_assignments, h.listening_assignment_id, h.listening_satellite_id,"
@@ -289,18 +316,6 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
 """Every file a raw snapshot holds, in the order the export writes them."""
 
 
-@dataclass(frozen=True, slots=True)
-class SourceTerms:
-    """One archive source a snapshot holds rows from, and the terms they came under."""
-
-    source_id: str
-    licence: str
-    terms_url: str
-    attribution_entry: str
-    records: int
-    """Artefacts from this source that the snapshot's archive receptions cite."""
-
-
 def snapshot_instant(conn: Connection) -> datetime:
     """The transaction's own time, which is the snapshot's ``as_of`` (D-143).
 
@@ -340,41 +355,3 @@ def read_table(
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(table.sql, {"since": scope.since, "as_of": scope.as_of})
         return list(cur.fetchall())
-
-
-def read_source_terms(conn: Connection, scope: SnapshotScope) -> list[SourceTerms]:
-    """The terms of every source the snapshot holds receptions or values from.
-
-    Args:
-        conn: A connection inside the export's transaction.
-        scope: The snapshot's interval.
-
-    Returns:
-        One entry per source, ordered by ``source_id``, for the manifest — so a
-        dataset carries "were we allowed to use this" with it (D-134).
-    """
-    with conn.cursor() as cur:
-        cur.execute(
-            "select source_id, licence, terms_url, attribution_entry,"
-            f" count(*) from ingest_provenance where record_id in ({_CITED_RECORDS})"
-            " group by source_id, licence, terms_url, attribution_entry"
-            " order by source_id",
-            {"since": scope.since, "as_of": scope.as_of},
-        )
-        return [_source_terms(row) for row in cur.fetchall()]
-
-
-def _source_terms(row: tuple[object, ...]) -> SourceTerms:
-    """One grouped row, with every column the view declares ``not null`` checked."""
-    source_id, licence, terms_url, attribution_entry, records = row
-    texts = (source_id, licence, terms_url, attribution_entry)
-    if not all(isinstance(one, str) for one in texts) or not isinstance(records, int):
-        message = f"ingest_provenance returned an unexpected row: {row!r}"
-        raise TypeError(message)
-    return SourceTerms(
-        source_id=str(source_id),
-        licence=str(licence),
-        terms_url=str(terms_url),
-        attribution_entry=str(attribution_entry),
-        records=records,
-    )

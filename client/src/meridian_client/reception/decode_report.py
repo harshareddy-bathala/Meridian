@@ -22,27 +22,38 @@ The report, with every optional key present::
       "frames_failed": 37,
       "first_frame_offset_s": 35.2,
       "snr": [{"offset_s": 35.0, "snr_db": 3.1}, {"offset_s": 326.0, "snr_db": 11.4}],
-      "noise_floor_dbfs": -52.3
+      "noise_floor_dbfs": -52.3,
+      "products": [{"kind": "waterfall", "path": "waterfall.png"}]
     }
 
 ``snr`` absent means not measured; ``[]`` means measured and nothing found.
 
-Reference: docs/DECISIONS.md D-117, D-122, D-124.
+**``products`` is how a decoder names what it produced** (D-176). Each entry is
+a ``kind`` (a short lowercase token) and a ``path`` relative to ``{output_dir}``.
+Nothing else in the output directory is read or kept, and a kind is never
+guessed from a file name. A path that leaves the output directory, or names no
+regular file, refuses the whole report, as an offset outside the recording does.
+
+Reference: docs/DECISIONS.md D-117, D-122, D-124, D-176.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import pairwise
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 __all__ = [
+    "MAX_PRODUCTS",
     "MAX_REPORT_BYTES",
     "MAX_SNR_POINTS",
+    "PRODUCT_KIND",
     "REPORT_FORMAT",
+    "DeclaredProduct",
     "DecodeFailure",
     "DecodeReport",
     "DecodeReportError",
@@ -62,6 +73,12 @@ MAX_SNR_POINTS = 100_000
 """A bound on the raw series, far above one point a second for any pass. The
 executor reduces it to MSP's 512 (D-122); this only stops a runaway decoder."""
 
+MAX_PRODUCTS = 64
+"""A decoder names a handful of files a pass; this only stops a runaway one."""
+
+PRODUCT_KIND = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+"""A kind the platform publishes as declared (D-176), so none is renamed."""
+
 _KEYS = frozenset(
     {
         "format",
@@ -72,6 +89,7 @@ _KEYS = frozenset(
         "first_frame_offset_s",
         "snr",
         "noise_floor_dbfs",
+        "products",
     }
 )
 
@@ -89,6 +107,14 @@ class SnrPoint:
 
 
 @dataclass(frozen=True, slots=True)
+class DeclaredProduct:
+    """One file a decoder named as a product, relative to its output directory."""
+
+    kind: str
+    path: PurePosixPath
+
+
+@dataclass(frozen=True, slots=True)
 class DecodeReport:
     """A report that passed every check. Unknown values are ``None``, not zero."""
 
@@ -99,6 +125,8 @@ class DecodeReport:
     first_frame_offset_s: float | None
     snr: tuple[SnrPoint, ...] | None
     noise_floor_dbfs: float | None
+    products: tuple[DeclaredProduct, ...] = ()
+    """What the decoder named, in its order; empty when it named nothing."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,17 +136,29 @@ class DecodeFailure:
     reason: str
 
 
-def read_decode_report(path: Path, *, recording_duration_s: float) -> DecodeReport:
-    """Read and check the report a decoder wrote.
+def read_decode_report(
+    path: Path,
+    *,
+    recording_duration_s: float,
+    output_dir: Path,
+    require_products: bool = True,
+) -> DecodeReport:
+    """Read and check the report a decoder wrote, and the products it names.
 
     Args:
         path: ``{report_path}``.
         recording_duration_s: The recording's length. Every offset must fall
             inside it.
+        output_dir: ``{output_dir}``. Every product must be a regular file
+            inside it, after symbolic links are followed.
+        require_products: Refuse the report over a product that fails that
+            test, as the decode settles. ``False`` drops the product instead,
+            for rebuilding a settled result from disk: a waterfall removed
+            since must not turn a decoded pass into a failed decode.
 
     Raises:
-        DecodeReportError: The file is missing, too large, not JSON, or not a
-            report this contract accepts.
+        DecodeReportError: The file is missing, too large, not JSON, not a
+            report this contract accepts, or names a product it cannot keep.
     """
     try:
         size = path.stat().st_size
@@ -130,7 +170,37 @@ def read_decode_report(path: Path, *, recording_duration_s: float) -> DecodeRepo
         decoded = json.loads(path.read_bytes())
     except (OSError, ValueError) as exc:
         raise DecodeReportError(f"the report is not JSON: {exc}") from exc
-    return parse_decode_report(decoded, recording_duration_s=recording_duration_s)
+    report = parse_decode_report(decoded, recording_duration_s=recording_duration_s)
+    if require_products:
+        for product in report.products:
+            _require_inside(output_dir, product.path)
+        return report
+    return replace(
+        report,
+        products=tuple(one for one in report.products if _inside(output_dir, one.path)),
+    )
+
+
+def _inside(output_dir: Path, relative: PurePosixPath) -> bool:
+    try:
+        _require_inside(output_dir, relative)
+    except DecodeReportError:
+        return False
+    return True
+
+
+def _require_inside(output_dir: Path, relative: PurePosixPath) -> None:
+    """A product is a regular file in the output directory, links followed.
+
+    A link out of the directory would have the station keep, and declare, a file
+    the decoder was never given (D-176).
+    """
+    root = output_dir.resolve()
+    target = (root / relative).resolve()
+    if not target.is_relative_to(root):
+        raise DecodeReportError(f"product {relative} leaves the output directory")
+    if not target.is_file():
+        raise DecodeReportError(f"product {relative} is not a file the decoder wrote")
 
 
 def parse_decode_report(
@@ -161,6 +231,7 @@ def parse_decode_report(
         first_frame_offset_s=first_frame_offset_s,
         snr=_snr(stored, recording_duration_s),
         noise_floor_dbfs=_number(stored, "noise_floor_dbfs"),
+        products=_products(stored),
     )
 
 
@@ -266,3 +337,41 @@ def _snr_point(value: object, recording_duration_s: float) -> SnrPoint:
     if offset_s is None or snr_db is None:
         raise DecodeReportError("an snr point needs both offset_s and snr_db")
     return SnrPoint(offset_s, snr_db)
+
+
+def _products(stored: Mapping[str, object]) -> tuple[DeclaredProduct, ...]:
+    """The products the decoder named, each a kind and a path in its output."""
+    listed = stored.get("products")
+    if listed is None:
+        return ()
+    if not isinstance(listed, list):
+        raise DecodeReportError("products must be an array")
+    if len(listed) > MAX_PRODUCTS:
+        raise DecodeReportError(
+            f"products has {len(listed)} entries, over {MAX_PRODUCTS}"
+        )
+    products = tuple(_product(one) for one in listed)
+    paths = [one.path for one in products]
+    if len(set(paths)) != len(paths):
+        raise DecodeReportError("products names one file twice")
+    return products
+
+
+def _product(value: object) -> DeclaredProduct:
+    if not isinstance(value, dict) or set(value) != {"kind", "path"}:
+        raise DecodeReportError(f"a product must be {{kind, path}}, not {value!r}")
+    kind, path = value["kind"], value["path"]
+    if not isinstance(kind, str) or not PRODUCT_KIND.fullmatch(kind):
+        raise DecodeReportError(
+            f"a product's kind must be a short lowercase token, not {kind!r}"
+        )
+    if not isinstance(path, str) or not path or "\\" in path:
+        raise DecodeReportError(
+            f"a product's path must be a relative path, not {path!r}"
+        )
+    relative = PurePosixPath(path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise DecodeReportError(
+            f"a product's path must stay inside the output directory, not {path!r}"
+        )
+    return DeclaredProduct(kind=kind, path=relative)

@@ -170,7 +170,9 @@ class SubprocessDecodeRun:
     ) -> None:
         """Supervise ``process``; ``None`` is a decode that never started."""
         self._process = process
-        self._report = decode_paths(job.folder).report
+        paths = decode_paths(job.folder)
+        self._report = paths.report
+        self._output_dir = paths.output_dir
         self._duration_s = job.recording.sample_count / job.recording.sample_rate_hz
         self._timeout_s = timeout_s
         self._clocks = clocks
@@ -219,7 +221,9 @@ class SubprocessDecodeRun:
             return DecodeFailure(f"the decoder exited with status {status}")
         try:
             return read_decode_report(
-                self._report, recording_duration_s=self._duration_s
+                self._report,
+                recording_duration_s=self._duration_s,
+                output_dir=self._output_dir,
             )
         except DecodeReportError as exc:
             return DecodeFailure(str(exc))
