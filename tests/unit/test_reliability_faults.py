@@ -419,14 +419,20 @@ def test_the_platform_reads_a_ledger_the_simulator_wrote(tmp_path: Path) -> None
     book.open("declines", "station:1", T0, tick=3, station_id="st_1", seed=7)
     book.act("declines", "station:1", s(1), ("as_1", "as_2"), tick=3)
     book.close("declines", "station:1", s(90), tick=6)
-    book.open("clock_drift", "station:2", s(30), detail={"drift_s_per_tick": 1.5})
+    book.open(
+        "clock_drift",
+        "station:2",
+        s(30),
+        station_id="st_2",
+        detail={"drift_s_per_tick": 1.5},
+    )
 
     with book.path.open(encoding="utf-8") as handle:
         faults = read_fault_ledger(handle)
 
     assert [(one.kind, one.station_id, one.closed_at) for one in faults] == [
         ("declines", "st_1", s(90)),
-        ("clock_drift", None, None),
+        ("clock_drift", "st_2", None),
     ]
     assert faults[0].assignment_ids == ("as_1", "as_2")
     assert faults[1].detail == {"drift_s_per_tick": 1.5}
@@ -443,13 +449,32 @@ def test_the_platform_reads_a_ledger_the_simulator_wrote(tmp_path: Path) -> None
         ' "at": "2026-09-29T12:00:00Z"}',
         '{"ledger": 1, "event": "pause", "run_id": "r", "kind": "k", "target": "t",'
         ' "at": "2026-09-29T12:00:00Z"}',
+        '{"ledger": 1, "event": "open", "run_id": "r", "kind": "k",'
+        ' "target": "station:1", "at": "2026-09-29T12:00:00Z"}',
     ],
-    ids=["not-json", "other-version", "zoneless", "close-unopened", "unknown-event"],
+    ids=[
+        "not-json",
+        "other-version",
+        "zoneless",
+        "close-unopened",
+        "unknown-event",
+        "station-unnamed",
+    ],
 )
 def test_a_ledger_line_it_cannot_read_is_refused(line: str) -> None:
     """A verdict against part of the truth is a verdict against another run."""
     with pytest.raises(FaultLedgerError, match="line 1"):
         read_fault_ledger([line])
+
+
+def test_an_offline_spell_too_short_to_scrape_is_owed_no_alert() -> None:
+    """Offline for 30 s: a correct platform can let it pass unseen by a rule."""
+    brief = evidence(heartbeats=beats(-120, 0) + beats(120, 300), alert_asked=True)
+
+    passed, detail = check(judge_station_fault(fault(closed=110), brief), "alerted")
+
+    assert passed is None
+    assert "too briefly" in detail
 
 
 def test_an_alert_already_firing_times_nothing_about_this_fault() -> None:
@@ -469,6 +494,7 @@ def test_a_rise_is_the_first_firing_sample_after_the_fault() -> None:
     start = T0.timestamp()
 
     assert first_rise([start - 5, start + 60], start).already_firing
-    rose = first_rise([start + 70, start + 75], start)
+    rose = first_rise([start - 600, start + 70, start + 75], start)
     assert (rose.fired_at, rose.already_firing) == (s(70), False)
     assert first_rise([], start).fired_at is None
+    assert first_rise([start + 70], start, end_s=start + 60).fired_at is None

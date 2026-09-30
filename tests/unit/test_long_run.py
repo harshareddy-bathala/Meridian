@@ -173,7 +173,7 @@ def test_an_alert_with_no_fault_near_it_is_a_false_positive(
 ) -> None:
     """Explained while a fault is open, and within the grace after it closes."""
     interval = long_run.Interval
-    faults = [interval("network_down", T0, T0 + timedelta(minutes=3))]
+    faults = [interval("network_down on station:1", T0, T0 + timedelta(minutes=3))]
     during = interval("StationOffline", T0 + timedelta(minutes=2), None)
     just_after = interval(
         "StationOffline",
@@ -181,7 +181,7 @@ def test_an_alert_with_no_fault_near_it_is_a_false_positive(
         T0 + timedelta(minutes=10),
     )
     long_after = interval(
-        "DatabaseUnavailable",
+        "StationOffline",
         T0 + timedelta(hours=2),
         T0 + timedelta(hours=2, minutes=1),
     )
@@ -191,6 +191,26 @@ def test_an_alert_with_no_fault_near_it_is_a_false_positive(
     )
 
     assert unexplained == [long_after]
+
+
+def test_an_alert_is_explained_only_by_a_fault_that_could_cause_it(
+    long_run: ModuleType,
+) -> None:
+    """Under chaos some fault is always open; a decoder fault raises no DB alert."""
+    interval = long_run.Interval
+    run_end = T0 + timedelta(hours=1)
+    unrelated = [interval("decoder_degraded on station:7", T0, run_end)]
+    database = interval("DatabaseUnavailable", T0 + timedelta(minutes=5), None)
+    schema = interval("SchemaMigrationMismatch", T0 + timedelta(minutes=5), None)
+    restart = [
+        interval("database_restart on platform:db", T0, T0 + timedelta(minutes=6))
+    ]
+    asleep = [interval("host asleep", T0, T0 + timedelta(minutes=6))]
+
+    assert long_run.false_positives([database], unrelated, run_end) == [database]
+    assert long_run.false_positives([database], restart, run_end) == []
+    assert long_run.false_positives([schema], restart, run_end) == [schema]
+    assert long_run.false_positives([schema], asleep, run_end) == []
 
 
 class _Laptop:

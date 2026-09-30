@@ -165,3 +165,30 @@ def test_a_window_opened_twice_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(MalformedLedgerError, match="line 2"):
         read_ledger(book.path)
+
+
+def test_a_restarted_run_closes_what_its_last_process_left_open(tmp_path: Path) -> None:
+    """Without it, the same fault opens twice and every reader refuses the file."""
+    before = ledger(tmp_path)
+    before.open("network_down", "station:1", AT, tick=3, station_id="st_1")
+    before.open("slow_api", "station:2", AT, tick=3, station_id="st_2")
+    before.close("slow_api", "station:2", AT + timedelta(seconds=30), tick=4)
+
+    after = ledger(tmp_path)
+    closed = after.close_dangling(AT + timedelta(minutes=10))
+    after.open("network_down", "station:1", AT + timedelta(minutes=11), tick=0)
+
+    records = read_ledger(after.path)
+    assert closed == 1
+    assert [(one.kind, one.closed_at is None) for one in records] == [
+        ("network_down", False),
+        ("slow_api", False),
+        ("network_down", True),
+    ]
+
+
+def test_another_run_s_open_windows_are_left_alone(tmp_path: Path) -> None:
+    """Only this run's faults ended with its process."""
+    FaultLedger(tmp_path / "faults.jsonl", "other-run").open("restart", "station:1", AT)
+
+    assert FaultLedger(tmp_path / "faults.jsonl", "run-1").close_dangling(AT) == 0

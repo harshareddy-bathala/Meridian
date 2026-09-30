@@ -98,6 +98,28 @@ class FaultLedger:
         self.path = path
         self._run_id = run_id
 
+    def close_dangling(self, at: datetime) -> int:
+        """Close every window of this run a previous process left open.
+
+        A simulator that died or was restarted wrote no ``close`` for the faults
+        it had in force; its faults ended with it. Without this, the restarted
+        process opens the same fault on the same station again and every reader
+        refuses the ledger as having opened it twice.
+
+        Returns:
+            How many windows were closed.
+        """
+        if not self.path.exists():
+            return 0
+        left_open = [
+            one
+            for one in read_ledger(self.path)
+            if one.run_id == self._run_id and one.closed_at is None
+        ]
+        for one in left_open:
+            self._append("close", one.kind, one.target, at, detail={"ended": "restart"})
+        return len(left_open)
+
     def open(  # noqa: PLR0913 — one line's fields, named at the call site
         self,
         kind: str,

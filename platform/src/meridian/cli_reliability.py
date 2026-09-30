@@ -42,7 +42,7 @@ from meridian.reliability.config import (
     load_deployed_reliability_config,
     load_reliability_config,
 )
-from meridian.reliability.fault_check import check_faults, prometheus_alert_lookup
+from meridian.reliability.fault_check import check_faults, prometheus_alert_history
 from meridian.reliability.faults import (
     FaultLedgerError,
     FaultVerdict,
@@ -223,8 +223,13 @@ def _faults(
                 faults = read_fault_ledger(handle)
     except (OSError, FaultLedgerError) as exc:
         return _refuse("faults", f"cannot read {args.ledger}: {exc}")
-    alerts = prometheus_alert_lookup(args.prometheus) if args.prometheus else None
-    verdicts = check_faults(conn, faults, now=now, alerts=alerts)
+    alerts = prometheus_alert_history(args.prometheus) if args.prometheus else None
+    try:
+        verdicts = check_faults(conn, faults, now=now, alerts=alerts)
+    except (OSError, ValueError) as exc:
+        # A Prometheus that is restarting or slow is a refusal to judge the
+        # alerts, said as one, not a traceback with nothing printed.
+        return _refuse("faults", f"Prometheus did not answer: {exc}")
     for verdict in verdicts:
         for line in _judged(verdict):
             _say(line)
@@ -258,6 +263,10 @@ def _as_json(verdict: FaultVerdict) -> dict[str, object]:
     fault = verdict.fault
     return {
         "run_id": fault.run_id,
+        # Injected, and against a station only the simulator drives: a station
+        # fault's verdict is about simulated work (rule 5). A platform fault
+        # was done to the platform itself, which is not simulated.
+        "simulated": not fault.on_platform,
         "kind": fault.kind,
         "target": fault.target,
         "station_id": fault.station_id,

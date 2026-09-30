@@ -55,6 +55,7 @@ from meridian.reliability.fault_ledger import (
     read_fault_ledger,
 )
 from meridian.reliability.fault_model import (
+    ALERT_VISIBLE_AFTER,
     MISS_SENSITIVE,
     NOT_LISTENED,
     RECOVERY_WITHIN,
@@ -67,6 +68,7 @@ from meridian.reliability.fault_model import (
     Silence,
     StationEvidence,
     StationWork,
+    silenced_until,
 )
 from meridian.reliability.fault_offline import detected, no_new_work, replanned
 
@@ -249,7 +251,7 @@ def _recovered(
     """
     if fault.kind not in SILENCING:
         return Check("recovered", None, f"{fault.kind} leaves the station reachable")
-    quiet_until = _silenced_until(fault, alongside)
+    quiet_until = silenced_until(fault, alongside)
     if quiet_until is None:
         return Check("recovered", None, "the station was still silenced at the end")
     after = min(
@@ -258,29 +260,12 @@ def _recovered(
     return _within("heartbeat", quiet_until, after, RECOVERY_WITHIN, evidence.as_of)
 
 
-def _silenced_until(
-    fault: InjectedFault, alongside: Sequence[InjectedFault]
-) -> datetime | None:
-    """When the last silencing fault overlapping ``fault`` ended, or ``None``."""
-    end = fault.closed_at
-    others = [one for one in alongside if one.kind in SILENCING and one is not fault]
-    grew = True
-    while grew and end is not None:
-        grew = False
-        for one in others:
-            if one.opened_at <= end and (one.closed_at is None or one.closed_at > end):
-                if one.closed_at is None:
-                    return None
-                end, grew = one.closed_at, True
-    return end
-
-
 def _alerted(
     fault: InjectedFault, silence: Silence, evidence: StationEvidence
 ) -> Check:
     """When ``StationOffline`` fired, measured from the fault — SC-5's measured half."""
     offline_at = silence.offline_at
-    unattributable = _unattributable(offline_at, evidence)
+    unattributable = _unattributable(offline_at, silence.next, evidence)
     if unattributable is not None:
         return Check("alerted", None, unattributable)
     fired = evidence.alert_fired_at
@@ -297,22 +282,35 @@ def _alerted(
 
 
 def _unattributable(
-    offline_at: datetime | None, evidence: StationEvidence
+    offline_at: datetime | None,
+    silence_end: datetime | None,
+    evidence: StationEvidence,
 ) -> str | None:
     """Why this fault is owed no alert, or cannot be timed by one; else ``None``.
 
     ``StationOffline`` is summed over the fleet (D-197), so it times a fault
-    only when it rose for this station: not before it went offline, not
-    already firing for another, and not at all for one never offline.
+    only when it rose for this station: one that went offline long enough for
+    a scrape and a rule to see it, while the alert was not already firing for
+    another, and not before this station read offline.
     """
     if offline_at is None:
         return "never offline, so no alert was owed"
-    if evidence.alert_already_firing:
-        return "StationOffline was already firing for another station: not attributable"
     fired = evidence.alert_fired_at
-    if fired is not None and fired < offline_at:
-        return "StationOffline rose before this station read offline: not attributable"
-    return None
+    reasons = (
+        (
+            silence_end is not None and silence_end - offline_at < ALERT_VISIBLE_AFTER,
+            "offline too briefly for a scrape and a rule to see it",
+        ),
+        (
+            evidence.alert_already_firing,
+            "StationOffline was already firing for another station: not attributable",
+        ),
+        (
+            fired is not None and fired < offline_at,
+            "StationOffline rose before this station read offline: not attributable",
+        ),
+    )
+    return next((reason for applies, reason in reasons if applies), None)
 
 
 def _within(

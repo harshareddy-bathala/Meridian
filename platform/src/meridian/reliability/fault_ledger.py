@@ -113,8 +113,12 @@ class _Folding:
     ) -> None:
         if key in self._open:
             raise FaultLedgerError(f"line {number}: {key} opened twice")
-        self._open[key] = len(self.faults)
         station_id = line.get("station_id")
+        if key[1].startswith("station:") and not isinstance(station_id, str):
+            # Refused rather than skipped, for the reason every other malformed
+            # line is: a verdict that left it out would pass part of the truth.
+            raise FaultLedgerError(f"line {number}: a station fault names no station")
+        self._open[key] = len(self.faults)
         detail = line.get("detail", {})
         self.faults.append(
             InjectedFault(

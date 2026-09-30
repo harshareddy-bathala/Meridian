@@ -165,6 +165,8 @@ class Supervisor:
             self._config.station_count,
         )
         self._notes.partition = self._partition
+        if self._notes.ledger is not None:
+            self._notes.ledger.close_dangling(datetime.now(UTC))
         return tuple(one.station.station_id for one in self._members)
 
     def tick_round(self, tick: int, now: datetime) -> RoundOutcome:

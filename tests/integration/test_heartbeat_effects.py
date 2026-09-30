@@ -422,6 +422,31 @@ def test_an_offline_revocation_decided_again_is_not_reinstated(
     assert state_of(rollback, "as_old") == "revoked"
 
 
+def test_a_null_configuration_decided_again_is_not_reinstated_either(
+    client: TestClient, rollback: Any
+) -> None:
+    """`model_config` may be null; two nulls are the same configuration here."""
+    station = register(client, rollback, simulated=False)
+    for name in ("as_old", "as_newer"):
+        issue_assignment(
+            rollback,
+            station["station_id"],
+            Issued(
+                name, state="revoked", starts_in_minutes=30, revoked_reason="offline"
+            ),
+        )
+    with rollback.cursor() as cur:
+        cur.execute(
+            "update assignments set model_config = null,"
+            " revision = case assignment_id when 'as_newer' then 1 else 0 end"
+            " where assignment_id in ('as_old', 'as_newer')"
+        )
+
+    send_heartbeat(client, station, holding=["as_old"])
+
+    assert state_of(rollback, "as_old") == "revoked"
+
+
 def test_a_held_assignment_dropped_once_under_way_is_not_revoked(
     client: TestClient, rollback: Any
 ) -> None:

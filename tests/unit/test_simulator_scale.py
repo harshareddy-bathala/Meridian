@@ -43,11 +43,23 @@ def test_a_missing_queue_is_empty(tmp_path: Path) -> None:
     assert queue_depth(tmp_path / "nowhere") == 0
 
 
+class Clock:
+    """Seconds that move only when a test says so."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 def test_the_report_counts_what_the_platform_answered(tmp_path: Path) -> None:
     """Answered against attempted, and per second against the cadence."""
-    recorder = ScaleRecorder(config(tmp_path), interval_s=30.0)
-    recorder(outcome(0, (1, 2, 3), (1, 2, 3)), 0.5)
-    recorder(outcome(1, (1, 2), (1, 2, 3)), 0.5)
+    clock = Clock()
+    recorder = ScaleRecorder(config(tmp_path), interval_s=30.0, clock=clock)
+    recorder(outcome(0, (1, 2, 3), (1, 2, 3)), 0.0)
+    clock.now += 30
+    recorder(outcome(1, (1, 2), (1, 2, 3)), 0.0)
 
     report = recorder.report()
 
@@ -56,6 +68,21 @@ def test_the_report_counts_what_the_platform_answered(tmp_path: Path) -> None:
     assert report["heartbeats_answered_per_s"] == round(5 / 60, 3)
     assert report["heartbeats_expected_per_s"] == 0.1
     assert report["observations_acknowledged"] == 2
+
+
+def test_a_fleet_falling_behind_reports_the_rate_it_achieved(tmp_path: Path) -> None:
+    """Rounds 45 s apart against a 30 s cadence: the rate is over 45, not 30."""
+    clock = Clock()
+    recorder = ScaleRecorder(config(tmp_path), interval_s=30.0, clock=clock)
+    for tick in range(3):
+        clock.now += 45
+        recorder(outcome(tick, (1, 2, 3), (1, 2, 3)), 45.0)
+
+    report = recorder.report()
+
+    assert recorder.window_s() == 2 * 45 + 30
+    assert report["heartbeats_answered_per_s"] == round(9 / 120, 3)
+    assert report["heartbeats_answered_per_s"] < report["heartbeats_expected_per_s"]
 
 
 def test_a_round_longer_than_the_cadence_is_an_overrun(tmp_path: Path) -> None:

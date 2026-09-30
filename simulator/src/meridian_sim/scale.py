@@ -23,6 +23,8 @@ D-197.
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -68,8 +70,18 @@ class ScaleRecorder:
     deepest_queue: int = 0
     """The deepest any one station's queue got, at any round."""
 
+    clock: Callable[[], float] = time.monotonic
+    """Seconds, monotonic; a test passes its own."""
+
+    first_start: float | None = None
+    last_start: float | None = None
+
     def __call__(self, outcome: RoundOutcome, took_s: float) -> None:
         """Record one round. A :data:`~meridian_sim.supervisor.RoundObserver`."""
+        began = self.clock() - took_s
+        if self.first_start is None:
+            self.first_start = began
+        self.last_start = began
         self.rounds += 1
         self.heard += len(outcome.heard)
         self.ticked += len(outcome.ticked)
@@ -87,7 +99,7 @@ class ScaleRecorder:
 
     def report(self) -> dict[str, object]:
         """The run, as the JSON the report file holds."""
-        wall_s = self.rounds * self.interval_s
+        wall_s = self.window_s()
         return {
             "format": REPORT_FORMAT,
             "simulated": True,
@@ -115,6 +127,18 @@ class ScaleRecorder:
             "queue_total_max": max(self.queue_by_round, default=0),
             "queue_deepest_station": self.deepest_queue,
         }
+
+    def window_s(self) -> float:
+        """Seconds from the first round starting to a cadence past the last.
+
+        Measured, not ``rounds * interval``: a supervisor that overruns skips
+        the rounds it missed (D-076), so under exactly the load this report
+        exists to measure, the rounds span longer than the cadence says, and
+        a rate over the nominal span would read faster than it was.
+        """
+        if self.first_start is None or self.last_start is None:
+            return 0.0
+        return self.last_start - self.first_start + self.interval_s
 
     def write(self, path: Path) -> None:
         """Write the report, creating its directory if it has none."""

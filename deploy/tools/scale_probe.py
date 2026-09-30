@@ -156,6 +156,9 @@ def summarise(
     heartbeats = delta(first, last, "meridian_msp_heartbeats_total")
     report: dict[str, object] = {
         "format": REPORT_FORMAT,
+        # The probe is Stage 21's tool for runs against a simulated fleet, and
+        # a figure it reports must say so wherever it is copied (rule 5).
+        "simulated": True,
         "window_s": round(seconds, 1),
         "scrapes": len(api),
         "routes": per_route,

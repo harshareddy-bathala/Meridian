@@ -247,18 +247,65 @@ def ledger_windows(lines: Iterable[str]) -> list[Interval]:
     return windows
 
 
+STATION_SILENCING = frozenset(
+    {"network_down", "partition", "heartbeat_delayed", "restart", "token_revoked"}
+)
+PLATFORM_OUTAGES = frozenset({"platform_restart", "database_restart", "api_paused"})
+STATION_FAULTS = STATION_SILENCING | {
+    "upload_blocked",
+    "slow_api",
+    "receiver_down",
+    "decoder_degraded",
+    "clock_drift",
+    "declines",
+}
+
+CAUSES: dict[str, frozenset[str]] = {
+    "StationStale": STATION_SILENCING | PLATFORM_OUTAGES,
+    "StationOffline": STATION_SILENCING | PLATFORM_OUTAGES,
+    "HeartbeatIngestionStopped": STATION_SILENCING | PLATFORM_OUTAGES,
+    "ApiUnavailable": frozenset({"platform_restart", "api_paused"}),
+    "DatabaseUnavailable": frozenset({"database_restart"}),
+    "SchedulerUnavailable": frozenset({"scheduler_down"}),
+    "ScheduledTaskStalled": frozenset({"scheduler_down", "database_restart"}),
+    "ScheduledTaskNeverSucceeded": frozenset({"scheduler_down", "database_restart"}),
+    "ObservationsOverdue": STATION_SILENCING | {"upload_blocked", "slow_api"},
+    "LossBudgetThresholdReached": STATION_FAULTS | PLATFORM_OUTAGES,
+}
+"""Which injected fault kinds can raise each alert.
+
+An alert is explained only by a fault that could have caused it: under the
+`chaos` scenario some fault is open on some station almost all the time, so
+"any fault was open" would explain every alert and find no false positive
+ever. An alert not listed here — `SchemaMigrationMismatch`, say — is caused by
+no fault the run injects, and so is always a false positive.
+"""
+
+HOST_ASLEEP = "host asleep"
+
+
+def _kind(window: Interval) -> str:
+    """The fault kind a ledger window was named for: ``kind on target``."""
+    return window.name.split(" on ", 1)[0]
+
+
 def false_positives(
     alerts: Sequence[Interval],
     faults: Sequence[Interval],
     run_end: datetime,
     grace: timedelta = ALERT_GRACE,
 ) -> list[Interval]:
-    """Alerts that fired while no fault was open, nor had closed within ``grace``."""
+    """Alerts that fired with no fault that could cause them open, nor closed
+    within ``grace``. A host that slept explains any alert; it fails the run
+    on its own account."""
     unexplained: list[Interval] = []
     for alert in alerts:
         alert_end = alert.end or run_end
+        causes = CAUSES.get(alert.name, frozenset())
         explained = any(
-            fault.start <= alert_end and alert.start <= (fault.end or run_end) + grace
+            (fault.name == HOST_ASLEEP or _kind(fault) in causes)
+            and fault.start <= alert_end
+            and alert.start <= (fault.end or run_end) + grace
             for fault in faults
         )
         if not explained:
@@ -317,7 +364,7 @@ class Waiter:
             asleep = after - before - timedelta(seconds=step)
             if asleep > PAUSE_THRESHOLD:
                 self.pauses.append(
-                    Interval("host asleep", before + timedelta(seconds=step), after)
+                    Interval(HOST_ASLEEP, before + timedelta(seconds=step), after)
                 )
 
     def sleep(self, seconds: float) -> None:

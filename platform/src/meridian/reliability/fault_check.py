@@ -17,6 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from meridian.reliability.fault_model import silenced_until
 from meridian.reliability.faults import (
     FaultVerdict,
     InjectedFault,
@@ -38,7 +39,13 @@ from meridian.store.fault_evidence import (
 )
 from meridian.store.stations import Connection
 
-__all__ = ["AlertAnswer", "AlertLookup", "check_faults", "prometheus_alert_lookup"]
+__all__ = [
+    "AlertAnswer",
+    "AlertHistory",
+    "check_faults",
+    "first_rise",
+    "prometheus_alert_history",
+]
 
 MARGIN = timedelta(minutes=5)
 """How far either side of a fault its evidence is read.
@@ -58,12 +65,15 @@ class AlertAnswer:
     firing inherited from another station's fault times nothing about this one."""
 
 
-AlertLookup = Callable[[str, datetime, datetime], AlertAnswer]
-"""When an alert began firing between two instants."""
+AlertHistory = Callable[[str, datetime, datetime], list[float]]
+"""Every sampled instant, in epoch seconds, an alert was firing between two."""
 
 STATION_OFFLINE_ALERT = "StationOffline"
 PROMETHEUS_STEP_S = 5
 PROMETHEUS_TIMEOUT_S = 10.0
+PROMETHEUS_CHUNK = timedelta(hours=12)
+"""One ``query_range`` at most: Prometheus refuses more than 11,000 points a
+query, which at a five-second step is fifteen hours."""
 
 
 def check_faults(
@@ -71,7 +81,7 @@ def check_faults(
     faults: Sequence[InjectedFault],
     *,
     now: datetime,
-    alerts: AlertLookup | None = None,
+    alerts: AlertHistory | None = None,
 ) -> tuple[FaultVerdict, ...]:
     """Judge every fault, in ledger order.
 
@@ -80,40 +90,57 @@ def check_faults(
         faults: The ledger's windows, from
             :func:`~meridian.reliability.faults.read_fault_ledger`.
         now: When the evidence is read; a window still open is judged up to it.
-        alerts: Where to ask when an alert fired, or ``None`` not to ask.
+        alerts: Where to read when an alert fired, or ``None`` not to ask. Read
+            once for the whole run, not once a fault: a seventy-two hour run
+            has tens of thousands of windows.
+
+    Raises:
+        OSError: Prometheus could not be reached.
+        ValueError: Prometheus answered with something that is not its API.
     """
+    by_target: dict[tuple[str, str], list[InjectedFault]] = {}
+    for one in faults:
+        by_target.setdefault((one.run_id, one.target), []).append(one)
+    firing = _station_offline_history(faults, now, alerts)
     return tuple(
         _judge_platform(conn, one, now)
         if one.on_platform
-        else _judge_station(conn, one, now, alerts, _same_target(one, faults))
+        else _judge_station(
+            conn,
+            one,
+            now,
+            firing,
+            tuple(x for x in by_target[(one.run_id, one.target)] if x is not one),
+        )
         for one in faults
-        if one.on_platform or one.station_id is not None
     )
 
 
-def _same_target(
-    fault: InjectedFault, faults: Sequence[InjectedFault]
-) -> tuple[InjectedFault, ...]:
-    """The other faults of the same run on the same station."""
-    return tuple(
-        one
-        for one in faults
-        if one is not fault
-        and one.run_id == fault.run_id
-        and one.target == fault.target
-    )
+def _station_offline_history(
+    faults: Sequence[InjectedFault], now: datetime, alerts: AlertHistory | None
+) -> list[float] | None:
+    """When ``StationOffline`` was firing across the whole run, or ``None``."""
+    stations = [one for one in faults if not one.on_platform]
+    if alerts is None or not stations:
+        return None
+    start = min(one.opened_at for one in stations) - MARGIN
+    end = min(max((one.closed_at or now) for one in stations) + MARGIN, now)
+    return alerts(STATION_OFFLINE_ALERT, start, end)
 
 
 def _judge_station(
     conn: Connection,
     fault: InjectedFault,
     now: datetime,
-    alerts: AlertLookup | None,
+    firing: list[float] | None,
     alongside: tuple[InjectedFault, ...],
 ) -> FaultVerdict:
     station_id = fault.station_id or ""
     start = fault.opened_at - MARGIN
-    end = min((fault.closed_at or now) + MARGIN, now)
+    # To the end of every silencing fault overlapping this one, not its close
+    # alone: recovery is judged from there, and its heartbeat must be in reach.
+    quiet_until = silenced_until(fault, alongside) or fault.closed_at
+    end = min(max(fault.closed_at or now, quiet_until or now) + MARGIN, now)
     work = tuple(
         StationWork(
             assignment_id=one.assignment_id,
@@ -134,7 +161,9 @@ def _judge_station(
     )
     touched = sorted({one.assignment_id for one in work} | set(fault.assignment_ids))
     answer = (
-        None if alerts is None else alerts(STATION_OFFLINE_ALERT, fault.opened_at, end)
+        None
+        if firing is None
+        else first_rise(firing, fault.opened_at.timestamp(), end.timestamp())
     )
     rounds = find_rounds_between(conn, start=start, end=end)
     evidence = StationEvidence(
@@ -147,7 +176,7 @@ def _judge_station(
         as_of=now,
         alert_fired_at=answer.fired_at if answer else None,
         alert_already_firing=bool(answer and answer.already_firing),
-        alert_asked=alerts is not None,
+        alert_asked=firing is not None,
     )
     return judge_station_fault(fault, evidence, alongside)
 
@@ -171,44 +200,58 @@ def _judge_platform(
     return judge_platform_fault(fault, evidence)
 
 
-def prometheus_alert_lookup(base_url: str) -> AlertLookup:
-    """An :data:`AlertLookup` asking a Prometheus server's ``ALERTS`` series.
+def prometheus_alert_history(base_url: str) -> AlertHistory:
+    """An :data:`AlertHistory` reading a Prometheus server's ``ALERTS`` series.
 
-    Queried over a range, at a five-second step, for the first sample at which
-    the alert was firing. The step bounds the answer's resolution, which is
-    finer than the fifteen-second evaluation interval the answer depends on.
+    At a five-second step, finer than the fifteen-second evaluation interval
+    the answer depends on, and in chunks of :data:`PROMETHEUS_CHUNK`.
     """
 
-    def first_firing(name: str, start: datetime, end: datetime) -> AlertAnswer:
-        # From a step before the window, to see whether it was already firing.
-        query = urllib.parse.urlencode(
-            {
-                "query": f'ALERTS{{alertname="{name}",alertstate="firing"}}',
-                "start": f"{start.timestamp() - PROMETHEUS_STEP_S:.3f}",
-                "end": f"{end.timestamp():.3f}",
-                "step": str(PROMETHEUS_STEP_S),
-            }
-        )
-        url = f"{base_url.rstrip('/')}/api/v1/query_range?{query}"
-        with urllib.request.urlopen(url, timeout=PROMETHEUS_TIMEOUT_S) as response:
-            body = json.load(response)
-        instants = sorted(
-            float(stamp)
-            for series in body.get("data", {}).get("result", [])
-            for stamp, value in series.get("values", [])
-            if value == "1"
-        )
-        return first_rise(instants, start.timestamp())
+    def history(name: str, start: datetime, end: datetime) -> list[float]:
+        instants: list[float] = []
+        chunk_start = start
+        while chunk_start < end:
+            chunk_end = min(chunk_start + PROMETHEUS_CHUNK, end)
+            instants.extend(_firing(base_url, name, chunk_start, chunk_end))
+            chunk_start = chunk_end
+        return sorted(set(instants))
 
-    return first_firing
+    return history
 
 
-def first_rise(instants: list[float], start_s: float) -> AlertAnswer:
-    """The first firing sample after ``start_s``, unless it was firing already."""
-    if any(one <= start_s for one in instants):
+def _firing(base_url: str, name: str, start: datetime, end: datetime) -> list[float]:
+    """The instants in one range at which ``name`` was firing."""
+    query = urllib.parse.urlencode(
+        {
+            "query": f'ALERTS{{alertname="{name}",alertstate="firing"}}',
+            "start": f"{start.timestamp():.3f}",
+            "end": f"{end.timestamp():.3f}",
+            "step": str(PROMETHEUS_STEP_S),
+        }
+    )
+    url = f"{base_url.rstrip('/')}/api/v1/query_range?{query}"
+    with urllib.request.urlopen(url, timeout=PROMETHEUS_TIMEOUT_S) as response:
+        body = json.load(response)
+    return [
+        float(stamp)
+        for series in body.get("data", {}).get("result", [])
+        for stamp, value in series.get("values", [])
+        if value == "1"
+    ]
+
+
+def first_rise(
+    instants: Sequence[float], start_s: float, end_s: float = float("inf")
+) -> AlertAnswer:
+    """The first firing sample in ``(start_s, end_s]``, unless it already was.
+
+    Already firing means a sample in the step before ``start_s``: the alert
+    was up when the fault began, for someone else.
+    """
+    if any(start_s - PROMETHEUS_STEP_S <= one <= start_s for one in instants):
         return AlertAnswer(fired_at=None, already_firing=True)
-    after = [one for one in instants if one > start_s]
+    after = [one for one in instants if start_s < one <= end_s]
     return AlertAnswer(
-        fired_at=datetime.fromtimestamp(after[0], UTC) if after else None,
+        fired_at=datetime.fromtimestamp(min(after), UTC) if after else None,
         already_firing=False,
     )

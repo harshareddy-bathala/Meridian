@@ -104,6 +104,7 @@ def test_the_report_reads_pool_pressure_at_its_worst(probe: ModuleType) -> None:
         [probe.parse(BEFORE), middle, probe.parse(AFTER)], [], 60.0
     )
 
+    assert report["simulated"] is True
     assert report["pool_available_min"] == 1.0
     assert report["pool_waiting_max"] == 7.0
     assert report["pool_size_max"] == 4.0

@@ -10,7 +10,7 @@ Reference: docs/DECISIONS.md D-054, D-190, D-192.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -18,6 +18,7 @@ from meridian.registry.liveness import OFFLINE_AFTER_S, derive_liveness
 from meridian.reliability.fault_ledger import InjectedFault
 
 __all__ = [
+    "ALERT_VISIBLE_AFTER",
     "MISS_SENSITIVE",
     "NOT_LISTENED",
     "OFFLINE",
@@ -34,6 +35,7 @@ __all__ = [
     "StationEvidence",
     "StationWork",
     "offline_span",
+    "silenced_until",
 ]
 
 OFFLINE = timedelta(seconds=OFFLINE_AFTER_S)
@@ -76,6 +78,15 @@ ROUND_READ_GRACE = timedelta(seconds=60)
 """How long after it begins a round known only by its revocations may still be
 reading liveness. A round with a run record says exactly, by when it wrote;
 Stage 21's rehearsal measured ten seconds at ten stations."""
+
+ALERT_VISIBLE_AFTER = timedelta(seconds=60)
+"""How long a station must read offline before ``StationOffline`` can be owed.
+
+The collector sees liveness at a scrape and the rule fires at the next
+evaluation, each every fifteen seconds (``deploy/prometheus/prometheus.yml``),
+so a spell shorter than both, with margin, can pass unseen by a correct
+platform; the alert check does not ask about one.
+"""
 
 RECOVERY_WITHIN = OFFLINE
 """How soon after a fault ends a station must be heard again.
@@ -242,3 +253,20 @@ def offline_span(silence: Silence) -> tuple[datetime, datetime | None] | None:
     """From when the station was offline until it was heard again."""
     offline_at = silence.offline_at
     return None if offline_at is None else (offline_at, silence.next)
+
+
+def silenced_until(
+    fault: InjectedFault, alongside: Sequence[InjectedFault]
+) -> datetime | None:
+    """When the last silencing fault overlapping ``fault`` ended, or ``None``."""
+    end = fault.closed_at
+    others = [one for one in alongside if one.kind in SILENCING and one is not fault]
+    grew = True
+    while grew and end is not None:
+        grew = False
+        for one in others:
+            if one.opened_at <= end and (one.closed_at is None or one.closed_at > end):
+                if one.closed_at is None:
+                    return None
+                end, grew = one.closed_at, True
+    return end

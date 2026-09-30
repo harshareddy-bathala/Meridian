@@ -125,7 +125,9 @@ def reinstate_named(
                   and not exists (
                     select 1 from assignments later
                     where later.pass_id = a.pass_id
-                      and later.model_config = a.model_config
+                      -- `model_config` may be null (0012); `=` would never
+                      -- match two nulls and let superseded work back in.
+                      and later.model_config is not distinct from a.model_config
                       and later.revision > a.revision
                   )
                   and not exists (

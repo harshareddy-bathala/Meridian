@@ -4089,6 +4089,8 @@ Every line carries the format version, the run, the kind, the target (`station:<
 
 *Rejected:* a `faults` table in the platform database, which is the answer key in the examinee's hands and a migration nothing else needs. Also rejected: faults sent in the heartbeat's `health` object, which is on MSP.
 
+**A restarted run closes what its last process left open.** The simulator appends to one ledger across restarts, under a stable run id. A process that died wrote no `close` for the faults it had in force, and its successor would open the same fault on the same station again, which every reader refuses as a lost line. So the supervisor closes every open window of its run, marked `ended: restart`, before it ticks. A station fault that names no station is refused like any other malformed line, never skipped. (Stage 21's code review.)
+
 ---
 
 ## D-190 — A fault's expected detection is decided by the verifier, from its length
@@ -4144,6 +4146,12 @@ A delay short of the client's timeout changes nothing the platform can observe, 
 - **`StationOffline` times a fault only when it rose for that station.** The alert is summed over the fleet (D-197). If it was already firing, or rose before this station read offline, it was another station's, and the check says "not attributable" instead of reporting a latency of nothing.
 
 With these, the same run's record judged 347 faults and failed none. Where the alert could be attributed, it fired 10 to 80 seconds after the fault: the median was 10 seconds after the station read offline, and the most was 50 seconds after.
+
+**What the code review corrected:**
+- **Evidence reaches the end of the combined outage.** Recovery is measured from the end of every overlapping silencing fault, so its heartbeats are read up to there, not only to five minutes past this fault's close.
+- **A brief offline spell is owed no alert.** A spell shorter than sixty seconds can pass between a scrape and a rule evaluation, each every fifteen seconds, on a platform that is working correctly.
+- **The alert history is read once for the whole run,** in twelve-hour chunks under Prometheus's point limit, and each fault finds its own window in it. Faults are grouped by station once, not searched for per fault.
+- **A Prometheus that does not answer is a refusal,** said as one.
 
 *Rejected:* storing the verdicts in a table, which would put ground truth's shadow in the database D-189 keeps it out of; the verdict is printed and optionally written as JSON beside the ledger. Also rejected: judging detection from the dashboard's liveness at the moment of reading, which answers "is it offline now", not "when did it become so".
 
@@ -4228,6 +4236,8 @@ Each row is written by the statement that moves the assignment — an `update �
 
 *Rejected:* keeping `revoked_reason` through a reinstatement, which would make an assignment's columns describe its past rather than its state, and break 0019's check that a revocation is whole. Also rejected: a log line per revocation, which no verdict can read back.
 
+**Reinstatement compares configurations null-safely.** `assignments.model_config` may be null (0012), and `reinstate_named` tested for later decisions with `=`, which never matches two nulls. So a revoked, null-configuration assignment whose pass had been decided again would have been given back beside the newer decision. It is now `is not distinct from`, as `find_station_work` already was, and a heartbeat-effects test pins it. (Stage 21's code review.)
+
 ---
 
 ## D-197 — Scale is measured from both sides, and the platform's metrics must not grow with the fleet
@@ -4262,6 +4272,8 @@ It is in process, with D-202's `RATE_LIMITS=off` for accelerated simulations, so
 
 **Latency is measured against a running platform and recorded, labelled simulated.** It uses `meridian serve` and `meridian jobs run` on the host, the simulator at the real thirty-second cadence, and the probe beside it. `docs/SCALE-AND-FAULTS.md` holds the table, the machine it ran on and the commands that regenerate it. It is a measurement of one machine on one day, and says so; the CI test is what holds at every change.
 
+**Rates are over the time the rounds really took.** The recorder times each round from when it began, and a rate is over the span from the first round to a cadence past the last. The supervisor skips rounds it overran (D-076), so a rate over `rounds × interval` would read fastest under exactly the load it exists to measure. The probe's report says `simulated`, as the fleet's does. (Stage 21's code review.)
+
 *Rejected:* a latency threshold in CI, which would measure the CI runner's neighbours. Also rejected: labelling any metric by station, even for the fleet's own dashboard, which the public API already serves per station without a series each.
 
 ---
@@ -4284,6 +4296,8 @@ The roadmap's long run is seventy-two hours of the complete stack with simulated
   - **The verdict** is `meridian reliability faults` over both ledgers, run inside the API container against the run's own Prometheus. So SC-5's alert latency is measured, not derived (D-192). The ledger is piped in, because the container's filesystem is read-only (D-206).
 
 **It exits non-zero on any failure it finds,** so a seventy-two hour run that finished is a pass or a fail, not a directory to interpret.
+
+**An alert is explained only by a fault that could cause it.** Under `chaos` some fault is open on some station almost all the time, so "any fault was open" would explain every alert, and the long run could never report a false positive. Each alert rule lists the fault kinds that can raise it: station silences and platform outages for the station alerts, a database restart for `DatabaseUnavailable`, and so on. An alert no injected fault can raise, such as `SchemaMigrationMismatch`, is always a false positive. A host that slept explains any alert, and fails the run on its own account. (Stage 21's code review.)
 
 **Rehearsed for two hours first.** An hour between platform faults is right for three days and meets one or two in two hours, so a rehearsal passes a shorter mean gap to `chaos.plan`. At twenty minutes, two hours of seed 4471 meets all four platform faults. The rehearsal found three defects in the tool before any could spoil a three-day run:
 - the verdict could not read a ledger inside a read-only container;
