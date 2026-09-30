@@ -24,7 +24,13 @@ def scheduling_figures(rows: Sequence[Row]) -> dict[str, bytes]:
     if replay["status"] != "replayed":
         return {}
     sample = f"{replay['station_days']} station-days, {replay['resamples']} resamples"
-    gains = [_estimate(_gain_label(one), one, "relative") for one in _of(rows, "gain")]
+    # A gain with no value (the second scheduler decoded nothing) is left out
+    # of the figure, never drawn as zero; its table row says why.
+    gains = [
+        _estimate(_gain_label(one), one, "relative")
+        for one in _of(rows, "gain")
+        if one["relative"] is not None
+    ]
     regret = [
         _estimate(str(one["scheduler"]), one, "per_hour") for one in _of(rows, "regret")
     ]
@@ -100,7 +106,7 @@ def _estimate(label: str, one: Row, key: str) -> Estimate:
         if isinstance(interval, Mapping)
         else (None, None)
     )
-    return Estimate(label, float(str(value)) if value is not None else 0.0, *bounds)
+    return Estimate(label, float(str(value)), *bounds)
 
 
 def _sc1(sc1: Row) -> list[str]:

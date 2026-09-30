@@ -32,7 +32,12 @@ from pathlib import Path
 from meridian.datasets.fault_runs import FAULTS, FaultRun, read_fault_run
 from meridian.datasets.manifest import Manifest, content_sha256
 from meridian.datasets.publish import SnapshotDirectory, read_directory
-from meridian.reports.build import CONFIG_FILE, RunInputs, build_run
+from meridian.reports.build import (
+    CONFIG_FILE,
+    RunInputs,
+    build_run,
+    with_environment,
+)
 from meridian.reports.config import parse_report_config
 
 __all__ = [
@@ -194,7 +199,12 @@ def verify_run(
         recorded=content_sha256(manifest),
         regenerated=content_sha256(rebuilt.manifest),
         differing_files=tuple(sorted(differing)),
-        environment_changes=_changes(manifest.environment, environment),
+        # Against what this rebuild measured too (the solver's version), not
+        # only the machine: the recorded block holds both.
+        environment_changes=_changes(
+            manifest.environment,
+            with_environment(rebuilt, environment).manifest.environment,
+        ),
     )
 
 

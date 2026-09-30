@@ -40,6 +40,7 @@ from meridian.cli_snapshot import datasets_root
 from meridian.config import load_settings
 from meridian.datasets.fault_runs import publish_fault_run
 from meridian.datasets.manifest import content_sha256
+from meridian.datasets.publish import DamagedSnapshotError
 from meridian.registry.psycopg_registry import PsycopgRegistry
 from meridian.reliability.accounting import classify_settled
 from meridian.reliability.config import (
@@ -265,8 +266,8 @@ def _faults(
             json.dumps([_as_json(one) for one in verdicts], indent=2) + "\n",
             encoding="utf-8",
         )
-    if args.publish:
-        _publish(conn, args, (ledger, gathered, verdicts), now)
+    if args.publish and not _publish(conn, args, (ledger, gathered, verdicts), now):
+        return EXIT_FAILED
     return EXIT_FAILED if failed else 0
 
 
@@ -275,19 +276,28 @@ def _publish(
     args: argparse.Namespace,
     run: tuple[str, Sequence[Gathered], Sequence[FaultVerdict]],
     now: datetime,
-) -> None:
-    """Seal what was read and judged, so a report can judge it again (D-240)."""
+) -> bool:
+    """Seal what was read and judged, so a report can judge it again (D-240).
+
+    Returns False, having said why, when it could not be sealed — a read-only
+    filesystem, as inside the API's container (D-206), or a clash on disk.
+    """
     ledger, gathered, verdicts = run
-    published = publish_fault_run(
-        ledger,
-        gathered,
-        verdicts,
-        root=datasets_root(args.root),
-        stamp=(find_current_revision(conn) or "unknown", now),
-    )
+    try:
+        published = publish_fault_run(
+            ledger,
+            gathered,
+            verdicts,
+            root=datasets_root(args.root),
+            stamp=(find_current_revision(conn) or "unknown", now),
+        )
+    except (OSError, ValueError, DamagedSnapshotError) as exc:
+        _refuse("faults", f"the fault run was judged but not published: {exc}")
+        return False
     held = "written" if published.written else "already held, identically"
     _say(f"fault run: {published.path} ({held})")
     _say(f"  hash               {content_sha256(published.manifest).hex()}")
+    return True
 
 
 _MARKS = {True: "pass", False: "FAIL", None: "  - "}

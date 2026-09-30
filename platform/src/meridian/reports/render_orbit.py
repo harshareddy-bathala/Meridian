@@ -26,11 +26,7 @@ def orbit_figures(rows: Sequence[Row]) -> dict[str, bytes]:
     """One timing figure per population that has a corrected error to plot."""
     figures = {}
     for population in _TITLES:
-        points = [
-            one
-            for one in _of(rows, "detection")
-            if one["population"] == population and one["error_s"] is not None
-        ]
+        points = _plotted(rows, population)
         if not points:
             continue
         counts = _counts(rows, population)
@@ -61,15 +57,23 @@ def render_orbit(rows: Sequence[Row]) -> list[str]:
         "",
         *_sc3(_of(rows, "sc3")[0]),
     ]
-    figures = orbit_figures(rows)
     for population, title in _TITLES.items():
         lines.extend(_population(rows, population, title))
         name = orbit_figure_name(population)
-        if name in figures:
+        if _plotted(rows, population):  # exactly when orbit_figures draws one
             lines.extend(
                 [f"![Timing error against element-set age, {population}]({name})", ""]
             )
     return lines
+
+
+def _plotted(rows: Sequence[Row], population: str) -> list[Row]:
+    """A population's detections with a corrected error: its figure's points."""
+    return [
+        one
+        for one in _of(rows, "detection")
+        if one["population"] == population and one["error_s"] is not None
+    ]
 
 
 def _of(rows: Sequence[Row], kind: str) -> list[Row]:

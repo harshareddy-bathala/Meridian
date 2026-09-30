@@ -217,7 +217,7 @@ def _verify(args: argparse.Namespace) -> int:
     except DamagedSnapshotError as exc:
         _refuse("verify", str(exc))
         return EXIT_CORRUPT
-    except (ValueError, SnapshotNotFoundError, OSError) as exc:
+    except (ValueError, SnapshotNotFoundError, ReplayInvalidError, OSError) as exc:
         # ValueError: not a run, a refused configuration, a malformed snapshot
         # or fault run — each a refusal with a sentence, never a traceback.
         return _refuse("verify", str(exc))

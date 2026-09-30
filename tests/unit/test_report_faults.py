@@ -296,3 +296,27 @@ def test_verify_finds_a_fault_run_that_moved_and_refuses_a_tampered_one(
         path.chmod(0o700 if path.is_dir() else 0o600)
     evidence.write_bytes(evidence.read_bytes().replace(b"12:10:30", b"12:10:31"))
     assert main([*verify, "--faults", str(moved)]) == EXIT_CORRUPT
+
+
+def test_sc5_says_why_when_the_runs_given_timed_no_detection(
+    datasets_root: Path,
+) -> None:
+    """Found in review: it said no run was given when one was."""
+    from meridian.reports.fault_rows import fault_rows
+
+    text = ledger()
+    platform_line = "\n".join(text.splitlines()[2:]) + "\n"
+    platform = gathered(faults_of(text))[1:]
+    path = publish_fault_run(
+        platform_line,
+        platform,
+        [judge_gathered(one) for one in platform],
+        root=datasets_root,
+        stamp=("0025", T0 + timedelta(hours=2)),
+    ).path
+
+    rows = fault_rows([read_fault_run(path)], detection_max_s=90)
+    sc5 = next(one for one in rows if one["row"] == "sc5")
+
+    assert sc5["status"] == "not measured"
+    assert "no station fault was timed" in str(sc5["reason"])

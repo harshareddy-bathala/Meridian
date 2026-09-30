@@ -382,3 +382,14 @@ def test_the_section_and_its_figures_are_in_a_built_run(
     assert b"SIMULATED" in (run / "orbit_timing_simulated.svg").read_bytes()
     assert b"SIMULATED" not in (run / "orbit_timing_measured.svg").read_bytes()
     assert main(["report", "--root", str(datasets_root), "verify", str(run)]) == 0
+
+
+def test_two_heartbeats_at_one_instant_one_without_uncertainty_are_read(
+    raw_snapshot: Any,
+) -> None:
+    """Found in review: sorting compared None with a float and raised."""
+    tables = timing_world(simulated_too=False)
+    twin = dict(tables["heartbeats"][0]) | {"clock_uncertainty_s": None}
+    tables["heartbeats"].append(twin)
+
+    assert detections(files_of(raw_snapshot, tables))

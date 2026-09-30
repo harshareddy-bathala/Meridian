@@ -5044,6 +5044,8 @@ The file names a kind may hold moved to `manifest_rules.py`, and a name one kind
 - **The cost, pinned by a test.** An edited environment block still verifies, so the environment is a record, not a claim.
 - **Where the commit comes from.** Git, when the code is a checkout, with whether the tree had uncommitted changes; else `MERIDIAN_COMMIT`; else `unknown`. A dirty tree is reported when a run is built.
 
+**One exception, stated rather than hidden (found in review).** A model file names the numpy and scikit-learn that fitted it (D-163), and the prediction and scheduling sections name each model by its hash. So a different fitting library gives a different model and a different run, even where every figure agrees to the printed precision. D-163's choice is kept: a model is identified by what made it, and a report that cited a model it could not name exactly would be citing something else. When that is the difference, `verify` lists `prediction.jsonl` among the files that differ and the library under the environment changes, which is the diagnosis.
+
 **`verify` regenerates; it does not only re-check digests.** `read_directory` already refuses a file edited after publishing, and exits 3 as `snapshot verify` does. A run edited and then resealed passes that check. Only building it again from its recorded snapshot, configuration and seed can tell a forged number from a computed one, and a test makes exactly that forgery and requires `verify` to fail on it.
 
 **The snapshot is found by its hash, never by trust:**

@@ -258,3 +258,26 @@ def test_both_figures_are_drawn_and_named_in_the_report(runs: Runs) -> None:
     for name in ("scheduling_gains.svg", "scheduling_regret.svg"):
         assert ElementTree.fromstring((run / name).read_bytes()).tag.endswith("svg")
         assert f"]({name})" in report
+
+
+def test_a_gain_with_no_value_is_left_out_of_the_figure_never_drawn_at_zero() -> None:
+    """Found in review: greedy B decoding nothing drew D − greedy B at 0.000."""
+    from meridian.reports.render_scheduling import GAINS_FIGURE, scheduling_figures
+
+    replay = {"row": "replay", "status": "replayed", "station_days": 3}
+    none = {"per_hour": 1.0, "per_hour_interval": None, "relative_interval": None}
+    rows = [
+        replay | {"resamples": 100},
+        {"row": "gain", "first": "D", "second": "B", "label": "SC-1"}
+        | none
+        | {"relative": 0.1, "relative_interval": {"low": 0.0, "high": 0.2}},
+        {"row": "gain", "first": "D", "second": "greedy B", "label": "x"}
+        | none
+        | {"relative": None},
+        {"row": "sc1", "target": 0.2},
+    ]
+
+    figure = scheduling_figures(rows)[GAINS_FIGURE]
+
+    assert b"greedy B" not in figure
+    assert b"D \xe2\x88\x92 B (SC-1)" in figure

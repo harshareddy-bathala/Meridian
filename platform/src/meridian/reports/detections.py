@@ -205,12 +205,19 @@ def _clocks(heartbeats: Sequence[Row]) -> dict[str, list[Clock]]:
                     optional_number(one, "clock_uncertainty_s"),
                 )
             )
-    return {station: sorted(found) for station, found in held.items()}
+    # Keyed so that two heartbeats at one instant with one offset, one of them
+    # without an uncertainty, never compare None with a float.
+    return {station: sorted(found, key=_clock_order) for station, found in held.items()}
+
+
+def _clock_order(one: Clock) -> tuple[datetime, float, bool, float]:
+    at, offset, uncertainty = one
+    return at, offset, uncertainty is not None, uncertainty or 0.0
 
 
 def _nearest(clocks: Sequence[Clock], detected: datetime) -> Clock | None:
     """The latest heartbeat from 30 minutes before to 5 minutes after."""
-    index = bisect_right([one[0] for one in clocks], detected + _AFTER)
+    index = bisect_right(clocks, detected + _AFTER, key=lambda one: one[0])
     if index == 0:
         return None
     latest = clocks[index - 1]

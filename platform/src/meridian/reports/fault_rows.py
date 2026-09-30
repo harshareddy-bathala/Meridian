@@ -31,13 +31,13 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Sequence
-from math import ceil
 
 from meridian.datasets.fault_runs import FaultRun
 from meridian.datasets.manifest import content_sha256
 from meridian.datasets.weighting import wilson
 from meridian.reliability.fault_record import verdict_rows
 from meridian.reliability.faults import FaultVerdict, judge_gathered
+from meridian.reliability.slis import delays
 
 __all__ = ["LONG_RUN_HOURS", "TIMED", "fault_rows"]
 
@@ -110,11 +110,12 @@ def _spread(
     row: Row = {"row": "latency", "check": name, "kind": kind, "simulated": True}
     if not seconds:
         return row | {"n": 0}
+    ranked = delays(seconds)
     row |= {
         "n": len(seconds),
         "min_s": _real(seconds[0]),
-        "median_s": _real(_rank(seconds, 0.5)),
-        "p95_s": _real(_rank(seconds, 0.95)),
+        "median_s": _real(ranked.p50_s or 0.0),
+        "p95_s": _real(ranked.p95_s or 0.0),
         "max_s": _real(seconds[-1]),
         "threshold_s": threshold,
     }
@@ -163,7 +164,12 @@ def _sc5(verdicts: Sequence[FaultVerdict], threshold: int) -> Row:
     )
     row: Row = {"row": "sc5", "target_s": threshold, "simulated": True}
     if not seconds:
-        return row | {"status": "not measured", "reason": "no fault run was given"}
+        reason = (
+            "no station fault was timed to its station reading offline"
+            if verdicts
+            else "no fault run was given"
+        )
+        return row | {"status": "not measured", "reason": reason}
     inside = sum(1 for one in seconds if one <= threshold)
     return row | {
         "status": "measured",
@@ -199,11 +205,6 @@ def _hours(run: FaultRun) -> float:
     first = min(one.opened_at for one in run.faults)
     last = max(one.closed_at or run.directory.manifest.as_of for one in run.faults)
     return _real((last - first).total_seconds() / 3600)
-
-
-def _rank(ordered: Sequence[float], share: float) -> float:
-    """Nearest rank, as every other percentile in the report is read."""
-    return ordered[max(min(ceil(share * len(ordered)) - 1, len(ordered) - 1), 0)]
 
 
 def _real(value: float) -> float:

@@ -293,7 +293,9 @@ def test_verify_regenerates_it(gate: Gate, guarded: Any) -> None:
     run = gate.build()
 
     assert gate.verify(run) == 0
-    assert "regenerates identically" in gate.capsys.readouterr().out
+    out = gate.capsys.readouterr().out
+    assert "regenerates identically" in out
+    assert "environment" not in out, "the same machine reported a change"
     assert guarded.attempts == []
 
 
