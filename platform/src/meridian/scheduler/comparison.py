@@ -39,6 +39,7 @@ __all__ = [
     "Interval",
     "Totals",
     "paired_gain",
+    "percentile_interval",
     "totals",
 ]
 
@@ -139,11 +140,11 @@ def paired_gain(
     return Gain(
         per_hour=difference / spent,
         relative=difference / base if base else None,
-        per_hour_interval=_interval(per_hour),
+        per_hour_interval=percentile_interval(per_hour),
         relative_interval=(
             None
             if any(one is None for one in relative)
-            else _interval([one for one in relative if one is not None])
+            else percentile_interval([one for one in relative if one is not None])
         ),
         resamples=resamples,
     )
@@ -158,8 +159,12 @@ def _sums(days: Sequence[tuple[int, int, float]]) -> tuple[int, int, float]:
     )
 
 
-def _interval(values: Sequence[float]) -> Interval:
-    """The central :data:`CONFIDENCE` of ``values``, by nearest rank."""
+def percentile_interval(values: Sequence[float]) -> Interval:
+    """The central :data:`CONFIDENCE` of ``values``, by nearest rank.
+
+    Public because the evaluation report's other bootstraps read their
+    intervals the same way, so one seed gives one interval everywhere (D-237).
+    """
     ordered = sorted(values)
     tail = (1.0 - CONFIDENCE) / 2.0
     return Interval(low=_rank(ordered, tail), high=_rank(ordered, 1.0 - tail))

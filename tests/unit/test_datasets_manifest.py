@@ -275,3 +275,77 @@ def test_a_negative_count_is_refused() -> None:
 def test_the_manifest_cannot_be_changed_once_made() -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         raw().kind = "evaluation_dataset"  # type: ignore[misc]
+
+
+# --- an evaluation report (D-235) ------------------------------------------
+
+
+def report(**overrides: Any) -> Manifest:
+    """An evaluation report's manifest: results, a report, its configuration."""
+    fields: dict[str, Any] = {
+        "kind": "evaluation_report",
+        "files": (
+            file_entry("config.toml", b"[labels]\nsettle_margin_s = 86400"),
+            file_entry("data.jsonl", b'{"row":"label"}\n'),
+            file_entry("report.md", b"# Meridian evaluation report\n"),
+        ),
+        "derived_from": RAW_HASH,
+        "transformation_version": "report-1",
+        "config_sha256": CONFIG_HASH,
+        "parameters": {"seed": 4471},
+        "environment": {"code": {"commit": "abc", "dirty": False}},
+    }
+    return raw(**(fields | overrides))
+
+
+def test_the_machine_that_made_a_report_is_not_part_of_its_hash() -> None:
+    other = report(environment={"code": {"commit": "def", "dirty": True}})
+
+    assert content_sha256(report()) == content_sha256(other)
+
+
+def test_a_reports_environment_reads_back_and_is_written_beside_the_hash() -> None:
+    written = manifest_bytes(report())
+
+    assert parse_manifest(written).environment == report().environment
+    assert json.loads(written)["environment"]["code"]["commit"] == "abc"
+
+
+def test_an_edited_environment_still_verifies_because_it_names_nothing() -> None:
+    """The cost of leaving it unhashed, stated as a test: a record, not a claim."""
+    stored = json.loads(manifest_bytes(report()))
+    stored["environment"]["code"]["commit"] = "edited"
+
+    assert parse_manifest(json.dumps(stored).encode()).environment["code"] == {
+        "commit": "edited",
+        "dirty": False,
+    }
+
+
+def test_only_a_report_records_an_environment() -> None:
+    with pytest.raises(MalformedManifestError, match="records no environment"):
+        evaluation(environment={"python": "3.11"})
+
+
+def test_a_reports_configuration_need_not_end_with_a_newline() -> None:
+    """A file a person wrote is kept byte for byte; only a table must end whole."""
+    entry = file_entry("config.toml", b"seed_free = true")
+
+    assert entry.rows == 0
+
+
+@pytest.mark.parametrize("name", ["report.md", "config.toml", "figure.svg"])
+def test_a_report_file_in_a_raw_snapshot_is_refused(name: str) -> None:
+    with pytest.raises(MalformedManifestError, match="does not hold"):
+        raw(files=(file_entry(name, b"x\n"),))
+
+
+def test_a_model_file_in_a_report_is_refused() -> None:
+    with pytest.raises(MalformedManifestError, match=r"does not hold model\.json"):
+        report(files=(file_entry("model.json", b"{}\n"),))
+
+
+def test_a_report_holds_figures() -> None:
+    held = report(files=(file_entry("reliability_a.svg", b"<svg/>\n"),))
+
+    assert [one.name for one in held.files] == ["reliability_a.svg"]

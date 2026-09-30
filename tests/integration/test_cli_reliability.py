@@ -106,3 +106,63 @@ def test_a_configuration_it_cannot_obey_is_refused_before_any_query(
 
     assert main(["reliability", "--config", str(config), "report"]) == 1
     assert "window_days must be in" in capsys.readouterr().err
+
+
+@pytest.mark.usefixtures("world")
+def test_faults_publish_seals_what_it_read_so_a_report_judges_it_again(
+    tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Stage 22's fault runs, from the live record (D-240).
+
+    The command reads the evidence from the database and seals it; reading the
+    sealed run back and judging it again, with no database, reaches the
+    verdicts the command printed.
+    """
+    import json
+
+    from meridian.datasets.fault_runs import read_fault_run
+    from meridian.reliability.fault_record import verdict_rows
+    from meridian.reliability.faults import judge_gathered
+
+    def line(event: str, kind: str, target: str, at: datetime, **more: str) -> str:
+        stamp = at.isoformat().replace("+00:00", "Z")
+        fields = {"ledger": 1, "event": event, "run_id": "r", "kind": kind}
+        return json.dumps(fields | {"target": target, "at": stamp} | more)
+
+    ledger = tmp_path / "faults.jsonl"
+    ledger.write_text(
+        "\n".join(
+            [
+                line("open", "network_down", "station:1", AOS, station_id="st_a"),
+                line("close", "network_down", "station:1", AOS + timedelta(minutes=9)),
+                line("open", "api_paused", "platform:api", AOS),
+                line("close", "api_paused", "platform:api", AOS + timedelta(minutes=2)),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    root = tmp_path / "datasets"
+
+    code = main(
+        [
+            "reliability",
+            "faults",
+            "--ledger",
+            str(ledger),
+            "--publish",
+            "--root",
+            str(root),
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert code in {0, 1}
+    assert "fault run: " in out
+    path = next((root / "faults").iterdir())
+    run = read_fault_run(path)
+    again = verdict_rows([judge_gathered(one) for one in run.gathered])
+    assert json.loads(json.dumps(again)) == list(run.verdicts)
+    assert run.directory.manifest.kind == "fault_run"
+    assert run.directory.manifest.counts["faults"] == 2
+    assert run.directory.manifest.schema_revision != "unknown"

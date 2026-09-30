@@ -20,12 +20,12 @@ from datetime import UTC, datetime, timedelta
 from meridian.reliability.fault_model import silenced_until
 from meridian.reliability.faults import (
     FaultVerdict,
+    Gathered,
     InjectedFault,
     PlatformEvidence,
     StationEvidence,
     StationWork,
-    judge_platform_fault,
-    judge_station_fault,
+    judge_gathered,
 )
 from meridian.store.fault_evidence import (
     find_first_heartbeat_after,
@@ -44,6 +44,7 @@ __all__ = [
     "AlertHistory",
     "check_faults",
     "first_rise",
+    "gather_evidence",
     "prometheus_alert_history",
 ]
 
@@ -98,14 +99,36 @@ def check_faults(
         OSError: Prometheus could not be reached.
         ValueError: Prometheus answered with something that is not its API.
     """
+    return tuple(
+        judge_gathered(one)
+        for one in gather_evidence(conn, faults, now=now, alerts=alerts)
+    )
+
+
+def gather_evidence(
+    conn: Connection,
+    faults: Sequence[InjectedFault],
+    *,
+    now: datetime,
+    alerts: AlertHistory | None = None,
+) -> tuple[Gathered, ...]:
+    """Read every fault's evidence, in ledger order, without judging it.
+
+    :func:`check_faults` judges what this returns; ``--publish`` keeps it, so
+    the same verdicts can be reached from a sealed directory (D-240).
+
+    Raises:
+        OSError: Prometheus could not be reached.
+        ValueError: Prometheus answered with something that is not its API.
+    """
     by_target: dict[tuple[str, str], list[InjectedFault]] = {}
     for one in faults:
         by_target.setdefault((one.run_id, one.target), []).append(one)
     firing = _station_offline_history(faults, now, alerts)
     return tuple(
-        _judge_platform(conn, one, now)
+        _gather_platform(conn, one, now)
         if one.on_platform
-        else _judge_station(
+        else _gather_station(
             conn,
             one,
             now,
@@ -128,13 +151,13 @@ def _station_offline_history(
     return alerts(STATION_OFFLINE_ALERT, start, end)
 
 
-def _judge_station(
+def _gather_station(
     conn: Connection,
     fault: InjectedFault,
     now: datetime,
     firing: list[float] | None,
     alongside: tuple[InjectedFault, ...],
-) -> FaultVerdict:
+) -> Gathered:
     station_id = fault.station_id or ""
     start = fault.opened_at - MARGIN
     # To the end of every silencing fault overlapping this one, not its close
@@ -178,12 +201,10 @@ def _judge_station(
         alert_already_firing=bool(answer and answer.already_firing),
         alert_asked=firing is not None,
     )
-    return judge_station_fault(fault, evidence, alongside)
+    return Gathered(fault, evidence, alongside)
 
 
-def _judge_platform(
-    conn: Connection, fault: InjectedFault, now: datetime
-) -> FaultVerdict:
+def _gather_platform(conn: Connection, fault: InjectedFault, now: datetime) -> Gathered:
     closed = fault.closed_at
     evidence = PlatformEvidence(
         first_heartbeat_after=None
@@ -197,7 +218,7 @@ def _judge_platform(
         ),
         as_of=now,
     )
-    return judge_platform_fault(fault, evidence)
+    return Gathered(fault, evidence)
 
 
 def prometheus_alert_history(base_url: str) -> AlertHistory:

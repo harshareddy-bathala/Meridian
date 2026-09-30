@@ -11,11 +11,10 @@ metrics directory several workers need (``cli_serve``); ``jobs`` and ``db`` are
 the scheduled work and the migration check beside it; ``snapshot`` exports,
 labels and verifies Stage 15's datasets (``cli_snapshot``); ``model`` fits,
 evaluates and shows Stage 17's models (``cli_model``); ``profiles`` writes the
-horizon and interference profiles (``cli_profiles``). A command whose stage
-has not arrived yet — ``report`` — reports which stage of
-docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md builds it and exits
-:data:`EXIT_NOT_IMPLEMENTED`, so a caller gets an answer rather than a
-traceback — see :data:`PENDING`.
+horizon and interference profiles (``cli_profiles``); ``report`` builds
+and verifies Stage 22's evaluation reports (``cli_report``). Every command the
+operations runbook documents is now built, so the table of commands whose
+stage had not arrived went with the last of them.
 
 This module owns the command tree and the dispatch. Each command's work lives
 beside it — ``cli_invite``, ``cli_passes`` and ``cli_schedule`` — so the whole
@@ -31,7 +30,6 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 
 from meridian import __version__
 from meridian.cli_catalogue import run_catalogue
@@ -43,6 +41,7 @@ from meridian.cli_passes import run_passes
 from meridian.cli_profiles import add_profiles_parser, run_profiles
 from meridian.cli_regions import add_regions_parser, run_regions
 from meridian.cli_reliability import add_reliability_parser, run_reliability
+from meridian.cli_report import add_report_parser, run_report
 from meridian.cli_schedule import add_schedule_parser, run_scheduler
 from meridian.cli_serve import add_serve_parser, run_serve
 from meridian.cli_snapshot import (
@@ -56,50 +55,15 @@ from meridian.store.pool import DatabaseUnreachableError, connect_once
 
 __all__ = ["main"]
 
-EXIT_NOT_IMPLEMENTED = 2
-"""Distinct from 1. A caller can tell "this command does not work yet" from
-"this command ran and failed", which matters once these are wired into scripts."""
+EXIT_USAGE = 2
+"""No command was given, the code argparse itself uses for a usage error.
+Distinct from 1, so a script can tell "called wrongly" from "ran and failed"."""
 
 EXIT_FAILED = 1
 """A command that is implemented and ran, but could not complete — an
 unreachable database, an unknown ``--for-station``, a ``revoke`` matching
-nothing. Distinct from :data:`EXIT_NOT_IMPLEMENTED` so a script can tell "try
-again" from "this command doesn't exist yet"."""
-
-
-@dataclass(frozen=True, slots=True)
-class _Pending:
-    """Which stage builds a subcommand, and what that stage delivers."""
-
-    stage: str
-    gate: str
-
-
-PENDING: dict[str, _Pending] = {
-    "report": _Pending(
-        stage="Stage 22 — reproducible evaluation and reports",
-        gate="reports regenerated from a snapshot, a configuration and a seed",
-    ),
-}
-"""Every subcommand, and the stage that replaces its shell with real work.
-
-A table rather than a ``match`` with one arm per command. The arms were identical
-apart from two strings, so the branching carried no information — and each arm was
-a separate ``return``, which is how a dispatch function with nothing to decide ends
-up over the four-return limit in CLAUDE.local.md section 2.
-"""
-
-
-def _pending(command: str, pending: _Pending) -> int:
-    """Report that ``command`` is not built yet, and say what will build it."""
-    print(  # noqa: T201 — this is a CLI; stdout is the interface
-        f"meridian {command}: not implemented yet.\n"
-        f"  Arrives in: {pending.stage}\n"
-        f"  Which delivers: {pending.gate}\n"
-        f"  Roadmap: docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md",
-        file=sys.stderr,
-    )
-    return EXIT_NOT_IMPLEMENTED
+nothing. Distinct from :data:`EXIT_USAGE` so a script can tell "try again"
+from "called wrongly"."""
 
 
 def _run_station(args: argparse.Namespace) -> int:
@@ -279,13 +243,6 @@ def _add_passes_parser(
     )
 
 
-def _add_pending_parsers(
-    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> None:
-    """Wire the commands Stage 12 documents and later stages build."""
-    subcommands.add_parser("report", help="generate an evaluation report (Stage 22)")
-
-
 def _build_parser() -> argparse.ArgumentParser:
     """The whole command tree.
 
@@ -315,7 +272,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_reliability_parser(subcommands)
     add_regions_parser(subcommands)
     add_profiles_parser(subcommands)
-    _add_pending_parsers(subcommands)
+    add_report_parser(subcommands)
 
     return parser
 
@@ -331,6 +288,7 @@ NEEDS_ACTION = frozenset(
         "regions",
         "reliability",
         "profiles",
+        "report",
         "snapshot",
         "station",
     }
@@ -353,6 +311,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "regions": run_regions,
     "reliability": run_reliability,
     "profiles": run_profiles,
+    "report": run_report,
     "schedule": run_scheduler,
     "serve": run_serve,
     "snapshot": run_snapshot,
@@ -360,7 +319,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
 }
 """Every subcommand that does real work, and the handler that does it.
 
-A table for the same reason :data:`PENDING` is one: the three arms were
+A table rather than a ``match`` with one arm per command: the arms were
 identical apart from a name, so branching on the command carried no information
 and cost a ``return`` against CLAUDE.local.md §2's limit of four.
 
@@ -381,12 +340,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.parse_args([args.command, "--help"])  # exits
         return handler(args)
 
-    pending = PENDING.get(args.command)
-    if pending is None:  # no subcommand, or one argparse already rejected
-        parser.print_help(sys.stderr)
-        return EXIT_NOT_IMPLEMENTED
-
-    return _pending(args.command, pending)
+    parser.print_help(sys.stderr)  # no subcommand; argparse rejected the rest
+    return EXIT_USAGE
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -4732,6 +4732,8 @@ Two sources sharing one allowance — Open-Meteo's two endpoints are limited per
 
 **Not built:** D-131's leave-one-group-out run, D without this group, reported beside the four configurations. It needs a configuration key and a model of real data; there is no model of real data yet (Stage 17), and the key is owed with the first fit that could use it.
 
+*Amended by D-237:* the key is `without`, and the evaluation report fits D∖conditions beside the four configurations.
+
 ---
 
 ## D-225 — Near real time is `meridian-ingest follow`, on the ingest machine, never in the jobs service
@@ -4984,6 +4986,264 @@ It is real-time, so the unmaterialised recent hours are read from raw rows. A re
 **Observations are not dropped either.** Migration 0005's note left their retention to "90 days then downsampled". An observation is the system of record, and rule 8 applies to it as it does to heartbeats, so the same answer holds.
 
 *Rejected: a 90-day drop with guards.* Export and reclassification would refuse old windows, and old passes would keep a frozen classification. That is honest, but it makes one Stage 20 answer depend on the day it was computed. It also buys space that compression already provides at the scale this network has.
+
+---
+
+## D-234 — Evaluation reports are a platform module with their own scope; `analysis/` holds configurations
+
+**2026-09-30 · accepted** · *`platform/src/meridian/reports/`, `meridian/cli_report.py`, `analysis/`, `GIT-WORKFLOW.md` Rule 3, CI's `conventions` job*
+
+The roadmap sketches Stage 22 as scripts under an `analysis/` tree:
+- configs, snapshots, features, models, scheduler, reliability, reports and tests;
+- deterministic commands for the final figures.
+
+**The code is a platform module instead**, `meridian.reports`, behind `meridian report`. A figure the viva defends is then computed by code that is typed, linted, reviewed and tested like the rest of the platform. It also calls the same functions `meridian model evaluate` and `meridian schedule evaluate` call, rather than a second copy of them that can drift. `reports` joins the scope list and the `conventions` pattern, as `regions` did (D-228).
+
+**`analysis/` holds what a person writes:**
+- `README.md`;
+- `configs/`, the experiment configurations whose runs are reported. A configuration behind a reported figure is committed there, so the figure's three inputs are a snapshot's hash, a file in the repository and a number.
+
+The roadmap's other directories are not created:
+- snapshots, models and runs are content-addressed directories under the datasets root, outside the repository;
+- tests live in `tests/`.
+
+An empty directory would read as stalled work.
+
+*Rejected: notebooks as the report.* A notebook's output depends on the order its cells ran in. `EVALUATION.md` §9 says a figure that cannot be regenerated is not a result, and a command that writes a sealed directory is the form in which "regenerated" can be checked.
+
+**`meridian report` was the last command waiting on its stage.** The table of pending commands and the exit code 2 it returned went with it. Exit 2 now means only that no command was given, which is argparse's own meaning for it.
+
+---
+
+## D-235 — A run is a sealed directory; its hash names the result, and the environment is recorded beside it, unhashed
+
+**2026-09-30 · accepted** · *`meridian.reports.{build,verify,render,environment}`, `meridian.datasets.manifest`, `meridian.datasets.manifest_rules`*
+
+**A run is published like every other derived directory**, through `publish_directory`, as a new manifest kind, `evaluation_report`. Its manifest names:
+- the raw snapshot's hash;
+- the report method's version;
+- the configuration's hash and resolved values;
+- the master seed;
+- the evaluation dataset it labelled.
+
+It holds:
+- one `*.jsonl` results file per section, plus `run.jsonl` for the run record;
+- `report.md`;
+- `config.toml`.
+
+The file names a kind may hold moved to `manifest_rules.py`, and a name one kind holds is refused in another. A raw snapshot cannot carry a stray `report.md` and still verify.
+
+**`report.md` is rendered from the results files parsed back**, never from the objects that made them. So every number it prints is in a hashed file, and the report is a function of those files alone, which a test asserts.
+
+**The configuration is kept byte for byte.** `verify` then rebuilds from exactly what was used. The run's hash covers `config.toml`'s bytes, so a comment edited in a configuration gives a different run. The configuration hash in the header is over resolved values, like every other configuration's, and says what was *used*.
+
+**The code version, the Python and dependency versions, the snapshot's path and the runtimes go in an `environment` block that is recorded and not hashed**, as `created_at` already was:
+- **What the hash then means.** The roadmap asks every run to record its code version, and hashing it would make the hash name the machine rather than the result. The same numbers regenerated after an unrelated commit would get a different name, and "regenerates identically" could never be true across a commit.
+- **What changes are caught.** A change of code that changes a number still changes the hash, through the results files.
+- **What `verify` shows.** It prints how this environment differs from the recorded one, beside the hash comparison, so a changed library is the first thing a reader rules out.
+- **The cost, pinned by a test.** An edited environment block still verifies, so the environment is a record, not a claim.
+- **Where the commit comes from.** Git, when the code is a checkout, with whether the tree had uncommitted changes; else `MERIDIAN_COMMIT`; else `unknown`. A dirty tree is reported when a run is built.
+
+**One exception, stated rather than hidden (found in review).** A model file names the numpy and scikit-learn that fitted it (D-163), and the prediction and scheduling sections name each model by its hash. So a different fitting library gives a different model and a different run, even where every figure agrees to the printed precision. D-163's choice is kept: a model is identified by what made it, and a report that cited a model it could not name exactly would be citing something else. When that is the difference, `verify` lists `prediction.jsonl` among the files that differ and the library under the environment changes, which is the diagnosis.
+
+**`verify` regenerates; it does not only re-check digests.** `read_directory` already refuses a file edited after publishing, and exits 3 as `snapshot verify` does. A run edited and then resealed passes that check. Only building it again from its recorded snapshot, configuration and seed can tell a forged number from a computed one, and a test makes exactly that forgery and requires `verify` to fail on it.
+
+**The snapshot is found by its hash, never by trust:**
+1. a path given with `--snapshot`;
+2. the recorded path;
+3. any snapshot under the datasets root with that hash prefix.
+
+Each candidate is read through `read_directory` and its whole hash compared.
+
+*Rejected: the environment inside `report.md`.* `report.md` is hashed, so this is the same choice as hashing the environment, made less visibly.
+
+*Rejected: runs as rows in the database.* A report must be computable with every service down and must name its inputs by hash (D-229 made the same choice for regional reports).
+
+---
+
+## D-236 — One master seed, component seeds derived by name, and one configuration with a table per section
+
+**2026-09-30 · accepted** · *`meridian.datasets.seeds`, `meridian.reports.config`, `meridian.regions.change`, `meridian.datasets.label_config`, `analysis/configs/evaluation.toml.example`*
+
+**A run takes one master seed.** Each component that draws a random number draws from `derive(master, name)`, the first eight bytes of `sha256(f"{master}:{name}")`:
+- the fits' folds;
+- the solver;
+- each bootstrap.
+
+Every derived seed is listed in the run record, so a reader sees what each part drew from. That gives:
+- **one number to state**, where one seed per component would give a reader eight to copy;
+- **no two components on the same stream by accident**;
+- **a result that does not depend on the order components ran in.**
+
+The regional report already derived its per-area seeds this way, privately. The function now lives in `meridian.datasets.seeds`, the layer both offline readers already import, rather than in `reports`, which nothing but its command may import. Regions call it, and a test pins that their seeds did not move.
+
+**The seed is not in the configuration file.** It is given with `--seed`, and a `seed` in the file is refused rather than ignored, since a reader who found one would assume it was used. The component configurations' own `seed` fields are refused inside it for the same reason.
+
+**One configuration file, one table per section, each table checked by its owner.** `[labels]` is exactly `meridian snapshot label`'s configuration one level down, checked by `label_config_from_mapping`, which `parse_label_config` now calls too. The tables for the later sections arrive with them. A test holds the example's `[labels]` to `deploy/snapshot.toml.example`, so the two documented defaults cannot drift apart.
+
+*Rejected: a configuration that names other configuration files.* A run could then only be regenerated from several files, one of which may have changed since. One file, copied into the run, is the whole of what was configured.
+
+---
+
+## D-237 — The prediction section: four fits, a leave-one-group-out key, and intervals that resample station-days
+
+**2026-09-30 · accepted** · *`meridian.reports.{prediction,prediction_rows,bootstrap,svg,render_prediction}`, `meridian.prediction.{model_config,configurations,fit}`, `meridian.scheduler.comparison`, `meridian.cli_model`*
+
+**What is fitted.** The section fits four models, each through the functions `meridian model fit` and `meridian model evaluate` call:
+- **A**, whose model is also B's, since B differs in the scheduler's objective and never in its probabilities (D-160);
+- **C**;
+- **D**;
+- **D∖conditions**, the leave-one-group-out run of `EVALUATION.md` §3.
+
+Each fit:
+- draws its seed from the master as `model.<name>`, taken modulo 2³² because a model's seed is 32-bit;
+- is published under `models/` and read back before it is judged, so the report scores the file that ships.
+
+A test fits D again with `meridian model fit` and the recorded seed and gets the same directory. The `[prediction]` table holds the settings every fit shares. `configuration`, `seed` and `without` are refused there, because the report sets them itself.
+
+**A model that cannot be fitted is a row that says why**, and the report is still built. The reasons include:
+- too few examples;
+- only simulated passes (D-078);
+- a configuration the archive population cannot take (D-156);
+- no split dates.
+
+On a development snapshot every model is refused, which is the true answer.
+
+**`without` is the configuration key D-224 owed.**
+- **What it takes.** It names groups the configuration reads, each once, and never all of them.
+- **What it changes.** `Configuration.leaving_out` keeps the name and the objective, so D∖conditions is still D, fitted on less. The model file records `without` when it is set.
+- **Hashes.** It is written, and hashed, only when it names a group, so every model fitted before it keeps its hash.
+
+**Every interval is a station-day bootstrap.** Passes at one station on one day share weather, interference and the station's state, so drawing single passes would count a bad day many times over and narrow the interval. A resample draws whole station-days. The Brier score, the skill against the base rate (SC-2's reduction) and each comparison are read on the same draws. The comparisons are D against D∖conditions, C against A, and D against A. So a difference between two models on the same passes is paired, as the scheduler's gain is (D-172).
+
+The seed is `bootstrap.prediction`. The percentiles are by nearest rank, through the scheduler comparison's function, now public as `percentile_interval`. A draw on which the skill is undefined is dropped and counted.
+
+**SC-2 is read from D's skill** and stated two ways:
+- whether the point estimate meets 25%;
+- whether the whole interval is above it.
+
+The criterion does not say which one counts, so the report does not choose.
+
+**Kp is untested below a count stated in advance.** A disturbed pass is one with a published Kp at or above `disturbed_kp`, NOAA's G1 storm by default. Below `min_disturbed` of them in the test span, the section says Kp is untested, never that it does not help (`EVALUATION.md` §3). Cloud cover's count is stated beside it and never folded into one verdict.
+
+*Not built:* a leave-one-feature-out run for Kp and for cloud cover apart. `without` leaves out a group, and the two share one.
+
+**Reals in the results are rounded to six decimal places.** Fits agree across numerical environments to about 1e-9 (D-163). A published figure should not move with a library's last bits, and three places are printed.
+
+**The reliability diagram is drawn by hand**, as every figure is (D-235). Each point is one bin's mean prediction against its observed frequency, with a Wilson interval. The diagonal is perfect calibration, and a strip beneath counts the passes in each bin. Its style comes from the reference data-visualisation palette:
+- one blue on a light surface;
+- a recessive grid;
+- text in ink;
+- a key above the plot rather than a label on the data.
+
+**Without the `fit` extra**, `meridian report` says what to install, as `meridian model` does. The message is `cli_model.NEEDS_EXTRA`, now public.
+
+---
+
+## D-238 — The scheduling section: the replay `meridian schedule evaluate` runs, on the report's own models, with regret and runtime
+
+**2026-09-30 · accepted** · *`meridian.reports.{scheduling,render_scheduling,svg_intervals}`, `meridian.scheduler.replay` (`DayResult.runtime_s`), `meridian.prediction.replay` (`snapshot`), `meridian.reports.build`*
+
+**The same replay, not a second one.** The section calls `load_replay` and `replay_schedules`, the functions behind `meridian schedule evaluate` (D-172), on the A, C and D models the prediction section just published. So one command fits, judges and schedules on one dataset, and every scheduler still gets the same candidates, constraints, solver and time limit. A test runs those functions itself with the recorded seeds and finds the section's figures.
+
+The `[scheduling]` table holds everything the comparison configuration holds, except:
+- the model paths, since the models are the report's own;
+- the seed, which is derived. The solver's seed is `solver`, taken modulo 2³¹ because HiGHS's seed is 31-bit. The bootstrap's is `bootstrap.scheduling`.
+
+`load_replay` now takes the raw snapshot's path, so a report built from a snapshot kept outside the datasets root is replayed too. It is checked against the dataset's lineage as before.
+
+**What it reports, beyond `schedule evaluate`'s table:**
+- **oracle regret** for each scheduler: the oracle's frames per station-hour minus the scheduler's, as a paired bootstrap over station-days;
+- **SC-1** stated two ways, like SC-2 (D-237): whether the point estimate meets 20%, and whether the whole interval is above it;
+- **the schedules checked**, with violations at 0.
+
+**Violations are 0 by construction.** A violation stops the replay (`ReplayInvalidError`), and `report build` then publishes nothing. A report with a broken schedule in it would be one whose scheduling numbers are about a schedule that could not run.
+
+**Runtime is measured, so it is not hashed.** `DayResult` gains the solver's `runtime_s`, with `compare=False`, so two replays of one problem are still equal. The section summarises it per scheduler: days, total, median and slowest. It goes into the manifest's environment block beside HiGHS's version, as D-235 puts every fact about the machine. The build's environment is now merged into rather than replaced, and `verify` does not compare runtimes.
+
+**The one way a scheduling figure can depend on the machine is a solve the time limit cut short.** So each scheduler's statuses (optimal, time limit, fallback) are hashed and shown in the `Solved` column. A run whose days were all optimal regenerates anywhere, and one that was cut short says so.
+
+**Two figures, one form.** An interval chart puts every estimate on one axis, one row each: a point on its 95% interval, zero solid, and a target dashed and labelled. It shows:
+- the gains against SC-1's target;
+- each scheduler's shortfall from the oracle.
+
+It is drawn by hand like the reliability diagram (D-235), with the drawing primitives now public in `svg.py`.
+
+*Rejected: a new scheduling configuration file referenced from the report's.* D-236 keeps a run to one file.
+
+---
+
+## D-239 — The orbit-uncertainty section: the live view's timing error, from a snapshot, with SC-3 stated both ways
+
+**2026-09-30 · accepted** · *`meridian.reports.{detections,orbit,render_orbit,svg_scatter}`, `meridian.reports.config` (`[orbit]`)*
+
+**Timing error is the `timing_error` view's, computed from a snapshot** (D-177):
+- one row per current observation with a first detection;
+- `first_detection_at + clock_offset_s − aos`, with the sign fixed by D-025;
+- the offset from the station's latest heartbeat that carried one, between 30 minutes before the detection and 5 minutes after;
+- §6.1's two exclusions, `clock_offset_unknown` and `within_clock_uncertainty`, carried and counted and never silently applied.
+
+A test pins the sign with a known pass, and makes the reversed sign fail.
+
+**One difference from the view, stated.** A raw snapshot exports heartbeats received inside some assignment's window (Stage 15), and the view reads every heartbeat. A detection is inside its own window, so the heartbeats a station sends while listening are all there. An offset reported only in the half hour before a window opened is not, and such a detection reads as `clock_offset_unknown` here where the view would have corrected it. The difference moves passes from kept to excluded, never the other way, and the count of exclusions shows how many.
+
+*Rejected: widening the export by 30 minutes before each window.* That would change every raw snapshot's contents and hash for one section's edge case. The exclusion count already says how much it matters.
+
+**The stated 1σ is the one the station was issued**, `assignments.timing_uncertainty_s`. An assignment without one takes the published prior at its element set's age (D-060). Each detection row names which source it used, and the section counts them.
+
+**SC-3 is stated two ways.** §6.1 discards an error smaller than the clock's own uncertainty. Such an error is inside any stated 1σ, so discarding it can only lower the coverage. The section reports:
+- coverage under §6.1's exclusions, which is SC-3;
+- coverage with only the unknown offsets left out.
+
+The two bound the rule's effect, and neither is chosen silently. As with SC-1 and SC-2, it says whether the point estimate meets 68% and whether the whole Wilson interval is above it.
+
+**Error against age is a least-squares slope of |timing error| on age in days, for each orbital regime**, with a station-day bootstrap interval drawn from `bootstrap.orbit`. It is not a model. It is the relationship §6.1 names, stated with its uncertainty. A regime with fewer than three kept passes, or with a single age, has no slope, and says so.
+
+**§6.3's test (D-100) now runs whenever it can.** It looks at detections on element sets under a day old, where the orbit contributes a fraction of a second, and asks whether their first-detection spread (a standard deviation) exceeds the orbital signal the data could show: §6.3's 0.27 s per day of age, times the span of ages present.
+- If the spread is larger, timing error is measuring the station's horizon rather than the element set, and the section says §6.1 is **not fit as written**, as §6.3 requires.
+- Below `min_young` young detections, stated in the configuration before any result, it is **not tested**.
+
+This is the test D-100 left open. Its answer on real archive data is still owed, because no such data has been reported yet.
+
+**Every detection is a row** in `orbit.jsonl`, so a reader can recompute any figure, and the figure is drawn from those rows. It plots |timing error| against age, one colour per regime (the palette's first three slots, safe when every pair is on screen), each regime's fitted line, and the published prior as a dashed curve. A discarded point is drawn hollow, so the rule's effect is seen rather than hidden.
+
+---
+
+## D-240 — The reliability section, and fault runs sealed so their verdicts can be reached again
+
+**2026-09-30 · accepted** · *`meridian.reports.{reliability,fault_rows,render_reliability}`, `meridian.reliability.{fault_model,fault_offline,faults,fault_check,fault_record}`, `meridian.datasets.fault_runs`, `meridian.cli_reliability` (`faults --publish`), `meridian.datasets.manifest_rules` (`fault_run`)*
+
+**The snapshot half is `meridian snapshot reliability`'s arithmetic.** It uses `passes_in_window`, `build_report`, `slo_results` and `loss_budget` over the labels:
+- every indicator per population and station, each with its interval;
+- every target from the `[reliability]` table, which is `SloConfig` itself;
+- SC-4 stated like every other claim, as the point and as the whole interval, and marked when its window is not 30 days.
+
+**A loss-budget history** repeats the same window ending every `history_step_days` back to the snapshot's `since`. A window that reaches before `since` is marked **partial**, because its early passes are not in the snapshot. Station availability and submission delay are not in a snapshot (D-184), and the section says why rather than leaving a blank.
+
+**A fault's verdict cannot be regenerated by judging its ledger again.** `meridian reliability faults` reads the live record around each fault (D-192), and that record moves:
+- work is decided again;
+- revocations are added;
+- a later run's faults land beside the earlier ones.
+
+So `check_faults` is split:
+- `gather_evidence` reads each fault's `Gathered` evidence;
+- `judge_gathered` judges it, with the same pure judges;
+- `--publish` seals the ledger, the gathered evidence (`fault_record`, standard library only, since reliability may not import datasets) and the verdicts as a new manifest kind, `fault_run`, under `<root>/faults/`.
+
+A fault run is read from the database like a raw snapshot, so it names no parent. `cli_reliability` joins the commands allowed to import `meridian.datasets`: it writes a directory and reads none.
+
+**The report judges every sealed fault again**, from the files alone, and says whether it reached the published verdicts. A judge changed since shows as a disagreement, never as a silently different figure. Fault runs are inputs to a build (`RunInputs`), named in the manifest by hash, found again by `verify` by that hash, and never searched for.
+
+**Latency is a field, not a sentence.** `Check` gains `latency_s`, filled by the checks that time something:
+- `detected`: the fault's start to reading offline;
+- `replanned`: reading offline to the first revocation;
+- `alerted`: the fault's start to `StationOffline` firing.
+
+The section reports each as a distribution by fault kind: minimum, median, p95 and maximum, by nearest rank. Detection and alerting also give the share inside SC-5's bound with its interval. Replanning is not what SC-5 bounds, and gets no share. SC-5 is read from detection. Every station fault is against simulated work, so these figures are labelled simulated (rule 5), and platform faults are counted apart.
+
+**The 72-hour run is Stage 24's.** The section reports it as **not run** until a fault run spanning 72 hours is given, and then names it. Nothing here starts one.
+
+*Rejected: exporting fault evidence into raw snapshots.* A snapshot is scoped to passes. A fault run is scoped to its ledger's windows and may name faults done to the platform itself, and one does not contain the other.
 
 ---
 
@@ -5256,6 +5516,20 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-198 the long run and its rehearsal | `deploy/tools/{long_run,chaos}.py`; `meridian/cli_reliability.py` (`--ledger -`); `pyproject.toml` (its lint set); `tests/unit/test_long_run.py`; `docs/SCALE-AND-FAULTS.md`; `OPERATIONS.md` § Fault drills, scale runs and the long run |
 | — the completion gate | `tests/integration/test_fault_gate.py`: five stations under `chaos` through real MSP on a stated clock, judged, with two positive controls |
 | — the amended entry | D-171, whose revocations are now kept (D-196) |
+
+**Landed 2026-09-30**, building reproducible evaluation and reports and Stage 22's completion gate.
+
+| Decision | Applied to |
+|---|---|
+| D-234 a platform module with its own scope; `analysis/` holds configurations | `meridian/reports/`; `meridian/cli_report.py`, `cli.py` (the pending-command table removed); `analysis/`; `GIT-WORKFLOW.md` Rule 3; `.github/workflows/ci.yml`; `tests/unit/{test_reports_boundaries,test_executables}.py` |
+| D-235 a sealed run whose hash names the result; the environment recorded unhashed | `meridian/reports/{build,verify,render,markdown,environment,svg}.py`; `meridian/datasets/{manifest,manifest_rules}.py`; `tests/unit/{test_report_cli,test_report_data,test_datasets_manifest}.py` |
+| D-236 one master seed, one configuration | `meridian/datasets/seeds.py`; `meridian/regions/change.py`; `meridian/reports/config.py`; `meridian/datasets/label_config.py`; `analysis/configs/evaluation.toml.example`; `tests/unit/{test_datasets_seeds,test_report_config}.py` |
+| D-237 the prediction section, `without`, station-day intervals | `meridian/reports/{prediction,prediction_rows,bootstrap,render_prediction}.py`; `meridian/prediction/{model_config,configurations,fit}.py`; `meridian/scheduler/comparison.py`; `meridian/cli_model.py`; `deploy/model.toml.example`; `tests/unit/{test_report_prediction,test_report_bootstrap,test_prediction_configurations}.py` |
+| D-238 the scheduling section | `meridian/reports/{scheduling,render_scheduling,svg_intervals}.py`; `meridian/scheduler/replay.py` (`runtime_s`); `meridian/prediction/replay.py` (`snapshot`); `tests/unit/test_report_scheduling.py` |
+| D-239 the orbit-uncertainty section | `meridian/reports/{detections,orbit,render_orbit,svg_scatter}.py`; `tests/unit/test_report_orbit.py` |
+| D-240 the reliability section and sealed fault runs | `meridian/reports/{reliability,fault_rows,render_reliability}.py`; `meridian/reliability/{fault_model,fault_offline,faults,fault_check,fault_record}.py`; `meridian/datasets/fault_runs.py`; `meridian/cli_reliability.py` (`--publish`); `tests/unit/{test_report_faults,test_datasets_boundaries}.py`; `tests/integration/test_cli_reliability.py` |
+| — the completion gate, and how to run it by hand | `tests/unit/test_report_gate.py`; `OPERATIONS.md` § Evaluation reports |
+| — the amended entry | D-224, whose leave-one-group-out key is `without` (D-237) |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

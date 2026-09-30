@@ -137,7 +137,8 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Why a pass counted as it did | `compose exec api meridian reliability explain <assignment id>` |
 | Classify settled passes now | `compose exec api meridian reliability classify` — the `jobs` service does this every round |
 | Reliability from a dataset | `uv run meridian snapshot reliability <dataset dir>` — needs no database |
-| Generate a report | `meridian report` — not built yet; Stage 22 |
+| Build an evaluation report | `uv run meridian report build --snapshot <raw snapshot> --config analysis/configs/evaluation.toml.example --seed <n>` — needs no database; § Evaluation reports |
+| Check a report regenerates | `uv run meridian report verify <run dir>` — § Evaluation reports |
 
 **Scheduling needs no command.** The `jobs` service generates passes, schedules them, and builds the profiles under `SCHEDULE_CONFIG` (configuration A on the elevation proxy when it is unset, D-170) every `SCHEDULE_INTERVAL_S` (default 300), over the next `SCHEDULE_HORIZON_S` (default 21600), in every deployment (D-110). Each round then expires work nobody took and classifies every pass that has settled (D-182, D-183). The commands above are for filling a horizon by hand. Every task is idempotent, so running them beside the service writes nothing twice.
 
@@ -814,6 +815,119 @@ diff one.txt two.txt                                                          # 
 
 ---
 
+## Evaluation reports
+
+Every number in a report is regenerable from a raw snapshot, one configuration and one seed (rule 8, `EVALUATION.md` §9). `meridian report build` computes a report from those three and nothing else, and `meridian report verify` proves a report regenerates. Neither opens a database or a socket.
+
+Decisions this section puts into practice: D-234 to D-240.
+
+### Building a run
+
+```sh
+uv run meridian report build \
+  --snapshot data/datasets/snapshots/<raw snapshot> \
+  --config analysis/configs/evaluation.toml.example \
+  --seed 4471
+```
+
+- **It fits models, so it needs the `fit` extra** (`uv sync --extra fit`), as `meridian model fit` does. Without it, it says so and exits 1.
+- **The configuration** is one file, one table per section. Copy `analysis/configs/evaluation.toml.example`, whose values are the defaults. An unknown table or key is refused, and so is a `seed`. **Set `train_until` and `validate_until` under `[prediction]`** for the snapshot you are reporting. Without them no model is fitted, and the prediction section says so.
+- **The seed** is the master seed. Every component that draws a random number draws from a seed derived from it by name, and the run lists each one (D-236).
+- **The run** goes under `<datasets root>/reports/<hash12>/`, or where `--output` says. Building the same inputs twice names the same directory, and the second build says `already held, identically`. An `--output` that already holds a different run is refused, never overwritten.
+
+### What a run holds
+
+```text
+reports/<hash12>/
+├── report.md       the report, rendered from the results files beside it
+├── run.jsonl       the run record: method, snapshot, configuration, seeds
+├── data.jsonl      the data section's results
+├── prediction.jsonl                the prediction section's results
+├── reliability_<model>.svg         one reliability diagram per fitted model
+├── scheduling.jsonl                the scheduling section's results
+├── scheduling_gains.svg            D − B and D − greedy B against the SC-1 target
+├── scheduling_regret.svg           each scheduler's shortfall from the oracle
+├── orbit.jsonl                     the orbit-uncertainty section's results, a row per detection
+├── orbit_timing_<population>.svg   |timing error| against element-set age, by regime
+├── reliability.jsonl               the reliability section's results
+├── capture_history.svg             capture over each window of the loss-budget history
+├── fault_detection.svg             seconds from each fault to offline, by kind, when a fault run was given
+├── config.toml     the configuration, byte for byte as it was given
+└── manifest.json   every file's digest, the inputs, the seeds, and the environment
+```
+
+- **The data section** states:
+  - provenance, and the snapshot's sources with their licences;
+  - every outcome label and exclusion reason, with measured and simulated kept apart;
+  - completeness and weighting for our stations and the archive's;
+  - silent-satellite exclusions and the indeterminate share, each with its interval (`EVALUATION.md` §4, §5).
+- **The prediction section** covers A, C, D and D∖conditions (B's model is A's):
+  - it fits each under the `[prediction]` settings with a seed derived from the master, publishes it under `models/`, and judges it on the test span;
+  - it reports the Brier score, the skill against the training base rate, the reliability diagram, calibration by station, band and element-set age, the cold-start routes and the rolling-origin folds;
+  - it compares D against D∖conditions, C against A, and D against A on the same passes;
+  - it reads SC-2 from D;
+  - it counts disturbed passes, and says Kp is **untested** below `min_disturbed`.
+
+  Every interval is a 95% bootstrap that resamples whole station-days (D-237). A model that could not be fitted is a row that says why, and the report is still built.
+- **The scheduling section** replays the seven schedulers of `meridian schedule evaluate` on the fitted A, C and D models, over every retained station-day of the test span. The seven are greedy A and B, the optimiser under A to D, and the oracle. It reports:
+  - frames, passes taken, frames per station-hour and the unknown share for each scheduler;
+  - SC-1 as D − B, with D − greedy B beside it;
+  - each scheduler's regret against the oracle, with paired intervals;
+  - how many schedules were checked. A schedule that breaks a constraint stops the build, and nothing is published (D-238).
+
+  Settings are under `[scheduling]`, and the solver's seed is derived. Solver runtimes and HiGHS's version are written to the environment block, never to a hashed file. A day the time limit cut short shows in the `Solved` column: only such a day can make a figure depend on the machine.
+- **The orbit-uncertainty section** computes timing error from the snapshot: `first_detection_at + clock_offset_s − aos`, using the offset from the station's latest heartbeat between 30 minutes before the detection and 5 minutes after (D-025). This is the rule the live `timing_error` view uses, and `meridian passes timing` reads that view. For measured and simulated passes apart, it gives:
+  - the slope of |timing error| against element-set age, for each orbital regime, with a station-day interval;
+  - the share inside the stated 1σ, which is SC-3, read from measured passes only. It is given twice: with §6.1's exclusions, and with only the unknown offsets left out;
+  - the exclusions, counted;
+  - §6.3's spread test on element sets under a day old: `fit`, `not fit as written`, or `not tested` below `min_young`.
+
+  A snapshot holds only the heartbeats received inside some assignment's window, so an offset reported before a window opened is not seen (D-239).
+- **The reliability section** counts from the labels, as `meridian snapshot reliability` does:
+  - every indicator, with its interval, by population and station, each judged against its target from `[reliability]`;
+  - SC-4, measured capture over the window against 90%;
+  - the loss-budget history: the same window ending every `history_step_days` back to the snapshot's start, a window reaching before the start marked partial.
+
+  With `--faults DIR` (repeatable), it also judges each sealed fault run again from its files. It says whether the same verdicts were reached, and reports the seconds to detection, to replanning and to the alert, by fault kind. It reads SC-5 from the detections (all simulated, and labelled so), counts the platform faults apart, and includes the 72-hour run when a fault run spans 72 hours; until then it says "not run". `verify` finds each fault run by hash, as it finds the snapshot, or takes `--faults DIR`.
+- **The environment block** in `manifest.json` records the commit (and whether the tree had uncommitted changes), the Python and dependency versions, where the snapshot was read from, and how long the build took. It is **not part of the hash** (D-235), so the hash names the numbers, not the machine. There is one exception: each fitted model names the numpy and scikit-learn that fitted it (D-163), and the run names its models by hash. So a different fitting library changes the run, and `verify` shows that library among the environment changes. A run built from uncommitted code says so when it is built. Build reported figures from a clean tree.
+- The evaluation dataset the run labelled is published under `evaluation/` as `meridian snapshot label` would publish it, and the run names it by hash.
+
+### Verifying a run
+
+```sh
+uv run meridian report verify data/datasets/reports/<hash12>
+```
+
+`verify` reads the run's configuration and seed. It finds the raw snapshot by its hash, in this order:
+1. the path given with `--snapshot`;
+2. the path the run recorded;
+3. any snapshot under the datasets root with that hash prefix.
+
+It then builds the run again and compares hashes. It prints any difference between this machine's environment and the recorded one, whether or not the hashes match.
+
+| Exit | Meaning |
+|---|---|
+| 0 | The run regenerated identically |
+| 1 | It did not, and the files that differ are named; or the snapshot could not be found, or the directory is not a run |
+| 3 | The run or the snapshot does not match its own manifest: it was edited after it was written |
+
+A run edited *and resealed* passes its own manifest check but fails verification, because only regeneration can tell a forged number from a computed one.
+
+### The completion gate, at a prompt
+
+Stage 22's gate is that every number and figure can be regenerated from a snapshot, a configuration, a seed and a code version. `tests/unit/test_report_gate.py` asserts it clause by clause, with every socket and database refused. To see it by hand:
+
+```sh
+uv run meridian report build --snapshot <raw snapshot> --config analysis/configs/evaluation.toml.example --seed 4471
+uv run meridian report build --snapshot <raw snapshot> --config analysis/configs/evaluation.toml.example --seed 4471
+```
+
+The second build says `already held, identically`. Then run `uv run meridian report verify <run>`, which exits 0.
+
+Build again with `--seed 4472`. Every interval moves, and no Brier score, frame count, slope or capture rate does.
+
+---
+
 ## Rate limits
 
 The API limits request rates itself (D-202), beside the edge rule on the tunnel hostname (D-088). A refused request gets `429` with `rate_limited` and a `Retry-After` header.
@@ -1206,6 +1320,19 @@ A dash is a question that did not apply. It exits 1 if any check failed. Inside 
 
 ```sh
 docker compose exec -T api meridian reliability faults --ledger - < faults.jsonl
+```
+
+**Keeping a run for a report** (D-240). Add `--publish` to seal what was judged:
+- the ledger;
+- the evidence the platform held about every fault;
+- the verdicts, each check with the seconds it timed.
+
+The run goes under `<datasets root>/faults/<hash12>` (`--root`, else `$MERIDIAN_DATASETS_ROOT`). Evidence read later can differ, because assignments are decided again and heartbeats age out of reach. So a figure that must be regenerable comes from the sealed run, never from judging the ledger a second time:
+
+```sh
+meridian reliability faults --ledger faults.jsonl --prometheus http://prometheus:9090 --publish
+uv run meridian report build --snapshot <raw snapshot> --config <file> --seed 4471 \
+  --faults data/datasets/faults/<hash12>
 ```
 
 **When a check fails.** The detail names the assignments or instants.

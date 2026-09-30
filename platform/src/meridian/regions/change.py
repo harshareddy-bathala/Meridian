@@ -23,12 +23,12 @@ Reference: docs/DECISIONS.md D-229, D-231.
 
 from __future__ import annotations
 
-import hashlib
 import math
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
+from meridian.datasets.seeds import derive
 from meridian.regions.config import Period, RegionsConfig, Rule
 from meridian.regions.series import SeriesPoint
 
@@ -176,5 +176,4 @@ def _interval(
 
 
 def _seed(seed: int, area_id: int, quantity: str) -> int:
-    digest = hashlib.sha256(f"{seed}:{area_id}:{quantity}".encode()).digest()
-    return int.from_bytes(digest[:8], "big")
+    return derive(seed, f"{area_id}:{quantity}")

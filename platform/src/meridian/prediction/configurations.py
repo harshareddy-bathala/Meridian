@@ -22,7 +22,8 @@ tables equal.
 **``conditions`` is the public geomagnetic and weather group** of
 ``EVALUATION.md`` §3, filled by Stage 31 (D-224): what a source published
 before the pass. Only D reads it. D-131's leave-one-group-out run, D without
-this group, is not built yet: it waits on a model of real data (D-224).
+this group, is the model configuration's ``without`` key (D-237), which the
+evaluation report fits beside the four.
 
 **Cold start is a route, not a default** (D-161). A configuration that reads
 the station's own record cannot describe a station that has none; one with
@@ -69,6 +70,18 @@ class Configuration:
     def features(self) -> tuple[str, ...]:
         """Its inputs, in :data:`FEATURES` order."""
         return tuple(one.name for one in FEATURES if one.group in self.groups)
+
+    def leaving_out(self, groups: tuple[str, ...]) -> Configuration:
+        """The same configuration, with ``groups`` left out of its inputs.
+
+        The name is kept: D∖conditions is still D, fitted on less, and its
+        objective is D's (D-237). Leaving out ``ours`` also leaves out the
+        station history, so the cold-start route goes with it.
+        """
+        if not groups:
+            return self
+        kept = tuple(one for one in self.groups if one not in groups)
+        return Configuration(self.name, kept, self.weighted_by_priority, self.question)
 
     @property
     def reads_history(self) -> bool:

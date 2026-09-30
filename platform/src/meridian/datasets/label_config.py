@@ -55,6 +55,7 @@ __all__ = [
     "LabelConfigError",
     "PropensityConfig",
     "config_sha256",
+    "label_config_from_mapping",
     "load_label_config",
     "parse_label_config",
 ]
@@ -110,6 +111,29 @@ def parse_label_config(text: str) -> LabelConfig:
     except tomllib.TOMLDecodeError as exc:
         message = f"the labelling configuration is not TOML: {exc}"
         raise LabelConfigError(message) from exc
+    return label_config_from_mapping(stored)
+
+
+def label_config_from_mapping(table: object) -> LabelConfig:
+    """Build a labelling configuration from parsed TOML.
+
+    The same checks as :func:`parse_label_config`, for a ``[labels]`` table
+    inside another file — an evaluation report's configuration (D-236).
+
+    Args:
+        table: The table, as ``tomllib`` read it. Every key is optional.
+
+    Returns:
+        The resolved configuration, defaults filled in.
+
+    Raises:
+        LabelConfigError: Not a table, an unknown key, or a value outside its
+            bounds.
+    """
+    if not isinstance(table, dict):
+        message = f"the labelling settings must be a table, not {table!r}"
+        raise LabelConfigError(message)
+    stored = dict(table)
     known = {*_LIMITS, "completeness", "propensity"}
     unknown = sorted(set(stored) - known)
     if unknown:

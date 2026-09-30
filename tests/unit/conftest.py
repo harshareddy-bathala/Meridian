@@ -10,6 +10,8 @@ Reference: docs/DECISIONS.md D-143, D-144.
 
 from __future__ import annotations
 
+import math
+import random
 import socket
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -127,7 +129,12 @@ WORLD: Mapping[str, Sequence[Mapping[str, object]]] = {
         {"id": 1, "satellite_id": "norad:57166", "epoch": AOS - timedelta(hours=6)},
     ],
     "heartbeats": [
-        {"station_id": "st_b", "received_at": AOS + timedelta(minutes=2)},
+        {
+            "station_id": "st_b",
+            "received_at": AOS + timedelta(minutes=2),
+            "clock_offset_s": None,
+            "clock_uncertainty_s": None,
+        },
     ],
     "transmitters": [
         {
@@ -290,3 +297,131 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[NetworkGuard]:
     monkeypatch.setattr(socket.socket, "connect", refuse_socket)
     monkeypatch.setattr(socket, "create_connection", refuse_socket)
     yield guard
+
+
+# --- a world a report can fit models on (Stage 22) --------------------------
+
+EVALUATION_DAYS = 22
+DAILY = "norad:57166"
+RIVAL = "norad:59051"
+CLASH_SLOT = 2
+
+Tables = dict[str, list[Mapping[str, object]]]
+
+
+def _decoded_world() -> Tables:
+    """22 days over two stations, fittable, and a clash for the scheduler.
+
+    Each station has eight passes a day of one satellite, decoding more often
+    the higher it climbs, and once a day a second satellite rises six minutes
+    after one of them; the historical policy took the higher of the two. The
+    same shape as the scheduler gate's world (``test_scheduler_gate.py``), so a
+    report's prediction and scheduling sections both have something to judge.
+    Every row is measured: no model is ever fitted on a simulated one (D-078).
+    """
+    rng = random.Random(22)
+    rows: Tables = {"passes": [], "assignments": [], "observations": []}
+    for day in range(EVALUATION_DAYS):
+        for offset, station in enumerate(("st_a", "st_b")):
+            for slot in range(8):
+                aos = SINCE + timedelta(days=day, hours=3 * slot + offset, minutes=10)
+                taken = [_world_pass(rows, rng, (station, DAILY), aos)]
+                if slot == CLASH_SLOT:
+                    later = aos + timedelta(minutes=6)
+                    rival = _world_pass(rows, rng, (station, RIVAL), later)
+                    taken = [max((taken[0], rival), key=lambda one: one[1])]
+                for number, _peak, decoded in taken:
+                    _world_report(rows, number, decoded, rng)
+    return rows | {
+        "element_sets": [
+            {
+                "id": 2 * day + index,
+                "satellite_id": satellite,
+                "epoch": SINCE + timedelta(days=day),
+            }
+            for day in range(EVALUATION_DAYS)
+            for index, satellite in enumerate((DAILY, RIVAL))
+        ],
+        "stations": [{"station_id": one, "lon_deg": 77.6} for one in ("st_a", "st_b")],
+        "satellites": [
+            {"satellite_id": DAILY, "priority": 1.0},
+            {"satellite_id": RIVAL, "priority": 1.5},
+        ],
+        "transmitters": [
+            {
+                "id": index + 1,
+                "satellite_id": one,
+                "centre_freq_hz": 137_900_000,
+                "active": True,
+                "deleted_at": None,
+            }
+            for index, one in enumerate((DAILY, RIVAL))
+        ],
+    }
+
+
+def _world_pass(
+    rows: Tables, rng: random.Random, who: tuple[str, str], aos: datetime
+) -> tuple[int, float, bool]:
+    """Add a predicted pass; return its id, its peak and whether it decodes."""
+    station, satellite = who
+    number = len(rows["passes"]) + 1
+    peak = rng.uniform(5.0, 85.0)
+    odds = 0.9 if satellite == RIVAL else 1.0
+    decoded = rng.random() < odds / (1 + math.exp(-(peak - 35.0) / 10.0))
+    rows["passes"].append(
+        {
+            "id": number,
+            "satellite_id": satellite,
+            "station_id": station,
+            "aos": aos,
+            "los": aos + timedelta(minutes=12),
+            "max_elevation_deg": peak,
+            "aos_azimuth_deg": rng.uniform(0.0, 360.0),
+            "los_azimuth_deg": rng.uniform(0.0, 360.0),
+            "element_set_id": 2 * (aos - SINCE).days + (satellite == RIVAL),
+            "computed_at": aos - timedelta(hours=5),
+            "simulated": False,
+        }
+    )
+    return number, peak, decoded
+
+
+def _world_report(rows: Tables, number: int, decoded: bool, rng: random.Random) -> None:
+    """The assignment the historical policy made, and the station's report."""
+    predicted = rows["passes"][number - 1]
+    frames = rng.randint(20, 400) if decoded else 0
+    rows["assignments"].append(
+        {
+            "assignment_id": f"as_{number}",
+            "pass_id": number,
+            "station_id": predicted["station_id"],
+            "start_at": predicted["aos"],
+            "end_at": predicted["los"],
+            "decision": "scheduled",
+            "state": "reported",
+            "model_config": "B",
+            "simulated": False,
+        }
+    )
+    rows["observations"].append(
+        {
+            "assignment_id": f"as_{number}",
+            "revision": 1,
+            "outcome": "decoded" if decoded else "signal_no_decode",
+            "first_detection_at": None,
+            "noise_floor_dbfs": None,
+            "receiver_gain_db": None,
+            "frames_decoded": frames,
+            "simulated": False,
+        }
+    )
+
+
+EVALUATION_WORLD = _decoded_world()
+
+
+@pytest.fixture
+def evaluation_world() -> Mapping[str, Sequence[Mapping[str, object]]]:
+    """:func:`_decoded_world`, built once: a world every configuration fits on."""
+    return EVALUATION_WORLD
