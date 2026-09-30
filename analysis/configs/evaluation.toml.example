@@ -147,3 +147,28 @@ resamples = 2000
 # Detections on element sets under a day old that §6.3's spread test needs.
 # Below it, the test is reported as not run. Stated here, before any result.
 min_young = 10
+
+# ── [reliability] — the window and targets every indicator is judged against,
+#    as deploy/reliability.toml.example's [slo] table holds them, and how far
+#    apart the loss-budget history's windows end (D-184, D-240). Fault runs are
+#    not configured here: give each with `report build --faults DIR`.
+[reliability]
+
+# SC-4 is a 30-day figure; another window is reported, and says so.
+window_days = 30
+
+# SC-4: ≥ 90% pass capture rate. Also sets the loss budget (D-185).
+capture_rate_min = 0.90
+
+# SC-5: ≤ 90 s to detect a failure, judged from the fault runs given.
+failure_detection_max_s = 90
+
+# Proposed targets, to agree with the team.
+confirmed_miss_rate_max = 0.05
+station_availability_min = 0.95
+assignment_completion_rate_min = 0.95
+schedule_execution_rate_min = 0.90
+submission_delay_p95_max_s = 3600
+
+# Days between the ends of the loss-budget history's windows.
+history_step_days = 7

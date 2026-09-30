@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from meridian.datasets.publish import SnapshotDirectory, read_directory
-from meridian.reports.build import build_run
+from meridian.reports.build import RunInputs, build_run
 from meridian.reports.config import parse_report_config
 from meridian.reports.render import render_report
 
@@ -24,8 +24,7 @@ CREATED = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
 def built(raw_snapshot: Any, archive_world: Any, datasets_root: Path) -> Any:
     raw = read_directory(raw_snapshot(archive_world))
     return build_run(
-        raw,
-        parse_report_config(b""),
+        RunInputs(raw, parse_report_config(b"")),
         seed=4471,
         root=datasets_root,
         created_at=CREATED,
@@ -43,11 +42,11 @@ def of(found: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
 def test_the_report_is_rendered_from_its_results_files_alone(built: Any) -> None:
     """Every number report.md prints is in a hashed file, because it came from one."""
     again = render_report(
-        run=rows(built.files["run.jsonl"]),
-        data=rows(built.files["data.jsonl"]),
-        prediction=rows(built.files["prediction.jsonl"]),
-        scheduling=rows(built.files["scheduling.jsonl"]),
-        orbit=rows(built.files["orbit.jsonl"]),
+        {
+            name.removesuffix(".jsonl"): rows(data)
+            for name, data in built.files.items()
+            if name.endswith(".jsonl")
+        }
     )
 
     assert again == built.files["report.md"]
@@ -114,8 +113,9 @@ def test_when_it_was_built_is_not_part_of_the_run(
     from meridian.datasets.manifest import content_sha256
 
     later = build_run(
-        read_directory(raw_snapshot(archive_world)),
-        parse_report_config(b""),
+        RunInputs(
+            read_directory(raw_snapshot(archive_world)), parse_report_config(b"")
+        ),
         seed=4471,
         root=datasets_root,
         created_at=datetime(2027, 1, 1, tzinfo=UTC),

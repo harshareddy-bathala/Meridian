@@ -45,6 +45,7 @@ def detected(fault: InjectedFault, silence: Silence) -> Check:
         "detected",
         latency <= OFFLINE_AFTER_S,
         f"offline {latency:.0f} s after the fault began (SC-5: ≤ {OFFLINE_AFTER_S} s)",
+        latency_s=latency,
     )
 
 
@@ -145,9 +146,11 @@ def _revocations_of(
         return Check("replanned", True, "it held no unbegun work to revoke")
     first = min(at for at in revoked_at.values() if at is not None)
     decided_again = sum(one.redecided_at is not None for one in owed)
+    after = (first - offline_at).total_seconds()
     return Check(
         "replanned",
         True,
-        f"{len(owed)} revoked {(first - offline_at).total_seconds():.0f} s after "
-        f"going offline; {decided_again} decided again",
+        f"{len(owed)} revoked {after:.0f} s after going offline;"
+        f" {decided_again} decided again",
+        latency_s=after,
     )

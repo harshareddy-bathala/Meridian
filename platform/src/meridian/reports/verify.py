@@ -25,25 +25,27 @@ Reference: docs/DECISIONS.md D-235.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from meridian.datasets.fault_runs import FAULTS, FaultRun, read_fault_run
 from meridian.datasets.manifest import Manifest, content_sha256
 from meridian.datasets.publish import SnapshotDirectory, read_directory
-from meridian.reports.build import CONFIG_FILE, build_run
+from meridian.reports.build import CONFIG_FILE, RunInputs, build_run
 from meridian.reports.config import parse_report_config
 
 __all__ = [
     "NotARunError",
     "SnapshotNotFoundError",
     "Verdict",
+    "locate_fault_runs",
     "locate_snapshot",
     "verify_run",
 ]
 
 _SNAPSHOTS = "snapshots"
-_UNCOMPARED = frozenset(("snapshot_path", "runtime_s"))
+_UNCOMPARED = frozenset(("snapshot_path", "runtime_s", "fault_run_paths"))
 """Environment entries that describe where or how long, not what, and are
 never a cause of a different number."""
 
@@ -109,10 +111,55 @@ def locate_snapshot(
     raise SnapshotNotFoundError(message)
 
 
+def locate_fault_runs(
+    run: Manifest, *, root: Path, given: Sequence[Path] = ()
+) -> tuple[FaultRun, ...]:
+    """Every fault run ``run`` judged, each found and checked by its hash.
+
+    Looked for, in order, among the paths given, at the path the run recorded,
+    and under ``<root>/faults``; whatever is found is read whole and its hash
+    compared, as a snapshot is (D-240).
+
+    Raises:
+        SnapshotNotFoundError: A recorded fault run is nowhere searched.
+        DamagedSnapshotError: A candidate does not match its own manifest.
+    """
+    recorded = run.parameters.get("fault_runs", [])
+    hints = run.environment.get("fault_run_paths", {})
+    found = []
+    for wanted in recorded if isinstance(recorded, list) else []:
+        digest = str(wanted)
+        hinted = hints.get(digest) if isinstance(hints, Mapping) else None
+        candidates = [
+            *given,
+            *([Path(str(hinted))] if hinted else []),
+            *sorted((root / FAULTS).glob(f"{digest[:12]}*")),
+        ]
+        match = _fault_run(candidates, digest)
+        if match is None:
+            message = (
+                f"no fault run {digest[:12]} under {root / FAULTS};"
+                " name it with --faults"
+            )
+            raise SnapshotNotFoundError(message)
+        found.append(match)
+    return tuple(found)
+
+
+def _fault_run(candidates: Sequence[Path], digest: str) -> FaultRun | None:
+    for path in candidates:
+        if path.is_dir():
+            run = read_fault_run(path)
+            if content_sha256(run.directory.manifest).hex() == digest:
+                return run
+    return None
+
+
 def verify_run(
     run: SnapshotDirectory,
     raw: SnapshotDirectory,
     *,
+    faults: tuple[FaultRun, ...] = (),
     root: Path,
     environment: Mapping[str, object],
 ) -> Verdict:
@@ -121,6 +168,7 @@ def verify_run(
     Args:
         run: The run, as :func:`read_directory` verified it.
         raw: Its raw snapshot, as :func:`locate_snapshot` found it.
+        faults: Its fault runs, as :func:`locate_fault_runs` found them.
         root: The datasets root the evaluation dataset is published under.
         environment: This machine's environment, to compare with the recorded.
 
@@ -134,8 +182,7 @@ def verify_run(
     manifest = run.manifest
     seed = _require_run(manifest)
     rebuilt = build_run(
-        raw,
-        parse_report_config(run.files[CONFIG_FILE]),
+        RunInputs(raw, parse_report_config(run.files[CONFIG_FILE]), faults),
         seed=seed,
         root=root,
         created_at=manifest.created_at,

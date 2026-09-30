@@ -11,43 +11,40 @@ Reference: docs/DECISIONS.md D-235, D-236.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from meridian.reports.markdown import cell, table
 from meridian.reports.render_data import render_data
 from meridian.reports.render_orbit import render_orbit
 from meridian.reports.render_prediction import render_prediction
+from meridian.reports.render_reliability import render_reliability
 from meridian.reports.render_scheduling import render_scheduling
 
-__all__ = ["render_report"]
+__all__ = ["SECTIONS", "render_report"]
 
 Row = Mapping[str, object]
 
 
-def render_report(
-    *,
-    run: Sequence[Row],
-    data: Sequence[Row],
-    prediction: Sequence[Row],
-    scheduling: Sequence[Row],
-    orbit: Sequence[Row],
-) -> bytes:
+SECTIONS: tuple[tuple[str, Callable[[Sequence[Row]], list[str]]], ...] = (
+    ("data", render_data),
+    ("prediction", render_prediction),
+    ("scheduling", render_scheduling),
+    ("orbit", render_orbit),
+    ("reliability", render_reliability),
+)
+"""Each section in the order the report prints it, by its results file's name."""
+
+
+def render_report(parsed: Mapping[str, Sequence[Row]]) -> bytes:
     """The whole report, as the bytes written to ``report.md``.
 
     Args:
-        run: ``run.jsonl``, parsed: the run record.
-        data: ``data.jsonl``, parsed: the data section.
-        prediction: ``prediction.jsonl``, parsed: the prediction section.
-        scheduling: ``scheduling.jsonl``, parsed: the scheduling section.
-        orbit: ``orbit.jsonl``, parsed: the orbit-uncertainty section.
+        parsed: Every results file, parsed, by its name without ``.jsonl``:
+            ``run`` and one per entry of :data:`SECTIONS`.
     """
-    lines = [
-        *_header(run),
-        *render_data(data),
-        *render_prediction(prediction),
-        *render_scheduling(scheduling),
-        *render_orbit(orbit),
-    ]
+    lines = _header(parsed["run"])
+    for name, render in SECTIONS:
+        lines.extend(render(parsed[name]))
     return ("\n".join(lines).rstrip("\n") + "\n").encode("utf-8")
 
 

@@ -33,24 +33,25 @@ from meridian.cli_snapshot import (
     EXIT_CORRUPT,
     datasets_root,
 )
+from meridian.datasets.fault_runs import read_fault_run
 from meridian.datasets.manifest import content_sha256
 from meridian.datasets.publish import DamagedSnapshotError, read_directory
 from meridian.datasets.seeds import MASTER_SEED_MAX
-from meridian.datasets.snapshot_rows import MalformedSnapshotError
 from meridian.reports.build import (
     REPORT_FILE,
     REPORTS,
     Run,
     RunExistsError,
+    RunInputs,
     build_run,
     publish_run,
     with_environment,
 )
-from meridian.reports.config import ReportConfigError, load_report_config
+from meridian.reports.config import load_report_config
 from meridian.reports.environment import run_environment
 from meridian.reports.verify import (
-    NotARunError,
     SnapshotNotFoundError,
+    locate_fault_runs,
     locate_snapshot,
     verify_run,
 )
@@ -95,6 +96,15 @@ def add_report_parser(
     )
     build.add_argument("--seed", type=int, required=True, help="the master seed")
     build.add_argument(
+        "--faults",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="a fault run sealed by `meridian reliability faults --publish`;"
+        " repeat for several (D-240)",
+    )
+    build.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -107,6 +117,14 @@ def add_report_parser(
         type=Path,
         default=None,
         help="the raw snapshot, if it is not under the datasets root",
+    )
+    verify.add_argument(
+        "--faults",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="a fault run the run judged, if it is not under the datasets root",
     )
 
 
@@ -158,8 +176,12 @@ def _made(args: argparse.Namespace, root: Path) -> Run:
         raise ValueError(message)
     started = datetime.now(UTC)
     config = load_report_config(args.config)
-    raw = read_directory(args.snapshot)
-    run = build_run(raw, config, seed=args.seed, root=root, created_at=started)
+    inputs = RunInputs(
+        read_directory(args.snapshot),
+        config,
+        tuple(read_fault_run(path) for path in args.faults),
+    )
+    run = build_run(inputs, seed=args.seed, root=root, created_at=started)
     elapsed = (datetime.now(UTC) - started).total_seconds()
     environment = run_environment(args.snapshot) | {"runtime_s": {"build": elapsed}}
     return with_environment(run, environment)
@@ -184,17 +206,20 @@ def _verify(args: argparse.Namespace) -> int:
     try:
         run = read_directory(args.run)
         raw = locate_snapshot(run.manifest, root=root, given=args.snapshot)
-        verdict = verify_run(run, raw, root=root, environment=run_environment(raw.path))
+        faults = locate_fault_runs(run.manifest, root=root, given=args.faults)
+        verdict = verify_run(
+            run,
+            raw,
+            faults=faults,
+            root=root,
+            environment=run_environment(raw.path),
+        )
     except DamagedSnapshotError as exc:
         _refuse("verify", str(exc))
         return EXIT_CORRUPT
-    except (
-        NotARunError,
-        SnapshotNotFoundError,
-        ReportConfigError,
-        MalformedSnapshotError,
-        OSError,
-    ) as exc:
+    except (ValueError, SnapshotNotFoundError, OSError) as exc:
+        # ValueError: not a run, a refused configuration, a malformed snapshot
+        # or fault run — each a refusal with a sentence, never a traceback.
         return _refuse("verify", str(exc))
     if verdict.matches:
         _say(f"{args.run} regenerates identically: {verdict.recorded.hex()}")

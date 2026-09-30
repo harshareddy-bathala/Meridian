@@ -28,11 +28,14 @@ The sections arrive one at a time:
   schedule checked; runtimes measured into the environment (D-238);
 * **orbit uncertainty** — timing error from the snapshot, clock-corrected,
   against element-set age by regime, 1σ coverage for SC-3, the exclusions
-  counted, and §6.3's spread test (D-239).
+  counted, and §6.3's spread test (D-239);
+* **reliability** — every indicator and SC-4 from the labels, the loss
+  budget's history, and saved fault runs judged again for SC-5's detection,
+  replan and alert times and the 72-hour run (D-240).
 
 **Nothing here opens a database or a socket.** The snapshot is the only input
 that holds data, and a report command never fetches anything (rule 8, and the
 roadmap's "no report command may silently fetch mutable external data").
 
-Reference: docs/DECISIONS.md D-234 to D-239.
+Reference: docs/DECISIONS.md D-234 to D-240.
 """

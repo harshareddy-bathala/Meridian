@@ -819,7 +819,7 @@ diff one.txt two.txt                                                          # 
 
 Every number in a report is regenerable from a raw snapshot, one configuration and one seed (rule 8, `EVALUATION.md` §9). `meridian report build` computes a report from those three and nothing else, and `meridian report verify` proves a report regenerates. Neither opens a database or a socket.
 
-Decisions this section puts into practice: D-234 to D-239.
+Decisions this section puts into practice: D-234 to D-240.
 
 ### Building a run
 
@@ -849,6 +849,9 @@ reports/<hash12>/
 ├── scheduling_regret.svg           each scheduler's shortfall from the oracle
 ├── orbit.jsonl                     the orbit-uncertainty section's results, a row per detection
 ├── orbit_timing_<population>.svg   |timing error| against element-set age, by regime
+├── reliability.jsonl               the reliability section's results
+├── capture_history.svg             capture over each window of the loss-budget history
+├── fault_detection.svg             seconds from each fault to offline, by kind, when a fault run was given
 ├── config.toml     the configuration, byte for byte as it was given
 └── manifest.json   every file's digest, the inputs, the seeds, and the environment
 ```
@@ -880,6 +883,12 @@ reports/<hash12>/
   - §6.3's spread test on element sets under a day old: `fit`, `not fit as written`, or `not tested` below `min_young`.
 
   A snapshot holds only the heartbeats received inside some assignment's window, so an offset reported before a window opened is not seen (D-239).
+- **The reliability section** counts from the labels, as `meridian snapshot reliability` does:
+  - every indicator, with its interval, by population and station, each judged against its target from `[reliability]`;
+  - SC-4, measured capture over the window against 90%;
+  - the loss-budget history: the same window ending every `history_step_days` back to the snapshot's start, a window reaching before the start marked partial.
+
+  With `--faults DIR` (repeatable), it also judges each sealed fault run again from its files. It says whether the same verdicts were reached, and reports the seconds to detection, to replanning and to the alert, by fault kind. It reads SC-5 from the detections (all simulated, and labelled so), counts the platform faults apart, and includes the 72-hour run when a fault run spans 72 hours; until then it says "not run". `verify` finds each fault run by hash, as it finds the snapshot, or takes `--faults DIR`.
 - **The environment block** in `manifest.json` records the commit (and whether the tree had uncommitted changes), the Python and dependency versions, where the snapshot was read from, and how long the build took. It is **not part of the hash** (D-235), so the hash names the numbers, not the machine. A run built from uncommitted code says so when it is built. Build reported figures from a clean tree.
 - The evaluation dataset the run labelled is published under `evaluation/` as `meridian snapshot label` would publish it, and the run names it by hash.
 
@@ -1298,6 +1307,19 @@ A dash is a question that did not apply. It exits 1 if any check failed. Inside 
 
 ```sh
 docker compose exec -T api meridian reliability faults --ledger - < faults.jsonl
+```
+
+**Keeping a run for a report** (D-240). Add `--publish` to seal what was judged:
+- the ledger;
+- the evidence the platform held about every fault;
+- the verdicts, each check with the seconds it timed.
+
+The run goes under `<datasets root>/faults/<hash12>` (`--root`, else `$MERIDIAN_DATASETS_ROOT`). Evidence read later can differ, because assignments are decided again and heartbeats age out of reach. So a figure that must be regenerable comes from the sealed run, never from judging the ledger a second time:
+
+```sh
+meridian reliability faults --ledger faults.jsonl --prometheus http://prometheus:9090 --publish
+uv run meridian report build --snapshot <raw snapshot> --config <file> --seed 4471 \
+  --faults data/datasets/faults/<hash12>
 ```
 
 **When a check fails.** The detail names the assignments or instants.

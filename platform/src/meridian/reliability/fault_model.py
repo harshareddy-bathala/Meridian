@@ -30,6 +30,7 @@ __all__ = [
     "WHOLLY_SILENCING",
     "Check",
     "FaultVerdict",
+    "Gathered",
     "PlatformEvidence",
     "Silence",
     "StationEvidence",
@@ -204,6 +205,11 @@ class Check:
     """``None`` when the question does not apply, or cannot be answered yet."""
 
     detail: str
+    latency_s: float | None = None
+    """The interval the answer measured, as a number beside its sentence: for
+    ``detected``, the fault's start to reading offline; for ``replanned``,
+    reading offline to the first revocation; for ``alerted``, the fault's start
+    to ``StationOffline`` firing. ``None`` where nothing was timed (D-240)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +223,20 @@ class FaultVerdict:
     def passed(self) -> bool:
         """No check failed. A check that did not apply is not a failure."""
         return all(one.passed is not False for one in self.checks)
+
+
+@dataclass(frozen=True, slots=True)
+class Gathered:
+    """One fault, and everything read to judge it — enough to judge it again.
+
+    What ``meridian reliability faults --publish`` keeps, so a verdict can be
+    reached again from a sealed directory with no database (D-240).
+    """
+
+    fault: InjectedFault
+    evidence: StationEvidence | PlatformEvidence
+    alongside: tuple[InjectedFault, ...] = ()
+    """The other faults on the same station; recovery reads them."""
 
 
 @dataclass(frozen=True, slots=True)

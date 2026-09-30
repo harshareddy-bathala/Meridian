@@ -15,6 +15,8 @@ its own and see the same answer — and a fifth that judges a fault run:
   figure the report prints is traced back to its rows (Stage 20's gate);
 * ``faults --ledger PATH`` judges every fault a run's ledger records against
   what the platform stored, and exits non-zero if any check failed (D-192).
+  With ``--publish`` it also seals the ledger, the evidence it read and the
+  verdicts as a fault run, which an evaluation report judges again (D-240).
 
 Every verb takes ``--config``, else :data:`RELIABILITY_CONFIG_ENV`, else the
 defaults, which ``deploy/reliability.toml.example`` spells out.
@@ -25,14 +27,19 @@ Reference: docs/DECISIONS.md D-182, D-183, D-184, D-185, D-192.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
 
+from meridian.cli_snapshot import datasets_root
 from meridian.config import load_settings
+from meridian.datasets.fault_runs import publish_fault_run
+from meridian.datasets.manifest import content_sha256
 from meridian.registry.psycopg_registry import PsycopgRegistry
 from meridian.reliability.accounting import classify_settled
 from meridian.reliability.config import (
@@ -42,10 +49,12 @@ from meridian.reliability.config import (
     load_deployed_reliability_config,
     load_reliability_config,
 )
-from meridian.reliability.fault_check import check_faults, prometheus_alert_history
+from meridian.reliability.fault_check import gather_evidence, prometheus_alert_history
 from meridian.reliability.faults import (
     FaultLedgerError,
     FaultVerdict,
+    Gathered,
+    judge_gathered,
     read_fault_ledger,
 )
 from meridian.reliability.live import read_live_report
@@ -56,6 +65,7 @@ from meridian.store.pass_classifications import (
     find_classifications_of,
 )
 from meridian.store.pool import DatabaseUnreachableError, connect_once
+from meridian.store.schema_revision import find_current_revision
 from meridian.store.stations import Connection
 
 __all__ = ["add_reliability_parser", "run_reliability"]
@@ -115,6 +125,19 @@ def add_reliability_parser(
     )
     faults.add_argument(
         "--json", type=Path, default=None, metavar="PATH", help="also write JSON"
+    )
+    faults.add_argument(
+        "--publish",
+        action="store_true",
+        help="also seal the ledger, the evidence and the verdicts as a fault run"
+        " an evaluation report can judge again (D-240)",
+    )
+    faults.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help="datasets root for --publish (default: $MERIDIAN_DATASETS_ROOT,"
+        " else data/datasets)",
     )
 
 
@@ -214,22 +237,24 @@ def _faults(
     now: datetime,
 ) -> int:
     try:
-        if str(args.ledger) == "-":
-            # So a ledger on the host can be judged inside the API's container,
-            # whose filesystem is read-only (D-206): piped, not copied in.
-            faults = read_fault_ledger(sys.stdin)
-        else:
-            with args.ledger.open(encoding="utf-8") as handle:
-                faults = read_fault_ledger(handle)
+        # "-" so a ledger on the host can be judged inside the API's container,
+        # whose filesystem is read-only (D-206): piped, not copied in.
+        ledger = (
+            sys.stdin.read()
+            if str(args.ledger) == "-"
+            else args.ledger.read_text(encoding="utf-8")
+        )
+        faults = read_fault_ledger(io.StringIO(ledger))
     except (OSError, FaultLedgerError) as exc:
         return _refuse("faults", f"cannot read {args.ledger}: {exc}")
     alerts = prometheus_alert_history(args.prometheus) if args.prometheus else None
     try:
-        verdicts = check_faults(conn, faults, now=now, alerts=alerts)
+        gathered = gather_evidence(conn, faults, now=now, alerts=alerts)
     except (OSError, ValueError) as exc:
         # A Prometheus that is restarting or slow is a refusal to judge the
         # alerts, said as one, not a traceback with nothing printed.
         return _refuse("faults", f"Prometheus did not answer: {exc}")
+    verdicts = tuple(judge_gathered(one) for one in gathered)
     for verdict in verdicts:
         for line in _judged(verdict):
             _say(line)
@@ -240,7 +265,29 @@ def _faults(
             json.dumps([_as_json(one) for one in verdicts], indent=2) + "\n",
             encoding="utf-8",
         )
+    if args.publish:
+        _publish(conn, args, (ledger, gathered, verdicts), now)
     return EXIT_FAILED if failed else 0
+
+
+def _publish(
+    conn: Connection,
+    args: argparse.Namespace,
+    run: tuple[str, Sequence[Gathered], Sequence[FaultVerdict]],
+    now: datetime,
+) -> None:
+    """Seal what was read and judged, so a report can judge it again (D-240)."""
+    ledger, gathered, verdicts = run
+    published = publish_fault_run(
+        ledger,
+        gathered,
+        verdicts,
+        root=datasets_root(args.root),
+        stamp=(find_current_revision(conn) or "unknown", now),
+    )
+    held = "written" if published.written else "already held, identically"
+    _say(f"fault run: {published.path} ({held})")
+    _say(f"  hash               {content_sha256(published.manifest).hex()}")
 
 
 _MARKS = {True: "pass", False: "FAIL", None: "  - "}
@@ -274,7 +321,12 @@ def _as_json(verdict: FaultVerdict) -> dict[str, object]:
         "closed_at": fault.closed_at.isoformat() if fault.closed_at else None,
         "passed": verdict.passed,
         "checks": [
-            {"name": one.name, "passed": one.passed, "detail": one.detail}
+            {
+                "name": one.name,
+                "passed": one.passed,
+                "detail": one.detail,
+                "latency_s": one.latency_s,
+            }
             for one in verdict.checks
         ],
     }

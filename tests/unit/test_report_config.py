@@ -77,6 +77,9 @@ def test_the_hash_is_over_values_not_spelling() -> None:
         (b"[orbit]\nseed = 2\n", "the seed is derived"),
         (b"[orbit]\nmin_young = 1\n", "outside 2..100000"),
         (b"[orbit]\nresamples = 1.5\n", "must be a number"),
+        (b"[reliability]\ncapture_rate_min = 1.5\n", "[reliability]"),
+        (b"[reliability]\nclassification = 1\n", "unknown settings"),
+        (b"[reliability]\nhistory_step_days = 0\n", "outside 1..366"),
         (b"\xff\xfe", "not UTF-8 TOML"),
     ],
 )
@@ -111,3 +114,14 @@ def test_scheduling_settings_reach_the_solver_but_never_its_seed() -> None:
     assert config.threshold == 0.7
     assert "seed" not in config.parameters()
     assert config.parameters()["turnaround_s"] == 60.0
+
+
+def test_reliability_targets_are_the_slo_tables() -> None:
+    config = parse_report_config(
+        b"[reliability]\nwindow_days = 14\ncapture_rate_min = 0.8\n"
+        b"history_step_days = 3\n"
+    ).config.reliability
+
+    assert config.slo.window_days == 14
+    assert config.slo.capture_rate_min == 0.8
+    assert config.history_step_days == 3

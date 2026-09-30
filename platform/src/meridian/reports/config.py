@@ -16,7 +16,11 @@ validated by the module that owns those settings rather than restated:
   resamples; and a completeness threshold in place of the dataset's (D-238);
 * ``[orbit]`` — the timing-error bootstrap's resamples, and how many detections
   on element sets under a day old ``EVALUATION.md`` §6.3's spread test needs
-  before it says anything (D-239).
+  before it says anything (D-239);
+* ``[reliability]`` — the window and targets
+  :class:`~meridian.reliability.config.SloConfig` checks, as
+  ``deploy/reliability.toml.example``'s ``[slo]`` holds them, and how far apart
+  the loss-budget history's windows end (D-240).
 
 Every table is optional and falls back to its owner's defaults. An unknown
 table is refused, so a misspelt one cannot silently fall back.
@@ -47,12 +51,14 @@ from meridian.datasets.canonical import canonical_bytes
 from meridian.datasets.config_checks import LabelConfigError
 from meridian.datasets.label_config import LabelConfig, label_config_from_mapping
 from meridian.prediction.model_config import ModelConfig, ModelConfigError
+from meridian.reliability.config import ReliabilityConfigError, SloConfig
 from meridian.scheduler.schedule_config import ScheduleConfig, ScheduleConfigError
 
 __all__ = [
     "ConfigFile",
     "OrbitConfig",
     "PredictionConfig",
+    "ReliabilitySectionConfig",
     "ReportConfig",
     "ReportConfigError",
     "SchedulingConfig",
@@ -61,7 +67,7 @@ __all__ = [
     "report_config_sha256",
 ]
 
-_TABLES = ("labels", "prediction", "scheduling", "orbit")
+_TABLES = ("labels", "prediction", "scheduling", "orbit", "reliability")
 
 _DECIDED_BY_THE_REPORT = ("configuration", "seed", "without")
 """Model settings the report sets itself, for every configuration it fits."""
@@ -144,6 +150,22 @@ class OrbitConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ReliabilitySectionConfig:
+    """The reliability section's window, targets and history."""
+
+    slo: SloConfig = field(default_factory=SloConfig)
+    history_step_days: int = 7
+    """How far apart the loss-budget history's windows end."""
+
+    def parameters(self) -> dict[str, object]:
+        """The values the section's numbers depend on."""
+        return {
+            "slo": self.slo.parameters(),
+            "history_step_days": self.history_step_days,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ReportConfig:
     """The resolved configuration of every section."""
 
@@ -151,6 +173,9 @@ class ReportConfig:
     prediction: PredictionConfig = field(default_factory=PredictionConfig)
     scheduling: SchedulingConfig = field(default_factory=SchedulingConfig)
     orbit: OrbitConfig = field(default_factory=OrbitConfig)
+    reliability: ReliabilitySectionConfig = field(
+        default_factory=ReliabilitySectionConfig
+    )
 
     def parameters(self) -> dict[str, object]:
         """The values, for the run's manifest and its header."""
@@ -159,6 +184,7 @@ class ReportConfig:
             "prediction": self.prediction.parameters(),
             "scheduling": self.scheduling.parameters(),
             "orbit": self.orbit.parameters(),
+            "reliability": self.reliability.parameters(),
         }
 
 
@@ -208,6 +234,7 @@ def parse_report_config(text: bytes) -> ConfigFile:
         prediction=_prediction(stored.get("prediction", {})),
         scheduling=_scheduling(stored.get("scheduling", {})),
         orbit=_orbit(stored.get("orbit", {})),
+        reliability=_reliability(stored.get("reliability", {})),
     )
     return ConfigFile(config=config, text=text)
 
@@ -329,3 +356,25 @@ def _orbit(table: object) -> OrbitConfig:
     _check_number("[orbit] resamples", config.resamples, int, _RESAMPLES)
     _check_number("[orbit] min_young", config.min_young, int, (2, 100_000))
     return config
+
+
+def _reliability(table: object) -> ReliabilitySectionConfig:
+    """``[reliability]``: ``SloConfig``'s window and targets, and the history's step."""
+    if not isinstance(table, dict):
+        message = f"[reliability] must be a table, not {table!r}"
+        raise ReportConfigError(message)
+    step = table.get("history_step_days", 7)
+    targets = {
+        name: value for name, value in table.items() if name != "history_step_days"
+    }
+    unknown = sorted(set(targets) - set(SloConfig.__dataclass_fields__))
+    if unknown:
+        message = f"[reliability]: unknown settings {unknown}"
+        raise ReportConfigError(message)
+    try:
+        slo = SloConfig(**targets)
+    except ReliabilityConfigError as exc:
+        message = f"[reliability]: {exc}"
+        raise ReportConfigError(message) from exc
+    _check_number("[reliability] history_step_days", step, int, (1, 366))
+    return ReliabilitySectionConfig(slo=slo, history_step_days=step)

@@ -65,6 +65,9 @@ MAY_IMPORT_DATASETS = frozenset(
         PLATFORM / "cli_model.py",
         PLATFORM / "cli_regions.py",
         PLATFORM / "cli_report.py",
+        # `faults --publish` seals a fault run; it writes a directory and reads
+        # none, so no runtime path reads the past through it (D-240).
+        PLATFORM / "cli_reliability.py",
     }
 )
 PREDICTION = PLATFORM / "prediction"

@@ -64,6 +64,7 @@ from meridian.reliability.fault_model import (
     WHOLLY_SILENCING,
     Check,
     FaultVerdict,
+    Gathered,
     PlatformEvidence,
     Silence,
     StationEvidence,
@@ -77,14 +78,23 @@ __all__ = [
     "Check",
     "FaultLedgerError",
     "FaultVerdict",
+    "Gathered",
     "InjectedFault",
     "PlatformEvidence",
     "StationEvidence",
     "StationWork",
+    "judge_gathered",
     "judge_platform_fault",
     "judge_station_fault",
     "read_fault_ledger",
 ]
+
+
+def judge_gathered(one: Gathered) -> FaultVerdict:
+    """Judge a fault from the evidence gathered for it, wherever it came from."""
+    if isinstance(one.evidence, PlatformEvidence):
+        return judge_platform_fault(one.fault, one.evidence)
+    return judge_station_fault(one.fault, one.evidence, one.alongside)
 
 
 def judge_station_fault(
@@ -278,6 +288,7 @@ def _alerted(
         True,
         f"StationOffline fired {latency:.0f} s after the fault, "
         f"{after_offline:.0f} s after it read offline",
+        latency_s=latency,
     )
 
 

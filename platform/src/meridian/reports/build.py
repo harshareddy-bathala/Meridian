@@ -26,6 +26,7 @@ from pathlib import Path
 
 from meridian.datasets.canonical import canonical_line
 from meridian.datasets.evaluation import build_evaluation_dataset
+from meridian.datasets.fault_runs import FaultRun
 from meridian.datasets.manifest import Manifest, content_sha256, file_entry
 from meridian.datasets.publish import (
     DamagedSnapshotError,
@@ -38,6 +39,7 @@ from meridian.datasets.seeds import derive
 from meridian.reports.config import ConfigFile, report_config_sha256
 from meridian.reports.data import DATA_FILE, data_rows
 from meridian.reports.detections import detections
+from meridian.reports.fault_rows import fault_rows
 from meridian.reports.orbit import ORBIT_FILE, orbit_rows
 from meridian.reports.prediction import (
     Destination,
@@ -46,9 +48,11 @@ from meridian.reports.prediction import (
     fitted_paths,
 )
 from meridian.reports.prediction_rows import PREDICTION_FILE, prediction_rows
+from meridian.reports.reliability import RELIABILITY_FILE, snapshot_rows
 from meridian.reports.render import render_report
 from meridian.reports.render_orbit import orbit_figures
 from meridian.reports.render_prediction import prediction_figures
+from meridian.reports.render_reliability import reliability_figures
 from meridian.reports.render_scheduling import scheduling_figures
 from meridian.reports.scheduling import (
     SCHEDULING_FILE,
@@ -68,12 +72,13 @@ __all__ = [
     "NotARawSnapshotError",
     "Run",
     "RunExistsError",
+    "RunInputs",
     "build_run",
     "publish_run",
     "with_environment",
 ]
 
-METHOD_VERSION = "report-4"
+METHOD_VERSION = "report-5"
 """Bumped whenever a section's method changes, so two runs made under different
 methods can never share a hash."""
 
@@ -107,9 +112,22 @@ class Run:
     files: Mapping[str, bytes]
 
 
+@dataclass(frozen=True, slots=True)
+class RunInputs:
+    """What a run is computed from, besides its seed."""
+
+    raw: SnapshotDirectory
+    """The raw snapshot, as :func:`read_directory` verified it."""
+
+    config: ConfigFile
+    """The configuration, beside the bytes it was read from."""
+
+    faults: tuple[FaultRun, ...] = ()
+    """Sealed fault runs the reliability section judges again (D-240)."""
+
+
 def build_run(
-    raw: SnapshotDirectory,
-    config: ConfigFile,
+    inputs: RunInputs,
     *,
     seed: int,
     root: Path,
@@ -118,8 +136,7 @@ def build_run(
     """Every section, from one raw snapshot, one configuration and one seed.
 
     Args:
-        raw: The raw snapshot, as :func:`read_directory` verified it.
-        config: The configuration, beside the bytes it was read from.
+        inputs: The raw snapshot, the configuration and any fault runs.
         seed: The master seed every component's seed is derived from.
         root: The datasets root the evaluation dataset and the models are
             published under.
@@ -133,6 +150,7 @@ def build_run(
         MalformedSnapshotError: A row lacks a field a label needs.
         ModuleNotFoundError: The ``fit`` extra is not installed.
     """
+    raw, config = inputs.raw, inputs.config
     if raw.manifest.kind != "raw_snapshot":
         message = f"{raw.path} is a {raw.manifest.kind}, not a raw snapshot"
         raise NotARawSnapshotError(message)
@@ -141,7 +159,7 @@ def build_run(
     )
     dataset = read_directory(labelled.path)
     computed = _sections(
-        raw, dataset, config, seed, Destination(root=root, created_at=created_at)
+        inputs, dataset, seed, Destination(root=root, created_at=created_at)
     )
     files = _files(computed, config.text)
     manifest = Manifest(
@@ -162,6 +180,9 @@ def build_run(
             "config": config.config.parameters(),
             "evaluation_dataset": content_sha256(dataset.manifest),
             "models": computed.models,
+            "fault_runs": [
+                content_sha256(one.directory.manifest) for one in inputs.faults
+            ],
         },
         environment=computed.measured,
     )
@@ -180,15 +201,16 @@ class _Computed:
 
 
 def _sections(
-    raw: SnapshotDirectory,
+    inputs: RunInputs,
     dataset: SnapshotDirectory,
-    config: ConfigFile,
     seed: int,
     destination: Destination,
 ) -> _Computed:
     """Every section's rows. Each seed is derived here, by name, and recorded."""
+    raw, config = inputs.raw, inputs.config
+    reliability = config.config.reliability
     prediction = config.config.prediction
-    seeds, outcomes, inputs = fit_variants(
+    seeds, outcomes, examples = fit_variants(
         dataset, raw, prediction, seed=seed, destination=destination
     )
     seeds[BOOTSTRAP_PREDICTION] = derive(seed, BOOTSTRAP_PREDICTION)
@@ -206,12 +228,18 @@ def _sections(
         RUN_FILE: _run_rows(raw.manifest, config, seed, seeds),
         DATA_FILE: data_rows(raw, dataset),
         PREDICTION_FILE: prediction_rows(
-            outcomes, inputs, prediction, seed=seeds[BOOTSTRAP_PREDICTION]
+            outcomes, examples, prediction, seed=seeds[BOOTSTRAP_PREDICTION]
         ),
         SCHEDULING_FILE: scheduled.rows,
         ORBIT_FILE: orbit_rows(
             detections(raw.files), config.config.orbit, seed=seeds[BOOTSTRAP_ORBIT]
         ),
+        RELIABILITY_FILE: [
+            *snapshot_rows(dataset, reliability),
+            *fault_rows(
+                inputs.faults, detection_max_s=reliability.slo.failure_detection_max_s
+            ),
+        ],
     }
     models = {
         one.variant.name: one.sha256 for one in outcomes if isinstance(one, Fitted)
@@ -224,6 +252,10 @@ def _sections(
         measured={
             "solver": runtimes.pop("solver"),
             "runtime_s": {"scheduling": runtimes.get("schedulers", {})},
+            "fault_run_paths": {
+                content_sha256(one.directory.manifest).hex(): str(one.directory.path)
+                for one in inputs.faults
+            },
         },
     )
 
@@ -233,15 +265,12 @@ def _files(computed: _Computed, config_text: bytes) -> dict[str, bytes]:
     files = {name: _lines(rows) for name, rows in computed.rows.items()}
     parsed = {name: _parsed(data) for name, data in files.items()}
     files[REPORT_FILE] = render_report(
-        run=parsed[RUN_FILE],
-        data=parsed[DATA_FILE],
-        prediction=parsed[PREDICTION_FILE],
-        scheduling=parsed[SCHEDULING_FILE],
-        orbit=parsed[ORBIT_FILE],
+        {name.removesuffix(".jsonl"): rows for name, rows in parsed.items()}
     )
     files |= prediction_figures(parsed[PREDICTION_FILE])
     files |= scheduling_figures(parsed[SCHEDULING_FILE])
     files |= orbit_figures(parsed[ORBIT_FILE])
+    files |= reliability_figures(parsed[RELIABILITY_FILE])
     files[CONFIG_FILE] = config_text
     return files
 

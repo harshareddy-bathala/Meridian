@@ -39,6 +39,7 @@ Kind = Literal[
     "model",
     "regions_report",
     "evaluation_report",
+    "fault_run",
 ]
 KINDS: tuple[Kind, ...] = (
     "raw_snapshot",
@@ -46,6 +47,7 @@ KINDS: tuple[Kind, ...] = (
     "model",
     "regions_report",
     "evaluation_report",
+    "fault_run",
 )
 DERIVED: tuple[Kind, ...] = (
     "evaluation_dataset",
