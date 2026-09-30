@@ -102,7 +102,10 @@ def add_reliability_parser(
         "faults", help="judge a fault run's ledger against what was stored"
     )
     faults.add_argument(
-        "--ledger", type=Path, required=True, help="the run's fault ledger"
+        "--ledger",
+        type=Path,
+        required=True,
+        help="the run's fault ledger, or - to read it from standard input",
     )
     faults.add_argument(
         "--prometheus",
@@ -211,8 +214,13 @@ def _faults(
     now: datetime,
 ) -> int:
     try:
-        with args.ledger.open(encoding="utf-8") as handle:
-            faults = read_fault_ledger(handle)
+        if str(args.ledger) == "-":
+            # So a ledger on the host can be judged inside the API's container,
+            # whose filesystem is read-only (D-206): piped, not copied in.
+            faults = read_fault_ledger(sys.stdin)
+        else:
+            with args.ledger.open(encoding="utf-8") as handle:
+                faults = read_fault_ledger(handle)
     except (OSError, FaultLedgerError) as exc:
         return _refuse("faults", f"cannot read {args.ledger}: {exc}")
     alerts = prometheus_alert_lookup(args.prometheus) if args.prometheus else None

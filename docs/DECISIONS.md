@@ -4134,6 +4134,13 @@ A delay short of the client's timeout changes nothing the platform can observe, 
 
 **A round is on the record when it left one:** a run, because it decided something (D-170), or an offline revocation (D-196). A round that did neither wrote nothing, and the verdict cannot hold the platform to a round it cannot see, so `replanned` does not apply to an outage with no recorded round. A revocation at the very instant a heartbeat arrived belongs to the gap before that heartbeat: the round judged liveness first, when the station had been silent ninety seconds.
 
+**What the real stack corrected** (Stage 21's rehearsal, D-198). Judged against a real stack, the first version failed sixteen faults that the platform had handled correctly. Each failure was a question asked wrongly:
+- **Work is owed a revocation only if it was still the station's.** Work revoked in an earlier outage and never given back had nothing left to revoke. The in-process gate never met this, because its stations always came back holding their work.
+- **A round owes an outage only if the station was still silent when the round finished reading.** A round begins, generates passes, and only then reads liveness: ten seconds, at ten stations. A station heard in between was back, and leaving its work was right. A run's `created_at` says when its reads were done; a round known only by its revocations is allowed sixty seconds.
+- **`StationOffline` times a fault only when it rose for that station.** The alert is summed over the fleet (D-197). If it was already firing, or rose before this station read offline, it was another station's, and the check says "not attributable" instead of reporting a latency of nothing.
+
+With these, the same run's record judged 347 faults and failed none. Where the alert could be attributed, it fired 10 to 80 seconds after the fault: the median was 10 seconds after the station read offline, and the most was 50 seconds after.
+
 *Rejected:* storing the verdicts in a table, which would put ground truth's shadow in the database D-189 keeps it out of; the verdict is printed and optionally written as JSON beside the ledger. Also rejected: judging detection from the dashboard's liveness at the moment of reading, which answers "is it offline now", not "when did it become so".
 
 ---
@@ -4252,6 +4259,40 @@ It is in process, with D-202's `RATE_LIMITS=off` for accelerated simulations, so
 **Latency is measured against a running platform and recorded, labelled simulated.** It uses `meridian serve` and `meridian jobs run` on the host, the simulator at the real thirty-second cadence, and the probe beside it. `docs/SCALE-AND-FAULTS.md` holds the table, the machine it ran on and the commands that regenerate it. It is a measurement of one machine on one day, and says so; the CI test is what holds at every change.
 
 *Rejected:* a latency threshold in CI, which would measure the CI runner's neighbours. Also rejected: labelling any metric by station, even for the fleet's own dashboard, which the public API already serves per station without a series each.
+
+---
+
+## D-198 — The long run is a tool that judges itself, rehearsed for two hours before it runs for seventy-two
+
+**2026-09-29 · accepted** · *`deploy/tools/long_run.py`; `chaos.plan`'s `mean_gap_s`; `meridian reliability faults --ledger -`, Stage 21.*
+
+The roadmap's long run is seventy-two hours of the complete stack with simulated stations, recording crashes, restarts, alerts, false positives, data loss, queue growth and resource use. `long_run.py` does it unattended, from the host, and ends by judging what it recorded.
+- **Faults.** It brings the stack up with the `sim` and `metrics` profiles and ten stations under `chaos`, and injects platform faults on `chaos.py`'s seeded plan.
+- **Samples,** every `--sample-every-minutes`:
+  - each container's state, restart count and exit code;
+  - the alerts Prometheus has firing;
+  - the simulator's upload queue;
+  - each container's CPU and memory.
+- **The judgement,** after a settling time:
+  - **False positives** are alerts that fired with no fault in either ledger open, or closed within ten minutes. That is a `for:` of five minutes, plus a scrape and an evaluation.
+  - **Data loss** is anything still queued after the faults have stopped and the stations have had time to drain. Every acknowledged report is keyed on its assignment, so none can be stored twice (D-015).
+  - **Crashes** are restart counts above zero, which only Docker's restart policy produces, and any service not running at the end. `migrate` and `sim-seed` count as healthy when they exited cleanly.
+  - **The verdict** is `meridian reliability faults` over both ledgers, run inside the API container against the run's own Prometheus. So SC-5's alert latency is measured, not derived (D-192). The ledger is piped in, because the container's filesystem is read-only (D-206).
+
+**It exits non-zero on any failure it finds,** so a seventy-two hour run that finished is a pass or a fail, not a directory to interpret.
+
+**Rehearsed for two hours first.** An hour between platform faults is right for three days and meets one or two in two hours, so a rehearsal passes a shorter mean gap to `chaos.plan`. At twenty minutes, two hours of seed 4471 meets all four platform faults. The rehearsal found three defects in the tool before any could spoil a three-day run:
+- the verdict could not read a ledger inside a read-only container;
+- a service that died and stayed down would have vanished from `compose ps -q` rather than show as failed;
+- **the laptop running it suspended 36 minutes in, and the tool slept through it.** Python's `sleep` does not count time the host was asleep, so the run stalled for two hours, silent, with its stack frozen.
+
+**The rehearsal ran three times.** The first stalled when the laptop suspended; the second was cut by a lid close. That second run's record found the three wrongly asked questions D-192 now records, and the tool now stops the fleet before it copies the ledger, so no fault is judged against heartbeats sent after the copy.
+
+**A run on a host that slept is not unattended, and the tool now says so.** Every wait is cut into thirty-second sleeps against the wall clock. A sleep the clock says lasted over two minutes longer than asked is recorded as a pause, and a pause fails the run. Alerts raised by the pause itself are attributed to it, not counted as false positives. The rehearsal was rerun under `systemd-inhibit --what=sleep:idle`, and a seventy-two hour run on a laptop needs the same.
+
+**The seventy-two hour run is Stage 24's acceptance item,** and it is not claimed here. `docs/SCALE-AND-FAULTS.md` records the rehearsal, and will record the long run when it has run.
+
+*Rejected:* running the long run in CI, whose jobs end at six hours. Also rejected: an in-process long run, which would test neither the containers, nor the restarts, nor the alerts.
 
 ---
 
@@ -4829,6 +4870,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-195 one heartbeat, one time | `meridian/api/msp/heartbeat.py`; `meridian/store/{heartbeats,assignments}.py`; `DATA-MODEL.md` (heartbeats); `tests/msp_conformance/test_heartbeat_endpoint.py` |
 | D-196 the revocation history | migration 0021; `meridian/store/{revocations,fault_evidence}.py`; `DATA-MODEL.md`; `tests/integration/{test_heartbeat_effects,test_schedule_run,test_migrations,test_migration_lifecycle}.py` |
 | D-197 scale from both sides, series that do not grow | `meridian_sim/{scale,supervisor,station}.py`; `deploy/tools/scale_probe.py`; `pyproject.toml` (its lint set); `tests/e2e/test_fifty_stations.py`; `tests/unit/{test_scale_probe,test_simulator_scale}.py`; `docs/SCALE-AND-FAULTS.md` |
+| D-198 the long run and its rehearsal | `deploy/tools/{long_run,chaos}.py`; `meridian/cli_reliability.py` (`--ledger -`); `pyproject.toml` (its lint set); `tests/unit/test_long_run.py`; `docs/SCALE-AND-FAULTS.md`; `OPERATIONS.md` § Fault drills, scale runs and the long run |
 | — the completion gate | `tests/integration/test_fault_gate.py`: five stations under `chaos` through real MSP on a stated clock, judged, with two positive controls |
 | — the amended entry | D-171, whose revocations are now kept (D-196) |
 

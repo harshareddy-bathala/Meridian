@@ -93,22 +93,26 @@ class Planned:
     duration_s: float
 
 
-def plan(seed: int, hours: float) -> tuple[Planned, ...]:
+def plan(
+    seed: int, hours: float, mean_gap_s: float = MEAN_GAP_S
+) -> tuple[Planned, ...]:
     """The faults a `run` of `hours` injects, drawn from `seed`.
 
-    Pure, so the plan can be printed and tested; the same seed and length give
-    the same faults at the same offsets.
+    Pure, so the plan can be printed and tested; the same seed, length and gap
+    give the same faults at the same offsets. `mean_gap_s` is shortened for a
+    rehearsal, which is too short to meet a fault an hour; `MIN_GAP_S` still
+    holds between faults.
     """
     stream = random.Random(f"{seed}:platform-faults")
     kinds = sorted(FAULTS)
     end_s = hours * 3600.0
     planned: list[Planned] = []
-    at_s = stream.expovariate(1.0 / MEAN_GAP_S)
+    at_s = stream.expovariate(1.0 / mean_gap_s)
     while at_s < end_s:
         kind = stream.choice(kinds)
         duration_s = FAULTS[kind].default_duration_s
         planned.append(Planned(round(at_s, 1), kind, duration_s))
-        at_s += duration_s + MIN_GAP_S + stream.expovariate(1.0 / MEAN_GAP_S)
+        at_s += duration_s + MIN_GAP_S + stream.expovariate(1.0 / mean_gap_s)
     return tuple(planned)
 
 
