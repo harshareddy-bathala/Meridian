@@ -243,3 +243,37 @@ def test_a_suspended_host_is_recorded_and_the_wait_ends_on_waking(
     assert pause.end == T0 + timedelta(hours=1, minutes=1)
     assert laptop.clock >= T0 + timedelta(minutes=5)
     assert laptop.sleeps == 2, "a wait past its instant after waking ends at once"
+
+
+def test_an_unreadable_station_ledger_stops_the_judgement(
+    long_run: ModuleType, tmp_path: Path
+) -> None:
+    """Judged on the platform's faults alone, every station alert would be false."""
+    host = long_run.Host(
+        run=lambda _command, _stdin: (1, "no such container"),
+        sleep=lambda _s: None,
+        now=lambda: T0,
+    )
+    compose = sys.modules["compose_db"].Compose("deploy/docker-compose.yml")
+
+    with pytest.raises(sys.modules["compose_db"].ToolError, match="ledger"):
+        long_run._merged_ledger(compose, host, tmp_path, tmp_path / "none.jsonl")
+
+
+def test_the_judgement_reads_alerts_only_until_the_fleet_stopped(
+    long_run: ModuleType, tmp_path: Path
+) -> None:
+    """Recorded when there is one, else the last sample, which comes just before."""
+    host = long_run.Host(
+        run=lambda _c, _s: (0, ""), sleep=lambda _s: None, now=lambda: T0
+    )
+    (tmp_path / "samples.json").write_text(
+        json.dumps([{"at": (T0 - timedelta(hours=1)).isoformat()}]), "utf-8"
+    )
+
+    recorded = {"fleet_stopped": (T0 - timedelta(minutes=5)).isoformat()}
+
+    assert long_run._fleet_stopped(recorded, tmp_path, host) == T0 - timedelta(
+        minutes=5
+    )
+    assert long_run._fleet_stopped({}, tmp_path, host) == T0 - timedelta(hours=1)

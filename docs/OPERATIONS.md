@@ -1245,6 +1245,8 @@ It exits 1 on any of:
 
 `--fault-gap-minutes` shortens the mean time between platform faults for a rehearsal: an hour is right for three days and too rare for two hours.
 
+`--judge-only` judges a finished run again from `--out` and the stack it left standing, without re-running it: for a judgement lost to anything but the run. On a laptop, keep the host awake with the lid closed and idle sleep inhibited, or the run fails as not unattended.
+
 ---
 
 ## Monitoring

@@ -4292,6 +4292,8 @@ The roadmap's long run is seventy-two hours of the complete stack with simulated
 
 **The rehearsal ran three times.** The first stalled when the laptop suspended; the second was cut by a lid close. That second run's record found the three wrongly asked questions D-192 now records, and the tool now stops the fleet before it copies the ledger, so no fault is judged against heartbeats sent after the copy.
 
+**The third ran clean, and its own judgement failed.** The tool stopped the simulator and then read its ledger through `exec`, which needs the container running. So every station fault's alert looked unexplained, and no station fault was judged. The ledger is now read from the simulator's volume by a one-off container, and a ledger that cannot be read stops the judgement. `compose run`'s narration on stderr no longer mixes into what a command returns, and alerts are read only up to the fleet being stopped, whose own heartbeat alert is the judgement's doing. `--judge-only` judged that run again from the stack it left standing: 414 faults, none failed, no false positives.
+
 **A run on a host that slept is not unattended, and the tool now says so.** Every wait is cut into thirty-second sleeps against the wall clock. A sleep the clock says lasted over two minutes longer than asked is recorded as a pause, and a pause fails the run. Alerts raised by the pause itself are attributed to it, not counted as false positives. The rehearsal was rerun under `systemd-inhibit --what=sleep:idle`, and a seventy-two hour run on a laptop needs the same.
 
 **The seventy-two hour run is Stage 24's acceptance item,** and it is not claimed here. `docs/SCALE-AND-FAULTS.md` records the rehearsal, and will record the long run when it has run.

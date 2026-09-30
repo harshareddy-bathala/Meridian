@@ -282,6 +282,11 @@ def real_host() -> Host:
         result = subprocess.run(
             command, input=stdin, text=True, capture_output=True, check=False
         )
+        # Standard output alone when it worked: `compose run` narrates on
+        # stderr, and its narration must not become part of a ledger. Both
+        # when it failed, so the error says why.
+        if result.returncode == 0:
+            return 0, result.stdout
         return result.returncode, result.stdout + result.stderr
 
     return Host(run=run, sleep=time.sleep, now=lambda: datetime.now(UTC))
@@ -431,7 +436,29 @@ def run_long(args: argparse.Namespace, host: Host) -> dict[str, object]:
     # the ledger was copied would otherwise be judged against heartbeats sent
     # after the copy, and read as a fault that did not hold.
     _step(host, compose.command("stop", "simulator"))
-    ledger = _merged_ledger(compose, host, out, platform_ledger)
+    report = _report(args, started, ended, samples, settled, [], [])
+    report["fleet_stopped"] = host.now().isoformat()
+    report["faults_injected"] = {
+        "platform": len([one for one in faults if one.at_s < args.hours * 3600])
+    }
+    return judge(compose, host, out, report, waiter.pauses)
+
+
+def judge(
+    compose: Compose,
+    host: Host,
+    out: Path,
+    report: dict[str, object],
+    pauses: Sequence[Interval] = (),
+) -> dict[str, object]:
+    """Judge a finished run from its ledgers, its stack and its Prometheus.
+
+    Also what ``--judge-only`` runs, against a stack a run left standing, so a
+    judgement lost to a defect in this tool need not cost the run again.
+    """
+    started = datetime.fromisoformat(str(report["started"]))
+    ended = datetime.fromisoformat(str(report["ended"]))
+    ledger = _merged_ledger(compose, host, out, out / "platform-faults.jsonl")
     verdict_status, verdict = host.run(
         compose.command(
             "exec",
@@ -449,21 +476,27 @@ def run_long(args: argparse.Namespace, host: Host) -> dict[str, object]:
     )
     (out / "verdict.txt").write_text(verdict, encoding="utf-8")
 
-    alerts = alert_history(compose, host, started, host.now())
+    # Only up to the fleet being stopped: the alerts that stopping it raises —
+    # heartbeats ceasing — are the judgement's doing, not the run's.
+    alerts = alert_history(compose, host, started, _fleet_stopped(report, out, host))
     windows = ledger_windows(ledger.splitlines())
     # An alert raised by the host having slept is the host's, not a false one;
-    # the pause itself fails the run below.
-    unexplained = false_positives(alerts, windows + waiter.pauses, ended)
-    report = _report(args, started, ended, samples, settled, alerts, unexplained)
-    report["host_pauses"] = [
-        {"start": one.start.isoformat(), "end": (one.end or ended).isoformat()}
-        for one in waiter.pauses
+    # the pause itself fails the run.
+    unexplained = false_positives(alerts, [*windows, *pauses], ended)
+    report["alerts_fired"] = len(alerts)
+    report["alerts_by_name"] = _count(one.name for one in alerts)
+    report["false_positives"] = [
+        {"alert": one.name, "start": one.start.isoformat()} for one in unexplained
     ]
+    if pauses or "host_pauses" not in report:
+        report["host_pauses"] = [
+            {"start": one.start.isoformat(), "end": (one.end or ended).isoformat()}
+            for one in pauses
+        ]
     report["verdict"] = {"exit": verdict_status, "summary": _last_line(verdict)}
-    report["faults_injected"] = {
-        "platform": len([one for one in faults if one.at_s < args.hours * 3600]),
-        "windows_in_ledger": len(windows),
-    }
+    injected = dict(report.get("faults_injected") or {})  # type: ignore[call-overload]
+    injected["windows_in_ledger"] = len(windows)
+    report["faults_injected"] = injected
     (out / "report.json").write_text(json.dumps(report, indent=2) + "\n", "utf-8")
     return report
 
@@ -515,15 +548,42 @@ def _count(names: Iterable[str]) -> dict[str, int]:
     return counts
 
 
+def _fleet_stopped(report: dict[str, object], out: Path, host: Host) -> datetime:
+    """When the run stopped its fleet: recorded, else its last sample, else now."""
+    if "fleet_stopped" in report:
+        return datetime.fromisoformat(str(report["fleet_stopped"]))
+    samples_file = out / "samples.json"
+    if samples_file.exists():
+        taken = json.loads(samples_file.read_text("utf-8"))
+        if taken:
+            return datetime.fromisoformat(taken[-1]["at"])
+    return host.now()
+
+
 def _merged_ledger(
     compose: Compose, host: Host, out: Path, platform_ledger: Path
 ) -> str:
-    """The simulator's ledger and the platform's, as one text, kept in ``out``."""
+    """The simulator's ledger and the platform's, as one text, kept in ``out``.
+
+    Read through a one-off container on the simulator's volume, not ``exec``:
+    the fleet is stopped by then, and ``exec`` needs it running. A ledger that
+    cannot be read stops the judgement — judged against the platform's faults
+    alone, every station fault's alert would read as a false positive.
+    """
     status, stations = host.run(
-        compose.command("exec", "-T", "simulator", "cat", STATION_LEDGER), None
+        compose.command(
+            "run",
+            "--rm",
+            "--no-deps",
+            "--entrypoint",
+            "cat",
+            "simulator",
+            STATION_LEDGER,
+        ),
+        None,
     )
     if status != 0:
-        stations = ""
+        raise ToolError(f"the simulator's ledger could not be read: {stations[-400:]}")
     platform = platform_ledger.read_text("utf-8") if platform_ledger.exists() else ""
     merged = stations + platform
     (out / "faults.jsonl").write_text(merged, encoding="utf-8")
@@ -569,6 +629,11 @@ def main(argv: list[str] | None = None) -> int:
         help="mean time between platform faults; shorter for a rehearsal",
     )
     parser.add_argument("--settle-minutes", type=float, default=10.0)
+    parser.add_argument(
+        "--judge-only",
+        action="store_true",
+        help="judge a finished run again from --out and the stack it left up",
+    )
     add_compose_arguments(parser)
     args = parser.parse_args(argv)
     if args.up:
@@ -577,7 +642,11 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("SIMULATOR_SEED", str(args.seed))
 
     try:
-        report = run_long(args, real_host())
+        if args.judge_only:
+            existing = json.loads((args.out / "report.json").read_text("utf-8"))
+            report = judge(compose_from(args), real_host(), args.out, existing)
+        else:
+            report = run_long(args, real_host())
     except ToolError as refused:
         print(f"long_run: {refused}", file=sys.stderr)
         return 1

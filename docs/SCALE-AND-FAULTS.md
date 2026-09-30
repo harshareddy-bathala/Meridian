@@ -42,14 +42,10 @@ What is proven at every change is in CI and in the tests named below. The tables
 | A reinstatement erased the only record that work was ever revoked, so replanning could not be shown | D-196 |
 | The simulator "declined" work the platform had never seen it hold, which MSP reads as not yet arrived | D-188 |
 
-**Not measured here — the alert.** SC-5's detection is derived on read, so its ninety seconds are arithmetic (D-192). The measured half is when `StationOffline` fires, which needs Prometheus. On a stack with the `metrics` profile:
-
-```sh
-python -m meridian_sim.station --scenario network --count 5 --ledger faults.jsonl
-meridian reliability faults --ledger faults.jsonl --prometheus http://localhost:9090
-```
-
-prints each outage's alert latency. It has not been run for this document.
+**The alert, SC-5's measured half.** SC-5's detection is derived on read, so its ninety seconds are arithmetic (D-192). The measured half is when `StationOffline` fires, and the long-run rehearsal below measured it against the real stack's Prometheus.
+- **The alert is summed over the fleet** (D-197), so it times a fault only when it rose for that station: not already firing for another, and not before this station read offline.
+- **29 station outages met that test.** Each alert fired **20 to 80 seconds after the fault began**, and 20 to 50 seconds after the station read offline. That is inside SC-5's ninety seconds every time.
+- **The other outages are not a failure.** The alert was already firing for another station, so it timed nothing.
 
 ---
 
@@ -117,4 +113,49 @@ done
 
 ## The long run
 
-Seventy-two hours of the full stack with simulated stations under the `chaos` scenario and seeded platform faults is Stage 21's last part, and Stage 24's acceptance item. Its tool and its result are recorded here when it has run.
+`deploy/tools/long_run.py` runs the whole compose stack under faults for hours, samples it, and judges it (D-198). The seventy-two hour run is Stage 24's acceptance item and **has not been run**; what follows is its two-hour rehearsal.
+
+**The rehearsal, 2026-09-30, 06:59 to 09:09 UTC**, on the laptop above:
+- ten stations under `chaos`, and seed 4471's four platform faults: the scheduler stopped for five minutes, the API paused past a station's timeout, the API restarted and the database restarted;
+- a sample every fifteen minutes, and ten minutes to settle.
+
+| Recorded | Result |
+|---|---|
+| Faults judged | **414, none failed**: 410 station faults of ten kinds, and the four platform faults |
+| Host asleep during the run | none |
+| Containers that died on their own | none; every service running at the end |
+| Alerts | 100 — `StationStale` 62, `StationOffline` 37, `SchedulerUnavailable` 1 |
+| False positives | **none**: every alert fell inside a fault in the ledger, or within ten minutes of one closing |
+| Upload queue | at most one report waiting; empty after settling |
+| Peak memory | API 233 MiB, Grafana 206, database 96, jobs 65, Prometheus 52, simulator 31, Alertmanager 23 |
+
+**The verdict, question by question.**
+
+| Question | Passed | Did not apply |
+|---|---|---|
+| `held` | 140 | 270 |
+| `detected` | 177 | 233 |
+| `no_new_work` | 191 | 219 |
+| `replanned` | 19 | 391 |
+| `no_false_miss` | 357 | 57 |
+| `declines_honoured` | 2 | 408 |
+| `recovered` | 182 | 232 |
+| `alerted` | 29 | 381 |
+
+In the 19 outages a scheduling round saw, the station's unbegun work was revoked within 101 seconds of it going offline, which is the next round.
+
+**It took three runs, and each earlier one found something.**
+- **The first stalled when the laptop suspended.** The tool slept through it, because a monotonic sleep does not count a suspend. It now waits against the wall clock and fails a run whose host slept.
+- **The second was cut by a lid close.** Its record exposed three questions the checker was asking wrongly, now recorded in D-192: work already revoked is not owed a revocation again; a round owes an outage only if it finished reading while the station was silent; and a fleet-wide alert times a fault only when it rose for that station. Judged again with the fixes, that run's record also failed nothing.
+- **The third, above, ran clean.** Its own judgement then failed for a reason in the tool: it read the station ledger through `exec` after stopping the simulator. The tool now reads the ledger from the simulator's volume, fails loudly when it cannot, and can judge a finished run again with `--judge-only`, which is how the table above was produced from the run's own stack.
+
+**Regenerating it.**
+
+```sh
+MERIDIAN_IMAGE=… API_PORT=8131 GRAFANA_PORT=3031 \
+python deploy/tools/long_run.py --hours 2 --seed 4471 --sample-every-minutes 15 \
+    --fault-gap-minutes 20 --settle-minutes 10 --out runs/long-2h \
+    --project-name meridian-s21 --up --stations 10
+```
+
+The laptop was kept awake with its lid closed (a user-level `handle-lid-switch` inhibitor) and idle sleep inhibited. A seventy-two hour run on a laptop needs both.
