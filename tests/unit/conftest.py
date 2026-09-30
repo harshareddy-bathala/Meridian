@@ -129,7 +129,12 @@ WORLD: Mapping[str, Sequence[Mapping[str, object]]] = {
         {"id": 1, "satellite_id": "norad:57166", "epoch": AOS - timedelta(hours=6)},
     ],
     "heartbeats": [
-        {"station_id": "st_b", "received_at": AOS + timedelta(minutes=2)},
+        {
+            "station_id": "st_b",
+            "received_at": AOS + timedelta(minutes=2),
+            "clock_offset_s": None,
+            "clock_uncertainty_s": None,
+        },
     ],
     "transmitters": [
         {

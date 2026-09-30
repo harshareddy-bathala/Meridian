@@ -819,7 +819,7 @@ diff one.txt two.txt                                                          # 
 
 Every number in a report is regenerable from a raw snapshot, one configuration and one seed (rule 8, `EVALUATION.md` §9). `meridian report build` computes a report from those three and nothing else, and `meridian report verify` proves a report regenerates. Neither opens a database or a socket.
 
-Decisions this section puts into practice: D-234 to D-238.
+Decisions this section puts into practice: D-234 to D-239.
 
 ### Building a run
 
@@ -847,6 +847,8 @@ reports/<hash12>/
 ├── scheduling.jsonl                the scheduling section's results
 ├── scheduling_gains.svg            D − B and D − greedy B against the SC-1 target
 ├── scheduling_regret.svg           each scheduler's shortfall from the oracle
+├── orbit.jsonl                     the orbit-uncertainty section's results, a row per detection
+├── orbit_timing_<population>.svg   |timing error| against element-set age, by regime
 ├── config.toml     the configuration, byte for byte as it was given
 └── manifest.json   every file's digest, the inputs, the seeds, and the environment
 ```
@@ -871,6 +873,13 @@ reports/<hash12>/
   - how many schedules were checked. A schedule that breaks a constraint stops the build, and nothing is published (D-238).
 
   Settings are under `[scheduling]`, and the solver's seed is derived. Solver runtimes and HiGHS's version are written to the environment block, never to a hashed file. A day the time limit cut short shows in the `Solved` column: only such a day can make a figure depend on the machine.
+- **The orbit-uncertainty section** computes timing error from the snapshot: `first_detection_at + clock_offset_s − aos`, using the offset from the station's latest heartbeat between 30 minutes before the detection and 5 minutes after (D-025). This is the rule the live `timing_error` view uses, and `meridian passes timing` reads that view. For measured and simulated passes apart, it gives:
+  - the slope of |timing error| against element-set age, for each orbital regime, with a station-day interval;
+  - the share inside the stated 1σ, which is SC-3, read from measured passes only. It is given twice: with §6.1's exclusions, and with only the unknown offsets left out;
+  - the exclusions, counted;
+  - §6.3's spread test on element sets under a day old: `fit`, `not fit as written`, or `not tested` below `min_young`.
+
+  A snapshot holds only the heartbeats received inside some assignment's window, so an offset reported before a window opened is not seen (D-239).
 - **The environment block** in `manifest.json` records the commit (and whether the tree had uncommitted changes), the Python and dependency versions, where the snapshot was read from, and how long the build took. It is **not part of the hash** (D-235), so the hash names the numbers, not the machine. A run built from uncommitted code says so when it is built. Build reported figures from a clean tree.
 - The evaluation dataset the run labelled is published under `evaluation/` as `meridian snapshot label` would publish it, and the run names it by hash.
 

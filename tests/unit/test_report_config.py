@@ -74,6 +74,9 @@ def test_the_hash_is_over_values_not_spelling() -> None:
         (b"[scheduling]\nthreshold = 0\n", "above 0"),
         (b"[scheduling]\nthreshold = 1.5\n", "outside 0..1"),
         (b"[scheduling]\nresamples = 10\n", "outside 100..100000"),
+        (b"[orbit]\nseed = 2\n", "the seed is derived"),
+        (b"[orbit]\nmin_young = 1\n", "outside 2..100000"),
+        (b"[orbit]\nresamples = 1.5\n", "must be a number"),
         (b"\xff\xfe", "not UTF-8 TOML"),
     ],
 )

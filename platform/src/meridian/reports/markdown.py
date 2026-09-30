@@ -52,7 +52,7 @@ def rate(value: object) -> str:
 def table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> list[str]:
     """A GitHub-flavoured markdown table, one line per row."""
     lines = [
-        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join(one.replace("|", "\\|") for one in headers) + " |",
         "|" + "|".join("---" for _ in headers) + "|",
     ]
     lines.extend("| " + " | ".join(row) + " |" for row in rows)

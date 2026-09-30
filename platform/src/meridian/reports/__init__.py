@@ -25,11 +25,14 @@ The sections arrive one at a time:
   and a reliability diagram per model (D-237);
 * **scheduling** — seven schedulers replayed on those models over the test
   span, SC-1 as D − B with D − greedy B beside it, oracle regret, and every
-  schedule checked; runtimes measured into the environment (D-238).
+  schedule checked; runtimes measured into the environment (D-238);
+* **orbit uncertainty** — timing error from the snapshot, clock-corrected,
+  against element-set age by regime, 1σ coverage for SC-3, the exclusions
+  counted, and §6.3's spread test (D-239).
 
 **Nothing here opens a database or a socket.** The snapshot is the only input
 that holds data, and a report command never fetches anything (rule 8, and the
 roadmap's "no report command may silently fetch mutable external data").
 
-Reference: docs/DECISIONS.md D-234 to D-238.
+Reference: docs/DECISIONS.md D-234 to D-239.
 """

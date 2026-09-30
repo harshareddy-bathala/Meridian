@@ -33,7 +33,7 @@ from meridian.reports.svg import (
     text,
 )
 
-__all__ = ["Estimate", "interval_chart"]
+__all__ = ["Estimate", "interval_chart", "nice_step"]
 
 _WIDTH = 560
 _LABELS = 170
@@ -115,14 +115,14 @@ def _axis(rows: Sequence[Estimate], target: tuple[float, str] | None) -> _Axis:
     for one in rows:
         values.extend(v for v in (one.value, one.low, one.high) if v is not None)
     low, high = min(values), max(values)
-    step = _step((high - low) / (_TICKS - 1) if high > low else 1.0)
+    step = nice_step((high - low) / (_TICKS - 1) if high > low else 1.0)
     first = math.floor(low / step) * step
     last = math.ceil(high / step) * step
     count = round((last - first) / step)
     return _Axis(first, last, tuple(first + step * n for n in range(count + 1)))
 
 
-def _step(raw: float) -> float:
+def nice_step(raw: float) -> float:
     """The round step at or above ``raw``: 1, 2, 2.5 or 5 times a power of ten."""
     power = 10.0 ** math.floor(math.log10(raw))
     return next(one * power for one in (1, 2, 2.5, 5, 10) if one * power >= raw)

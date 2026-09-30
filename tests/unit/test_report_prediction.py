@@ -155,6 +155,7 @@ def test_every_seed_is_derived_and_recorded(runs: Runs) -> None:
     }
 
     assert set(seeds) == {
+        "bootstrap.orbit",
         "bootstrap.prediction",
         "bootstrap.scheduling",
         "solver",

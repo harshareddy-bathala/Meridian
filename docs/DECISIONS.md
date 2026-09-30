@@ -5171,6 +5171,42 @@ It is drawn by hand like the reliability diagram (D-235), with the drawing primi
 
 ---
 
+## D-239 — The orbit-uncertainty section: the live view's timing error, from a snapshot, with SC-3 stated both ways
+
+**2026-09-30 · accepted** · *`meridian.reports.{detections,orbit,render_orbit,svg_scatter}`, `meridian.reports.config` (`[orbit]`)*
+
+**Timing error is the `timing_error` view's, computed from a snapshot** (D-177):
+- one row per current observation with a first detection;
+- `first_detection_at + clock_offset_s − aos`, with the sign fixed by D-025;
+- the offset from the station's latest heartbeat that carried one, between 30 minutes before the detection and 5 minutes after;
+- §6.1's two exclusions, `clock_offset_unknown` and `within_clock_uncertainty`, carried and counted and never silently applied.
+
+A test pins the sign with a known pass, and makes the reversed sign fail.
+
+**One difference from the view, stated.** A raw snapshot exports heartbeats received inside some assignment's window (Stage 15), and the view reads every heartbeat. A detection is inside its own window, so the heartbeats a station sends while listening are all there. An offset reported only in the half hour before a window opened is not, and such a detection reads as `clock_offset_unknown` here where the view would have corrected it. The difference moves passes from kept to excluded, never the other way, and the count of exclusions shows how many.
+
+*Rejected: widening the export by 30 minutes before each window.* That would change every raw snapshot's contents and hash for one section's edge case. The exclusion count already says how much it matters.
+
+**The stated 1σ is the one the station was issued**, `assignments.timing_uncertainty_s`. An assignment without one takes the published prior at its element set's age (D-060). Each detection row names which source it used, and the section counts them.
+
+**SC-3 is stated two ways.** §6.1 discards an error smaller than the clock's own uncertainty. Such an error is inside any stated 1σ, so discarding it can only lower the coverage. The section reports:
+- coverage under §6.1's exclusions, which is SC-3;
+- coverage with only the unknown offsets left out.
+
+The two bound the rule's effect, and neither is chosen silently. As with SC-1 and SC-2, it says whether the point estimate meets 68% and whether the whole Wilson interval is above it.
+
+**Error against age is a least-squares slope of |timing error| on age in days, for each orbital regime**, with a station-day bootstrap interval drawn from `bootstrap.orbit`. It is not a model. It is the relationship §6.1 names, stated with its uncertainty. A regime with fewer than three kept passes, or with a single age, has no slope, and says so.
+
+**§6.3's test (D-100) now runs whenever it can.** It looks at detections on element sets under a day old, where the orbit contributes a fraction of a second, and asks whether their first-detection spread (a standard deviation) exceeds the orbital signal the data could show: §6.3's 0.27 s per day of age, times the span of ages present.
+- If the spread is larger, timing error is measuring the station's horizon rather than the element set, and the section says §6.1 is **not fit as written**, as §6.3 requires.
+- Below `min_young` young detections, stated in the configuration before any result, it is **not tested**.
+
+This is the test D-100 left open. Its answer on real archive data is still owed, because no such data has been reported yet.
+
+**Every detection is a row** in `orbit.jsonl`, so a reader can recompute any figure, and the figure is drawn from those rows. It plots |timing error| against age, one colour per regime (the palette's first three slots, safe when every pair is on screen), each regime's fitted line, and the published prior as a dashed curve. A discarded point is drawn hollow, so the rule's effect is seen rather than hidden.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

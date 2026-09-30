@@ -13,7 +13,10 @@ validated by the module that owns those settings rather than restated:
 * ``[scheduling]`` — how every scheduler is replayed: the frames term, the
   time limit and turnaround, checked by
   :class:`~meridian.scheduler.schedule_config.ScheduleConfig`; the bootstrap
-  resamples; and a completeness threshold in place of the dataset's (D-238).
+  resamples; and a completeness threshold in place of the dataset's (D-238);
+* ``[orbit]`` — the timing-error bootstrap's resamples, and how many detections
+  on element sets under a day old ``EVALUATION.md`` §6.3's spread test needs
+  before it says anything (D-239).
 
 Every table is optional and falls back to its owner's defaults. An unknown
 table is refused, so a misspelt one cannot silently fall back.
@@ -48,6 +51,7 @@ from meridian.scheduler.schedule_config import ScheduleConfig, ScheduleConfigErr
 
 __all__ = [
     "ConfigFile",
+    "OrbitConfig",
     "PredictionConfig",
     "ReportConfig",
     "ReportConfigError",
@@ -57,7 +61,7 @@ __all__ = [
     "report_config_sha256",
 ]
 
-_TABLES = ("labels", "prediction", "scheduling")
+_TABLES = ("labels", "prediction", "scheduling", "orbit")
 
 _DECIDED_BY_THE_REPORT = ("configuration", "seed", "without")
 """Model settings the report sets itself, for every configuration it fits."""
@@ -126,12 +130,27 @@ class SchedulingConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class OrbitConfig:
+    """How the orbit-uncertainty section estimates its intervals and its test."""
+
+    resamples: int = 2000
+    min_young: int = 10
+    """Detections on element sets under a day old that §6.3's spread test
+    needs; below it, the test is reported as not run, stated in advance."""
+
+    def parameters(self) -> dict[str, object]:
+        """The values the section's numbers depend on."""
+        return {"resamples": self.resamples, "min_young": self.min_young}
+
+
+@dataclass(frozen=True, slots=True)
 class ReportConfig:
     """The resolved configuration of every section."""
 
     labels: LabelConfig = field(default_factory=LabelConfig)
     prediction: PredictionConfig = field(default_factory=PredictionConfig)
     scheduling: SchedulingConfig = field(default_factory=SchedulingConfig)
+    orbit: OrbitConfig = field(default_factory=OrbitConfig)
 
     def parameters(self) -> dict[str, object]:
         """The values, for the run's manifest and its header."""
@@ -139,6 +158,7 @@ class ReportConfig:
             "labels": self.labels.parameters(),
             "prediction": self.prediction.parameters(),
             "scheduling": self.scheduling.parameters(),
+            "orbit": self.orbit.parameters(),
         }
 
 
@@ -187,6 +207,7 @@ def parse_report_config(text: bytes) -> ConfigFile:
         labels=labels,
         prediction=_prediction(stored.get("prediction", {})),
         scheduling=_scheduling(stored.get("scheduling", {})),
+        orbit=_orbit(stored.get("orbit", {})),
     )
     return ConfigFile(config=config, text=text)
 
@@ -293,3 +314,18 @@ def _check_number(
     if not low <= value <= high:  # type: ignore[operator]
         message = f"{name} = {value} is outside {low}..{high}"
         raise ReportConfigError(message)
+
+
+def _orbit(table: object) -> OrbitConfig:
+    """``[orbit]``: the bootstrap's resamples and the spread test's minimum."""
+    if not isinstance(table, dict):
+        message = f"[orbit] must be a table, not {table!r}"
+        raise ReportConfigError(message)
+    unknown = sorted(set(table) - {"resamples", "min_young"})
+    if unknown:
+        message = f"[orbit]: unknown settings {unknown}; the seed is derived (D-236)"
+        raise ReportConfigError(message)
+    config = OrbitConfig(**table)
+    _check_number("[orbit] resamples", config.resamples, int, _RESAMPLES)
+    _check_number("[orbit] min_young", config.min_young, int, (2, 100_000))
+    return config

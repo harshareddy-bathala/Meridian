@@ -135,3 +135,15 @@ resamples = 2000
 # A completeness threshold in place of the dataset's own (D-151), to read the
 # comparison at another. Leave unset to use the dataset's.
 # threshold = 0.8
+
+# ── [orbit] — the orbit-uncertainty section: timing error against element-set
+#    age by regime, 1σ coverage (SC-3), and EVALUATION.md §6.3's spread test.
+#    The bootstrap's seed is derived (D-236, D-239).
+[orbit]
+
+# Station-day bootstrap draws behind each regime's slope interval.
+resamples = 2000
+
+# Detections on element sets under a day old that §6.3's spread test needs.
+# Below it, the test is reported as not run. Stated here, before any result.
+min_young = 10

@@ -37,6 +37,8 @@ from meridian.datasets.publish import (
 from meridian.datasets.seeds import derive
 from meridian.reports.config import ConfigFile, report_config_sha256
 from meridian.reports.data import DATA_FILE, data_rows
+from meridian.reports.detections import detections
+from meridian.reports.orbit import ORBIT_FILE, orbit_rows
 from meridian.reports.prediction import (
     Destination,
     Fitted,
@@ -45,6 +47,7 @@ from meridian.reports.prediction import (
 )
 from meridian.reports.prediction_rows import PREDICTION_FILE, prediction_rows
 from meridian.reports.render import render_report
+from meridian.reports.render_orbit import orbit_figures
 from meridian.reports.render_prediction import prediction_figures
 from meridian.reports.render_scheduling import scheduling_figures
 from meridian.reports.scheduling import (
@@ -54,6 +57,7 @@ from meridian.reports.scheduling import (
 )
 
 __all__ = [
+    "BOOTSTRAP_ORBIT",
     "BOOTSTRAP_PREDICTION",
     "BOOTSTRAP_SCHEDULING",
     "CONFIG_FILE",
@@ -69,7 +73,7 @@ __all__ = [
     "with_environment",
 ]
 
-METHOD_VERSION = "report-3"
+METHOD_VERSION = "report-4"
 """Bumped whenever a section's method changes, so two runs made under different
 methods can never share a hash."""
 
@@ -79,6 +83,7 @@ REPORTS = "reports"
 RUN_FILE = "run.jsonl"
 BOOTSTRAP_PREDICTION = "bootstrap.prediction"
 BOOTSTRAP_SCHEDULING = "bootstrap.scheduling"
+BOOTSTRAP_ORBIT = "bootstrap.orbit"
 SOLVER = "solver"
 REPORT_FILE = "report.md"
 CONFIG_FILE = "config.toml"
@@ -189,6 +194,7 @@ def _sections(
     seeds[BOOTSTRAP_PREDICTION] = derive(seed, BOOTSTRAP_PREDICTION)
     seeds[SOLVER] = derive(seed, SOLVER) % SOLVER_SEED_RANGE
     seeds[BOOTSTRAP_SCHEDULING] = derive(seed, BOOTSTRAP_SCHEDULING)
+    seeds[BOOTSTRAP_ORBIT] = derive(seed, BOOTSTRAP_ORBIT)
     scheduled = scheduling_section(
         dataset,
         raw,
@@ -203,6 +209,9 @@ def _sections(
             outcomes, inputs, prediction, seed=seeds[BOOTSTRAP_PREDICTION]
         ),
         SCHEDULING_FILE: scheduled.rows,
+        ORBIT_FILE: orbit_rows(
+            detections(raw.files), config.config.orbit, seed=seeds[BOOTSTRAP_ORBIT]
+        ),
     }
     models = {
         one.variant.name: one.sha256 for one in outcomes if isinstance(one, Fitted)
@@ -228,9 +237,11 @@ def _files(computed: _Computed, config_text: bytes) -> dict[str, bytes]:
         data=parsed[DATA_FILE],
         prediction=parsed[PREDICTION_FILE],
         scheduling=parsed[SCHEDULING_FILE],
+        orbit=parsed[ORBIT_FILE],
     )
     files |= prediction_figures(parsed[PREDICTION_FILE])
     files |= scheduling_figures(parsed[SCHEDULING_FILE])
+    files |= orbit_figures(parsed[ORBIT_FILE])
     files[CONFIG_FILE] = config_text
     return files
 
