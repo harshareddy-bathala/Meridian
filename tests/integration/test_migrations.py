@@ -120,6 +120,8 @@ def test_all_expected_tables_exist(conn) -> None:
         "horizon_profiles",
         "interference_profiles",
         "products",
+        # The label "usable", rated blind (0027, D-260).
+        "reception_ratings",
     }
     assert expected <= tables
 
@@ -178,6 +180,7 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:
         "horizon_profiles",
         "interference_profiles",
         "products",
+        "reception_ratings",
     } <= carrying
     # D-049: element_sets is the deliberate exception. Its provenance lives in
     # `source`, which distinguishes celestrak from spacetrack from manual as
@@ -1532,3 +1535,13 @@ def test_a_run_over_both_populations_is_two_rows_never_one_total(fixtures) -> No
     )
 
     assert rows == [(False, 1, 2), (True, 1, 2)]
+
+
+def test_a_rating_names_an_observation_that_exists(rollback) -> None:
+    """D-260: a rating belongs to one observation revision, by key."""
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        rollback(
+            "insert into reception_ratings (assignment_id, revision,"
+            " observation_started_at, station_id, usable, rubric, rater, simulated)"
+            " values ('as_none', 1, now(), 'st_none', true, 'usable-1', 'hr', false)"
+        )

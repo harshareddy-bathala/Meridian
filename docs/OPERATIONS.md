@@ -723,6 +723,34 @@ Models, like datasets, are regenerable from what they were made from, so the raw
 
 ---
 
+## Reception verdicts
+
+The reception verdict is a calibrated probability that a reception is usable (Stage 26). The label it learns is a person's rating of the decoded product, made without seeing the verdict or anything it reads (D-260). Rating is the only part of the verdict that needs a person, and the verdict cannot be fitted without it.
+
+### Rating receptions
+
+```sh
+meridian verdict queue
+meridian verdict rate as_8f2c41d07e 1 --usable --rater hr
+meridian verdict rate as_8f2c41d07e 1 --unusable --rater hr
+```
+
+`queue` lists measured receptions that declared a product and have no rating yet, oldest first. For each reception it shows the assignment, revision, station, satellite and time, and under it each product's kind, sha256 and place on the station. It shows nothing else, on purpose: do not look the reception up on the dashboard or in the logs before rating it. A rating made with the outcome, the SNR or a verdict in view is not blind, and it would teach the verdict to agree with itself.
+
+Open each product where the station keeps it, judge it by the rubric below, and record one answer. A second rating of the same reception is kept beside the first, and the latest is the label. `--rater` is a short tag that tells raters apart, such as initials. It is not a name, and the database refuses spaces and capitals. A simulated reception, or one that declared no product, is refused: the first is never training input (D-078), and the second is unusable without being rated.
+
+### Rubric `usable-1`
+
+A reception is **usable** if someone who wanted this satellite's data from this pass would keep the product and use it:
+- **an image** (Meteor LRPT): at least one channel shows recognisable ground, cloud or coastline over a continuous stretch of the pass. Short dropouts, a noisy edge and a missing channel do not make it unusable;
+- **telemetry**: at least one frame decodes to plausible values.
+
+It is **unusable** if it is mostly noise, mostly missing, or decoded but shows nothing, such as a black or uniform image or a corrupt file.
+
+Rate what the product shows, not what you expected from the pass. A good image from a low pass is usable, and a broken one from a high pass is not. If a reception is genuinely ambiguous, rate it unusable and move on: a rubric that needs a judgement call on every product is a different rubric, and a change of rubric is a new name such as `usable-2`.
+
+---
+
 ## Scheduling
 
 The `jobs` service decides, every `SCHEDULE_INTERVAL_S`, which of the next `SCHEDULE_HORIZON_S` of passes each station receives. It maximises the summed value of what it takes: **yield × frames × priority**, the last under B and D only (D-168). A mixed-integer programme solved by HiGHS finds that maximum, under one set of constraints, and the result is checked against those constraints before anything is written (D-166, D-167). Every run is a row in `schedule_runs`, and every decision carries an explanation (D-170).

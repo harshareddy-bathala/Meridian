@@ -2305,7 +2305,7 @@ D-078 excludes simulated observations from every training and evaluation set, be
 
 ## D-106 — What "usable" means for the reception verdict
 
-**2026-09-14 · open**
+**2026-09-14 · open** · *Settled 2026-10-01 by D-260: a blind human rating of the decoded product.*
 
 A calibrated probability needs a label, and the label must not be built from the verdict's own inputs. If "usable" were defined as, say, frames decoded above some fraction of frames expected, the verdict would be predicting a threshold on a number it reads, and a perfect Brier score would prove arithmetic.
 
@@ -5347,6 +5347,39 @@ Their effects are specified in `docs/SCALE-AND-FAULTS.md` § Ground-truth faults
 
 ---
 
+## D-260 — "Usable" is a person's rating of the decoded product, made blind to the verdict
+
+**2026-10-01 · accepted, to be confirmed by the team** · *Migration 0027; `meridian/store/ratings.py`, `meridian/cli_verdict.py`, `meridian/datasets/usable_labels.py`, `meridian/store/snapshot_reads.py`, Stage 26. Settles D-106.*
+
+D-106 asked what label the reception verdict is calibrated against, and required one not built from the verdict's own inputs. Of its four candidates, only one meets that requirement outright:
+- **line continuity, or any product check**, is computed from the decoded frames. Its own entry warned that it may track the frames ratio closely enough to bring the circularity back;
+- **agreement with another reception** is sparse while the network has one physical station;
+- **SatNOGS vetting** rates *with signal*, not *usable*, on another network's receptions.
+
+A person who looks at the product and says whether it can be used answers the question SC-7 asks and reads none of the verdict's inputs. The user chose it on 2026-10-01; the team confirms it at review, with SC-7's target.
+
+**The rules.**
+- **A revision with no product is unusable, unrated.** Nothing exists to look at or to use. This is the one part of the label that follows from what the station reported, since a reception that decoded nothing declares no product. So SC-7 is reported twice: on every labelled reception, and on rated receptions only. The second is the hard question, and the easy cases cannot inflate it.
+- **The latest rating of a revision is its label.** Ratings are append-only, so a re-rating or a second rater's answer is a new row and the first stays on the record. A label belongs to one observation revision, as a verdict does (D-104).
+- **An unrated reception has no label.** It is left out of fitting and scoring and never guessed from its outcome.
+- **Simulated receptions cannot be rated.** No simulated row is ever a label (D-078, D-105), so the tool refuses one rather than collecting work that could never be used.
+
+**Blind by construction.** `meridian verdict queue` lists what to look at: the reception's assignment, revision, station, satellite and time, and each product's kind, hash and place on the station. Its query reads no other column, so the outcome, the SNR series, the frame counts, the noise floor and any verdict never reach the rater. `tests/unit/test_reception_ratings.py` pins the query's columns and checks the printed queue for every verdict input. The rater opens the product where the station keeps it. The platform holds no product bytes (D-029, D-176), and on the single-machine deployment the station and the platform are one host.
+
+**What a rating records.**
+- `usable`, true or false.
+- `rubric`: which written instructions were followed. `usable-1` is in `OPERATIONS.md` § Reception verdicts. A changed rubric is a different label, and a model says which one it was fitted on.
+- `rater`: a short tag, not a name. `PROJECT.md` §16 holds no personal data and D-107 is still open. A tag is enough to tell two raters apart, and the column's `CHECK` refuses spaces and capitals, so a full name does not fit.
+- `simulated`, copied as everywhere, and always false.
+
+**The cost, stated.** Six to fifteen passes a day from one station is the most the team can rate, and fewer will carry a product. The temporal split needs enough rated receptions in each of its three spans. Until it has them, `meridian verdict fit` refuses with the counts (Stage 26, Part 3), and SC-7 is reported as not measured rather than estimated from too few.
+
+*Rejected: deriving "usable" from frames decoded against frames expected.* That is the verdict's own strongest input. A verdict calibrated to it would predict a threshold on a number it reads.
+
+*Rejected: rating with the verdict shown.* It is faster, and every rating would then be an agreement with the model rather than a test of it.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5365,7 +5398,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | | Question | Blocks |
 |---|---|---|
 | **D-100** | Which method SC-3 is measured by, after `first_detection_at` is tested on archive data | SC-3's analysis in Stage 22 |
-| **D-106** | What label "usable" is, independent of the verdict's inputs | Stage 26 and SC-7 |
+| **D-106** | What label "usable" is, independent of the verdict's inputs | Settled 2026-10-01 by **D-260**, a blind human rating; the team confirms it with SC-7's target |
 | **D-107** | Whether an owner's contact is held, and how §16 of `PROJECT.md` changes | Stage 29 beyond team-operated stations |
 | **D-108** | Archive rows as runtime evidence; D-053 against §17; phase naming; calendar placement | — |
 
@@ -5640,6 +5673,13 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-252 Skyfield in one simulator module | `meridian_sim/sky_track.py`; `simulator/pyproject.toml`; `pyproject.toml` (its exemption); `ARCHITECTURE.md` rule 2; `tests/unit/test_simulator_sky_track.py` |
 | D-253 four faults with ground-truth causes | `meridian_sim/{faults,sky_faults,sky_effects,fleet_faults,fault_notes,fault_schedule,supervisor,station,config,virtual_station}.py`; `deploy/{docker-compose.yml,.env.example}`; `docs/SCALE-AND-FAULTS.md` § Ground-truth faults; `OPERATIONS.md` § Ground-truth faults; `tests/unit/{test_simulator_sky_faults,test_simulator_sky_ground_truth,test_simulator_cli,test_reliability_faults}.py` |
 | — the completion gate | `tests/integration/test_ground_truth_gate.py`: three stations under `sky` over a day of real passes, read from the ledger and from every table, with a planted label as the positive control |
+
+**Landed 2026-10-01**, building Stage 26's reception verdict.
+
+| Decision | Applied to |
+|---|---|
+| D-260 the label "usable", rated blind | migration 0027; `meridian/store/{ratings,snapshot_reads}.py`; `meridian/cli_verdict.py`, `cli.py`; `meridian/datasets/{usable_labels,export}.py`; `DATA-MODEL.md`; `OPERATIONS.md` § Reception verdicts; `tests/unit/{test_usable_labels,test_reception_ratings,test_snapshot_tables}.py`; `tests/integration/{test_reception_ratings,test_migrations,test_migration_lifecycle}.py` |
+| — the settled entry | D-106 |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

@@ -12,7 +12,8 @@ the scheduled work and the migration check beside it; ``snapshot`` exports,
 labels and verifies Stage 15's datasets (``cli_snapshot``); ``model`` fits,
 evaluates and shows Stage 17's models (``cli_model``); ``profiles`` writes the
 horizon and interference profiles (``cli_profiles``); ``report`` builds
-and verifies Stage 22's evaluation reports (``cli_report``). Every command the
+and verifies Stage 22's evaluation reports (``cli_report``); ``verdict``
+rates receptions for the reception verdict (``cli_verdict``). Every command the
 operations runbook documents is now built, so the table of commands whose
 stage had not arrived went with the last of them.
 
@@ -48,6 +49,7 @@ from meridian.cli_snapshot import (
     add_snapshot_parser,
     run_snapshot,
 )
+from meridian.cli_verdict import add_verdict_parser, run_verdict
 from meridian.cli_views import add_timing_arguments
 from meridian.config import load_settings
 from meridian.store import station_tokens, stations
@@ -273,6 +275,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_regions_parser(subcommands)
     add_profiles_parser(subcommands)
     add_report_parser(subcommands)
+    add_verdict_parser(subcommands)
 
     return parser
 
@@ -291,6 +294,7 @@ NEEDS_ACTION = frozenset(
         "report",
         "snapshot",
         "station",
+        "verdict",
     }
 )
 """Commands that are a noun and mean nothing without a verb after them.
@@ -316,6 +320,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "serve": run_serve,
     "snapshot": run_snapshot,
     "station": _run_station,
+    "verdict": run_verdict,
 }
 """Every subcommand that does real work, and the handler that does it.
 
