@@ -32,10 +32,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
+from meridian.config import Settings
 from meridian.observations.frames_expected import frames_expected
 from meridian.prediction.verdict_inputs import ReceptionInputs
 from meridian.prediction.verdict_score import VerdictModel, score_reception
-from meridian.registry import ListeningQuery
+from meridian.registry import ListeningQuery, Registry
+from meridian.registry.psycopg_registry import PsycopgRegistry
 from meridian.store.stations import Connection
 from meridian.store.verdicts import (
     NewVerdict,
@@ -44,7 +46,13 @@ from meridian.store.verdicts import (
     unscored_receptions,
 )
 
-__all__ = ["Listening", "VerdictBuildReport", "apply_verdicts", "inputs_of"]
+__all__ = [
+    "Listening",
+    "VerdictBuildReport",
+    "apply_verdicts",
+    "inputs_of",
+    "registry_for",
+]
 
 
 class Listening(Protocol):
@@ -64,6 +72,20 @@ class VerdictBuildReport:
     written: int
     routes: dict[str, int] = field(default_factory=dict)
     simulated: int = 0
+
+
+def registry_for(conn: Connection, settings: Settings, now: datetime) -> Registry:
+    """The registry over ``conn``, configured as every other caller builds it.
+
+    Shared by ``meridian verdict apply`` and the jobs service's verdict task,
+    so both ask ``was_listening`` the same way.
+    """
+    return PsycopgRegistry(
+        conn,
+        pepper=settings.token_hash_pepper,
+        recovery_window_s=settings.registration_recovery_window_s,
+        now_utc=now,
+    )
 
 
 def inputs_of(reception: UnscoredReception, *, listening: bool) -> ReceptionInputs:

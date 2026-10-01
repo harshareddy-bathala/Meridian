@@ -14,7 +14,8 @@ Each skill carries a station-day bootstrap interval, as SC-2's does
 (:mod:`meridian.reports.bootstrap`, D-237).
 
 **Not measured is a result.** A snapshot with too few rated receptions, no
-split dates, or no product manifest gives one ``verdict`` row with
+split dates, no product manifest, or no reception after ``validate_until``
+gives one ``verdict`` row with
 ``status = not_measured`` and the reason. It never gives a number from too
 little. That is SC-7's state until station 001's receptions are rated (D-260).
 
@@ -36,6 +37,7 @@ from meridian.prediction.calibration import Calibration
 from meridian.prediction.splits import SplitError
 from meridian.prediction.verdict_evaluation import (
     VerdictEvaluation,
+    VerdictEvaluationError,
     evaluate_verdict,
 )
 from meridian.prediction.verdict_examples import (
@@ -121,13 +123,18 @@ def verdict_section(
     )
     held = read_verdict(published.path)
     split = fitted.split
-    evaluation = evaluate_verdict(
-        held.model,
-        found,
-        train_until=split.train_until,
-        validate_until=split.validate_until,
-        as_of=split.as_of,
-    )
+    try:
+        evaluation = evaluate_verdict(
+            held.model,
+            found,
+            train_until=split.train_until,
+            validate_until=split.validate_until,
+            as_of=split.as_of,
+        )
+    except VerdictEvaluationError as exc:
+        # A validation span that reaches the snapshot's end leaves no test
+        # span: a fitted model with nothing to judge it on is not measured.
+        return VerdictSection([_refused(str(exc), config)], None)
     judge = _Judge(held.model, config.resamples, bootstrap_seed)
     rows = [
         _summary(held.model, found, evaluation, config),

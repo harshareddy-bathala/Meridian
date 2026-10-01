@@ -68,7 +68,8 @@ def snapshot(*observations: dict[str, object]) -> dict[str, bytes]:
             )
         ),
         "listening.jsonl": jsonl(
-            {"assignment_id": "as_a", "listening_confirmed": True}
+            {"assignment_id": "as_a", "listening_confirmed": True},
+            {"assignment_id": "as_b", "listening_confirmed": False},
         ),
         "observations.jsonl": jsonl(*observations),
     }
@@ -94,10 +95,20 @@ def test_a_reception_reads_every_input() -> None:
     )
 
 
-def test_an_assignment_never_asked_about_reads_as_not_confirmed() -> None:
+def test_a_registry_that_said_no_reads_as_not_confirmed() -> None:
     (one,) = read_receptions(snapshot(observation("as_b")))
 
     assert one.inputs.listening_confirmed is False
+
+
+def test_an_assignment_never_asked_about_is_left_out() -> None:
+    """D-263: an open window at export is not a reception the writer scores."""
+    held = snapshot(observation("as_a"), observation("as_b"))
+    held["listening.jsonl"] = jsonl(
+        {"assignment_id": "as_a", "listening_confirmed": True}
+    )
+
+    assert [one.assignment_id for one in read_receptions(held)] == ["as_a"]
 
 
 def test_absent_evidence_stays_absent() -> None:

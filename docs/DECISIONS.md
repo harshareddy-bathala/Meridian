@@ -5437,7 +5437,7 @@ The verdict is fitted and judged the way Stage 17 fits a yield model: stated spl
 
 Stage 26's output is a `reception_verdicts` row for every observation revision, including one that received nothing. Five decisions settle how the rows are written.
 
-**What is scored: closed windows of scheduled assignments.** These are exactly the receptions a raw snapshot asks the registry about (D-145). The writer therefore gets the listening answer the snapshot freezes, and a verdict written now hashes the same as one recomputed from a snapshot later (D-261). `tests/integration/test_reception_verdicts.py` checks this row by row, against a real export. A reception whose window is still open waits for the next round.
+**What is scored: closed windows of scheduled assignments.** These are exactly the receptions a raw snapshot asks the registry about (D-145). The writer therefore gets the listening answer the snapshot freezes, and a verdict written now hashes the same as one recomputed from a snapshot later (D-261). `tests/integration/test_reception_verdicts.py` checks this row by row, against a real export. A reception whose window is still open waits for the next round. The snapshot reader keeps the same receptions and no others, so one whose window was open at export is never fitted with a listening value its stored verdict will not have.
 
 **Measured and simulated alike, labelled.** A simulated reception's verdict carries `simulated = true`, copied from the observation. It is never a label or a training row (D-078). Stage 27 needs it to tell a partial reception from a decoded one on a simulated fleet.
 

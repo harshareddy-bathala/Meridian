@@ -262,3 +262,19 @@ def test_without_dates_sc7_is_not_measured(reports: Reports) -> None:
     assert summary["status"] == "not_measured"
     assert "names no train_until" in summary["reason"]
     assert not of(found, "sc7")
+
+
+def test_a_validation_span_to_the_snapshot_s_end_is_not_measured(
+    reports: Reports,
+) -> None:
+    """Review fix: no test span is *not measured*, never a failed build."""
+    settings = SETTINGS + VERDICT.replace(
+        "validate_until = 2026-09-16T00:00:00Z",
+        "validate_until = 2026-09-23T06:00:00Z",
+    )
+
+    found = rows(reports.build(settings=settings))
+
+    (summary,) = of(found, "verdict")
+    assert summary["status"] == "not_measured"
+    assert "test 0" in summary["reason"]

@@ -180,11 +180,11 @@ def _verdicts(settings: Settings) -> DatabaseVerdictWork | None:
             not match its manifest.
     """
     # Inside the function: see the module docstring.
-    from meridian.cli_verdict import registry_for  # noqa: PLC0415
     from meridian.jobs.verdict_round import DatabaseVerdictWork  # noqa: PLC0415
     from meridian.prediction.verdict_files import (  # noqa: PLC0415
         load_verdict_model,
     )
+    from meridian.verdict_build import registry_for  # noqa: PLC0415
 
     if not settings.verdict_model:
         return None

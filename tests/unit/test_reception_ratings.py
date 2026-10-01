@@ -9,9 +9,14 @@ Reference: docs/DECISIONS.md D-106, D-260.
 
 from __future__ import annotations
 
+import argparse
 import re
 from datetime import UTC, datetime
 
+import psycopg
+import pytest
+
+from meridian import cli_verdict
 from meridian.cli_verdict import queue_lines
 from meridian.store import ratings
 from meridian.store.ratings import QueuedProduct, QueuedReception
@@ -84,3 +89,40 @@ def test_an_empty_queue_says_so() -> None:
     assert queue_lines([]) == [
         "nothing to rate: every measured reception with products is rated"
     ]
+
+
+class _Connection:
+    def __enter__(self) -> _Connection:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        ("rate", "the rater tag or rubric is not of an allowed form"),
+        ("apply", "probability_usable out of range"),
+    ],
+)
+def test_a_check_violation_names_the_rater_tag_only_when_rating(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    action: str,
+    expected: str,
+) -> None:
+    """Review fix: ``apply`` reports its own constraint, not the rater's."""
+
+    def violates(*_args: object) -> list[str]:
+        raise psycopg.errors.CheckViolation("probability_usable out of range")
+
+    monkeypatch.setattr(cli_verdict, "load_settings", lambda: None)
+    monkeypatch.setattr(cli_verdict, "connect_once", lambda _settings: _Connection())
+    monkeypatch.setattr(cli_verdict, "_rate", violates)
+    monkeypatch.setattr(cli_verdict, "_apply", violates)
+
+    code = cli_verdict.run_verdict(argparse.Namespace(action=action))
+
+    assert code == cli_verdict.EXIT_FAILED
+    assert expected in capsys.readouterr().err

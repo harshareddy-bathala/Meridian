@@ -9,8 +9,15 @@ reads from the database:
 - frames expected from :func:`meridian.datasets.frames_expected.read_frames_expected`,
   the one definition (D-250);
 - listening from ``listening.jsonl``, the registry's answers frozen at export
-  (D-145). An assignment the registry was not asked about reads as not
-  confirmed, which is what the writer's registry call answers for it too.
+  (D-145).
+
+**Only the receptions the writer scores.** The export asks the registry about
+every scheduled assignment whose window had closed, and about no other. A
+reception of any other assignment, most often one whose window was still open
+when the snapshot was taken, is left out. Read as "not confirmed", it would
+carry a listening value the live writer, asking once the window closed, never
+stores. So a reception here has exactly the inputs, and the inputs hash, its
+stored verdict has (D-261, D-263).
 
 Every revision is read, measured and simulated alike, each carrying
 ``simulated`` from its row. Leaving the simulated ones out of fitting and
@@ -57,14 +64,14 @@ class Reception:
 
 
 def read_receptions(files: Mapping[str, bytes]) -> tuple[Reception, ...]:
-    """Every observation revision's inputs, oldest first.
+    """Every closed, scheduled observation revision's inputs, oldest first.
 
     Args:
         files: A raw snapshot's files, by name, as read and verified.
 
     Returns:
-        One reception per row of ``observations.jsonl``, ordered by start, then
-        assignment and revision.
+        One reception per row of ``observations.jsonl`` whose assignment the
+        registry was asked about, ordered by start, assignment and revision.
 
     Raises:
         MalformedSnapshotError: A needed file is missing, a field is of the
@@ -85,6 +92,8 @@ def read_receptions(files: Mapping[str, bytes]) -> tuple[Reception, ...]:
         if assignment_id not in assignments:
             message = f"observation of {assignment_id} names no assignment held"
             raise MalformedSnapshotError(message)
+        if assignment_id not in listening:
+            continue
         mode, frequency = assignments[assignment_id]
         receptions.append(
             Reception(
@@ -103,7 +112,7 @@ def read_receptions(files: Mapping[str, bytes]) -> tuple[Reception, ...]:
                     frames_expected=expected.get(assignment_id),
                     decoder=_optional_text(one, "decoder"),
                     decoder_version=_optional_text(one, "decoder_version"),
-                    listening_confirmed=listening.get(assignment_id, False),
+                    listening_confirmed=listening[assignment_id],
                     mode=mode,
                 ),
             )

@@ -230,6 +230,7 @@ def test_the_live_hash_is_the_hash_a_snapshot_gives(world: Any, root: Path) -> N
     }
 
     assert live
+    assert set(recomputed) == set(live)
     for key, digest in live.items():
         assert recomputed[key] == digest, key
     exported = [json.loads(one) for one in files["reception_verdicts.jsonl"].split()]

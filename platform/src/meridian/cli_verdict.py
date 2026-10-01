@@ -35,8 +35,6 @@ from meridian.cli_verdict_model import (
 from meridian.config import Settings, load_settings
 from meridian.prediction.score import MalformedModelError
 from meridian.prediction.verdict_files import DamagedVerdictError, load_verdict_model
-from meridian.registry import Registry
-from meridian.registry.psycopg_registry import PsycopgRegistry
 from meridian.store.pool import DatabaseUnreachableError, connect_once
 from meridian.store.ratings import (
     NewRating,
@@ -46,14 +44,13 @@ from meridian.store.ratings import (
     unrated_receptions,
 )
 from meridian.store.stations import Connection
-from meridian.verdict_build import VerdictBuildReport, apply_verdicts
+from meridian.verdict_build import VerdictBuildReport, apply_verdicts, registry_for
 
 __all__ = [
     "DEFAULT_RUBRIC",
     "add_verdict_parser",
     "apply_lines",
     "queue_lines",
-    "registry_for",
     "run_verdict",
 ]
 
@@ -132,7 +129,7 @@ def _run_database(args: argparse.Namespace) -> int:
     except _REFUSED as exc:
         reason = (
             "the rater tag or rubric is not of an allowed form"
-            if isinstance(exc, psycopg.errors.CheckViolation)
+            if args.action == "rate" and isinstance(exc, psycopg.errors.CheckViolation)
             else str(exc)
         )
         return _refuse(args.action, reason)
@@ -152,16 +149,6 @@ def _apply(conn: Connection, args: argparse.Namespace, settings: Settings) -> li
     report = apply_verdicts(conn, registry_for(conn, settings, now), model, now=now)
     conn.commit()
     return apply_lines(report)
-
-
-def registry_for(conn: Connection, settings: Settings, now: datetime) -> Registry:
-    """The registry over ``conn``, configured as the jobs service builds it."""
-    return PsycopgRegistry(
-        conn,
-        pepper=settings.token_hash_pepper,
-        recovery_window_s=settings.registration_recovery_window_s,
-        now_utc=now,
-    )
 
 
 def apply_lines(report: VerdictBuildReport) -> list[str]:
