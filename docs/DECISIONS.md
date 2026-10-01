@@ -5510,6 +5510,12 @@ The project is software-complete when the register has no pending row.
 
 **Every result now carries its count.** A walk over every results file found SC-1, SC-2 and the gain and regret rows each stating an interval without what it was drawn from. They now carry the station-days their bootstrap resampled, and SC-2 its test passes too, as `n`. The counts arrive under `report-7`, the method Stage 26 named for SC-7 (D-264), which this branch had first named `report-6`. One name for both is kept, as D-264 asks, and no run is published between the two, so no `report-7` run lacks the counts.
 
+**The dashboard shows results.** It showed stations, schedules, uptime and the sky, and no outcome, so "shows stations and results" did not hold. A selected station now shows:
+- its recent receptions from `/api/v1/observations`: outcome, signal and peak SNR, the number of products held, and a simulated badge on every simulated row;
+- its capture rate from `/api/v1/reliability`, as the count, the rate and its Wilson interval, labelled simulated when the station is found among the simulated population.
+
+Nothing was added to the public API. It has no frame count, and the privacy review pins its fields (D-210), so the list shows what is already published. An outcome is coloured only when it is a decode. A quiet pass is not a miss until the platform has read its heartbeats (rule 7), so the page does not draw one as a failure. CI's image job now requires the served bundle to read both routes.
+
 *Rejected: the register as prose in the roadmap's "Where the build has got to".* A paragraph cannot be checked, and that section is a snapshot in time by its own account.
 
 *Rejected: a pytest marker on each proving test, such as `@pytest.mark.acceptance("…")`.* It puts the clause text in forty places, and it cannot cite a CI step, a document, or a clause that is pending.
@@ -5895,6 +5901,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the clauses true by construction, now asserted | `tests/unit/{test_scheduler_boundaries,test_schedule_config,test_prediction_gate,test_report_gate}.py`; `tests/integration/test_cli_invite.py`; `tests/msp_conformance/test_healthz.py`; `meridian/reports/{scheduling,prediction_rows,build}.py` (counts on SC-1, SC-2, gains; kept under `report-7`) |
 | D-255 a version for the feature code | `meridian/prediction/{features,score,fit,live,replay_models}.py`; `meridian/cli_model.py`; `meridian/reports/prediction.py`; `DATA-MODEL.md` § Model; `OPERATIONS.md` § Models; `tests/unit/{test_feature_version,test_prediction_fit,test_prediction_live}.py` |
 | D-256 pins and Dependabot | `deploy/{docker-compose.yml,docker-compose.public.yml,.env.example}`; `.github/workflows/{ci,image-publish,security}.yml`; `.github/dependabot.yml`; `OPERATIONS.md` § Security scanning; `tests/unit/test_pinning.py` |
+| — the dashboard shows results | `dashboard/src/{receptions,reliability,StationDetail,useStationDetail,format}.ts(x)`, `app.css`, and their tests; `.github/workflows/ci.yml` (the image job's dashboard step); `SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 11's later views |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

@@ -338,13 +338,19 @@ jobs:
         # The platform starts without a dashboard when DASHBOARD_DIR holds no
         # build (D-091), so a broken COPY in the Dockerfile would still pass the
         # health check above. The asset is fetched too: an index.html whose
-        # hashed script 404s is a blank page that answered 200.
+        # hashed script 404s is a blank page that answered 200. And it must
+        # read results as well as stations, which is Stage 24's clause "the
+        # public dashboard shows stations and results" (D-254); both routes
+        # it reads them from must answer.
         run: |
           set -euo pipefail
           curl -fsS http://localhost:8000/ > /tmp/index.html
           grep -q '<div id="root"></div>' /tmp/index.html
           script=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' /tmp/index.html)
-          curl -fsS -o /dev/null "http://localhost:8000${script}"
+          curl -fsS "http://localhost:8000${script}" > /tmp/dashboard.js
+          grep -q '/api/v1/observations' /tmp/dashboard.js
+          grep -q '/api/v1/reliability' /tmp/dashboard.js
+          curl -fsS -o /dev/null "http://localhost:8000/api/v1/observations?limit=1"
 
       - name: Every service with a healthcheck reports healthy
         # db, api, jobs, prometheus, alertmanager and grafana. A service that is

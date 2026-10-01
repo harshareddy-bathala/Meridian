@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatAge,
+  formatDay,
   formatFrequency,
   formatWindow,
   livenessLabel,
@@ -44,6 +45,12 @@ describe("precisionLabel", () => {
 describe("livenessLabel", () => {
   it("names the state a station has never left", () => {
     expect(livenessLabel("never_seen")).toBe("Never seen");
+  });
+});
+
+describe("formatDay", () => {
+  it("names the UTC day alone", () => {
+    expect(formatDay("2026-09-30T23:59:00Z")).toBe("30 Sep");
   });
 });
 

@@ -1603,10 +1603,10 @@ This satisfies the first major demonstrable milestone.
 
 - pass queue;
 - scheduling reason;
-- observation history;
+- observation history — *built in Stage 24 as a station's recent receptions, simulated ones badged*;
 - predicted versus actual outcomes;
 - element-set age and uncertainty;
-- reliability;
+- reliability — *a station's capture rate with its interval and count, built in Stage 24; the network's figures and the loss budget are not shown*;
 - loss budget;
 - model calibration;
 - simulated-versus-measured filtering.

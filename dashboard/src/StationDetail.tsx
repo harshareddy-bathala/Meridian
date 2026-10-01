@@ -1,6 +1,8 @@
-import { formatAge, formatFrequency, formatWindow } from "./format";
+import { formatAge, formatDay, formatFrequency, formatWindow } from "./format";
 import { HorizonPlot } from "./HorizonPlot";
 import type { StationProfiles } from "./profiles";
+import { describeSignal, outcomeLabel, type Reception } from "./receptions";
+import { describeCapture, type StationCapture } from "./reliability";
 import type { StationUptime } from "./uptime";
 import { UptimeStrip } from "./UptimeStrip";
 import { describeValue, type Assignment, type LatestHeartbeat } from "./schedule";
@@ -88,6 +90,80 @@ function Assignments({ assignments, showStation }: { assignments: Assignment[]; 
   );
 }
 
+function SimulatedBadge() {
+  return (
+    <span className="badge badge-simulated" title="Reported by a virtual station run by the simulator">
+      simulated
+    </span>
+  );
+}
+
+function Receptions({ receptions }: { receptions: Reception[] }) {
+  if (receptions.length === 0) {
+    return <p>This station has reported no reception yet.</p>;
+  }
+  return (
+    <div className="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Satellite</th>
+            <th scope="col">Window</th>
+            <th scope="col">Outcome</th>
+            <th scope="col">Signal</th>
+            <th scope="col">Products</th>
+          </tr>
+        </thead>
+        <tbody>
+          {receptions.map((reception) => (
+            <tr key={reception.observationId}>
+              <td className="mono">{reception.satelliteId}</td>
+              <td>{formatWindow(reception.startedAt, reception.endedAt)}</td>
+              <td>
+                <span className={`badge badge-outcome badge-${reception.outcome}`}>{outcomeLabel(reception.outcome)}</span>
+                {reception.simulated && <SimulatedBadge />}
+                {reception.revision > 1 && <div className="dim">corrected, revision {reception.revision}</div>}
+              </td>
+              <td>{describeSignal(reception)}</td>
+              <td>{reception.products === 0 ? "—" : String(reception.products)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Capture({ capture }: { capture: StationCapture | null }) {
+  if (capture === null) {
+    return <p>No pass of this station has settled yet, so there is no capture rate.</p>;
+  }
+  return (
+    <p>
+      Capture rate <strong>{describeCapture(capture.capture)}</strong> (95% interval), for passes whose windows
+      closed between {formatDay(capture.windowStart)} and {formatDay(capture.windowEnd)}.{" "}
+      {capture.simulated && <SimulatedBadge />}
+    </p>
+  );
+}
+
+interface ResultsProps {
+  receptions: Reception[] | null | undefined;
+  capture: StationCapture | null | undefined;
+}
+
+function Results({ receptions, capture }: ResultsProps) {
+  return (
+    <>
+      <h3>Results</h3>
+      {capture !== undefined && <Capture capture={capture} />}
+      {receptions === undefined && <p className="dim">Loading receptions…</p>}
+      {receptions === null && <p className="dim">The receptions could not be read.</p>}
+      {Array.isArray(receptions) && <Receptions receptions={receptions} />}
+    </>
+  );
+}
+
 function StationSky({ profiles, uptime }: { profiles: StationProfiles | null; uptime: StationUptime | null }) {
   return (
     <>
@@ -107,13 +183,30 @@ function StationSky({ profiles, uptime }: { profiles: StationProfiles | null; up
   );
 }
 
+function UpcomingAssignments({
+  assignments,
+  error,
+  showStation,
+}: {
+  assignments: Assignment[] | null;
+  error: string | null;
+  showStation: boolean;
+}) {
+  if (assignments === null) {
+    return error === null ? <p className="dim">Loading assignments…</p> : null;
+  }
+  return <Assignments assignments={assignments} showStation={showStation} />;
+}
+
 interface DetailProps {
   station: Station | null;
   onClear: () => void;
 }
 
 export function StationDetail({ station, onClear }: DetailProps) {
-  const { heartbeat, assignments, profiles, uptime, error } = useStationDetail(station?.stationId ?? null);
+  const { heartbeat, assignments, profiles, uptime, receptions, capture, error } = useStationDetail(
+    station?.stationId ?? null,
+  );
   return (
     <section aria-labelledby="detail-heading" className="station-detail">
       <h2 id="detail-heading">
@@ -128,11 +221,8 @@ export function StationDetail({ station, onClear }: DetailProps) {
         </>
       )}
       {error !== null && <p role="alert">Could not refresh: {error}</p>}
-      {assignments === null ? (
-        error === null && <p className="dim">Loading assignments…</p>
-      ) : (
-        <Assignments assignments={assignments} showStation={station === null} />
-      )}
+      <UpcomingAssignments assignments={assignments} error={error} showStation={station === null} />
+      {station !== null && <Results receptions={receptions} capture={capture} />}
       <StationSky profiles={profiles} uptime={uptime} />
     </section>
   );
