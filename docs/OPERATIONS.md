@@ -763,6 +763,16 @@ Copy `deploy/verdict.toml.example`, set `train_until` and `validate_until`, and 
 **"route full: validation holds 6 receptions…"** means too few rated receptions fall in that span for that route's model. Rate more, or move the dates. Never lower the minimums to get a number.
 
 `evaluate` judges the test span twice: every labelled reception, and rated ones only (D-260). SC-7 is the second, skill against the base rate, with its proposed target of +0.40. It also prints how many decoded *validation* receptions fall either side of `partial_below`, and how many of each were usable. Choose the threshold from those lines, write it into the configuration and fit again (D-262). Never choose it from the test span.
+
+### Writing verdicts
+
+```sh
+meridian verdict apply --model "$MERIDIAN_DATASETS_ROOT"/verdicts/<model>
+```
+
+`apply` writes a verdict for every observation whose assignment window has closed and which has none by this model. That includes simulated ones, labelled so, and ones that received nothing. Run it again and it writes nothing. A refitted model is a new method, so its verdicts sit beside the old ones (D-263).
+
+To have the jobs service do this every round, set `VERDICT_MODEL` in `deploy/.env` to the model's directory as the container sees it, such as `/datasets/verdicts/<model>`, and restart `jobs`. It scores at most 500 receptions a round, oldest first, under the task label `verdicts`. A model that cannot be read stops `jobs` at start with the reason. Unset `VERDICT_MODEL` to stop writing verdicts; the ones written stay.
 ---
 
 ## Scheduling

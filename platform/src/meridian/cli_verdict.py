@@ -1,10 +1,13 @@
 """``meridian verdict`` — the reception verdict, and its label rated blind.
 
 ``queue`` lists the measured receptions waiting for a rating. ``rate`` records
-one. ``fit`` and ``evaluate`` work on files, not the database, and live in
-:mod:`meridian.cli_verdict_model`. The label they make is D-260's answer to
-D-106: a person looks at the decoded product and says whether it is usable,
-without seeing the verdict or anything the verdict reads.
+one. ``apply`` writes a fitted model's verdict for every closed reception it
+has not scored (D-263). ``fit`` and ``evaluate`` work on files, not the
+database, and live in :mod:`meridian.cli_verdict_model`.
+
+The label is D-260's answer to D-106: a person looks at the decoded product
+and says whether it is usable, without seeing the verdict or anything the
+verdict reads.
 
 **The queue prints what to look at and nothing else**: the reception's
 identity, its time, and each product's kind, hash and place on the station.
@@ -18,15 +21,22 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 
 import psycopg
 
+from meridian.cli_snapshot import EXIT_CORRUPT
 from meridian.cli_verdict_model import (
     MODEL_ACTIONS,
     add_model_actions,
     run_model_action,
 )
-from meridian.config import load_settings
+from meridian.config import Settings, load_settings
+from meridian.prediction.score import MalformedModelError
+from meridian.prediction.verdict_files import DamagedVerdictError, load_verdict_model
+from meridian.registry import Registry
+from meridian.registry.psycopg_registry import PsycopgRegistry
 from meridian.store.pool import DatabaseUnreachableError, connect_once
 from meridian.store.ratings import (
     NewRating,
@@ -36,15 +46,29 @@ from meridian.store.ratings import (
     unrated_receptions,
 )
 from meridian.store.stations import Connection
+from meridian.verdict_build import VerdictBuildReport, apply_verdicts
 
-__all__ = ["DEFAULT_RUBRIC", "add_verdict_parser", "queue_lines", "run_verdict"]
+__all__ = [
+    "DEFAULT_RUBRIC",
+    "add_verdict_parser",
+    "apply_lines",
+    "queue_lines",
+    "registry_for",
+    "run_verdict",
+]
 
 EXIT_FAILED = 1
 
 DEFAULT_RUBRIC = "usable-1"
 """The written rating instructions in ``docs/OPERATIONS.md`` § Reception verdicts."""
 
-_REFUSED = (DatabaseUnreachableError, OSError, psycopg.Error)
+_REFUSED = (
+    RatingRefusedError,
+    MalformedModelError,
+    DatabaseUnreachableError,
+    OSError,
+    psycopg.Error,
+)
 
 
 def add_verdict_parser(
@@ -79,6 +103,12 @@ def add_verdict_parser(
         default=DEFAULT_RUBRIC,
         help=f"the rating instructions followed (default {DEFAULT_RUBRIC})",
     )
+    apply = actions.add_parser(
+        "apply", help="write a verdict for every closed reception a model has not"
+    )
+    apply.add_argument(
+        "--model", type=Path, required=True, help="a verdict model directory"
+    )
     add_model_actions(actions)
 
 
@@ -90,29 +120,63 @@ def run_verdict(args: argparse.Namespace) -> int:
 
 
 def _run_database(args: argparse.Namespace) -> int:
-    """``queue`` and ``rate``, on one short-lived connection."""
-    action = _queue if args.action == "queue" else _rate
+    """``queue``, ``rate`` and ``apply``, on one short-lived connection."""
+    action = {"queue": _queue, "rate": _rate, "apply": _apply}[args.action]
     try:
         settings = load_settings()
         with connect_once(settings) as conn:
-            lines = action(conn, args)
-    except RatingRefusedError as exc:
-        return _refuse(args.action, str(exc))
-    except psycopg.errors.CheckViolation:
-        return _refuse(args.action, "the rater tag or rubric is not of an allowed form")
+            lines = action(conn, args, settings)
+    except DamagedVerdictError as exc:
+        _refuse(args.action, str(exc))
+        return EXIT_CORRUPT
     except _REFUSED as exc:
-        return _refuse(args.action, str(exc))
+        reason = (
+            "the rater tag or rubric is not of an allowed form"
+            if isinstance(exc, psycopg.errors.CheckViolation)
+            else str(exc)
+        )
+        return _refuse(args.action, reason)
     for line in lines:
         _say(line)
     return 0
 
 
-def _queue(conn: Connection, args: argparse.Namespace) -> list[str]:
-    del args
+def _queue(conn: Connection, args: argparse.Namespace, settings: Settings) -> list[str]:
+    del args, settings
     return queue_lines(unrated_receptions(conn))
 
 
-def _rate(conn: Connection, args: argparse.Namespace) -> list[str]:
+def _apply(conn: Connection, args: argparse.Namespace, settings: Settings) -> list[str]:
+    model = load_verdict_model(args.model)
+    now = datetime.now(UTC)
+    report = apply_verdicts(conn, registry_for(conn, settings, now), model, now=now)
+    conn.commit()
+    return apply_lines(report)
+
+
+def registry_for(conn: Connection, settings: Settings, now: datetime) -> Registry:
+    """The registry over ``conn``, configured as the jobs service builds it."""
+    return PsycopgRegistry(
+        conn,
+        pepper=settings.token_hash_pepper,
+        recovery_window_s=settings.registration_recovery_window_s,
+        now_utc=now,
+    )
+
+
+def apply_lines(report: VerdictBuildReport) -> list[str]:
+    """One application's outcome, as printed."""
+    routes = " · ".join(f"{name} {n}" for name, n in report.routes.items()) or "none"
+    return [
+        f"verdicts by {report.method}",
+        f"  scored             {report.scored} ({report.simulated} simulated)",
+        f"  written            {report.written}",
+        f"  routes             {routes}",
+    ]
+
+
+def _rate(conn: Connection, args: argparse.Namespace, settings: Settings) -> list[str]:
+    del settings
     row = insert_rating(
         conn,
         NewRating(

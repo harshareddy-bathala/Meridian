@@ -52,6 +52,8 @@ def test_the_snapshot_holds_what_d_143_lists() -> None:
         "products",
         # The label "usable", rated blind (D-260).
         "reception_ratings",
+        # Each reception's verdict, by method (D-263).
+        "reception_verdicts",
         "heartbeats",
         "element_sets",
         "stations",

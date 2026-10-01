@@ -5431,6 +5431,31 @@ The verdict is fitted and judged the way Stage 17 fits a yield model: stated spl
 
 ---
 
+## D-263 — Writing the verdict: every closed reception, once per method, by command and by the jobs service
+
+**2026-10-01 · accepted** · *Migration 0028; `meridian/verdict_build.py`, `meridian/store/{verdicts,snapshot_reads}.py`, `meridian/jobs/{verdict_round,job_metrics}.py`, `meridian/cli_{verdict,jobs}.py`, `meridian/config.py` (`VERDICT_MODEL`), `meridian/prediction/verdict_files.py` (`load_verdict_model`), Stage 26. Builds DATA-MODEL's planned `reception_verdicts`.*
+
+Stage 26's output is a `reception_verdicts` row for every observation revision, including one that received nothing. Five decisions settle how the rows are written.
+
+**What is scored: closed windows of scheduled assignments.** These are exactly the receptions a raw snapshot asks the registry about (D-145). The writer therefore gets the listening answer the snapshot freezes, and a verdict written now hashes the same as one recomputed from a snapshot later (D-261). `tests/integration/test_reception_verdicts.py` checks this row by row, against a real export. A reception whose window is still open waits for the next round.
+
+**Measured and simulated alike, labelled.** A simulated reception's verdict carries `simulated = true`, copied from the observation. It is never a label or a training row (D-078). Stage 27 needs it to tell a partial reception from a decoded one on a simulated fleet.
+
+**Append-only by key.** The key is `(assignment_id, revision, method)`, and an insert that meets it does nothing. A re-run writes nothing. A refit is a new method and scores everything again beside the old rows (D-104, D-262). Each row also carries:
+- its `route`;
+- its `inputs_sha256`;
+- the `partial_below` it was fitted with, so a reader can tell partial from decoded without the model file.
+
+**Two ways to run it, one function.**
+- `meridian verdict apply --model DIR` scores everything unscored, at once.
+- The jobs service runs the same function last in each round, at most 500 receptions a round, oldest first, under the task label `verdicts`, when `VERDICT_MODEL` names a model directory. Unset, the task does not run and records nothing. A model that cannot be read stops the service at start, as a schedule that cannot be obeyed does (D-168). Writing no verdicts while looking configured would be the worse failure.
+
+**The runtime never imports `meridian.datasets`.** Reading a model directory needs the manifest checks, which live there. `prediction.verdict_files.load_verdict_model` therefore reports damage as `DamagedVerdictError`, a model error, and `meridian verdict apply` still exits 3 for it. `tests/unit/test_datasets_boundaries.py` keeps the command and the jobs module off the package.
+
+*Rejected: scoring inside observation ingest.* The verdict would be written in the same transaction as the reception, before the window closes and before the registry can answer for it. Ingest would also depend on a model file. A reception must be storable with no model at all.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5732,6 +5757,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-260 the label "usable", rated blind | migration 0027; `meridian/store/{ratings,snapshot_reads}.py`; `meridian/cli_verdict.py`, `cli.py`; `meridian/datasets/{usable_labels,export}.py`; `DATA-MODEL.md`; `OPERATIONS.md` § Reception verdicts; `tests/unit/{test_usable_labels,test_reception_ratings,test_snapshot_tables}.py`; `tests/integration/{test_reception_ratings,test_migrations,test_migration_lifecycle}.py` |
 | D-261 inputs, routes and the inputs hash | `meridian/prediction/{verdict_inputs,verdict_score,verdict_rows}.py`; `meridian/prediction/score.py` (`parse_linear`); `tests/unit/{test_verdict_inputs,test_verdict_score,test_verdict_rows,test_prediction_boundaries}.py` |
 | D-262 fitting and judging the verdict | `meridian/prediction/{fit,verdict_config,verdict_examples,verdict_files,verdict_evaluation,verdict_report,calibration,lineage}.py`; `meridian/cli_verdict_model.py`; `meridian/datasets/manifest_rules.py` (`verdict_model`); `deploy/verdict.toml.example`; `tests/unit/{test_verdict_fit,test_verdict_config,test_prediction_boundaries,test_datasets_boundaries}.py` |
+| D-263 writing the verdict | migration 0028; `meridian/verdict_build.py`; `meridian/store/{verdicts,snapshot_reads}.py`; `meridian/jobs/{verdict_round,job_metrics}.py`; `meridian/cli_{verdict,jobs}.py`; `meridian/config.py`; `meridian/prediction/verdict_files.py`; `deploy/{docker-compose.yml,.env.example}`; `tests/unit/{test_jobs_verdict_round,test_jobs_reliability_round,test_deferred_storage_gate,test_snapshot_tables}.py`; `tests/integration/{test_reception_verdicts,test_migrations,test_migration_lifecycle}.py` |
 | — the settled entry | D-106 |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.

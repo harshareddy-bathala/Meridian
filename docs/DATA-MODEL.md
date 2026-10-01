@@ -4,7 +4,7 @@ PostgreSQL with TimescaleDB. Observations and heartbeats are hypertables.
 
 > **Phase 1 scope.** D-018 builds eight of the tables below plus `invite_tokens` (D-020) and `satellite_transmitters` (D-021). `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles` were deferred — see D-018 for why each one waited — and Stage 19 built them once each had a producer and a consumer (migration `0023`, D-173 to D-176). Two derived views and an hourly heartbeat aggregate followed (migration `0024`, D-177, D-178).
 >
-> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below. Stage 26 builds the first of them, `reception_ratings` (migration `0027`, D-260); the rest are **planned, not built**. The rules they share are D-104.
+> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below. Stage 26 built the first two, `reception_ratings` and `reception_verdicts` (migrations `0027` and `0028`, D-260, D-263); the rest are **planned, not built**. The rules they share are D-104.
 
 ---
 
@@ -253,7 +253,7 @@ A station's noise floor by 45° sector of the pass's peak and 4-hour band of loc
 
 ## Post-reception tables
 
-Seven tables for modules 13–17. `reception_ratings` is built (migration `0027`, D-260). The others do not exist yet, and their column tuples are the intent, settled finally when each stage writes its migration. What they share is decided in D-104:
+Seven tables for modules 13–17. `reception_ratings` and `reception_verdicts` are built (migrations `0027` and `0028`, D-260, D-263). The others do not exist yet, and their column tuples are the intent, settled finally when each stage writes its migration. What they share is decided in D-104:
 
 - **Append-only, bound to what they describe.** A verdict belongs to one observation revision; a new revision gets a new verdict and the old one stays, exactly as D-015 keeps the old observation.
 - **Every row names the method that produced it** — a versioned string, as `method` on the orbit service's uncertainty (D-060). A new model version appends; it never rewrites an earlier conclusion, because the evidence dataset must be able to say which version concluded what.
@@ -271,12 +271,17 @@ The label the verdict is calibrated against: a person's answer to whether a rece
 - **`rater` is a tag, not a name.** Its `CHECK` admits lowercase letters, digits, `_` and `-`, up to 16 characters, so a full name does not fit. `rubric` names the written instructions followed (`usable-1`, in `OPERATIONS.md`).
 - **Retention:** never dropped, as every label.
 
-### `reception_verdicts` *(planned)*
-`(assignment_id, revision, station_id, probability_usable, method, inputs_sha256, computed_at, simulated)`
+### `reception_verdicts`
+`(assignment_id, revision, observation_started_at, station_id, probability_usable, method, route, inputs_sha256, partial_below, computed_at, simulated)`, keyed by `(assignment_id, revision, method)`, with a foreign key to the observation revision.
 
-One row per observation revision per method. `probability_usable` is `0..1` and is a **calibrated probability**, not a score. `inputs_sha256` hashes the exact inputs the verdict read — outcome, `peak_snr_db`, decoder statistics, the frames ratio, listening evidence — so a verdict can be traced to what it saw and regenerated from a snapshot. Every reception gets one, including a pass that received nothing, whose verdict is near zero and which then goes to loss diagnosis.
+One row per observation revision per method. `probability_usable` is `0..1` and is a **calibrated probability**, not a score. `inputs_sha256` hashes the exact inputs the verdict read (D-261): outcome, detection, `peak_snr_db`, frames decoded and expected, decoder and version, listening, mode. So a verdict can be traced to what it saw and recomputed from a raw snapshot. `route` says which of the three models scored it (`full`, `snr`, `outcome`), so a verdict made from less evidence is visible as one. `partial_below` is the threshold the model was fitted with (D-262). Every closed reception gets one, including a pass that received nothing, whose verdict is low and which then goes to loss diagnosis.
 
-A plain table rather than a hypertable: its volume is the observation count, not the heartbeat count. It references `observations`' key, which TimescaleDB 2.29 permits (D-015's correction).
+- **Producer:** `meridian.verdict_build`, run by `meridian verdict apply` and by the jobs service when `VERDICT_MODEL` is set (D-263). It scores every observation revision of a scheduled assignment whose window has closed and which has no row by that method.
+- **Consumers:** the raw snapshot's `reception_verdicts.jsonl`; Stage 27's diagnosis, which reads a decoded reception below `partial_below` as partial; Stage 30's evidence dataset.
+- **`simulated`** is copied from the observation. A simulated reception's verdict is never a label or a training row (D-078).
+- **Retention:** never dropped. A new method appends beside the old rows.
+
+A plain table rather than a hypertable: its volume is the observation count, not the heartbeat count.
 
 ### `loss_diagnoses` *(planned)*
 `(id, assignment_id, revision, cause, candidates_json, evidence_json, method, computed_at, simulated)`

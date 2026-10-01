@@ -30,9 +30,9 @@ not published as-is, and Stage 30's evidence dataset decides what may be.
 
 **Scope.** Passes whose ``aos`` falls in ``[since, as_of)``, and what they
 depend on: their assignments, every observation revision submitted by
-``as_of`` with the noise floor, products and ratings recorded for it, the heartbeats
-received inside each assignment's window, and the element sets, stations,
-capabilities, satellites and transmitters they name. A survey's noise reading
+``as_of`` with the noise floor, products, ratings and verdicts recorded for it,
+the heartbeats received inside each assignment's window, and the element sets,
+stations, capabilities, satellites and transmitters they name. A survey's noise reading
 names no assignment and is scoped by when it was measured.
 Archive receptions are scoped by ``started_at`` over the same interval, and
 bring the element sets current at each UTC day's start for every satellite
@@ -42,7 +42,7 @@ evidence than one in the middle — which the labeller reports as indeterminate,
 not as a miss (D-147).
 
 Reference: docs/DECISIONS.md D-139, D-143, D-144, D-145, D-150, D-173, D-176,
-D-260.
+D-260, D-263.
 """
 
 from __future__ import annotations
@@ -218,6 +218,15 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         f" from reception_ratings where assignment_id in ({_SCOPED_ASSIGNMENTS})"
         " and rated_at <= %(as_of)s"
         " order by id",
+    ),
+    SnapshotTable(
+        "reception_verdicts",
+        "select assignment_id, revision, observation_started_at, station_id,"
+        " probability_usable, method, route, inputs_sha256, partial_below,"
+        " computed_at, simulated"
+        f" from reception_verdicts where assignment_id in ({_SCOPED_ASSIGNMENTS})"
+        " and computed_at <= %(as_of)s"
+        " order by assignment_id, revision, method",
     ),
     SnapshotTable(
         "heartbeats",

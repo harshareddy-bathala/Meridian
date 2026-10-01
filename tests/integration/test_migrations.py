@@ -120,8 +120,10 @@ def test_all_expected_tables_exist(conn) -> None:
         "horizon_profiles",
         "interference_profiles",
         "products",
-        # The label "usable", rated blind (0027, D-260).
+        # The label "usable", rated blind (0027, D-260), and the verdict
+        # calibrated against it (0028, D-263).
         "reception_ratings",
+        "reception_verdicts",
     }
     assert expected <= tables
 
@@ -181,6 +183,7 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:
         "interference_profiles",
         "products",
         "reception_ratings",
+        "reception_verdicts",
     } <= carrying
     # D-049: element_sets is the deliberate exception. Its provenance lives in
     # `source`, which distinguishes celestrak from spacetrack from manual as

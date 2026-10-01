@@ -25,6 +25,7 @@ from typing import Protocol
 from meridian.datasets.canonical import canonical_bytes
 from meridian.datasets.manifest import Manifest, content_sha256, file_entry
 from meridian.datasets.publish import (
+    DamagedSnapshotError,
     PublishedDirectory,
     SnapshotDirectory,
     publish_directory,
@@ -38,8 +39,10 @@ __all__ = [
     "VERDICTS",
     "VERDICT_FILE",
     "VERDICT_VERSION",
+    "DamagedVerdictError",
     "FittedVerdictLike",
     "VerdictDirectory",
+    "load_verdict_model",
     "publish_verdict",
     "read_verdict",
 ]
@@ -50,6 +53,14 @@ VERDICTS = "verdicts"
 VERDICT_FILE = "verdict.json"
 VERDICT_VERSION = "verdict-1"
 """The fitting procedure's version: the manifest's ``transformation_version``."""
+
+
+class DamagedVerdictError(MalformedModelError):
+    """A verdict directory that does not match its manifest.
+
+    A model error, so a runtime caller that must not import
+    ``meridian.datasets`` can still tell damage apart from a malformed file.
+    """
 
 
 class FittedVerdictLike(Protocol):
@@ -135,3 +146,16 @@ def read_verdict(path: Path) -> VerdictDirectory:
     return VerdictDirectory(
         directory, parse_verdict_model(directory.files[VERDICT_FILE])
     )
+
+
+def load_verdict_model(path: Path) -> VerdictModel:
+    """The model in a verdict directory, verified, for the runtime writer.
+
+    Raises:
+        DamagedVerdictError: The directory is not what its manifest says.
+        MalformedModelError: It is not a verdict model, or cannot be scored.
+    """
+    try:
+        return read_verdict(path).model
+    except DamagedSnapshotError as exc:
+        raise DamagedVerdictError(str(exc)) from exc
