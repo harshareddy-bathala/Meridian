@@ -883,7 +883,7 @@ uv run meridian report build \
 ```
 
 - **It fits models, so it needs the `fit` extra** (`uv sync --extra fit`), as `meridian model fit` does. Without it, it says so and exits 1.
-- **The configuration** is one file, one table per section. Copy `analysis/configs/evaluation.toml.example`, whose values are the defaults. An unknown table or key is refused, and so is a `seed`. **Set `train_until` and `validate_until` under `[prediction]`** for the snapshot you are reporting. Without them no model is fitted, and the prediction section says so.
+- **The configuration** is one file, one table per section. Copy `analysis/configs/evaluation.toml.example`, whose values are the defaults. An unknown table or key is refused, and so is a `seed`. **Set `train_until` and `validate_until` under `[prediction]`** for the snapshot you are reporting. Without them no model is fitted, and the prediction section says so. The same goes for `[verdict]`, which fits the reception verdict and reports SC-7 (D-264).
 - **The seed** is the master seed. Every component that draws a random number draws from a seed derived from it by name, and the run lists each one (D-236).
 - **The run** goes under `<datasets root>/reports/<hash12>/`, or where `--output` says. Building the same inputs twice names the same directory, and the second build says `already held, identically`. An `--output` that already holds a different run is refused, never overwritten.
 
@@ -904,6 +904,8 @@ reports/<hash12>/
 ├── reliability.jsonl               the reliability section's results
 ├── capture_history.svg             capture over each window of the loss-budget history
 ├── fault_detection.svg             seconds from each fault to offline, by kind, when a fault run was given
+├── verdict.jsonl                   the reception verdict's results: SC-7, routes, segments, the threshold
+├── verdict_reliability_<subset>.svg  the verdict's reliability diagram, every labelled and rated only
 ├── config.toml     the configuration, byte for byte as it was given
 └── manifest.json   every file's digest, the inputs, the seeds, and the environment
 ```
@@ -941,6 +943,7 @@ reports/<hash12>/
   - the loss-budget history: the same window ending every `history_step_days` back to the snapshot's start, a window reaching before the start marked partial.
 
   With `--faults DIR` (repeatable), it also judges each sealed fault run again from its files. It says whether the same verdicts were reached, and reports the seconds to detection, to replanning and to the alert, by fault kind. It reads SC-5 from the detections (all simulated, and labelled so), counts the platform faults apart, and includes the 72-hour run when a fault run spans 72 hours; until then it says "not run". `verify` finds each fault run by hash, as it finds the snapshot, or takes `--faults DIR`.
+- **The reception verdict section** fits the verdict from the snapshot's rated receptions under `[verdict]`, with a derived seed, and publishes it under `verdicts/` (D-264). It judges the test span on every labelled reception and on rated receptions only, and reads SC-7 from the second, with a station-day interval. It gives a reliability diagram for each, calibration by segment, and the decoded validation receptions either side of `partial_below`. With too few rated receptions it says *not measured* and why, which is what it says until station 001's receptions are rated (D-260).
 - **The environment block** in `manifest.json` records the commit (and whether the tree had uncommitted changes), the Python and dependency versions, where the snapshot was read from, and how long the build took. It is **not part of the hash** (D-235), so the hash names the numbers, not the machine. There is one exception: each fitted model names the numpy and scikit-learn that fitted it (D-163), and the run names its models by hash. So a different fitting library changes the run, and `verify` shows that library among the environment changes. A run built from uncommitted code says so when it is built. Build reported figures from a clean tree.
 - The evaluation dataset the run labelled is published under `evaluation/` as `meridian snapshot label` would publish it, and the run names it by hash.
 

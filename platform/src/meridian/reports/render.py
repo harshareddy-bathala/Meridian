@@ -19,6 +19,7 @@ from meridian.reports.render_orbit import render_orbit
 from meridian.reports.render_prediction import render_prediction
 from meridian.reports.render_reliability import render_reliability
 from meridian.reports.render_scheduling import render_scheduling
+from meridian.reports.render_verdict import render_verdict
 
 __all__ = ["SECTIONS", "render_report"]
 
@@ -31,6 +32,7 @@ SECTIONS: tuple[tuple[str, Callable[[Sequence[Row]], list[str]]], ...] = (
     ("scheduling", render_scheduling),
     ("orbit", render_orbit),
     ("reliability", render_reliability),
+    ("verdict", render_verdict),
 )
 """Each section in the order the report prints it, by its results file's name."""
 

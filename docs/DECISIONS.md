@@ -5456,6 +5456,24 @@ Stage 26's output is a `reception_verdicts` row for every observation revision, 
 
 ---
 
+## D-264 — SC-7 in the evaluation report: the verdict fitted from the run's snapshot, judged on rated receptions
+
+**2026-10-01 · accepted** · *`meridian/reports/{verdict,verdict_config,render_verdict,build,render,config}.py`, `analysis/configs/evaluation.toml.example`, Stage 26. Adds a section to Stage 22's report (D-234, D-235).*
+
+The completion gate asks for SC-7's report (Brier score against the base rate, reliability diagram and segment calibration) to regenerate from a snapshot, a configuration and a seed. Stage 22's sealed run already does that for every other criterion, so the verdict is a sixth section in it, not a report of its own.
+
+**Fitted inside the run.** The section fits the verdict from the run's raw snapshot under a new `[verdict]` table, and publishes the model under `verdicts/`, as the prediction section publishes its models. The table holds the verdict configuration's settings without the seed, plus the bootstrap's resamples. The fit's seed is derived from the master seed as `verdict`, and the bootstrap's as `bootstrap.verdict` (D-236). The run names the model by hash, so `verify` rebuilds the same one.
+
+**SC-7 is read from rated receptions only** (D-260). The section reports both judgements. SC-7's own row reads the rated one, with a station-day bootstrap interval on the skill, as SC-2's does (D-237), against the proposed 40%. It says whether the point estimate meets the target and whether the whole interval is above it.
+
+**Not measured is a result.** Without split dates, without a product manifest, or with too few rated receptions for any route, the section writes one row saying *not measured* and why. That is SC-7's honest state until station 001's receptions are rated, and a number fitted from a handful would be worse than none.
+
+**The method is `report-7`.** Stage 24's branch moves the method to `report-6` at the same time. The two are kept apart, so two runs made under different methods never share a name, whichever merges first.
+
+*Rejected: SC-7 as `meridian verdict evaluate`'s output alone.* That command is the operator's view, made on a model already fitted. The report is what regenerates from inputs and seals the result, and every other success criterion is read there.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5758,6 +5776,9 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-261 inputs, routes and the inputs hash | `meridian/prediction/{verdict_inputs,verdict_score,verdict_rows}.py`; `meridian/prediction/score.py` (`parse_linear`); `tests/unit/{test_verdict_inputs,test_verdict_score,test_verdict_rows,test_prediction_boundaries}.py` |
 | D-262 fitting and judging the verdict | `meridian/prediction/{fit,verdict_config,verdict_examples,verdict_files,verdict_evaluation,verdict_report,calibration,lineage}.py`; `meridian/cli_verdict_model.py`; `meridian/datasets/manifest_rules.py` (`verdict_model`); `deploy/verdict.toml.example`; `tests/unit/{test_verdict_fit,test_verdict_config,test_prediction_boundaries,test_datasets_boundaries}.py` |
 | D-263 writing the verdict | migration 0028; `meridian/verdict_build.py`; `meridian/store/{verdicts,snapshot_reads}.py`; `meridian/jobs/{verdict_round,job_metrics}.py`; `meridian/cli_{verdict,jobs}.py`; `meridian/config.py`; `meridian/prediction/verdict_files.py`; `deploy/{docker-compose.yml,.env.example}`; `tests/unit/{test_jobs_verdict_round,test_jobs_reliability_round,test_deferred_storage_gate,test_snapshot_tables}.py`; `tests/integration/{test_reception_verdicts,test_migrations,test_migration_lifecycle}.py` |
+| D-264 SC-7 in the evaluation report | `meridian/reports/{verdict,verdict_config,render_verdict,build,render,config}.py`; `analysis/configs/evaluation.toml.example`; `OPERATIONS.md` § Evaluation reports; `tests/unit/{test_report_verdict,test_report_cli,test_report_prediction}.py` |
+| — the completion gate | `tests/integration/test_verdict_gate.py`: 150 receptions stored, the decoded ones rated, a snapshot exported, the verdict fitted from it and applied, every measured reception then holding a versioned verdict; `tests/unit/test_report_verdict.py`: SC-7 built and verified through `meridian report`, with every socket refused |
+| — D-102 enforced | `tests/unit/test_prediction_boundaries.py`: no module on the yield path reads a rating or a verdict |
 | — the settled entry | D-106 |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.

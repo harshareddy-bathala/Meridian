@@ -17,6 +17,9 @@ validated by the module that owns those settings rather than restated:
 * ``[orbit]`` — the timing-error bootstrap's resamples, and how many detections
   on element sets under a day old ``EVALUATION.md`` §6.3's spread test needs
   before it says anything (D-239);
+* ``[verdict]`` — the reception verdict's split dates, regularisation,
+  partial threshold and rubric, and its bootstrap
+  (:mod:`meridian.reports.verdict_config`, D-264);
 * ``[reliability]`` — the window and targets
   :class:`~meridian.reliability.config.SloConfig` checks, as
   ``deploy/reliability.toml.example``'s ``[slo]`` holds them, and how far apart
@@ -52,6 +55,11 @@ from meridian.datasets.config_checks import LabelConfigError
 from meridian.datasets.label_config import LabelConfig, label_config_from_mapping
 from meridian.prediction.model_config import ModelConfig, ModelConfigError
 from meridian.reliability.config import ReliabilityConfigError, SloConfig
+from meridian.reports.verdict_config import (
+    VerdictSectionConfig,
+    VerdictSectionConfigError,
+    verdict_section_config,
+)
 from meridian.scheduler.schedule_config import ScheduleConfig, ScheduleConfigError
 
 __all__ = [
@@ -67,7 +75,7 @@ __all__ = [
     "report_config_sha256",
 ]
 
-_TABLES = ("labels", "prediction", "scheduling", "orbit", "reliability")
+_TABLES = ("labels", "prediction", "scheduling", "orbit", "reliability", "verdict")
 
 _DECIDED_BY_THE_REPORT = ("configuration", "seed", "without")
 """Model settings the report sets itself, for every configuration it fits."""
@@ -176,6 +184,7 @@ class ReportConfig:
     reliability: ReliabilitySectionConfig = field(
         default_factory=ReliabilitySectionConfig
     )
+    verdict: VerdictSectionConfig = field(default_factory=VerdictSectionConfig)
 
     def parameters(self) -> dict[str, object]:
         """The values, for the run's manifest and its header."""
@@ -185,6 +194,7 @@ class ReportConfig:
             "scheduling": self.scheduling.parameters(),
             "orbit": self.orbit.parameters(),
             "reliability": self.reliability.parameters(),
+            "verdict": self.verdict.parameters(),
         }
 
 
@@ -235,8 +245,17 @@ def parse_report_config(text: bytes) -> ConfigFile:
         scheduling=_scheduling(stored.get("scheduling", {})),
         orbit=_orbit(stored.get("orbit", {})),
         reliability=_reliability(stored.get("reliability", {})),
+        verdict=_verdict(stored.get("verdict", {})),
     )
     return ConfigFile(config=config, text=text)
+
+
+def _verdict(table: object) -> VerdictSectionConfig:
+    """``[verdict]``, read by its own module (D-264)."""
+    try:
+        return verdict_section_config(table)
+    except VerdictSectionConfigError as exc:
+        raise ReportConfigError(str(exc)) from exc
 
 
 def _prediction(table: object) -> PredictionConfig:

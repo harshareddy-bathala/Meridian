@@ -172,3 +172,26 @@ submission_delay_p95_max_s = 3600
 
 # Days between the ends of the loss-budget history's windows.
 history_step_days = 7
+
+# ── [verdict] — the reception verdict and SC-7 (D-260 to D-264). Its settings
+#    are deploy/verdict.toml.example's, without the seed, which the report
+#    derives; and the bootstrap's resamples. Without train_until and
+#    validate_until the verdict is not fitted, and the section says so.
+[verdict]
+
+# The split dates, as UTC date-times, for the snapshot you are reporting.
+# train_until = 2027-01-01T00:00:00Z
+# validate_until = 2027-02-01T00:00:00Z
+
+# scikit-learn's C for the L2 penalty, stated and never tuned.
+inverse_regularisation = 1.0
+
+# Below this verdict, a decoded reception counts as partial. Read on
+# validation with `meridian verdict evaluate`, then written here.
+partial_below = 0.5
+
+# The rating instructions a rated label must have been made under.
+rubric = "usable-1"
+
+# Station-day resamples for SC-7's interval: 100 .. 100000.
+resamples = 2000
