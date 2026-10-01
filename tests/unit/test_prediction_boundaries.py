@@ -135,7 +135,11 @@ def test_the_scans_would_notice_a_crossing(tmp_path: Path) -> None:
 
 
 SCORER = PREDICTION / "score.py"
-MODEL_READERS = (SCORER, PREDICTION / "model_files.py")
+MODEL_READERS = (
+    SCORER,
+    PREDICTION / "model_files.py",
+    PREDICTION / "verdict_score.py",
+)
 
 
 def outside_the_standard_library(path: Path) -> list[str]:
@@ -150,6 +154,23 @@ def test_the_scorer_imports_the_standard_library_alone() -> None:
     """What the scheduler imports on the Pi reads a file and does arithmetic."""
     assert list(imported_modules(SCORER))
     assert outside_the_standard_library(SCORER) == []
+
+
+VERDICT_SCORING = (PREDICTION / "verdict_inputs.py", PREDICTION / "verdict_score.py")
+VERDICT_MAY_IMPORT = ("meridian.prediction.score", "meridian.prediction.verdict_inputs")
+
+
+def test_verdict_scoring_imports_the_standard_library_and_the_scorer_alone() -> None:
+    """The verdict writer runs in the image and builds inputs from the database,
+    so what it scores with reaches nothing but plain Python (D-261)."""
+    for path in VERDICT_SCORING:
+        assert list(imported_modules(path))
+        outside = [
+            module
+            for module in outside_the_standard_library(path)
+            if module not in VERDICT_MAY_IMPORT
+        ]
+        assert outside == [], path.name
 
 
 def test_reading_a_model_back_never_imports_the_fitter() -> None:

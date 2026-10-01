@@ -38,6 +38,7 @@ __all__ = [
     "Model",
     "Prediction",
     "Route",
+    "parse_linear",
     "parse_model",
     "predict",
     "route_for",
@@ -224,12 +225,18 @@ def parse_model(raw: bytes) -> Model:
         configuration=configuration,
         reads_history=reads_history,
         min_station_history=history,
-        configured=_linear(_field(stored, "configured"), "configured"),
-        fallback=None if fallback is None else _linear(fallback, "fallback"),
+        configured=parse_linear(_field(stored, "configured"), "configured"),
+        fallback=None if fallback is None else parse_linear(fallback, "fallback"),
     )
 
 
-def _linear(value: object, where: str) -> Linear:
+def parse_linear(value: object, where: str) -> Linear:
+    """One stored logistic regression, read strictly.
+
+    Raises:
+        MalformedModelError: A field is missing, of the wrong type or length,
+            or a scale is not positive. ``where`` names it in the message.
+    """
     stored = _object(value, where)
     features = _field(stored, "features")
     if not isinstance(features, list) or not all(

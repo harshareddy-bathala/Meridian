@@ -5380,6 +5380,31 @@ A person who looks at the product and says whether it can be used answers the qu
 
 ---
 
+## D-261 — The verdict's inputs, three routes by the evidence a reception has, and a hash of what it read
+
+**2026-10-01 · accepted** · *`meridian/prediction/{verdict_inputs,verdict_score,verdict_rows}.py`, `meridian/prediction/score.py` (`parse_linear`), Stage 26. Applies D-103, D-104 and the roadmap's "missing-feature fallback".*
+
+The roadmap lists the verdict's inputs: outcome and detection, peak SNR, frames decoded against frames expected, decoder name and version, listening evidence, and data type. Four decisions turn that list into features a model can be fitted on.
+
+**A missing input takes a route, never a zero.** A station on MSP 0.2 reports no decoder statistics, a downlink with no stated interval has no frames expected (D-250), and a reception that heard nothing may report no SNR. None of these is a zero, and a model fitted with zeros standing in for them would learn that an absent statistic means a bad reception. So there are three calibrated models, each fitted only on receptions that have its inputs:
+- `full` reads the SNR and the frames ratio;
+- `snr` reads the SNR, without decoder statistics;
+- `outcome` reads neither.
+
+A reception is scored by the route with the most evidence it has, as Stage 17 routes a new station to the geometry model (D-161), and the route is stored with the verdict. A frames ratio without an SNR goes to `outcome`, because no station reports that combination and a fourth model would be fitted on nothing.
+
+**Decoder name and version are inputs, not features.** They are in the inputs hash, and calibration is reported per decoder version (EVALUATION.md §11.1), so a decoder whose verdicts are miscalibrated is visible. As a one-hot feature, each release would get a coefficient fitted from the handful of rated receptions it decoded, and a new release would get none. This narrows the roadmap's feature list, and is why it is recorded.
+
+**Two flags, stated as flags.** `listening_confirmed` is 1 when the registry confirmed the station was listening and 0 otherwise, including when nobody asked. It records whether confirmation exists, a fact about the record, not an imputed measurement. `image` is 1 for a mode whose product is an image (`lrpt`, `apt`, `hrpt`) and 0 for telemetry.
+
+**`inputs_sha256` names what the verdict read.** It hashes the nine inputs in D-070's canonical style, sorted keys and no whitespace, with a version string. A float keeps its shortest round-trip form, which a JSON snapshot and a `double precision` column both reproduce, and the snapshot reader reads a whole-number SNR as a float so the two sides agree. The live writer builds the inputs from the database and the fitter from a snapshot, and a reception gets the same hash either way. `tests/unit/test_verdict_inputs.py` checks that every field is hashed and that each one changes the hash.
+
+**Scoring needs no numerical stack.** `verdict_inputs` and `verdict_score` import the standard library and `meridian.prediction.score` alone, which `tests/unit/test_prediction_boundaries.py` enforces, because the writer runs in the image without the `fit` extra (D-155). `verdict.json` is read strictly: a route missing or extra, or a route whose features are not exactly the ones its inputs carry, is refused by name.
+
+*Rejected: imputing a missing SNR with the training mean.* It is the usual fix, and it turns "the station did not say" into "the station said average", which is exactly the confusion rule 7 exists to prevent for absence.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5679,6 +5704,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | Decision | Applied to |
 |---|---|
 | D-260 the label "usable", rated blind | migration 0027; `meridian/store/{ratings,snapshot_reads}.py`; `meridian/cli_verdict.py`, `cli.py`; `meridian/datasets/{usable_labels,export}.py`; `DATA-MODEL.md`; `OPERATIONS.md` § Reception verdicts; `tests/unit/{test_usable_labels,test_reception_ratings,test_snapshot_tables}.py`; `tests/integration/{test_reception_ratings,test_migrations,test_migration_lifecycle}.py` |
+| D-261 inputs, routes and the inputs hash | `meridian/prediction/{verdict_inputs,verdict_score,verdict_rows}.py`; `meridian/prediction/score.py` (`parse_linear`); `tests/unit/{test_verdict_inputs,test_verdict_score,test_verdict_rows,test_prediction_boundaries}.py` |
 | — the settled entry | D-106 |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
