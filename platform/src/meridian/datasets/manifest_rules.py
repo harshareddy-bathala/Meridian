@@ -8,7 +8,8 @@ than in the middle of the parser.
 also holds its one ``model.json`` (D-163), and a verdict model its
 ``verdict.json`` (D-262). An evaluation report also holds the
 report a reader opens, the configuration it was built from, and its figures
-(D-235). A name never comes from a row, and a name one kind holds is refused in
+(D-235). A fault run of a long run also holds that run's record of itself
+(D-257). A name never comes from a row, and a name one kind holds is refused in
 another, so a raw snapshot cannot carry a stray report and still verify.
 
 Reference: docs/DECISIONS.md D-144, D-163, D-229, D-235, D-262.
@@ -72,6 +73,7 @@ _NAMED: dict[str, tuple[Kind, ...]] = {
     "verdict.json": ("verdict_model",),
     "report.md": ("evaluation_report",),
     "config.toml": ("evaluation_report",),
+    "long_run.json": ("fault_run",),
 }
 """The single files a kind holds besides its tables, and which kinds hold each."""
 

@@ -5586,6 +5586,58 @@ Each check has a positive control.
 
 ---
 
+## D-257 — The 72-hour run judges its resources, survives its own tool, and is sealed with its record
+
+**2026-10-01 · accepted** · *`deploy/tools/{long_run,long_run_watch,long_run_state}.py`; `meridian/datasets/{long_run_record,fault_runs,manifest_rules}.py`; `meridian/cli_reliability_faults.py` (`--run-record`); `meridian/reports/{fault_rows,render_long_run}.py`; `OPERATIONS.md` § The long run; `tests/unit/{test_long_run_watch,test_report_faults}.py`; `tests/integration/test_cli_reliability.py`; Stage 24. Amends D-198 and D-240.*
+
+D-198's tool ran the long run and judged it, but three things kept its result from being Stage 24's acceptance evidence:
+- **it sealed nothing**, so a report could not name the run it relied on;
+- **it could not outlive itself.** A lost SSH session, a reboot or a crash lost the run's start, and a signal mid-fault could leave the API paused;
+- **`report build` counted any fault run spanning seventy-two hours as the long run.** It counted from the first fault opening, whether or not the run had passed.
+
+**Surviving is judged on resources too** (`long_run_watch.py`). The run fails when:
+- a container is unhealthy after settling;
+- memory, fitted by least squares over the run's *second* half, grows faster than 4 MiB/h. The first half is left out because caches and pools fill there, and that is not a leak. The slope is judged only once the half holds eight samples, so a two-hour rehearsal says nothing about leaks;
+- free disk falls under 5 GiB;
+- the Pi throttled.
+
+The database's and Prometheus's sizes, free memory, swap and temperature are recorded unjudged. Each bound is a flag, and the record keeps the bounds it ran under.
+
+**Alerts get a positive control, as the stations' faults have `alerted`.** A platform fault that lasts longer than an alert's `for:` plus two minutes owes that alert a firing. Today that is `SchedulerUnavailable` for the five-minute `scheduler_down`. A twenty-second pause and a restart owe nothing, because `ApiUnavailable` and `DatabaseUnavailable` wait a minute; the rehearsal saw neither fire, as it should not have.
+
+Each alert's `for:` also sets its false-positive grace: ten minutes, or the wait and five more. `ObservationsOverdue`, which waits thirty minutes, was otherwise unexplained by the fault that caused it. Alert history is read in twelve-hour pieces and joined, as D-192's checker reads it.
+
+**Data loss is measured with nothing broken.** When the timeline ends, the simulator is restarted under `clean`. It closes the faults it held as `ended: restart` (D-189) and opens none, so the settle window's queue is what the platform failed to take, not what a still-open `upload_blocked` held back. Only a stack the tool brought up is restarted, because only then does it know how that fleet was configured.
+
+**The run survives its tool** (`long_run_state.py`):
+- `run.json` is written before the first fault, with the start, the settings and what ran: commit, image and digest, architecture, and Docker and Compose versions;
+- an `--out` or a simulator volume holding an earlier run is refused;
+- SIGTERM and SIGHUP leave through the injector's mend;
+- `--resume` mends and closes what was left open, skips what fell in the gap and records the gap;
+- the report is written before judging, so `--judge-only` always has one.
+
+*A gap is recorded, not failed.* The platform ran on through it, and every fault injected is still judged from the platform's own records. A reader sees the gap in the report.
+
+**Sealed with its record.** The tool writes its own judgement as `long_run.json`. Then `meridian reliability faults --publish --run-record` judges every fault in a one-off API container and seals ledger, evidence, verdicts and the record as one fault run. The platform reads only what the acceptance needs from the record:
+- `started` and `ended`;
+- `passed`, which must be true exactly when `failures` is empty;
+- `seed`.
+
+The rest is kept and shown. This also answers "every experiment has a config and seed" for fault runs: the seed and the settings are in the sealed record. A non-derived manifest carries no parameters.
+
+**`report build` counts the long run only from a sealed record.** It counts only when all of these hold:
+- the record spans seventy-two hours from start to end, not from the first fault, which opens minutes in;
+- its own judgement passed;
+- every fault passes when judged again here, and agrees with what was sealed.
+
+Otherwise it says *too short* or *failed*, with the reasons, and a fault run without a record is *not run*. The paragraph names the architecture, the image digest, peak memory and its growth, and the database at both ends.
+
+*Rejected: the record in the manifest.* A fault run is read from the database, not derived, so its manifest holds no parameters (D-144). A sealed file is hashed all the same.
+
+*Rejected: requiring every platform alert to fire.* A twenty-second fault cannot raise an alert that waits a minute, so every good run would fail.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5902,6 +5954,8 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-255 a version for the feature code | `meridian/prediction/{features,score,fit,live,replay_models}.py`; `meridian/cli_model.py`; `meridian/reports/prediction.py`; `DATA-MODEL.md` § Model; `OPERATIONS.md` § Models; `tests/unit/{test_feature_version,test_prediction_fit,test_prediction_live}.py` |
 | D-256 pins and Dependabot | `deploy/{docker-compose.yml,docker-compose.public.yml,.env.example}`; `.github/workflows/{ci,image-publish,security}.yml`; `.github/dependabot.yml`; `OPERATIONS.md` § Security scanning; `tests/unit/test_pinning.py` |
 | — the dashboard shows results | `dashboard/src/{receptions,reliability,StationDetail,useStationDetail,format}.ts(x)`, `app.css`, and their tests; `.github/workflows/ci.yml` (the image job's dashboard step); `SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 11's later views |
+| D-257 the 72-hour run's resources, resume and seal | `deploy/tools/{long_run,long_run_watch,long_run_state}.py`; `meridian/datasets/{long_run_record,fault_runs,manifest_rules}.py`; `meridian/{cli_reliability,cli_reliability_faults}.py`; `meridian/reports/{fault_rows,render_reliability,render_long_run}.py`; `OPERATIONS.md` § The long run; `tests/unit/{test_long_run_watch,test_report_faults,test_datasets_manifest,test_datasets_boundaries}.py`; `tests/integration/test_cli_reliability.py` |
+| — the amended entries | D-198, whose run now seals itself and judges its resources; D-240, whose long-run row now needs a sealed, passed record |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

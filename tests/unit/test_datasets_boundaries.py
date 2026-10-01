@@ -67,7 +67,7 @@ MAY_IMPORT_DATASETS = frozenset(
         PLATFORM / "cli_report.py",
         # `faults --publish` seals a fault run; it writes a directory and reads
         # none, so no runtime path reads the past through it (D-240).
-        PLATFORM / "cli_reliability.py",
+        PLATFORM / "cli_reliability_faults.py",
         # Fitting and judging the reception verdict read a raw snapshot, as
         # `meridian model` does; rating and applying it do not (D-262).
         PLATFORM / "cli_verdict_model.py",

@@ -17,22 +17,30 @@ injected failure's own instant (D-192):
   revocation of the work the station held;
 * **alert latency** — seconds from each fault to ``StationOffline`` firing,
   where Prometheus was asked, SC-5's measured half;
-* **the 72-hour run** — Stage 24's acceptance item, reported as **not run**
-  until a fault run spanning 72 hours is given.
+* **the 72-hour run** — Stage 24's acceptance item. It counts only from a fault
+  run sealed by ``deploy/tools/long_run.py`` with the run's own record inside
+  it, and only when every one of these holds:
+  - that record spans 72 hours from its start to its end;
+  - its own judgement passed;
+  - every fault, judged again here, passed;
+  - the verdicts reached again are the ones it was published with.
+
+  Otherwise it says why: **not run**, **too short** or **failed** (D-257).
 
 Every station fault is against simulated work, so each of these figures is
 **simulated** and labelled so (rule 5); platform faults are counted apart.
 
-Reference: docs/DECISIONS.md D-189, D-192, D-197, D-198, D-240.
+Reference: docs/DECISIONS.md D-189, D-192, D-197, D-198, D-240, D-257.
 """
 
 from __future__ import annotations
 
 import json
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from meridian.datasets.fault_runs import FaultRun
+from meridian.datasets.long_run_record import LongRunRecord
 from meridian.datasets.manifest import content_sha256
 from meridian.datasets.weighting import wilson
 from meridian.reliability.fault_record import verdict_rows
@@ -181,21 +189,54 @@ def _sc5(verdicts: Sequence[FaultVerdict], threshold: int) -> Row:
 
 
 def _long_run(judged: Sequence[tuple[FaultRun, Sequence[FaultVerdict]]]) -> Row:
-    """Stage 24's 72-hour run: included if a run spans it, otherwise not run."""
-    long = [run for run, _ in judged if _hours(run) >= LONG_RUN_HOURS]
+    """Stage 24's 72-hour run: the longest run with a record, judged in full."""
     row: Row = {"row": "long_run", "hours_required": LONG_RUN_HOURS}
-    if not long:
+    recorded = [
+        (run, found, run.record) for run, found in judged if run.record is not None
+    ]
+    if not recorded:
         return row | {
             "status": "not run",
-            "reason": "Stage 24's acceptance item; publish its fault run with"
-            " `meridian reliability faults --publish` and give it with --faults",
+            "reason": "no fault run carrying a long run's record was given; seal"
+            " one with deploy/tools/long_run.py and give it with --faults",
         }
-    longest = max(long, key=_hours)
-    return row | {
-        "status": "included",
-        "sha256": content_sha256(longest.directory.manifest),
-        "hours": _hours(longest),
+    run, found, record = max(recorded, key=lambda one: one[2].hours)
+    row |= {
+        "sha256": content_sha256(run.directory.manifest),
+        "hours": _real(record.hours),
+        "seed": record.seed,
+        "record": _shown(record.document),
     }
+    reasons = _why_not(run, found, record)
+    if record.hours < LONG_RUN_HOURS:
+        return row | {"status": "too short", "reasons": reasons}
+    if reasons:
+        return row | {"status": "failed", "reasons": reasons}
+    return row | {"status": "included"}
+
+
+def _why_not(
+    run: FaultRun, found: Sequence[FaultVerdict], record: LongRunRecord
+) -> list[str]:
+    """Every reason the run is not an acceptance run, its length aside."""
+    reasons = list(record.failures)
+    failed = sum(not one.passed for one in found)
+    if failed:
+        reasons.append(f"{failed} of {len(found)} faults failed, judged again")
+    again = [json.loads(json.dumps(one)) for one in verdict_rows(found)]
+    if again != list(run.verdicts):
+        reasons.append(
+            "judged again, its verdicts differ from those it was sealed with"
+        )
+    return reasons
+
+
+SHOWN = ("environment", "interruptions", "stations", "resources", "alerts_by_name")
+"""What of a run's record the report repeats, for a reader to judge the run by."""
+
+
+def _shown(document: Mapping[str, object]) -> dict[str, object]:
+    return {key: document[key] for key in SHOWN if key in document}
 
 
 def _hours(run: FaultRun) -> float:

@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from meridian.reports.markdown import cell, table
+from meridian.reports.render_long_run import long_run_lines
 from meridian.reports.svg_intervals import Estimate, interval_chart
 
 __all__ = [
@@ -248,7 +249,9 @@ def _faults(rows: Sequence[Row]) -> list[str]:
     else:
         lines.extend(_runs(runs))
         lines.extend(_latencies(rows))
-    lines.extend([*_sc5(_of(rows, "sc5")[0]), *_long_run(_of(rows, "long_run")[0])])
+    lines.extend(
+        [*_sc5(_of(rows, "sc5")[0]), *long_run_lines(_of(rows, "long_run")[0])]
+    )
     if any(one["check"] == "detected" and one["n"] for one in _of(rows, "latency")):
         lines.extend([f"![Detection by fault kind]({DETECTION_FIGURE})", ""])
     return lines
@@ -334,18 +337,5 @@ def _sc5(sc5: Row) -> list[str]:
         f"**SC-5** (simulated): {sc5['within']} of {sc5['n']} detections within"
         f" {sc5['target_s']} s; the slowest took {cell(sc5['max_s'])} s. Every"
         f" one within: {cell(sc5['all_within'])}.",
-        "",
-    ]
-
-
-def _long_run(one: Row) -> list[str]:
-    if one["status"] != "included":
-        return [
-            f"**The {one['hours_required']}-hour run**: not run — {one['reason']}.",
-            "",
-        ]
-    return [
-        f"**The {one['hours_required']}-hour run**: included,"
-        f" `{str(one['sha256'])[:12]}`, {cell(one['hours'])} hours.",
         "",
     ]

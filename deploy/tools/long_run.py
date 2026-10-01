@@ -26,8 +26,25 @@ At the end it waits for the stack to settle, then judges the run:
 Everything lands in ``--out``: the merged ledger, every sample, the verdict and
 a ``report.json`` a person or a later stage can read.
 
+**For Stage 24's acceptance the run is sealed, and survives its own tool**
+(D-257):
+- **resources** — each sample also reads container health, the database's and
+  Prometheus's size, free disk, and the host's memory, temperature and
+  throttling. Memory that climbs, disk that runs short, or a host that
+  throttled fails the run (:mod:`long_run_watch`);
+- **alerts as a positive control** — a platform fault that outlasts an alert's
+  ``for:`` owes that alert a firing;
+- **data loss** — the simulator's own faults are stopped when the run ends, so
+  the settle window measures the queue with nothing broken;
+- **resume** — ``run.json`` records the start, the settings and what the run ran
+  on, so ``--resume`` carries a run on after its tool stopped
+  (:mod:`long_run_state`);
+- **seal** — the judgement is published as a fault run with this run's record
+  inside it as ``long_run.json``, which ``meridian report build --faults``
+  reads to say whether the seventy-two hours were run and passed.
+
     python deploy/tools/long_run.py --hours 72 --seed 4471 --out runs/long-72h \\
-        --project-name meridian-s21 --up --stations 10
+        --up --stations 10
 
 Pure where it decides anything, so ``tests/unit/test_long_run.py`` pins the
 schedule, the parsing and the false-positive rule without Docker.
@@ -38,6 +55,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -47,20 +67,46 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from chaos import Effects, Planned, inject, plan
+from chaos import FAULTS, Effects, Planned, append, inject, plan
 from compose_db import Compose, ToolError, add_compose_arguments, compose_from
+from long_run_state import (
+    PLATFORM_LEDGER,
+    REPORT_FILE,
+    RunState,
+    environment,
+    left_open,
+    read_state,
+    refuse_taken,
+    restart_close,
+    write_state,
+)
+from long_run_watch import (
+    DISK_FREE_FLOOR_GIB,
+    MEMORY_SLOPE_MIB_PER_HOUR,
+    Machine,
+    Sizes,
+    alert_waits,
+    grace_for,
+    judge_resources,
+    missed_alerts,
+    parse_bytes,
+    parse_kib,
+    read_machine,
+)
 
-REPORT_FORMAT = "meridian-long-run/1"
+REPORT_FORMAT = "meridian-long-run/2"
+RECORD_FILE = "long_run.json"
+"""The run's own record, sealed inside its fault run (D-257)."""
+
+RULES = Path(__file__).resolve().parents[1] / "prometheus" / "rules" / "meridian.yml"
+"""The alert rules, for each alert's ``for:``."""
+
+HISTORY_CHUNK = timedelta(hours=12)
+"""Alert history is read twelve hours at a time, as D-192's checker reads it:
+seventy-two hours at a thirty-second step is near Prometheus's point limit."""
 RUN_ID = "long-run"
 STATION_LEDGER = "/var/lib/meridian-sim/faults.jsonl"
 """Where the simulator writes its ledger, inside its state volume."""
-
-ALERT_GRACE = timedelta(minutes=10)
-"""How long after a fault closes an alert it caused may still be firing.
-
-Long enough for a `for:` of five minutes plus an evaluation and a scrape; an
-alert still firing later than this, with nothing open, is a false positive.
-"""
 
 PROFILES = ("--profile", "sim", "--profile", "metrics")
 
@@ -86,6 +132,8 @@ class Container:
     state: str
     restarts: int
     exit_code: int = 0
+    health: str = "none"
+    """Its healthcheck's answer, ``none`` for a service without one."""
 
     @property
     def healthy(self) -> bool:
@@ -115,6 +163,8 @@ class Sample:
     firing: list[str] = field(default_factory=list)
     queued: int | None = None
     usage: list[Usage] = field(default_factory=list)
+    machine: Machine | None = None
+    sizes: Sizes = field(default_factory=Sizes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,7 +199,7 @@ def timeline(
 
 
 def parse_containers(lines: Iterable[str]) -> list[Container]:
-    """``docker inspect`` output: ``service restarts state exit-code`` per line.
+    """``docker inspect``: ``service restarts state exit-code [health]`` per line.
 
     The service is compose's own label on the container, not a piece of its
     name: a project name may contain hyphens, and so may a service's.
@@ -157,10 +207,13 @@ def parse_containers(lines: Iterable[str]) -> list[Container]:
     found: list[Container] = []
     for line in lines:
         parts = line.split()
-        if len(parts) != 4:
+        if len(parts) not in {4, 5} or not parts[1].isdigit():
             continue
-        service, restarts, state, code = parts
-        found.append(Container(service, state, int(restarts), int(code)))
+        service, restarts, state, code = parts[:4]
+        if not code.lstrip("-").isdigit():
+            continue
+        health = parts[4] if len(parts) == 5 else "none"
+        found.append(Container(service, state, int(restarts), int(code), health))
     return sorted(found, key=lambda one: one.service)
 
 
@@ -293,14 +346,19 @@ def false_positives(
     alerts: Sequence[Interval],
     faults: Sequence[Interval],
     run_end: datetime,
-    grace: timedelta = ALERT_GRACE,
+    waits: dict[str, timedelta] | None = None,
 ) -> list[Interval]:
     """Alerts that fired with no fault that could cause them open, nor closed
-    within ``grace``. A host that slept explains any alert; it fails the run
-    on its own account."""
+    within their grace. A host that slept explains any alert; it fails the run
+    on its own account.
+
+    The grace is ten minutes, or longer for an alert whose ``for:`` is: an alert
+    that waits thirty minutes can first fire nearly that long after its cause.
+    """
     unexplained: list[Interval] = []
     for alert in alerts:
         alert_end = alert.end or run_end
+        grace = grace_for(alert.name, waits or {})
         causes = CAUSES.get(alert.name, frozenset())
         explained = any(
             (fault.name == HOST_ASLEEP or _kind(fault) in causes)
@@ -372,7 +430,29 @@ class Waiter:
         self.until(self.host.now() + timedelta(seconds=seconds))
 
 
-def sample(compose: Compose, host: Host) -> Sample:
+@dataclass(frozen=True, slots=True)
+class Probe:
+    """What a sample can read on this host besides Docker, found once."""
+
+    disk_root: Path | None = None
+    """Docker's data root, whose free space is the stack's disk."""
+    vcgencmd: bool = False
+    """Whether this is a Raspberry Pi that can say if it throttled."""
+
+
+def probe_for(host: Host) -> Probe:
+    """Find Docker's data root, and whether ``vcgencmd`` is here."""
+    status, root = host.run(["docker", "info", "--format", "{{.DockerRootDir}}"], None)
+    return Probe(
+        disk_root=Path(root.strip()) if status == 0 and root.strip() else None,
+        vcgencmd=shutil.which("vcgencmd") is not None,
+    )
+
+
+SIZE_SQL = "select pg_database_size(current_database());\n"
+
+
+def sample(compose: Compose, host: Host, probe: Probe | None = None) -> Sample:
     """One look at the stack, from outside it."""
     taken = Sample(at=host.now().isoformat())
     # Every container, stopped ones too: a service that died and stayed down
@@ -385,7 +465,8 @@ def sample(compose: Compose, host: Host) -> Sample:
                 "inspect",
                 "--format",
                 '{{index .Config.Labels "com.docker.compose.service"}}'
-                " {{.RestartCount}} {{.State.Status}} {{.State.ExitCode}}",
+                " {{.RestartCount}} {{.State.Status}} {{.State.ExitCode}}"
+                " {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
                 *ids.split(),
             ],
             None,
@@ -413,7 +494,23 @@ def sample(compose: Compose, host: Host) -> Sample:
     )
     if status == 0 and count.strip().isdigit():
         taken.queued = int(count.strip())
+    _measure(compose, host, probe or Probe(), taken)
     return taken
+
+
+def _measure(compose: Compose, host: Host, probe: Probe, taken: Sample) -> None:
+    """The stack's sizes on disk and the machine's state, into ``taken``."""
+    status, size = host.run(compose.psql(), SIZE_SQL)
+    database = parse_bytes(size) if status == 0 else None
+    status, used = host.run(
+        compose.command("exec", "-T", "prometheus", "du", "-sk", "/prometheus"), None
+    )
+    taken.sizes = Sizes(database, parse_kib(used) if status == 0 else None)
+    throttled = None
+    if probe.vcgencmd:
+        status, answer = host.run(["vcgencmd", "get_throttled"], None)
+        throttled = answer if status == 0 else None
+    taken.machine = read_machine(probe.disk_root, throttled)
 
 
 def _in_prometheus(compose: Compose, path: str) -> list[str]:
@@ -426,56 +523,98 @@ def _in_prometheus(compose: Compose, path: str) -> list[str]:
 def alert_history(
     compose: Compose, host: Host, start: datetime, end: datetime, step_s: float = 30
 ) -> list[Interval]:
-    """Every stretch any alert fired between ``start`` and ``end``."""
-    query = urllib.parse.urlencode(
-        {
-            "query": 'ALERTS{alertstate="firing"}',
-            "start": f"{start.timestamp():.0f}",
-            "end": f"{end.timestamp():.0f}",
-            "step": f"{step_s:.0f}",
-        }
-    )
-    status, body = host.run(
-        _in_prometheus(compose, f"/api/v1/query_range?{query}"), None
-    )
-    if status != 0:
-        raise ToolError(f"the alert history could not be read: {body.strip()}")
-    return parse_alert_history(body, step_s)
+    """Every stretch any alert fired between ``start`` and ``end``.
+
+    Read in twelve-hour pieces and joined again, so a stretch crossing a piece's
+    edge is one stretch.
+    """
+    found: list[Interval] = []
+    at = start
+    while at < end:
+        upto = min(at + HISTORY_CHUNK, end)
+        query = urllib.parse.urlencode(
+            {
+                "query": 'ALERTS{alertstate="firing"}',
+                "start": f"{at.timestamp():.0f}",
+                "end": f"{upto.timestamp():.0f}",
+                "step": f"{step_s:.0f}",
+            }
+        )
+        status, body = host.run(
+            _in_prometheus(compose, f"/api/v1/query_range?{query}"), None
+        )
+        if status != 0:
+            raise ToolError(f"the alert history could not be read: {body.strip()}")
+        found.extend(parse_alert_history(body, step_s))
+        at = upto
+    return join_stretches(found, step_s)
+
+
+def join_stretches(stretches: Sequence[Interval], step_s: float) -> list[Interval]:
+    """One stretch per alert where two pieces of history meet within a step."""
+    joined: list[Interval] = []
+    for one in sorted(stretches, key=lambda item: (item.name, item.start)):
+        last = joined[-1] if joined else None
+        if (
+            last is not None
+            and last.name == one.name
+            and last.end is not None
+            and (one.start - last.end).total_seconds() <= step_s * 1.5
+        ):
+            joined[-1] = Interval(
+                one.name, last.start, max(last.end, one.end or last.end)
+            )
+        else:
+            joined.append(one)
+    return sorted(joined, key=lambda item: (item.start, item.name))
+
+
+@dataclass(frozen=True, slots=True)
+class Judging:
+    """Where the judgement seals the run: a datasets root on this host."""
+
+    datasets: Path
 
 
 def run_long(args: argparse.Namespace, host: Host) -> dict[str, object]:
     """The whole run: faults and samples on their timeline, then the judgement."""
     compose = compose_from(args)
     out: Path = args.out
-    out.mkdir(parents=True, exist_ok=True)
-    platform_ledger = out / "platform-faults.jsonl"
-    if args.up:
-        _step(host, compose.command(*PROFILES, "up", "-d"))
-
-    faults = plan(args.seed, args.hours, args.fault_gap_minutes * 60)
-    started = host.now()
-    samples: list[Sample] = []
+    state = _resume(compose, host, out) if args.resume else _begin(args, compose, host)
+    platform_ledger = out / PLATFORM_LEDGER
+    faults = plan(state.seed, state.hours, state.fault_gap_minutes * 60)
+    started = datetime.fromisoformat(state.started)
+    resumed_at_s = (host.now() - started).total_seconds() if args.resume else 0.0
+    samples = _read_samples(out)
     waiter = Waiter(host)
+    probe = probe_for(host)
     effects = Effects(
         run=lambda command: host.run(command, None)[0],
         sleep=waiter.sleep,
         now=host.now,
     )
+    skipped = 0
     for at_s, kind, fault in timeline(
-        faults, args.hours, args.sample_every_minutes * 60
+        faults, state.hours, state.sample_every_minutes * 60
     ):
+        if at_s < resumed_at_s:
+            # What fell while the tool was stopped did not happen; it is not
+            # done late, which would crowd it against what comes next.
+            skipped += kind == "fault"
+            continue
         waiter.until(started + timedelta(seconds=at_s))
         if kind == "fault" and fault is not None:
             inject(
                 compose, fault.kind, platform_ledger, RUN_ID, fault.duration_s, effects
             )
         else:
-            samples.append(sample(compose, host))
+            samples.append(sample(compose, host, probe))
             _write_samples(out, samples)
 
     ended = host.now()
-    waiter.sleep(args.settle_minutes * 60)
-    settled = sample(compose, host)
+    stopped_faults = _stop_station_faults(compose, host, state)
+    waiter.sleep(state.settle_minutes * 60)
+    settled = sample(compose, host, probe)
     samples.append(settled)
     _write_samples(out, samples)
 
@@ -483,12 +622,97 @@ def run_long(args: argparse.Namespace, host: Host) -> dict[str, object]:
     # the ledger was copied would otherwise be judged against heartbeats sent
     # after the copy, and read as a fault that did not hold.
     _step(host, compose.command("stop", "simulator"))
-    report = _report(args, started, ended, samples, settled, [], [])
+    report = _report(state, started, ended, samples, settled)
     report["fleet_stopped"] = host.now().isoformat()
+    report["station_faults_stopped_at_end"] = stopped_faults
     report["faults_injected"] = {
-        "platform": len([one for one in faults if one.at_s < args.hours * 3600])
+        "platform": len([one for one in faults if one.at_s < state.hours * 3600]),
+        "skipped_while_interrupted": skipped,
     }
-    return judge(compose, host, out, report, waiter.pauses)
+    # Kept before judging: a judgement that fails can be had again with
+    # --judge-only, from this, without running the hours again.
+    (out / REPORT_FILE).write_text(json.dumps(report, indent=2) + "\n", "utf-8")
+    return judge(compose, host, out, report, waiter.pauses, _judging(args))
+
+
+def _begin(args: argparse.Namespace, compose: Compose, host: Host) -> RunState:
+    """Refuse a run that is not fresh, bring the stack up, and record the start."""
+    refused = refuse_taken(args.out)
+    if refused:
+        raise ToolError(refused)
+    if args.up:
+        # Before `up`, which starts the simulator writing: a ledger already
+        # there is an earlier run's, and would be judged as part of this one.
+        status, held = host.run(_ledger_command(compose), None)
+        if status == 0 and held.strip():
+            raise ToolError(
+                "this compose project's simulator volume already holds a fault"
+                " ledger: give a new --project-name, or remove its volumes with"
+                " `docker compose down -v`"
+            )
+        _step(host, compose.command(*PROFILES, "up", "-d"))
+    status, api = host.run(compose.command("ps", "-q", "api"), None)
+    state = RunState(
+        started=host.now().isoformat(),
+        seed=args.seed,
+        hours=args.hours,
+        stations=args.stations,
+        fault_gap_minutes=args.fault_gap_minutes,
+        sample_every_minutes=args.sample_every_minutes,
+        settle_minutes=args.settle_minutes,
+        memory_slope_mib_per_hour=args.memory_slope_bound,
+        disk_free_gib=args.disk_floor_gib,
+        up=args.up,
+        environment=environment(
+            lambda command: host.run(command, None),
+            api.strip() or None if status == 0 else None,
+        ),
+    )
+    write_state(args.out, state)
+    return state
+
+
+def _resume(compose: Compose, host: Host, out: Path) -> RunState:
+    """Carry a run on: mend what its tool left broken, and record the gap."""
+    try:
+        state = read_state(out)
+    except FileNotFoundError as missing:
+        raise ToolError(f"{out} holds no run.json, so no run to resume") from missing
+    ledger = out / PLATFORM_LEDGER
+    text = ledger.read_text("utf-8") if ledger.exists() else ""
+    for opened in left_open(text):
+        mends = FAULTS[str(opened["kind"])].mends
+        if mends:
+            _step(host, compose.command(*mends))
+        append(ledger, restart_close(opened, host.now()))
+    taken = _read_samples(out)
+    since = taken[-1].at if taken else state.started
+    state.interruptions.append({"from": since, "to": host.now().isoformat()})
+    write_state(out, state)
+    return state
+
+
+def _stop_station_faults(compose: Compose, host: Host, state: RunState) -> bool:
+    """Restart the fleet under ``clean``, so nothing is broken while it settles.
+
+    A restarted simulator closes the faults it held as ``ended: restart`` and
+    opens none (D-189), so the queue measured after settling is what the
+    platform failed to take, not what a fault was still holding back. Only a
+    stack the tool brought up is restarted: it alone knows how that fleet was
+    configured.
+    """
+    if not state.up:
+        return False
+    settings = {
+        "SIMULATOR_SCENARIO": "clean",
+        "SIMULATOR_STATION_COUNT": str(state.stations),
+        "SIMULATOR_SEED": str(state.seed),
+    }
+    command = compose.command("up", "-d", "--no-deps", "--force-recreate", "simulator")
+    _step(
+        host, ["env", *(f"{key}={value}" for key, value in settings.items()), *command]
+    )
+    return True
 
 
 def judge(
@@ -497,79 +721,182 @@ def judge(
     out: Path,
     report: dict[str, object],
     pauses: Sequence[Interval] = (),
+    judging: Judging | None = None,
 ) -> dict[str, object]:
     """Judge a finished run from its ledgers, its stack and its Prometheus.
 
     Also what ``--judge-only`` runs, against a stack a run left standing, so a
     judgement lost to a defect in this tool need not cost the run again.
+
+    The run is judged twice over, and sealed once: first its own record — the
+    host, the containers, the alerts, the queue, the resources — written as
+    ``long_run.json``; then every fault, by ``meridian reliability faults
+    --publish``, which seals the ledger, the evidence and the verdicts with
+    that record beside them.
     """
     started = datetime.fromisoformat(str(report["started"]))
     ended = datetime.fromisoformat(str(report["ended"]))
-    ledger = _merged_ledger(compose, host, out, out / "platform-faults.jsonl")
-    verdict_status, verdict = host.run(
-        compose.command(
-            "exec",
-            "-T",
-            "api",
-            "meridian",
-            "reliability",
-            "faults",
-            "--ledger",
-            "-",
-            "--prometheus",
-            "http://prometheus:9090",
-        ),
-        ledger,
-    )
-    (out / "verdict.txt").write_text(verdict, encoding="utf-8")
+    ledger = _merged_ledger(compose, host, out, out / PLATFORM_LEDGER)
 
     # Only up to the fleet being stopped: the alerts that stopping it raises —
     # heartbeats ceasing — are the judgement's doing, not the run's.
     alerts = alert_history(compose, host, started, _fleet_stopped(report, out, host))
     windows = ledger_windows(ledger.splitlines())
+    waits = alert_waits(RULES.read_text("utf-8")) if RULES.exists() else {}
     # An alert raised by the host having slept is the host's, not a false one;
     # the pause itself fails the run.
-    unexplained = false_positives(alerts, [*windows, *pauses], ended)
+    unexplained = false_positives(alerts, [*windows, *pauses], ended, waits)
+    platform = [one for one in windows if " on platform:" in one.name]
     report["alerts_fired"] = len(alerts)
     report["alerts_by_name"] = _count(one.name for one in alerts)
     report["false_positives"] = [
         {"alert": one.name, "start": one.start.isoformat()} for one in unexplained
     ]
+    report["missed_alerts"] = missed_alerts(platform, alerts, waits, CAUSES)
     if pauses or "host_pauses" not in report:
         report["host_pauses"] = [
             {"start": one.start.isoformat(), "end": (one.end or ended).isoformat()}
             for one in pauses
         ]
-    report["verdict"] = {"exit": verdict_status, "summary": _last_line(verdict)}
     injected = dict(report.get("faults_injected") or {})  # type: ignore[call-overload]
     injected["windows_in_ledger"] = len(windows)
     report["faults_injected"] = injected
-    (out / "report.json").write_text(json.dumps(report, indent=2) + "\n", "utf-8")
+    report["failures"] = failures(report)
+    report["passed"] = not report["failures"]
+    _seal(compose, host, out, report, judging or Judging(Path("data/datasets")))
+    _keep_logs(compose, host, out)
+    (out / REPORT_FILE).write_text(json.dumps(report, indent=2) + "\n", "utf-8")
     return report
 
 
+def failures(report: dict[str, object]) -> list[str]:
+    """Every reason the run's own record fails it, in words; none if it passed."""
+    said = {
+        "host_pauses": "the host slept {n} time(s)",
+        "false_positives": "{n} alert(s) fired with no fault to cause them",
+        "missed_alerts": "{n} platform alert(s) owed by a fault never fired",
+        "unplanned_restarts": "{n} container(s) restarted on their own",
+        "not_running_at_end": "{n} service(s) not running after settling",
+        "unhealthy_at_end": "{n} service(s) unhealthy after settling",
+    }
+    found = [
+        text.format(n=len(report[key]))  # type: ignore[arg-type]
+        for key, text in said.items()
+        if report.get(key)
+    ]
+    if report.get("queue_after_settling"):
+        found.append(
+            f"{report['queue_after_settling']} observation(s) still queued after"
+            " settling"
+        )
+    resources = report.get("resources")
+    if isinstance(resources, dict):
+        found.extend(str(one) for one in resources.get("failures", []))
+    return found
+
+
+def _seal(
+    compose: Compose,
+    host: Host,
+    out: Path,
+    report: dict[str, object],
+    judging: Judging,
+) -> None:
+    """Judge every fault and seal the run as a fault run, with its record inside.
+
+    Run in a one-off API container on the stack's network, as the runbook
+    exports a snapshot: the API's own container cannot write (D-206).
+    """
+    record = {key: value for key, value in report.items() if key != "verdict"}
+    (out / RECORD_FILE).write_text(json.dumps(record, indent=2) + "\n", "utf-8")
+    datasets = judging.datasets.resolve()
+    datasets.mkdir(parents=True, exist_ok=True)
+    status, verdict = host.run(
+        compose.command(
+            "run",
+            "--rm",
+            "--no-deps",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
+            "-v",
+            f"{datasets}:/datasets",
+            "-v",
+            f"{out.resolve()}:/long-run:ro",
+            "-e",
+            "MERIDIAN_DATASETS_ROOT=/datasets",
+            "api",
+            "meridian",
+            "reliability",
+            "faults",
+            "--ledger",
+            "/long-run/faults.jsonl",
+            "--prometheus",
+            "http://prometheus:9090",
+            "--publish",
+            "--run-record",
+            f"/long-run/{RECORD_FILE}",
+        ),
+        None,
+    )
+    (out / "verdict.txt").write_text(verdict, encoding="utf-8")
+    sealed = sealed_run(verdict)
+    report["verdict"] = {"exit": status, "summary": _last_line(verdict)}
+    report["fault_run"] = (
+        None
+        if sealed is None
+        else {"sha256": sealed[1], "path": str(datasets / "faults" / sealed[0])}
+    )
+
+
+def sealed_run(verdict: str) -> tuple[str, str] | None:
+    """The fault run's directory name and hash, as ``--publish`` printed them."""
+    path = re.search(r"^fault run: \S*/([0-9a-f]{12}) ", verdict, re.M)
+    digest = re.search(r"^\s+hash\s+([0-9a-f]{64})\s*$", verdict, re.M)
+    return (path.group(1), digest.group(1)) if path and digest else None
+
+
+def _keep_logs(compose: Compose, host: Host, out: Path) -> None:
+    """Every service's log, kept beside the record: compose rotates them away."""
+    status, logs = host.run(compose.command("logs", "--no-color", "--timestamps"), None)
+    (out / "logs").mkdir(exist_ok=True)
+    (out / "logs" / "compose.log").write_text(
+        logs if status == 0 else f"compose logs failed: {logs[-400:]}\n", "utf-8"
+    )
+
+
 def _report(
-    args: argparse.Namespace,
+    state: RunState,
     started: datetime,
     ended: datetime,
     samples: Sequence[Sample],
     settled: Sample,
-    alerts: Sequence[Interval],
-    unexplained: Sequence[Interval],
 ) -> dict[str, object]:
     restarts = {
         one.service: one.restarts for one in (samples[-1].containers if samples else [])
     }
-    peak_memory: dict[str, float] = {}
-    for taken in samples:
-        for use in taken.usage:
-            peak_memory[use.name] = max(peak_memory.get(use.name, 0.0), use.memory_mib)
     queues = [one.queued for one in samples if one.queued is not None]
+    memory: dict[str, list[tuple[datetime, float]]] = {}
+    for taken in samples:
+        at = datetime.fromisoformat(taken.at)
+        for use in taken.usage:
+            memory.setdefault(use.name, []).append((at, use.memory_mib))
+    resources = judge_resources(
+        memory,
+        [one.machine for one in samples if one.machine is not None],
+        [one.sizes for one in samples],
+        (state.memory_slope_mib_per_hour, state.disk_free_gib),
+    )
     return {
         "format": REPORT_FORMAT,
         "simulated": True,
-        "seed": args.seed,
-        "hours": args.hours,
+        "seed": state.seed,
+        "hours": state.hours,
+        "stations": state.stations,
+        "fault_gap_minutes": state.fault_gap_minutes,
+        "sample_every_minutes": state.sample_every_minutes,
+        "settle_minutes": state.settle_minutes,
+        "environment": state.environment,
+        "interruptions": state.interruptions,
         "started": started.isoformat(),
         "ended": ended.isoformat(),
         "samples": len(samples),
@@ -577,14 +904,12 @@ def _report(
         "not_running_at_end": [
             one.service for one in settled.containers if not one.healthy
         ],
-        "alerts_fired": len(alerts),
-        "alerts_by_name": _count(one.name for one in alerts),
-        "false_positives": [
-            {"alert": one.name, "start": one.start.isoformat()} for one in unexplained
+        "unhealthy_at_end": [
+            one.service for one in settled.containers if one.health == "unhealthy"
         ],
         "queue_max": max(queues, default=None),
         "queue_after_settling": settled.queued,
-        "peak_memory_mib": peak_memory,
+        "resources": {"figures": resources.figures, "failures": resources.failures},
     }
 
 
@@ -617,24 +942,43 @@ def _merged_ledger(
     cannot be read stops the judgement — judged against the platform's faults
     alone, every station fault's alert would read as a false positive.
     """
-    status, stations = host.run(
-        compose.command(
-            "run",
-            "--rm",
-            "--no-deps",
-            "--entrypoint",
-            "cat",
-            "simulator",
-            STATION_LEDGER,
-        ),
-        None,
-    )
+    status, stations = host.run(_ledger_command(compose), None)
     if status != 0:
         raise ToolError(f"the simulator's ledger could not be read: {stations[-400:]}")
     platform = platform_ledger.read_text("utf-8") if platform_ledger.exists() else ""
     merged = stations + platform
     (out / "faults.jsonl").write_text(merged, encoding="utf-8")
     return merged
+
+
+def _ledger_command(compose: Compose) -> list[str]:
+    """Print the simulator's ledger from its volume, whether or not it runs."""
+    return compose.command(
+        "run", "--rm", "--no-deps", "--entrypoint", "cat", "simulator", STATION_LEDGER
+    )
+
+
+def _read_samples(out: Path) -> list[Sample]:
+    """The samples a run already took, from ``samples.json``; none if it has none."""
+    path = out / "samples.json"
+    if not path.exists():
+        return []
+    return [
+        Sample(
+            at=one["at"],
+            containers=[Container(**held) for held in one.get("containers", [])],
+            firing=list(one.get("firing", [])),
+            queued=one.get("queued"),
+            usage=[Usage(**held) for held in one.get("usage", [])],
+            machine=Machine(**one["machine"]) if one.get("machine") else None,
+            sizes=Sizes(**one.get("sizes", {})),
+        )
+        for one in json.loads(path.read_text("utf-8"))
+    ]
+
+
+def _judging(args: argparse.Namespace) -> Judging:
+    return Judging(datasets=args.datasets)
 
 
 def _write_samples(out: Path, samples: Sequence[Sample]) -> None:
@@ -654,7 +998,7 @@ def _last_line(text: str) -> str:
     return lines[-1] if lines else ""
 
 
-def main(argv: list[str] | None = None) -> int:
+def _arguments(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--hours", type=float, required=True)
     parser.add_argument("--seed", type=int, default=4471)
@@ -668,7 +1012,7 @@ def main(argv: list[str] | None = None) -> int:
         default=10,
         help="with --up: SIMULATOR_STATION_COUNT, under the chaos scenario",
     )
-    parser.add_argument("--sample-every-minutes", type=float, default=60.0)
+    parser.add_argument("--sample-every-minutes", type=float, default=15.0)
     parser.add_argument(
         "--fault-gap-minutes",
         type=float,
@@ -677,36 +1021,74 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--settle-minutes", type=float, default=10.0)
     parser.add_argument(
+        "--memory-slope-bound",
+        type=float,
+        default=MEMORY_SLOPE_MIB_PER_HOUR,
+        metavar="MIB_PER_HOUR",
+        help="fail a container whose memory grows faster over the second half",
+    )
+    parser.add_argument(
+        "--disk-floor-gib",
+        type=float,
+        default=DISK_FREE_FLOOR_GIB,
+        help="fail the run if Docker's disk ever has less free",
+    )
+    parser.add_argument(
+        "--datasets",
+        type=Path,
+        default=Path("data/datasets"),
+        help="the datasets root the run is sealed under, on this host",
+    )
+    again = parser.add_mutually_exclusive_group()
+    again.add_argument(
+        "--resume",
+        action="store_true",
+        help="carry on a run in --out whose tool stopped, from its run.json",
+    )
+    again.add_argument(
         "--judge-only",
         action="store_true",
         help="judge a finished run again from --out and the stack it left up",
     )
     add_compose_arguments(parser)
-    args = parser.parse_args(argv)
+    return parser.parse_args(argv)
+
+
+def _judge_again(args: argparse.Namespace) -> dict[str, object]:
+    """``--judge-only``: the judgement again, from the report the run kept."""
+    path = args.out / REPORT_FILE
+    if not path.exists():
+        raise ToolError(f"{path} does not exist: the run never reached its end")
+    report = json.loads(path.read_text("utf-8"))
+    return judge(
+        compose_from(args), real_host(), args.out, report, judging=_judging(args)
+    )
+
+
+def _stopped(signum: int, _frame: object) -> None:
+    """Leave by an exception, so a fault being injected is mended on the way."""
+    raise SystemExit(128 + signum)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _arguments(argv)
     if args.up:
         os.environ.setdefault("SIMULATOR_SCENARIO", "chaos")
         os.environ.setdefault("SIMULATOR_STATION_COUNT", str(args.stations))
         os.environ.setdefault("SIMULATOR_SEED", str(args.seed))
+    # A lost SSH session sends SIGHUP and `systemctl stop` sends SIGTERM; both
+    # would otherwise end the tool with a paused API or a stopped scheduler.
+    for one in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(one, _stopped)
 
     try:
-        if args.judge_only:
-            existing = json.loads((args.out / "report.json").read_text("utf-8"))
-            report = judge(compose_from(args), real_host(), args.out, existing)
-        else:
-            report = run_long(args, real_host())
+        report = _judge_again(args) if args.judge_only else run_long(args, real_host())
     except ToolError as refused:
         print(f"long_run: {refused}", file=sys.stderr)
         return 1
     print(json.dumps(report, indent=2))
-    failed = (
-        report["host_pauses"]
-        or report["false_positives"]
-        or report["unplanned_restarts"]
-        or report["not_running_at_end"]
-        or report["queue_after_settling"]
-        or report["verdict"]["exit"]  # type: ignore[index]
-    )
-    return 1 if failed else 0
+    passed = report["passed"] and report["verdict"]["exit"] == 0  # type: ignore[index]
+    return 0 if passed and report.get("fault_run") else 1
 
 
 if __name__ == "__main__":

@@ -1423,23 +1423,49 @@ The probe needs `METRICS_TOKEN`. The jobs process's metrics are on `JOBS_METRICS
 
 ### The long run
 
-`deploy/tools/long_run.py` runs the whole stack for hours: stations under `chaos`, platform faults from `chaos.py`'s seeded plan, and a sample of the stack every `--sample-every-minutes`. It then settles, judges and writes `report.json` (D-198):
+`deploy/tools/long_run.py` runs the whole stack for hours. Stations run under `chaos`, platform faults come from `chaos.py`'s seeded plan, and the stack is sampled every `--sample-every-minutes` (fifteen by default). It then stops the stations' own faults, settles, judges, and **seals the run** (D-198, D-257):
 
 ```sh
 python deploy/tools/long_run.py --hours 72 --seed 4471 --out runs/long-72h --up --stations 10
 ```
 
-`--up` brings the stack up with the `sim` and `metrics` profiles. Run it under its own `--project-name`, with `API_PORT` and `GRAFANA_PORT` set, to keep it away from a stack already running.
+`--up` brings the stack up with the `sim` and `metrics` profiles. Run it under its own `--project-name`, with `API_PORT` and `GRAFANA_PORT` set, to keep it away from a stack already running. Pin `MERIDIAN_IMAGE` to a `sha-<commit>` tag, so the record names the software that ran (D-256). The Pi's own procedure is § The 72-hour acceptance run on the Pi, below.
 
-It exits 1 on any of:
-- an alert with no fault near it;
-- a container that died on its own, or is not running at the end;
-- observations still queued after settling;
-- a failed verdict.
+**A run starts fresh.** An `--out` that holds a run is refused, and so is a project whose simulator volume already holds a ledger. Either would be judged as part of this run. Use a new `--out` and `--project-name`, or `docker compose down -v`.
 
-`--fault-gap-minutes` shortens the mean time between platform faults for a rehearsal: an hour is right for three days and too rare for two hours.
+**What each sample reads:**
+- every container's state, restart count and healthcheck;
+- CPU and memory;
+- the alerts firing;
+- the upload queues;
+- the database's size and Prometheus's;
+- free space on Docker's data root;
+- the host's free memory, swap and temperature;
+- on a Raspberry Pi, whether it throttled.
 
-`--judge-only` judges a finished run again from `--out` and the stack it left standing, without re-running it: for a judgement lost to anything but the run. On a laptop, keep the host awake with the lid closed and idle sleep inhibited, or the run fails as not unattended.
+**It fails, and exits 1, on any of these:**
+- the host slept;
+- an alert fired with no fault able to cause it. The grace after a fault is ten minutes, or the alert's own `for:` and five more;
+- a platform fault outlasted an alert's `for:` and the alert never fired, such as `SchedulerUnavailable` for a five-minute `scheduler_down`;
+- a container restarted on its own, or is not running, or is unhealthy after settling;
+- observations still queued after settling. The stations' faults were stopped first, by restarting the simulator under `clean`, so what is queued is what the platform did not take;
+- memory growing faster than `--memory-slope-bound` (4 MiB/h) over the run's second half, judged once that half holds eight samples;
+- free disk under `--disk-floor-gib` (5 GiB);
+- the host throttling;
+- a failed verdict, or a run it could not seal.
+
+**Sealed.** The tool's own judgement is written as `long_run.json`. Then `meridian reliability faults --publish --run-record long_run.json` runs in a one-off API container, judges every fault and seals the ledger, the evidence, the verdicts and that record under `--datasets` (default `data/datasets`) as one fault run. `report.json` names its hash, and `logs/compose.log` keeps every service's log. `meridian report build --faults <it>` counts it as the seventy-two hour run only if all of these hold:
+- the record spans seventy-two hours;
+- its judgement passed;
+- every fault passes when judged again.
+
+Otherwise the report says *too short* or *failed*, and why.
+
+**When the tool stops early.** Under SIGTERM or SIGHUP it mends the fault it was injecting before it exits.
+- `--resume`, with the same `--out` and compose options, carries the run on from `run.json`. It mends and closes any platform fault left open, and skips what fell in the gap. The gap is recorded, and the report shows it.
+- `--judge-only` judges a finished run again from the `report.json` it kept before judging, for a judgement lost to anything but the run.
+
+`--fault-gap-minutes` shortens the mean time between platform faults for a rehearsal: an hour is right for three days and too rare for two hours. On a laptop, keep the host awake with the lid closed and idle sleep inhibited, or the run fails as not unattended.
 
 ### Ground-truth faults
 
