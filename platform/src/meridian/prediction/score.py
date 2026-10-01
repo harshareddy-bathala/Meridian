@@ -111,6 +111,8 @@ class Model:
     configured: Linear
     fallback: Linear | None
     """The geometry-only model; ``None`` when the configuration reads no history."""
+    feature_version: str
+    """The feature code it was fitted on (D-255); scored only by the same code."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,8 +214,12 @@ def parse_model(raw: bytes) -> Model:
     reads_history = _field(stored, "reads_history")
     history = _field(stored, "min_station_history")
     configuration = _field(stored, "configuration")
+    feature_version = _field(stored, "feature_version")
     if not isinstance(reads_history, bool) or not isinstance(configuration, str):
         message = "reads_history must be true or false, configuration text"
+        raise MalformedModelError(message)
+    if not isinstance(feature_version, str):
+        message = f"feature_version is {feature_version!r}, not text"
         raise MalformedModelError(message)
     if isinstance(history, bool) or not isinstance(history, int):
         message = f"min_station_history is {history!r}, not a whole number"
@@ -227,6 +233,7 @@ def parse_model(raw: bytes) -> Model:
         min_station_history=history,
         configured=parse_linear(_field(stored, "configured"), "configured"),
         fallback=None if fallback is None else parse_linear(fallback, "fallback"),
+        feature_version=feature_version,
     )
 
 

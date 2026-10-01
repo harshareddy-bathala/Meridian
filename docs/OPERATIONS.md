@@ -689,7 +689,7 @@ The figures are unweighted even after an `ipw` fit, and the report says so: weig
 | | Means |
 |---|---|
 | 0 | It ran and succeeded |
-| 1 | It ran and refused. Possible reasons:<br>• too few examples, or one outcome only;<br>• no split dates;<br>• a setting refused;<br>• the `fit` extra missing;<br>• a dataset, snapshot or model that is not the one named;<br>• an empty test span |
+| 1 | It ran and refused. Possible reasons:<br>• too few examples, or one outcome only;<br>• no split dates;<br>• a setting refused;<br>• the `fit` extra missing;<br>• a dataset, snapshot or model that is not the one named;<br>• a model fitted on another version of the feature code: fit it again (D-255);<br>• an empty test span |
 | 2 | The command line was wrong |
 | **3** | **A dataset, snapshot or model no longer matches its manifest** |
 

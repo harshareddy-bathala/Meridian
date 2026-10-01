@@ -54,6 +54,7 @@ def test_every_key_is_read() -> None:
     ("text", "refusal"),
     [
         ('configuration = "E"', "configuration must be one of"),
+        ('configuration = "oracle"', "configuration must be one of"),
         ('configuration = "C"', "is a learned model: name its model"),
         ('configuration = "D"', "is a learned model: name its model"),
         ('model = ""', "must be a directory's path"),

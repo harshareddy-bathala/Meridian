@@ -328,12 +328,26 @@ def shuffling(path: Path) -> list[str]:
     return found
 
 
-def test_nothing_in_prediction_can_shuffle() -> None:
-    """``CLAUDE.md`` rule 6, for every line: no split takes a shuffle."""
-    paths = sorted(PREDICTION.rglob("*.py"))
+def test_nothing_that_evaluates_can_shuffle() -> None:
+    """``CLAUDE.md`` rule 6, for every line: no split takes a shuffle.
 
-    assert paths
-    assert {path.name: shuffling(path) for path in paths if shuffling(path)} == {}
+    Read across the whole platform and the archive ingest, not prediction
+    alone: the datasets, the scheduler's replay and the reports evaluate too,
+    and a shuffle in any of them would leak the future as surely (D-254).
+    """
+    paths = sorted(
+        path
+        for tree in (PREDICTION.parent, REPO / "ingest" / "src")
+        for path in tree.rglob("*.py")
+    )
+
+    assert len(paths) > 200
+    assert {"reports", "meridian_ingest"} <= {path.parent.name for path in paths}
+    assert {
+        str(path.relative_to(REPO)): shuffling(path)
+        for path in paths
+        if shuffling(path)
+    } == {}
 
 
 def test_the_shuffle_scan_would_notice_one(tmp_path: Path) -> None:

@@ -53,7 +53,7 @@ from meridian.prediction.feature_rows import (
     PassTrack,
     read_feature_rows,
 )
-from meridian.prediction.features import compute_features
+from meridian.prediction.features import compute_features, require_current_features
 from meridian.prediction.history import History, events_of
 from meridian.prediction.lineage import LineageError, raw_of
 from meridian.prediction.model_files import read_model
@@ -299,6 +299,7 @@ _UNREADABLE = (
 
 def _load(model_path: Path, root: Path) -> LiveScorer:
     fitted = read_model(model_path)
+    require_current_features(fitted.model)
     model_sha256 = content_sha256(fitted.directory.manifest)
     if not fitted.model.reads_history:
         return LiveScorer(fitted.model, model_sha256)

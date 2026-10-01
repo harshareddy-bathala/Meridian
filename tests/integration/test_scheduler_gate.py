@@ -27,6 +27,7 @@ import pytest
 psycopg = pytest.importorskip("psycopg")
 
 from meridian.orbit.skyfield_service import SkyfieldOrbitService  # noqa: E402
+from meridian.prediction.features import FEATURE_VERSION  # noqa: E402
 from meridian.prediction.live import LiveScorer  # noqa: E402
 from meridian.prediction.score import Linear, Model  # noqa: E402
 from meridian.scheduler import optimiser as optimiser_module  # noqa: E402
@@ -132,6 +133,7 @@ def a_scorer(configuration: str) -> LiveScorer:
         min_station_history=0,
         configured=linear,
         fallback=None,
+        feature_version=FEATURE_VERSION,
     )
     return LiveScorer(model, bytes([configuration.encode()[0]]) * 32)
 

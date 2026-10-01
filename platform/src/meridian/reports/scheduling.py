@@ -210,19 +210,21 @@ def _gains(
 
     rows: list[Row] = [
         {"row": "gain", "first": first, "second": second, "label": label}
-        | _gain(gain(first, second))
+        | _gain(gain(first, second), len(hours))
         for first, second, label in _GAINS
     ]
     rows.extend(
-        {"row": "regret", "scheduler": name} | _gain(gain(ORACLE, name))
+        {"row": "regret", "scheduler": name} | _gain(gain(ORACLE, name), len(hours))
         for name in SCHEDULERS
         if name != ORACLE
     )
     return rows
 
 
-def _gain(found: Gain) -> Row:
+def _gain(found: Gain, station_days: int) -> Row:
+    """One paired difference, and the station-days its interval resampled."""
     return {
+        "station_days": station_days,
         "per_hour": _real(found.per_hour),
         "per_hour_interval": _interval(found.per_hour_interval),
         "relative": _maybe(found.relative),
@@ -241,6 +243,7 @@ def _sc1(rows: Sequence[Row]) -> Row:
         "status": "measured",
         "relative": relative,
         "interval": interval,
+        "station_days": found["station_days"],
         "point_meets": isinstance(relative, float) and relative >= SC1_TARGET,
         "interval_above": isinstance(interval, dict) and interval["low"] >= SC1_TARGET,
     }

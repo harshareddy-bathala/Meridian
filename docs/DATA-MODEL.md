@@ -440,6 +440,7 @@ Written by `meridian model fit` from an evaluation dataset, its raw snapshot and
 
 - `model.json` — one canonical JSON object, with trailing newline:
   - `model_format` (1) and `configuration` (`A` to `D`), `population` (`own` or `archive`), `weighted_by_priority`, `reads_history` and `min_station_history`;
+  - `feature_version` — the version of the feature code that computed its examples, `features-1` today. A model is scored and evaluated only by the same feature code, and refused by any other (D-255);
   - `configured` — the calibrated logistic regression: `features` in order, the training span's `mean` and `scale` per feature, `coefficients` on the standardised features, `intercept`, and `calibration` (`method` `platt`, `a`, `b`) so that p = sigmoid(a × logit + b);
   - `fallback` — the geometry-only model in the same shape, present exactly when the configuration reads history (D-161), null otherwise;
   - `train_until`, `validate_until` and `as_of` — the three spans (D-162); `inverse_regularisation`, `weighting` and `seed`;

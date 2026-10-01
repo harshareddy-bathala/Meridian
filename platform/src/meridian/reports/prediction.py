@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING
 from meridian.datasets.manifest import content_sha256
 from meridian.datasets.publish import SnapshotDirectory
 from meridian.datasets.seeds import derive
+from meridian.prediction.features import require_current_features
 from meridian.prediction.lineage import Inputs, LineageError, examples_of
 from meridian.prediction.model_config import ModelConfig, ModelConfigError
 from meridian.prediction.model_files import publish_model, read_model
@@ -204,6 +205,7 @@ def _fit(
         created_at=destination.created_at,
     )
     model = read_model(published.path).model
+    require_current_features(model)
     evaluation = evaluate_model(
         model, inputs.examples, config, as_of=as_of, bands=inputs.bands
     )

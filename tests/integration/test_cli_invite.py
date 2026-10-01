@@ -1,4 +1,4 @@
-"""``meridian invite create`` — one invite, and a fleet's worth.
+"""``meridian invite create`` and ``revoke`` — one invite, a fleet's worth, and back.
 
 Tests the handler rather than the process: ``_invite_create`` takes an open
 connection, which is the seam that lets these run inside the ``rollback``
@@ -11,7 +11,11 @@ provisioned without anybody parsing a sentence.
 
 Marked ``integration`` by the directory hook in ``tests/conftest.py``.
 
-Reference: docs/DECISIONS.md D-020, D-034, D-079.
+Revoking is tested the same way, through its handler, and then by the registry:
+a revoked invite admits no station (D-046), which is what Stage 24's register
+means by "invites can be created and revoked" (D-254).
+
+Reference: docs/DECISIONS.md D-020, D-034, D-046, D-079, D-254.
 """
 
 from __future__ import annotations
@@ -24,12 +28,21 @@ import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from meridian.cli_invite import _invite_create  # noqa: E402 — after importorskip
+from datetime import UTC, datetime  # noqa: E402
+
+from meridian.cli_invite import (  # noqa: E402 — after importorskip
+    EXIT_FAILED,
+    _invite_create,
+    _invite_revoke,
+)
+from meridian.registry import InvalidInviteError, RegistrationRequest  # noqa: E402
+from meridian.registry.psycopg_registry import PsycopgRegistry  # noqa: E402
 from meridian.store.invites import (  # noqa: E402
     find_invite_by_hash,
     hash_invite_token,
     list_invites,
 )
+from meridian.store.stations import Capability  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -116,3 +129,67 @@ def test_a_single_invite_keeps_the_label_exactly_as_given(rollback: Any) -> None
     _invite_create(rollback, arguments(label="station-001"))
 
     assert "station-001" in {one.label for one in list_invites(rollback)}
+
+
+def registration(token: str) -> RegistrationRequest:
+    return RegistrationRequest(
+        invite_token=token,
+        registration_key="the-registration-key",
+        name="Test station",
+        operator="tests",
+        lat_deg=12.9716,
+        lon_deg=77.5946,
+        alt_m=920.0,
+        simulated=False,
+        location_precision_decimals=2,
+        simulator_run_id=None,
+        seed=None,
+        capabilities=[
+            Capability(
+                band="vhf",
+                freq_min_hz=136_000_000,
+                freq_max_hz=138_000_000,
+                modes=("lrpt",),
+                polarisation="rhcp",
+                tracking=True,
+                min_elevation_deg=10.0,
+            )
+        ],
+        client_implementation="meridian-reference",
+        client_version="0.1.0",
+    )
+
+
+def registry(conn: Any) -> PsycopgRegistry:
+    return PsycopgRegistry(
+        conn, pepper="test-pepper", recovery_window_s=3600, now_utc=datetime.now(UTC)
+    )
+
+
+def test_a_revoked_invite_admits_no_station(
+    rollback: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _invite_create(rollback, arguments(label="withdrawn"))
+    token = tokens_from(capsys.readouterr())[0]
+
+    assert _invite_revoke(rollback, argparse.Namespace(label="withdrawn")) == 0
+    assert "Revoked 1 invite(s)" in capsys.readouterr().out
+    with pytest.raises(InvalidInviteError):
+        registry(rollback).register(registration(token))
+
+
+def test_an_invite_not_revoked_still_admits_its_station(
+    rollback: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Positive control: the refusal above is the revocation, not the request."""
+    _invite_create(rollback, arguments(label="kept"))
+    token = tokens_from(capsys.readouterr())[0]
+
+    assert registry(rollback).register(registration(token)).station_id
+
+
+def test_revoking_a_label_nobody_issued_says_so(
+    rollback: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _invite_revoke(rollback, argparse.Namespace(label="nobody")) == EXIT_FAILED
+    assert "no revocable invite labelled 'nobody'" in capsys.readouterr().err

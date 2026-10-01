@@ -45,6 +45,7 @@ from sklearn.linear_model import LogisticRegression
 from meridian.datasets.canonical import canonical_bytes
 from meridian.prediction.configurations import CONFIGURATIONS, FALLBACK
 from meridian.prediction.examples import Example, ExampleSet
+from meridian.prediction.features import FEATURE_VERSION
 from meridian.prediction.model_config import ModelConfig
 from meridian.prediction.score import MODEL_FORMAT
 from meridian.prediction.splits import Split, temporal_split
@@ -167,6 +168,7 @@ def fit_split(found: ExampleSet, split: Split, config: ModelConfig) -> FittedMod
     left_out = {"without": list(config.without)} if config.without else {}
     document: dict[str, object] = left_out | {
         "model_format": MODEL_FORMAT,
+        "feature_version": FEATURE_VERSION,
         "configuration": configuration.name,
         "population": config.population,
         "weighted_by_priority": configuration.weighted_by_priority,

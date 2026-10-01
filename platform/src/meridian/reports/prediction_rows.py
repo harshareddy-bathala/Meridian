@@ -289,6 +289,8 @@ def _sc2(rows: Sequence[Row]) -> Row:
         "status": "measured",
         "skill": skill,
         "interval": interval,
+        "n": shipped["test"],
+        "station_days": shipped["station_days"],
         "point_meets": isinstance(skill, float) and skill >= SC2_TARGET,
         "interval_above": isinstance(interval, dict) and interval["low"] >= SC2_TARGET,
     }

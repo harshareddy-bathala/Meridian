@@ -5502,9 +5502,43 @@ The project is software-complete when the register has no pending row.
 
 **The end-to-end step no longer tolerates an empty selection.** It was written to accept pytest's exit 5 ("no tests collected") while `tests/e2e/` was empty. It holds eleven tests now, and the register cites three of them, so a suite that stopped collecting must fail CI, not pass it.
 
+**Four clauses were true by construction and are now asserted.** Each test has a positive control.
+- **The oracle.** `schedule.toml` refuses `configuration = "oracle"`. An import walk from the jobs service, the API and a live round never reaches the oracle or the replay that runs it, while the same walk from `meridian schedule evaluate` does reach it.
+- **The shuffle ban.** It reads the whole platform and the archive ingest, where it used to read `prediction/` alone.
+- **Invites.** `meridian invite revoke` is tested through its handler, and the registry then refuses the revoked invite.
+- **`/healthz`.** Its body and status are pinned both ways.
+
+**Every result now carries its count.** A walk over every results file found SC-1, SC-2 and the gain and regret rows each stating an interval without what it was drawn from. They now carry the station-days their bootstrap resampled, and SC-2 its test passes too, as `n`. The counts arrive under `report-7`, the method Stage 26 named for SC-7 (D-264), which this branch had first named `report-6`. One name for both is kept, as D-264 asks, and no run is published between the two, so no `report-7` run lacks the counts.
+
 *Rejected: the register as prose in the roadmap's "Where the build has got to".* A paragraph cannot be checked, and that section is a snapshot in time by its own account.
 
 *Rejected: a pytest marker on each proving test, such as `@pytest.mark.acceptance("…")`.* It puts the clause text in forty places, and it cannot cite a CI step, a document, or a clause that is pending.
+
+---
+
+## D-255 — Feature code has a version, and a model is scored only by the code it was fitted on
+
+**2026-10-01 · accepted** · *`meridian/prediction/{features,score,fit,live,replay_models}.py`; `meridian/cli_model.py`; `meridian/reports/prediction.py`; `DATA-MODEL.md` § Model; `tests/unit/test_feature_version.py`; Stage 24. Amends D-163.*
+
+Stage 24 asks that "snapshots and feature generation are versioned". Snapshots were already versioned: `labels-3`, hashed manifests, and `model-1` for the fitting procedure. Feature generation had no version of its own. A change to how a feature is computed left the model's file and hash unchanged. Live scoring then fed the model's coefficients numbers they were never learned from, and no score showed it.
+
+**`FEATURE_VERSION`, `features-1`, lives beside the features** in `meridian/prediction/features.py`. Every model writes it into `model.json` as `feature_version`, and a model without one is malformed.
+
+**Everything that computes features for a model refuses one fitted on other feature code:**
+- live scoring;
+- the replay;
+- `meridian model evaluate`;
+- the evaluation report.
+
+The refusal names both versions and says to fit again. `meridian model show` reads the file without computing anything, so it still shows an old model.
+
+**A test keeps the version honest.** `test_feature_version.py` pins a digest of the feature code to each version. The digest is taken over the syntax tree of every module that `features` reaches inside `prediction`, with docstrings removed. Changing what a feature computes without bumping the version fails the test, and the failure gives the new digest to add. Rewording a docstring does not move the digest, and changing a number does; both are checked. A module that starts being imported by the feature code is noticed too, because the set is read from the imports and compared with the list.
+
+**Nothing published moves.** No model of real data exists yet (D-155), so the models that change are the ones tests fit.
+
+*Rejected: the version as a hash of the source, computed at fit time.* Any reformat would then orphan every model, and a version nobody chose explains nothing in a viva. The digest decides only *when* the version must change; a person decides *that* it changes.
+
+*Rejected: bumping `MODEL_VERSION` for a feature change.* That names the fitting procedure, which a feature change does not alter, and it would not stop a model being scored by other feature code.
 
 ---
 
@@ -5820,6 +5854,8 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | Decision | Applied to |
 |---|---|
 | D-254 the acceptance register and its gate | `docs/ACCEPTANCE.md`; `tests/unit/test_acceptance_gate.py`; `.github/workflows/ci.yml` (the end-to-end step) |
+| — the clauses true by construction, now asserted | `tests/unit/{test_scheduler_boundaries,test_schedule_config,test_prediction_gate,test_report_gate}.py`; `tests/integration/test_cli_invite.py`; `tests/msp_conformance/test_healthz.py`; `meridian/reports/{scheduling,prediction_rows,build}.py` (counts on SC-1, SC-2, gains; kept under `report-7`) |
+| D-255 a version for the feature code | `meridian/prediction/{features,score,fit,live,replay_models}.py`; `meridian/cli_model.py`; `meridian/reports/prediction.py`; `DATA-MODEL.md` § Model; `OPERATIONS.md` § Models; `tests/unit/{test_feature_version,test_prediction_fit,test_prediction_live}.py` |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
