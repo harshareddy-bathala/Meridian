@@ -50,6 +50,10 @@ def test_the_snapshot_holds_what_d_143_lists() -> None:
         # Recorded from each observation revision (D-173, D-176).
         "noise_measurements",
         "products",
+        # The label "usable", rated blind (D-260).
+        "reception_ratings",
+        # Each reception's verdict, by method (D-263).
+        "reception_verdicts",
         "heartbeats",
         "element_sets",
         "stations",

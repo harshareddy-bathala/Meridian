@@ -723,6 +723,58 @@ Models, like datasets, are regenerable from what they were made from, so the raw
 
 ---
 
+## Reception verdicts
+
+The reception verdict is a calibrated probability that a reception is usable (Stage 26). The label it learns is a person's rating of the decoded product, made without seeing the verdict or anything it reads (D-260). Rating is the only part of the verdict that needs a person, and the verdict cannot be fitted without it.
+
+### Rating receptions
+
+```sh
+meridian verdict queue
+meridian verdict rate as_8f2c41d07e 1 --usable --rater hr
+meridian verdict rate as_8f2c41d07e 1 --unusable --rater hr
+```
+
+`queue` lists measured receptions that declared a product and have no rating yet, oldest first. For each reception it shows the assignment, revision, station, satellite and time, and under it each product's kind, sha256 and place on the station. It shows nothing else, on purpose: do not look the reception up on the dashboard or in the logs before rating it. A rating made with the outcome, the SNR or a verdict in view is not blind, and it would teach the verdict to agree with itself.
+
+Open each product where the station keeps it, judge it by the rubric below, and record one answer. A second rating of the same reception is kept beside the first, and the latest is the label. `--rater` is a short tag that tells raters apart, such as initials. It is not a name, and the database refuses spaces and capitals. A simulated reception, or one that declared no product, is refused: the first is never training input (D-078), and the second is unusable without being rated.
+
+### Rubric `usable-1`
+
+A reception is **usable** if someone who wanted this satellite's data from this pass would keep the product and use it:
+- **an image** (Meteor LRPT): at least one channel shows recognisable ground, cloud or coastline over a continuous stretch of the pass. Short dropouts, a noisy edge and a missing channel do not make it unusable;
+- **telemetry**: at least one frame decodes to plausible values.
+
+It is **unusable** if it is mostly noise, mostly missing, or decoded but shows nothing, such as a black or uniform image or a corrupt file.
+
+Rate what the product shows, not what you expected from the pass. A good image from a low pass is usable, and a broken one from a high pass is not. If a reception is genuinely ambiguous, rate it unusable and move on: a rubric that needs a judgement call on every product is a different rubric, and a change of rubric is a new name such as `usable-2`.
+
+
+### Fitting and judging the verdict
+
+```sh
+meridian snapshot export
+meridian verdict fit "$MERIDIAN_DATASETS_ROOT"/snapshots/<snapshot> --config verdict.toml
+meridian verdict evaluate "$MERIDIAN_DATASETS_ROOT"/verdicts/<model>
+```
+
+Copy `deploy/verdict.toml.example`, set `train_until` and `validate_until`, and fit from a raw snapshot exported after the ratings were made. `fit` needs the `fit` extra; `evaluate` does not. The verdict is fitted on measured receptions only, and the fit says how many simulated, unrated and other-rubric receptions it left out.
+
+**"route full: validation holds 6 receptions…"** means too few rated receptions fall in that span for that route's model. Rate more, or move the dates. Never lower the minimums to get a number.
+
+`evaluate` judges the test span twice: every labelled reception, and rated ones only (D-260). SC-7 is the second, skill against the base rate, with its proposed target of +0.40. It also prints how many decoded *validation* receptions fall either side of `partial_below`, and how many of each were usable. Choose the threshold from those lines, write it into the configuration and fit again (D-262). Never choose it from the test span.
+
+### Writing verdicts
+
+```sh
+meridian verdict apply --model "$MERIDIAN_DATASETS_ROOT"/verdicts/<model>
+```
+
+`apply` writes a verdict for every observation whose assignment window has closed and which has none by this model. That includes simulated ones, labelled so, and ones that received nothing. Run it again and it writes nothing. A refitted model is a new method, so its verdicts sit beside the old ones (D-263).
+
+To have the jobs service do this every round, set `VERDICT_MODEL` in `deploy/.env` to the model's directory as the container sees it, such as `/datasets/verdicts/<model>`, and restart `jobs`. It scores at most 500 receptions a round, oldest first, under the task label `verdicts`. A model that cannot be read stops `jobs` at start with the reason. Unset `VERDICT_MODEL` to stop writing verdicts; the ones written stay.
+---
+
 ## Scheduling
 
 The `jobs` service decides, every `SCHEDULE_INTERVAL_S`, which of the next `SCHEDULE_HORIZON_S` of passes each station receives. It maximises the summed value of what it takes: **yield × frames × priority**, the last under B and D only (D-168). A mixed-integer programme solved by HiGHS finds that maximum, under one set of constraints, and the result is checked against those constraints before anything is written (D-166, D-167). Every run is a row in `schedule_runs`, and every decision carries an explanation (D-170).
@@ -831,7 +883,7 @@ uv run meridian report build \
 ```
 
 - **It fits models, so it needs the `fit` extra** (`uv sync --extra fit`), as `meridian model fit` does. Without it, it says so and exits 1.
-- **The configuration** is one file, one table per section. Copy `analysis/configs/evaluation.toml.example`, whose values are the defaults. An unknown table or key is refused, and so is a `seed`. **Set `train_until` and `validate_until` under `[prediction]`** for the snapshot you are reporting. Without them no model is fitted, and the prediction section says so.
+- **The configuration** is one file, one table per section. Copy `analysis/configs/evaluation.toml.example`, whose values are the defaults. An unknown table or key is refused, and so is a `seed`. **Set `train_until` and `validate_until` under `[prediction]`** for the snapshot you are reporting. Without them no model is fitted, and the prediction section says so. The same goes for `[verdict]`, which fits the reception verdict and reports SC-7 (D-264).
 - **The seed** is the master seed. Every component that draws a random number draws from a seed derived from it by name, and the run lists each one (D-236).
 - **The run** goes under `<datasets root>/reports/<hash12>/`, or where `--output` says. Building the same inputs twice names the same directory, and the second build says `already held, identically`. An `--output` that already holds a different run is refused, never overwritten.
 
@@ -852,6 +904,8 @@ reports/<hash12>/
 ├── reliability.jsonl               the reliability section's results
 ├── capture_history.svg             capture over each window of the loss-budget history
 ├── fault_detection.svg             seconds from each fault to offline, by kind, when a fault run was given
+├── verdict.jsonl                   the reception verdict's results: SC-7, routes, segments, the threshold
+├── verdict_reliability_<subset>.svg  the verdict's reliability diagram, every labelled and rated only
 ├── config.toml     the configuration, byte for byte as it was given
 └── manifest.json   every file's digest, the inputs, the seeds, and the environment
 ```
@@ -889,6 +943,7 @@ reports/<hash12>/
   - the loss-budget history: the same window ending every `history_step_days` back to the snapshot's start, a window reaching before the start marked partial.
 
   With `--faults DIR` (repeatable), it also judges each sealed fault run again from its files. It says whether the same verdicts were reached, and reports the seconds to detection, to replanning and to the alert, by fault kind. It reads SC-5 from the detections (all simulated, and labelled so), counts the platform faults apart, and includes the 72-hour run when a fault run spans 72 hours; until then it says "not run". `verify` finds each fault run by hash, as it finds the snapshot, or takes `--faults DIR`.
+- **The reception verdict section** fits the verdict from the snapshot's rated receptions under `[verdict]`, with a derived seed, and publishes it under `verdicts/` (D-264). It judges the test span on every labelled reception and on rated receptions only, and reads SC-7 from the second, with a station-day interval. It gives a reliability diagram for each, calibration by segment, and the decoded validation receptions either side of `partial_below`. With too few rated receptions it says *not measured* and why, which is what it says until station 001's receptions are rated (D-260).
 - **The environment block** in `manifest.json` records the commit (and whether the tree had uncommitted changes), the Python and dependency versions, where the snapshot was read from, and how long the build took. It is **not part of the hash** (D-235), so the hash names the numbers, not the machine. There is one exception: each fitted model names the numpy and scikit-learn that fitted it (D-163), and the run names its models by hash. So a different fitting library changes the run, and `verify` shows that library among the environment changes. A run built from uncommitted code says so when it is built. Build reported figures from a clean tree.
 - The evaluation dataset the run labelled is published under `evaluation/` as `meridian snapshot label` would publish it, and the run names it by hash.
 

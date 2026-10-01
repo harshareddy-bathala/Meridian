@@ -42,6 +42,7 @@ from meridian.reports.detections import detections
 from meridian.reports.fault_rows import fault_rows
 from meridian.reports.orbit import ORBIT_FILE, orbit_rows
 from meridian.reports.prediction import (
+    MODEL_SEED_RANGE,
     Destination,
     Fitted,
     fit_variants,
@@ -54,21 +55,25 @@ from meridian.reports.render_orbit import orbit_figures
 from meridian.reports.render_prediction import prediction_figures
 from meridian.reports.render_reliability import reliability_figures
 from meridian.reports.render_scheduling import scheduling_figures
+from meridian.reports.render_verdict import verdict_figures
 from meridian.reports.scheduling import (
     SCHEDULING_FILE,
     SOLVER_SEED_RANGE,
     scheduling_section,
 )
+from meridian.reports.verdict import VERDICT_FILE, verdict_section
 
 __all__ = [
     "BOOTSTRAP_ORBIT",
     "BOOTSTRAP_PREDICTION",
     "BOOTSTRAP_SCHEDULING",
+    "BOOTSTRAP_VERDICT",
     "CONFIG_FILE",
     "METHOD_VERSION",
     "REPORTS",
     "REPORT_FILE",
     "RUN_FILE",
+    "VERDICT",
     "NotARawSnapshotError",
     "Run",
     "RunExistsError",
@@ -78,7 +83,7 @@ __all__ = [
     "with_environment",
 ]
 
-METHOD_VERSION = "report-5"
+METHOD_VERSION = "report-7"
 """Bumped whenever a section's method changes, so two runs made under different
 methods can never share a hash."""
 
@@ -89,6 +94,8 @@ RUN_FILE = "run.jsonl"
 BOOTSTRAP_PREDICTION = "bootstrap.prediction"
 BOOTSTRAP_SCHEDULING = "bootstrap.scheduling"
 BOOTSTRAP_ORBIT = "bootstrap.orbit"
+VERDICT = "verdict"
+BOOTSTRAP_VERDICT = "bootstrap.verdict"
 SOLVER = "solver"
 REPORT_FILE = "report.md"
 CONFIG_FILE = "config.toml"
@@ -217,12 +224,20 @@ def _sections(
     seeds[SOLVER] = derive(seed, SOLVER) % SOLVER_SEED_RANGE
     seeds[BOOTSTRAP_SCHEDULING] = derive(seed, BOOTSTRAP_SCHEDULING)
     seeds[BOOTSTRAP_ORBIT] = derive(seed, BOOTSTRAP_ORBIT)
+    seeds[VERDICT] = derive(seed, VERDICT) % MODEL_SEED_RANGE
+    seeds[BOOTSTRAP_VERDICT] = derive(seed, BOOTSTRAP_VERDICT)
     scheduled = scheduling_section(
         dataset,
         raw,
         fitted_paths(outcomes),
         config.config.scheduling,
         seeds=(seeds[SOLVER], seeds[BOOTSTRAP_SCHEDULING]),
+    )
+    verdict = verdict_section(
+        raw,
+        config.config.verdict,
+        seeds=(seeds[VERDICT], seeds[BOOTSTRAP_VERDICT]),
+        destination=destination,
     )
     rows = {
         RUN_FILE: _run_rows(raw.manifest, config, seed, seeds),
@@ -240,10 +255,13 @@ def _sections(
                 inputs.faults, detection_max_s=reliability.slo.failure_detection_max_s
             ),
         ],
+        VERDICT_FILE: verdict.rows,
     }
     models = {
         one.variant.name: one.sha256 for one in outcomes if isinstance(one, Fitted)
     }
+    if verdict.model_sha256 is not None:
+        models[VERDICT] = verdict.model_sha256
     runtimes = dict(scheduled.runtimes)
     return _Computed(
         rows=rows,
@@ -271,6 +289,7 @@ def _files(computed: _Computed, config_text: bytes) -> dict[str, bytes]:
     files |= scheduling_figures(parsed[SCHEDULING_FILE])
     files |= orbit_figures(parsed[ORBIT_FILE])
     files |= reliability_figures(parsed[RELIABILITY_FILE])
+    files |= verdict_figures(parsed[VERDICT_FILE])
     files[CONFIG_FILE] = config_text
     return files
 

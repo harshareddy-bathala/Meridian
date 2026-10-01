@@ -46,6 +46,7 @@ from meridian.config_checks import DATABASE_PASSWORD, METRICS_TOKEN
 from meridian.metrics.exposition import MULTIPROCESS_DIRECTORY_VARIABLE
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.prediction.live import LiveScoringError
+from meridian.prediction.score import MalformedModelError
 from meridian.scheduler.schedule_config import (
     ScheduleConfig,
     ScheduleConfigError,
@@ -57,6 +58,7 @@ from meridian.store.pool import CONNECT_TIMEOUT_S
 if TYPE_CHECKING:
     from meridian.jobs.reliability_round import DatabaseReliabilityWork
     from meridian.jobs.rounds import DatabaseRoundWork
+    from meridian.jobs.verdict_round import DatabaseVerdictWork
 
 __all__ = ["JOBS_SECRETS", "add_jobs_parser", "run_jobs"]
 
@@ -170,6 +172,31 @@ def _reliability(settings: Settings) -> DatabaseReliabilityWork:
     )
 
 
+def _verdicts(settings: Settings) -> DatabaseVerdictWork | None:
+    """The verdict task under ``VERDICT_MODEL``, or ``None`` when it names none.
+
+    Raises:
+        MalformedModelError: The directory is not a verdict model, or does
+            not match its manifest.
+    """
+    # Inside the function: see the module docstring.
+    from meridian.jobs.verdict_round import DatabaseVerdictWork  # noqa: PLC0415
+    from meridian.prediction.verdict_files import (  # noqa: PLC0415
+        load_verdict_model,
+    )
+    from meridian.verdict_build import registry_for  # noqa: PLC0415
+
+    if not settings.verdict_model:
+        return None
+    model = load_verdict_model(Path(settings.verdict_model))
+    url = settings.psycopg_url
+    return DatabaseVerdictWork(
+        lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
+        lambda conn, now: registry_for(conn, settings, now),
+        model,
+    )
+
+
 def run_jobs(args: argparse.Namespace) -> int:
     """Handle ``meridian jobs run``."""
     # Inside the function: see the module docstring.
@@ -182,6 +209,7 @@ def run_jobs(args: argparse.Namespace) -> int:
         run_round,
         run_until_stopped,
     )
+    from meridian.jobs.verdict_round import run_verdict_round  # noqa: PLC0415
     from meridian.reliability.config import ReliabilityConfigError  # noqa: PLC0415
 
     # The jobs process is given the database and the metrics token and nothing
@@ -195,7 +223,14 @@ def run_jobs(args: argparse.Namespace) -> int:
     try:
         config, scorers = _schedule(settings)
         reliability = _reliability(settings)
-    except (ScheduleConfigError, LiveScoringError, ReliabilityConfigError) as exc:
+        verdicts = _verdicts(settings)
+    except (
+        ScheduleConfigError,
+        LiveScoringError,
+        ReliabilityConfigError,
+        MalformedModelError,
+        OSError,
+    ) as exc:
         # Refused before any round: a schedule or a classification that cannot
         # be made as configured must not quietly become another one (D-168).
         print(f"meridian jobs run: {exc}", file=sys.stderr)  # noqa: T201
@@ -214,13 +249,14 @@ def run_jobs(args: argparse.Namespace) -> int:
         now = datetime.now(UTC)
         outcome = run_round(work, plan, now)
         checked = run_reliability_round(reliability, now)
+        applied = run_verdict_round(verdicts, now)
         return None not in (
             outcome.generated,
             outcome.scheduled,
             outcome.profiled,
             checked.expired,
             checked.classified,
-        )
+        ) and (verdicts is None or applied is not None)
 
     if args.once:
         return 0 if round_once() else _EXIT_FAILED

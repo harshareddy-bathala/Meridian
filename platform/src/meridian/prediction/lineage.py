@@ -53,6 +53,7 @@ __all__ = [
     "dataset_of",
     "examples_of",
     "raw_of",
+    "snapshot_of",
 ]
 
 _SNAPSHOTS = "snapshots"
@@ -92,6 +93,24 @@ def raw_of(
         f"{stamp}-",
         path,
         ("raw_snapshot", "--snapshot"),
+    )
+
+
+def snapshot_of(
+    child: SnapshotDirectory, *, root: Path, path: Path | None = None
+) -> SnapshotDirectory:
+    """The raw snapshot any directory made straight from one names, verified.
+
+    A verdict model is fitted from a raw snapshot, which holds its labels
+    (D-260), so it has no evaluation dataset between them.
+
+    Raises:
+        LineageError: As :func:`raw_of`.
+        DamagedSnapshotError: As :func:`raw_of`.
+    """
+    stamp = child.manifest.as_of.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return _parent(
+        child, root / _SNAPSHOTS, f"{stamp}-", path, ("raw_snapshot", "--snapshot")
     )
 
 

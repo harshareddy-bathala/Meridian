@@ -108,6 +108,8 @@ SIMULATED_SPLIT = (
     "observations",
     "noise_measurements",
     "products",
+    "reception_ratings",
+    "reception_verdicts",
     "heartbeats",
     "stations",
 )

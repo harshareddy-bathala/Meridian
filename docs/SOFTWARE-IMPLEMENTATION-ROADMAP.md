@@ -46,7 +46,24 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-09-30. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-10-01. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stage 26's software is built** (2026-10-01). It settles D-106: "usable" is a person's rating of the decoded product, made blind to the verdict (D-260). Its decisions are D-260 through D-264, `docs/OPERATIONS.md` § Reception verdicts is its runbook, and its migrations are `0027` and `0028`. Stage 24 is being built beside it; Stage 27 now waits on the review of Stage 25's fault specification (D-105), not on this stage.
+- **The completion gate passes, in two halves.** *Every measured reception carries a versioned verdict, and SC-7's report — Brier score against the base rate, reliability diagram and segment calibration — regenerates from a snapshot, a configuration and a seed.*
+  - `tests/integration/test_verdict_gate.py` stores 150 receptions and rates the decoded ones. It exports a snapshot, fits the verdict from it and applies it. Every closed, scheduled measured reception then has a verdict with the model's method. A simulated one has one too, labelled, and never reached the fit. A removed verdict is the positive control.
+  - `tests/unit/test_report_verdict.py` builds SC-7 through `meridian report build` and `verify` with every socket refused. It regenerates `report.md` and both figures from the results files. Another seed moves only the interval, and a report without split dates says *not measured*.
+- **The label** (D-260): `reception_ratings`, written by `meridian verdict rate`, listed blind by `meridian verdict queue`. Its query reads no column the verdict reads, and a test pins that. A reception with no product is unusable without a rating, so SC-7 is read from rated receptions only.
+- **Three routes by the evidence a reception has** (D-261). A reception without an SNR or decoder statistics is scored by a model fitted without them, never with a zero. Every verdict carries the hash of the nine inputs it read, the same whether computed live or from a snapshot.
+- **Fit and judge** (D-262): `meridian verdict fit` from a raw snapshot and `meridian verdict evaluate`, with a temporal split by stated dates. The partial threshold is read on validation, never on test.
+- **Written for every closed reception** (D-263): `reception_verdicts`, by `meridian verdict apply` and by the jobs service each round when `VERDICT_MODEL` names a model. A refit appends beside the old verdicts.
+- **SC-7 in the evaluation report** (D-264): a `[verdict]` table and a sixth section, method `report-7`.
+- **D-102 is enforced:** no module on the yield-prediction path reads a rating or a verdict.
+- **Owed, not done:**
+  - **ratings of station 001's real receptions.** Until enough are rated in each span, `fit` refuses with the counts and SC-7 says *not measured*;
+  - the team's confirmation of D-260 and of SC-7's proposed 40%.
+- **Known limits:**
+  - a route with too few rated receptions refuses the whole fit rather than falling back. A deployment with no frame interval for its downlinks cannot fit the `full` route until one is stated;
+  - decoder name and version are calibration segments, not features (D-261).
 
 **Stage 25's software is built** (2026-09-30), beside Stage 22, which it does not need and which merged first. **Stage 24 is still next in order**, and its seventy-two hour run is done on the Pi. Stage 26 now waits only on D-106, what "usable" means. Its decisions are D-250 through D-253, `docs/OPERATIONS.md` § Ground-truth faults is its runbook, and `docs/SCALE-AND-FAULTS.md` § Ground-truth faults is the specification of its faults' effects. Its migration is `0026`.
 - **The completion gate passes.** *A simulated fleet running each of the four new faults produces observations carrying the evidence that fault changes, and a run record naming every injected cause, while nothing the platform holds reveals the cause.*

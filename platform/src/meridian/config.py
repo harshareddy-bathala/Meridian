@@ -92,6 +92,11 @@ class Settings:
     simulator_seed: int
     simulator_station_count: int
 
+    verdict_model: str = ""
+    """A fitted verdict model's directory, as the jobs container sees it, or
+    empty for none: the jobs service then writes no verdicts (D-263). Last and
+    defaulted, so every settings object built before Stage 26 still builds."""
+
     @property
     def psycopg_url(self) -> str:
         """``database_url`` in the form ``psycopg.connect`` accepts (D-033)."""
@@ -296,6 +301,7 @@ def load_settings(*, secrets_held: frozenset[str] = EVERY_SECRET) -> Settings:
         grafana_admin_password=os.environ.get("GRAFANA_ADMIN_PASSWORD", PLACEHOLDER),
         simulator_seed=_int_env("SIMULATOR_SEED", 4471),
         simulator_station_count=_int_env("SIMULATOR_STATION_COUNT", 1),
+        verdict_model=os.environ.get("VERDICT_MODEL", "").strip(),
     )
 
     check_settings(settings, secrets_held)

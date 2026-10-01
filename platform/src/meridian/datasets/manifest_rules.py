@@ -5,12 +5,13 @@ so the rules a reader checks a directory against sit in one short list rather
 than in the middle of the parser.
 
 **A file name is ours, and plain.** Every kind holds JSON Lines tables. A model
-also holds its one ``model.json`` (D-163). An evaluation report also holds the
+also holds its one ``model.json`` (D-163), and a verdict model its
+``verdict.json`` (D-262). An evaluation report also holds the
 report a reader opens, the configuration it was built from, and its figures
 (D-235). A name never comes from a row, and a name one kind holds is refused in
 another, so a raw snapshot cannot carry a stray report and still verify.
 
-Reference: docs/DECISIONS.md D-144, D-163, D-229, D-235.
+Reference: docs/DECISIONS.md D-144, D-163, D-229, D-235, D-262.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ Kind = Literal[
     "regions_report",
     "evaluation_report",
     "fault_run",
+    "verdict_model",
 ]
 KINDS: tuple[Kind, ...] = (
     "raw_snapshot",
@@ -48,12 +50,14 @@ KINDS: tuple[Kind, ...] = (
     "regions_report",
     "evaluation_report",
     "fault_run",
+    "verdict_model",
 )
 DERIVED: tuple[Kind, ...] = (
     "evaluation_dataset",
     "model",
     "regions_report",
     "evaluation_report",
+    "verdict_model",
 )
 """Kinds made from another directory, which name it and how (D-163, D-229)."""
 
@@ -65,6 +69,7 @@ _TABLE = re.compile(r"^[a-z][a-z0-9_]*\.jsonl$")
 _FIGURE = re.compile(r"^[a-z][a-z0-9_]*\.svg$")
 _NAMED: dict[str, tuple[Kind, ...]] = {
     "model.json": ("model",),
+    "verdict.json": ("verdict_model",),
     "report.md": ("evaluation_report",),
     "config.toml": ("evaluation_report",),
 }

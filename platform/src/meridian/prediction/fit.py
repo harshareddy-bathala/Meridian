@@ -32,6 +32,7 @@ Reference: docs/DECISIONS.md D-078, D-155, D-156, D-161, D-162, D-163.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -41,19 +42,32 @@ import sklearn
 from numpy.typing import NDArray
 from sklearn.linear_model import LogisticRegression
 
+from meridian.datasets.canonical import canonical_bytes
 from meridian.prediction.configurations import CONFIGURATIONS, FALLBACK
 from meridian.prediction.examples import Example, ExampleSet
 from meridian.prediction.model_config import ModelConfig
 from meridian.prediction.score import MODEL_FORMAT
 from meridian.prediction.splits import Split, temporal_split
+from meridian.prediction.verdict_config import VerdictConfig
+from meridian.prediction.verdict_examples import (
+    VerdictExamples,
+    VerdictSplit,
+    learns_from,
+    split_verdict_examples,
+    verdict_counts,
+)
+from meridian.prediction.verdict_inputs import FEATURES, ROUTES
+from meridian.prediction.verdict_score import VERDICT_FORMAT
 
 __all__ = [
     "MIN_TRAIN",
     "MIN_VALIDATE",
     "FittedModel",
+    "FittedVerdict",
     "ModelFitError",
     "fit_model",
     "fit_split",
+    "fit_verdict",
     "rounded",
 ]
 
@@ -79,6 +93,15 @@ class FittedModel:
     document: dict[str, object]
     counts: dict[str, int]
     split: Split
+
+
+@dataclass(frozen=True, slots=True)
+class FittedVerdict:
+    """What a verdict fit produced: the ``verdict.json`` document and its counts."""
+
+    document: dict[str, object]
+    counts: dict[str, int]
+    split: VerdictSplit
 
 
 def rounded(value: float) -> float:
@@ -149,9 +172,21 @@ def fit_split(found: ExampleSet, split: Split, config: ModelConfig) -> FittedMod
         "weighted_by_priority": configuration.weighted_by_priority,
         "reads_history": configuration.reads_history,
         "min_station_history": config.min_station_history,
-        "configured": _fit_linear(configuration.features, split, config),
+        "configured": _fit_linear(
+            configuration.features,
+            split.train,
+            split.validate,
+            strength=config.inverse_regularisation,
+            seed=config.seed,
+        ),
         "fallback": (
-            _fit_linear(FALLBACK.features, split, config)
+            _fit_linear(
+                FALLBACK.features,
+                split.train,
+                split.validate,
+                strength=config.inverse_regularisation,
+                seed=config.seed,
+            )
             if configuration.reads_history
             else None
         ),
@@ -164,6 +199,82 @@ def fit_split(found: ExampleSet, split: Split, config: ModelConfig) -> FittedMod
         "libraries": {"numpy": np.__version__, "scikit-learn": sklearn.__version__},
     }
     return FittedModel(document=document, counts=_counts(found, split), split=split)
+
+
+def fit_verdict(
+    found: VerdictExamples, config: VerdictConfig, *, as_of: datetime
+) -> FittedVerdict:
+    """Fit the reception verdict: one calibrated model per route (D-261, D-262).
+
+    Each route learns from every example that has its inputs, by the same L2
+    logistic regression and Platt map as a yield model. Its ``method`` is
+    ``verdict-1:`` and the first 12 hex digits of the hash of everything
+    else in the document, so a different fit is a different method.
+
+    Raises:
+        ModelFitError: No split dates, or a route with too few examples or one
+            label only on either span, named with its counts.
+        SplitError: The dates cannot split these receptions.
+    """
+    if config.train_until is None or config.validate_until is None:
+        message = (
+            "the verdict configuration names no train_until and validate_until;"
+            " a fit splits on stated dates only (D-162)"
+        )
+        raise ModelFitError(message)
+    if not found.examples and found.simulated:
+        message = (
+            f"all {found.simulated} receptions are simulated, and a verdict is"
+            " never fitted on the simulator's own rule (D-078, D-105)"
+        )
+        raise ModelFitError(message)
+    split = split_verdict_examples(
+        found.examples,
+        train_until=config.train_until,
+        validate_until=config.validate_until,
+        as_of=as_of,
+    )
+    routes = {}
+    for route in ROUTES:
+        train = learns_from(route, split.train)
+        validate = learns_from(route, split.validate)
+        for name, span, least in (
+            ("training", train, MIN_TRAIN),
+            ("validation", validate, MIN_VALIDATE),
+        ):
+            usable = sum(one.positive for one in span)
+            if len(span) < least or usable in {0, len(span)}:
+                message = (
+                    f"route {route}: {name} holds {len(span)} receptions, {usable}"
+                    f" usable; a fit needs at least {least} with both labels"
+                    f" ({found.simulated} simulated and {found.unrated} unrated"
+                    " receptions were not counted)"
+                )
+                raise ModelFitError(message)
+        routes[route] = _fit_linear(
+            FEATURES[route],
+            train,
+            validate,
+            strength=config.inverse_regularisation,
+            seed=config.seed,
+        )
+    document: dict[str, object] = {
+        "verdict_format": VERDICT_FORMAT,
+        "rubric": config.rubric,
+        "partial_below": float(config.partial_below),
+        "routes": routes,
+        "train_until": split.train_until,
+        "validate_until": split.validate_until,
+        "as_of": split.as_of,
+        "inverse_regularisation": float(config.inverse_regularisation),
+        "seed": config.seed,
+        "libraries": {"numpy": np.__version__, "scikit-learn": sklearn.__version__},
+    }
+    digest = hashlib.sha256(canonical_bytes(document)).hexdigest()
+    document["method"] = f"verdict-1:{digest[:12]}"
+    return FittedVerdict(
+        document=document, counts=verdict_counts(found, split), split=split
+    )
 
 
 def _check_enough(found: ExampleSet, split: Split) -> None:
@@ -189,24 +300,29 @@ def _check_enough(found: ExampleSet, split: Split) -> None:
 
 
 def _fit_linear(
-    names: Sequence[str], split: Split, config: ModelConfig
+    names: Sequence[str],
+    train: Sequence[Example],
+    validate: Sequence[Example],
+    *,
+    strength: float,
+    seed: int,
 ) -> dict[str, object]:
     """One calibrated logistic regression, as the numbers ``score`` reads."""
-    train_x, train_y, train_w = _arrays(split.train, names)
+    train_x, train_y, train_w = _arrays(train, names)
     mean = np.array([rounded(one) for one in train_x.mean(axis=0)])
     spread = train_x.std(axis=0)
     scale = np.array([rounded(one) if one > 0 else 1.0 for one in spread])
     model = LogisticRegression(
-        C=config.inverse_regularisation,
-        random_state=config.seed,
+        C=strength,
+        random_state=seed,
         max_iter=_MAX_ITER,
         tol=_TOL,
     ).fit((train_x - mean) / scale, train_y, sample_weight=train_w)
     coefficients = np.array([rounded(one) for one in model.coef_[0]])
     intercept = rounded(float(model.intercept_[0]))
-    valid_x, valid_y, valid_w = _arrays(split.validate, names)
+    valid_x, valid_y, valid_w = _arrays(validate, names)
     logits = ((valid_x - mean) / scale) @ coefficients + intercept
-    a, b = _platt(logits, valid_y, valid_w, config.seed)
+    a, b = _platt(logits, valid_y, valid_w, seed)
     return {
         "features": list(names),
         "mean": [float(one) for one in mean],

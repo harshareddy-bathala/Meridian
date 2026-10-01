@@ -68,6 +68,9 @@ MAY_IMPORT_DATASETS = frozenset(
         # `faults --publish` seals a fault run; it writes a directory and reads
         # none, so no runtime path reads the past through it (D-240).
         PLATFORM / "cli_reliability.py",
+        # Fitting and judging the reception verdict read a raw snapshot, as
+        # `meridian model` does; rating and applying it do not (D-262).
+        PLATFORM / "cli_verdict_model.py",
     }
 )
 PREDICTION = PLATFORM / "prediction"
@@ -77,9 +80,11 @@ the scheduling path imports them (tests/unit/test_regions_boundaries.py)."""
 REPORTS = PLATFORM / "reports"
 """Evaluation reports read snapshots offline too (D-234); only ``cli_report``
 imports them (tests/unit/test_reports_boundaries.py)."""
-SCORED_AT_RUNTIME = frozenset({"score.py"})
-"""The one prediction module the scheduler will import (D-155). It reads a
-model file, never a dataset, so it is held to the runtime rule."""
+SCORED_AT_RUNTIME = frozenset({"score.py", "verdict_inputs.py", "verdict_score.py"})
+"""The prediction modules the runtime imports: the scheduler's scorer (D-155),
+and the verdict's inputs and scorer, which the verdict writer builds from the
+database (D-261). Each reads a model file, never a dataset, so each is held to
+the runtime rule."""
 
 
 def may_import_datasets(path: Path) -> bool:

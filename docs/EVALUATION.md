@@ -36,7 +36,7 @@ Four criteria for the post-reception layer (modules 13–17, D-095). **Every tar
 
 Owner reports (module 16) have no numeric criterion; they are proven by working end to end in the demonstration (§11.4).
 
-**SC-7's target is higher than SC-2's on purpose.** SC-2 forecasts a pass that has not happened; the verdict reads the evidence of one that has, so a verdict that only matched SC-2's margin would be using that evidence badly. **SC-7 also cannot be measured until D-106 settles what "usable" means** — a label built from the verdict's own inputs would make any target meaningless. **SC-8 and SC-9 are simulated results** and are labelled so wherever they appear (§11.2, §11.3, D-105).
+**SC-7's target is higher than SC-2's on purpose.** SC-2 forecasts a pass that has not happened; the verdict reads the evidence of one that has, so a verdict that only matched SC-2's margin would be using that evidence badly. **SC-7 needed D-106 to settle what "usable" means**, because a label built from the verdict's own inputs would make any target meaningless. D-260 settled it as a blind human rating, so SC-7 is measurable once enough measured receptions are rated. **SC-8 and SC-9 are simulated results** and are labelled so wherever they appear (§11.2, §11.3, D-105).
 
 ---
 
@@ -286,11 +286,11 @@ How modules 13–17 are proven (D-095). Everything above applies to them — tem
 
 **Method — the discipline of §7.**
 
-- **Label.** Settled by D-106 before any training, and independent of the verdict's inputs. Until then SC-7 is not measured.
+- **Label.** A person's rating of the decoded product, made blind to the verdict and its inputs (D-106, settled by D-260). A reception that declared no product is unusable without a rating, and is the one part of the label that follows from what the station reported, so SC-7 is reported on every labelled reception and again on rated receptions only. An unrated reception has no label and is left out.
 - **Data.** Measured receptions only: our station's, and archive receptions where the inputs exist. **Never simulated** — D-078 applies without exception (D-105).
 - **Split.** Temporal: train on earlier receptions, calibrate on a later interval, test on the latest untouched interval. Report the boundary dates.
 - **Base rate.** The fraction of usable receptions in the training period, predicted for every test reception.
-- **Report.** Brier score against the base rate; a reliability diagram; and calibration **by segment** — per station, per band, per data type (image or telemetry), per decoder version, and with and without the decoder statistics MSP 0.3 carries (D-103), because a verdict computed from less evidence must still be calibrated.
+- **Report.** Built by the evaluation report's verdict section (D-264) and by `meridian verdict evaluate` (D-262): Brier score against the base rate; a reliability diagram; and calibration **by segment** — per station, per band, per data type (image or telemetry), per decoder version, and with and without the decoder statistics MSP 0.3 carries (D-103), because a verdict computed from less evidence must still be calibrated.
 
 **Selection bias, and why §4's form of it is limited here.** The verdict is only ever applied to receptions that were scheduled, so training on scheduled receptions matches the population it serves. Archive receptions were scheduled by other policies at other stations, though, so archive and own-station results are separate segments and are not pooled.
 

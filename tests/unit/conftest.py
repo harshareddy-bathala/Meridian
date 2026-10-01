@@ -425,3 +425,147 @@ EVALUATION_WORLD = _decoded_world()
 def evaluation_world() -> Mapping[str, Sequence[Mapping[str, object]]]:
     """:func:`_decoded_world`, built once: a world every configuration fits on."""
     return EVALUATION_WORLD
+
+
+# --- Stage 26: a world of rated receptions, for the reception verdict ---------
+
+VERDICT_TABLES = (*RAW_TABLES, "products", "reception_ratings")
+"""A raw snapshot from after migration 0027: products and ratings too."""
+
+
+def _verdict_world() -> Tables:
+    """Receptions every two hours from ``SINCE`` to ``AS_OF``, rated where decoded.
+
+    The usable rate rises with SNR, so a verdict has something to learn. Every
+    fifth reception reports no decoder statistics (MSP 0.2), a weak one hears
+    nothing and reports no SNR, and every seventeenth decoded one is unrated.
+    Five simulated receptions, rated by hand in the file, must never be read.
+    """
+    rng = random.Random(2026)
+    rows: Tables = {name: [] for name in VERDICT_TABLES}
+    rows["transmitters"].append(
+        {
+            "id": 1,
+            "satellite_id": "norad:57166",
+            "centre_freq_hz": 137100000,
+            "mode": "lrpt",
+            "active": True,
+            "deleted_at": None,
+            "frame_interval_s": 0.113778,
+        }
+    )
+    start = SINCE + timedelta(hours=1)
+    number = 0
+    while start < AS_OF - timedelta(hours=1):
+        number += 1
+        _verdict_reception(rows, number, start, rng, simulated=number % 53 == 0)
+        start += timedelta(hours=2)
+    return rows
+
+
+def _verdict_reception(
+    rows: Tables, number: int, start: datetime, rng: random.Random, *, simulated: bool
+) -> None:
+    station = "st_sim" if simulated else "st_001"
+    name = f"as_{number}"
+    snr = rng.uniform(0.0, 20.0)
+    outcome = "no_signal" if snr < 3 else "signal_no_decode" if snr < 6 else "decoded"
+    statistics = number % 5 != 0
+    ratio = min(1.0, max(0.0, (snr - 6.0) / 10.0 + rng.uniform(-0.1, 0.1)))
+    rows["passes"].append(
+        {
+            "id": number,
+            "satellite_id": "norad:57166",
+            "station_id": station,
+            "aos": start,
+            "los": start + timedelta(minutes=10),
+        }
+    )
+    rows["assignments"].append(
+        {
+            "assignment_id": name,
+            "pass_id": number,
+            "station_id": station,
+            "centre_freq_hz": 137100000,
+            "mode": "lrpt",
+            "decision": "scheduled",
+            "simulated": simulated,
+        }
+    )
+    rows["listening"].append(
+        {"assignment_id": name, "listening_confirmed": number % 11 != 0}
+    )
+    decoded = outcome == "decoded"
+    rows["observations"].append(
+        {
+            "assignment_id": name,
+            "revision": 1,
+            "station_id": station,
+            "satellite_id": "norad:57166",
+            "started_at": start,
+            "outcome": outcome,
+            "signal_detected": outcome != "no_signal",
+            "peak_snr_db": None if outcome == "no_signal" else round(snr, 2),
+            "frames_decoded": round(5273 * ratio)
+            if statistics and decoded
+            else (0 if statistics else None),
+            "decoder": "satdump" if statistics else None,
+            "decoder_version": "1.2.2" if statistics else None,
+            "simulated": simulated,
+        }
+    )
+    if not decoded:
+        return
+    rows["products"].append(
+        {"assignment_id": name, "revision": 1, "kind": "image", "simulated": simulated}
+    )
+    if number % 17 == 0:
+        return
+    usable = rng.random() < 1.0 / (1.0 + math.exp(-(snr - 11.0) / 1.5))
+    rows["reception_ratings"].append(
+        {
+            "id": number,
+            "assignment_id": name,
+            "revision": 1,
+            "usable": usable,
+            "rubric": "usable-1",
+            "rated_at": start + timedelta(hours=1),
+            "simulated": simulated,
+        }
+    )
+
+
+VERDICT_WORLD = _verdict_world()
+
+
+@pytest.fixture
+def verdict_world() -> Mapping[str, Sequence[Mapping[str, object]]]:
+    """:func:`_verdict_world`, built once."""
+    return VERDICT_WORLD
+
+
+@pytest.fixture
+def verdict_snapshot(datasets_root: Path) -> Callable[[Tables], Path]:
+    """Publish a raw snapshot from after migration 0027 holding the given rows."""
+
+    def publish(tables: Tables) -> Path:
+        files = {
+            f"{name}.jsonl": b"".join(
+                canonical_line(row) for row in tables.get(name, ())
+            )
+            for name in VERDICT_TABLES
+        }
+        manifest = Manifest(
+            kind="raw_snapshot",
+            schema_revision="0027",
+            since=SINCE,
+            as_of=AS_OF,
+            files=tuple(file_entry(name, data) for name, data in sorted(files.items())),
+            created_at=AS_OF,
+        )
+        name = f"20260923T060000Z-{content_sha256(manifest).hex()[:12]}"
+        return publish_directory(
+            datasets_root / "snapshots", name, manifest, files
+        ).path
+
+    return publish

@@ -135,7 +135,14 @@ def test_the_scans_would_notice_a_crossing(tmp_path: Path) -> None:
 
 
 SCORER = PREDICTION / "score.py"
-MODEL_READERS = (SCORER, PREDICTION / "model_files.py")
+MODEL_READERS = (
+    SCORER,
+    PREDICTION / "model_files.py",
+    PREDICTION / "verdict_score.py",
+    PREDICTION / "verdict_files.py",
+    PREDICTION / "verdict_evaluation.py",
+    PREDICTION / "verdict_report.py",
+)
 
 
 def outside_the_standard_library(path: Path) -> list[str]:
@@ -150,6 +157,23 @@ def test_the_scorer_imports_the_standard_library_alone() -> None:
     """What the scheduler imports on the Pi reads a file and does arithmetic."""
     assert list(imported_modules(SCORER))
     assert outside_the_standard_library(SCORER) == []
+
+
+VERDICT_SCORING = (PREDICTION / "verdict_inputs.py", PREDICTION / "verdict_score.py")
+VERDICT_MAY_IMPORT = ("meridian.prediction.score", "meridian.prediction.verdict_inputs")
+
+
+def test_verdict_scoring_imports_the_standard_library_and_the_scorer_alone() -> None:
+    """The verdict writer runs in the image and builds inputs from the database,
+    so what it scores with reaches nothing but plain Python (D-261)."""
+    for path in VERDICT_SCORING:
+        assert list(imported_modules(path))
+        outside = [
+            module
+            for module in outside_the_standard_library(path)
+            if module not in VERDICT_MAY_IMPORT
+        ]
+        assert outside == [], path.name
 
 
 def test_reading_a_model_back_never_imports_the_fitter() -> None:
@@ -169,7 +193,12 @@ def test_the_standard_library_scan_would_notice_an_import(tmp_path: Path) -> Non
 
 
 PLATFORM = REPO_ROOT / "platform" / "src" / "meridian"
-COMMANDS = (PLATFORM / "cli.py", PLATFORM / "cli_model.py")
+COMMANDS = (
+    PLATFORM / "cli.py",
+    PLATFORM / "cli_model.py",
+    PLATFORM / "cli_verdict.py",
+    PLATFORM / "cli_verdict_model.py",
+)
 NEEDS_THE_EXTRA = (
     "meridian.prediction.fit",
     "meridian.prediction.evaluation",
@@ -206,6 +235,7 @@ def test_the_command_imports_the_fitter_only_when_it_fits() -> None:
 
     assert at_load == []
     assert crossings([PLATFORM / "cli_model.py"], NEEDS_THE_EXTRA)
+    assert crossings([PLATFORM / "cli_verdict_model.py"], NEEDS_THE_EXTRA)
 
 
 def test_the_load_time_scan_would_notice_an_import(tmp_path: Path) -> None:
@@ -218,3 +248,70 @@ def test_the_load_time_scan_would_notice_an_import(tmp_path: Path) -> None:
     )
 
     assert top_level_imports(offender) == ["meridian.prediction.fit"]
+
+
+VERDICT_ONLY = (
+    "meridian.prediction.verdict_inputs",
+    "meridian.prediction.verdict_score",
+    "meridian.prediction.verdict_rows",
+    "meridian.prediction.verdict_examples",
+    "meridian.prediction.verdict_files",
+    "meridian.prediction.verdict_evaluation",
+    "meridian.prediction.verdict_report",
+    "meridian.prediction.verdict_config",
+    "meridian.datasets.usable_labels",
+    "meridian.verdict_build",
+    "meridian.store.verdicts",
+    "meridian.store.ratings",
+)
+"""What a reception's verdict and its label are made of (Stage 26)."""
+
+VERDICT_TABLES = ("reception_verdicts", "reception_ratings")
+
+MAY_READ_VERDICTS = frozenset({"fit.py"})
+"""The fitter fits both kinds of model; nothing it fits a yield model with
+reads a verdict, which the yield path's own modules below show."""
+
+
+def yield_path() -> list[Path]:
+    """Every module a pass's yield prediction is made by: prediction's own,
+    except the verdict's, and the scheduler that scores with it."""
+    return [
+        path
+        for path in sorted(
+            [*PREDICTION.rglob("*.py"), *(PLATFORM / "scheduler").rglob("*.py")]
+        )
+        if not path.name.startswith("verdict_") and path.name not in MAY_READ_VERDICTS
+    ]
+
+
+def reads_a_verdict(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8")
+    return [
+        *crossings([path], VERDICT_ONLY),
+        *(f"{path.name} names {table}" for table in VERDICT_TABLES if table in text),
+    ]
+
+
+def test_no_pass_s_verdict_is_a_yield_feature() -> None:
+    """D-102: a pass's own verdict never feeds the prediction of its yield.
+
+    The verdict reads what a pass returned; the yield model predicts it before
+    the pass. A verdict among the yield features would let the outcome leak
+    into its own forecast, and SC-2 would measure the leak.
+    """
+    paths = yield_path()
+
+    assert len(paths) > 10
+    assert [line for path in paths for line in reads_a_verdict(path)] == []
+
+
+def test_the_verdict_scan_would_notice_a_reader(tmp_path: Path) -> None:
+    offender = tmp_path / "offender.py"
+    offender.write_text(
+        "from meridian.prediction.verdict_score import score_reception\n"
+        'QUERY = "select probability_usable from reception_verdicts"\n',
+        encoding="utf-8",
+    )
+
+    assert len(reads_a_verdict(offender)) == 2

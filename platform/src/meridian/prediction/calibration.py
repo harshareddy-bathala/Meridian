@@ -149,12 +149,19 @@ def brier(pairs: Iterable[tuple[float, bool]]) -> float:
     return fsum(gaps) / len(gaps)
 
 
-def calibrate(scored: Sequence[Scored], *, base_rate: float) -> Calibration:
+def calibrate(
+    scored: Sequence[Scored],
+    *,
+    base_rate: float,
+    dimensions: Sequence[str] = DIMENSIONS,
+) -> Calibration:
     """The calibration of one judged span.
 
     Args:
         scored: Every judged pass, scored.
         base_rate: The training span's decode rate, the reference predictor.
+        dimensions: What to segment by, in order. A yield model's are
+            :data:`DIMENSIONS`; the reception verdict names its own (D-262).
 
     Returns:
         The Brier scores, the reliability diagram, the segments and the routes.
@@ -178,7 +185,7 @@ def calibrate(scored: Sequence[Scored], *, base_rate: float) -> Calibration:
         base_brier=base,
         skill=None if base == 0 else 1.0 - score / base,
         bins=_bins(scored),
-        segments=_segments(scored),
+        segments=_segments(scored, tuple(dimensions)),
         routes=_routes(scored),
     )
 
@@ -201,10 +208,12 @@ def _bins(scored: Sequence[Scored]) -> tuple[Bin, ...]:
     )
 
 
-def _segments(scored: Sequence[Scored]) -> tuple[Segment, ...]:
+def _segments(
+    scored: Sequence[Scored], dimensions: tuple[str, ...]
+) -> tuple[Segment, ...]:
     grouped: dict[tuple[str, str], list[Scored]] = defaultdict(list)
     for one in scored:
-        for dimension in DIMENSIONS:
+        for dimension in dimensions:
             grouped[(dimension, one.segments.get(dimension, UNKNOWN))].append(one)
     return tuple(
         Segment(
@@ -216,15 +225,17 @@ def _segments(scored: Sequence[Scored]) -> tuple[Segment, ...]:
             observed=_observed(members),
         )
         for (dimension, value), members in sorted(
-            grouped.items(), key=lambda item: _order(*item[0])
+            grouped.items(), key=lambda item: _order(dimensions, *item[0])
         )
     )
 
 
-def _order(dimension: str, value: str) -> tuple[int, bool, int, str]:
+def _order(
+    dimensions: tuple[str, ...], dimension: str, value: str
+) -> tuple[int, bool, int, str]:
     """Dimensions as listed; ages youngest first; ``unknown`` last in each."""
     age = _AGE_ORDER.index(value) if value in _AGE_ORDER else 0
-    return DIMENSIONS.index(dimension), value == UNKNOWN, age, value
+    return dimensions.index(dimension), value == UNKNOWN, age, value
 
 
 def _routes(scored: Sequence[Scored]) -> tuple[RouteCount, ...]:

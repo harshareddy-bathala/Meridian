@@ -2305,7 +2305,7 @@ D-078 excludes simulated observations from every training and evaluation set, be
 
 ## D-106 — What "usable" means for the reception verdict
 
-**2026-09-14 · open**
+**2026-09-14 · open** · *Settled 2026-10-01 by D-260: a blind human rating of the decoded product.*
 
 A calibrated probability needs a label, and the label must not be built from the verdict's own inputs. If "usable" were defined as, say, frames decoded above some fraction of frames expected, the verdict would be predicting a threshold on a number it reads, and a perfect Brier score would prove arithmetic.
 
@@ -5347,6 +5347,133 @@ Their effects are specified in `docs/SCALE-AND-FAULTS.md` § Ground-truth faults
 
 ---
 
+## D-260 — "Usable" is a person's rating of the decoded product, made blind to the verdict
+
+**2026-10-01 · accepted, to be confirmed by the team** · *Migration 0027; `meridian/store/ratings.py`, `meridian/cli_verdict.py`, `meridian/datasets/usable_labels.py`, `meridian/store/snapshot_reads.py`, Stage 26. Settles D-106.*
+
+D-106 asked what label the reception verdict is calibrated against, and required one not built from the verdict's own inputs. Of its four candidates, only one meets that requirement outright:
+- **line continuity, or any product check**, is computed from the decoded frames. Its own entry warned that it may track the frames ratio closely enough to bring the circularity back;
+- **agreement with another reception** is sparse while the network has one physical station;
+- **SatNOGS vetting** rates *with signal*, not *usable*, on another network's receptions.
+
+A person who looks at the product and says whether it can be used answers the question SC-7 asks and reads none of the verdict's inputs. The user chose it on 2026-10-01; the team confirms it at review, with SC-7's target.
+
+**The rules.**
+- **A revision with no product is unusable, unrated.** Nothing exists to look at or to use. This is the one part of the label that follows from what the station reported, since a reception that decoded nothing declares no product. So SC-7 is reported twice: on every labelled reception, and on rated receptions only. The second is the hard question, and the easy cases cannot inflate it.
+- **The latest rating of a revision is its label.** Ratings are append-only, so a re-rating or a second rater's answer is a new row and the first stays on the record. A label belongs to one observation revision, as a verdict does (D-104).
+- **An unrated reception has no label.** It is left out of fitting and scoring and never guessed from its outcome.
+- **Simulated receptions cannot be rated.** No simulated row is ever a label (D-078, D-105), so the tool refuses one rather than collecting work that could never be used.
+
+**Blind by construction.** `meridian verdict queue` lists what to look at: the reception's assignment, revision, station, satellite and time, and each product's kind, hash and place on the station. Its query reads no other column, so the outcome, the SNR series, the frame counts, the noise floor and any verdict never reach the rater. `tests/unit/test_reception_ratings.py` pins the query's columns and checks the printed queue for every verdict input. The rater opens the product where the station keeps it. The platform holds no product bytes (D-029, D-176), and on the single-machine deployment the station and the platform are one host.
+
+**What a rating records.**
+- `usable`, true or false.
+- `rubric`: which written instructions were followed. `usable-1` is in `OPERATIONS.md` § Reception verdicts. A changed rubric is a different label, and a model says which one it was fitted on.
+- `rater`: a short tag, not a name. `PROJECT.md` §16 holds no personal data and D-107 is still open. A tag is enough to tell two raters apart, and the column's `CHECK` refuses spaces and capitals, so a full name does not fit.
+- `simulated`, copied as everywhere, and always false.
+
+**The cost, stated.** Six to fifteen passes a day from one station is the most the team can rate, and fewer will carry a product. The temporal split needs enough rated receptions in each of its three spans. Until it has them, `meridian verdict fit` refuses with the counts (Stage 26, Part 3), and SC-7 is reported as not measured rather than estimated from too few.
+
+*Rejected: deriving "usable" from frames decoded against frames expected.* That is the verdict's own strongest input. A verdict calibrated to it would predict a threshold on a number it reads.
+
+*Rejected: rating with the verdict shown.* It is faster, and every rating would then be an agreement with the model rather than a test of it.
+
+---
+
+## D-261 — The verdict's inputs, three routes by the evidence a reception has, and a hash of what it read
+
+**2026-10-01 · accepted** · *`meridian/prediction/{verdict_inputs,verdict_score,verdict_rows}.py`, `meridian/prediction/score.py` (`parse_linear`), Stage 26. Applies D-103, D-104 and the roadmap's "missing-feature fallback".*
+
+The roadmap lists the verdict's inputs: outcome and detection, peak SNR, frames decoded against frames expected, decoder name and version, listening evidence, and data type. Four decisions turn that list into features a model can be fitted on.
+
+**A missing input takes a route, never a zero.** A station on MSP 0.2 reports no decoder statistics, a downlink with no stated interval has no frames expected (D-250), and a reception that heard nothing may report no SNR. None of these is a zero, and a model fitted with zeros standing in for them would learn that an absent statistic means a bad reception. So there are three calibrated models, each fitted only on receptions that have its inputs:
+- `full` reads the SNR and the frames ratio;
+- `snr` reads the SNR, without decoder statistics;
+- `outcome` reads neither.
+
+A reception is scored by the route with the most evidence it has, as Stage 17 routes a new station to the geometry model (D-161), and the route is stored with the verdict. A frames ratio without an SNR goes to `outcome`, because no station reports that combination and a fourth model would be fitted on nothing.
+
+**Decoder name and version are inputs, not features.** They are in the inputs hash, and calibration is reported per decoder version (EVALUATION.md §11.1), so a decoder whose verdicts are miscalibrated is visible. As a one-hot feature, each release would get a coefficient fitted from the handful of rated receptions it decoded, and a new release would get none. This narrows the roadmap's feature list, and is why it is recorded.
+
+**Two flags, stated as flags.** `listening_confirmed` is 1 when the registry confirmed the station was listening and 0 otherwise, including when nobody asked. It records whether confirmation exists, a fact about the record, not an imputed measurement. `image` is 1 for a mode whose product is an image (`lrpt`, `apt`, `hrpt`) and 0 for telemetry.
+
+**`inputs_sha256` names what the verdict read.** It hashes the nine inputs in D-070's canonical style, sorted keys and no whitespace, with a version string. A float keeps its shortest round-trip form, which a JSON snapshot and a `double precision` column both reproduce, and the snapshot reader reads a whole-number SNR as a float so the two sides agree. The live writer builds the inputs from the database and the fitter from a snapshot, and a reception gets the same hash either way. `tests/unit/test_verdict_inputs.py` checks that every field is hashed and that each one changes the hash.
+
+**Scoring needs no numerical stack.** `verdict_inputs` and `verdict_score` import the standard library and `meridian.prediction.score` alone, which `tests/unit/test_prediction_boundaries.py` enforces, because the writer runs in the image without the `fit` extra (D-155). `verdict.json` is read strictly: a route missing or extra, or a route whose features are not exactly the ones its inputs carry, is refused by name.
+
+*Rejected: imputing a missing SNR with the training mean.* It is the usual fix, and it turns "the station did not say" into "the station said average", which is exactly the confusion rule 7 exists to prevent for absence.
+
+---
+
+## D-262 — Fitting and judging the verdict: from a raw snapshot, by date, judged twice, with the threshold read on validation
+
+**2026-10-01 · accepted** · *`meridian/prediction/{fit,verdict_config,verdict_examples,verdict_files,verdict_evaluation,verdict_report,calibration,lineage}.py`, `meridian/cli_verdict_model.py`, `meridian/datasets/manifest_rules.py`, `deploy/verdict.toml.example`, Stage 26. Applies D-155, D-162 and D-163 to the verdict.*
+
+The verdict is fitted and judged the way Stage 17 fits a yield model: stated split dates, an L2 logistic regression, Platt calibration on validation, numbers rounded to 12 significant figures, and a test span neither step sees. Five things differ.
+
+**It is fitted straight from a raw snapshot.** A yield model needs an evaluation dataset, Stage 15's labels and selection. The verdict's labels are ratings, and the snapshot already holds them (D-260), so `meridian verdict fit <raw snapshot> --config <file>` reads one directory and nothing between. Its directory, under `<datasets root>/verdicts/`, is a new manifest kind, `verdict_model`, holding one `verdict.json`. Its `derived_from` is the snapshot's hash, and `evaluate` finds the snapshot by it. A simulated reception, an unrated one and one rated under another rubric are left out, and the manifest counts each.
+
+**Each route learns from every example with its inputs.** `outcome` learns from all labelled receptions, `snr` from all with an SNR, `full` from those that also have a frames ratio. A route with fewer than 20 training or 10 validation receptions, or with one label only, is refused by name with its counts. The refusal says how many were simulated and unrated, because rating more receptions is the remedy.
+
+**The method names the fit.** `method` is `verdict-1:` and the first twelve hex digits of the hash of the rest of the document. A refit on more ratings is a new method, so its verdicts append beside the old ones rather than replacing them (D-104).
+
+**Judged twice, on every labelled reception and on rated ones only** (D-260). `meridian verdict evaluate` prints for each:
+- Brier and skill against the training span's usable rate;
+- the routes;
+- a ten-bin reliability diagram;
+- calibration by EVALUATION.md §11.1's segments: station, band, data type, decoder version, and with or without decoder statistics.
+
+`calibrate` takes its segment dimensions as a parameter, so the yield model's are unchanged. §11.1's archive segment is reported as empty, since an archive reception has no rating. `evaluate` scores with the standard library and needs no `fit` extra.
+
+**The partial threshold is read on validation, never on test.** Stage 26 asks for a verdict below which a decoded reception counts as partial, chosen from the calibrated verdict and recorded with every run. `partial_below` is configuration, 0.5 by default. `evaluate` prints how many decoded validation receptions fall each side of it and how many of each were usable. The operator chooses from that, writes it, and fits again. The threshold travels in `verdict.json`, so every verdict written by a model carries the one it was fitted with. What a partial reception counts as for SC-4 is Stage 27's capture rule, not this (D-102).
+
+*Rejected: choosing the threshold automatically, say where usable falls below half.* It is one more fitted number. Reading it on validation and writing it down keeps it visible and keeps it off the test span, which a search would not.
+
+---
+
+## D-263 — Writing the verdict: every closed reception, once per method, by command and by the jobs service
+
+**2026-10-01 · accepted** · *Migration 0028; `meridian/verdict_build.py`, `meridian/store/{verdicts,snapshot_reads}.py`, `meridian/jobs/{verdict_round,job_metrics}.py`, `meridian/cli_{verdict,jobs}.py`, `meridian/config.py` (`VERDICT_MODEL`), `meridian/prediction/verdict_files.py` (`load_verdict_model`), Stage 26. Builds DATA-MODEL's planned `reception_verdicts`.*
+
+Stage 26's output is a `reception_verdicts` row for every observation revision, including one that received nothing. Five decisions settle how the rows are written.
+
+**What is scored: closed windows of scheduled assignments.** These are exactly the receptions a raw snapshot asks the registry about (D-145). The writer therefore gets the listening answer the snapshot freezes, and a verdict written now hashes the same as one recomputed from a snapshot later (D-261). `tests/integration/test_reception_verdicts.py` checks this row by row, against a real export. A reception whose window is still open waits for the next round. The snapshot reader keeps the same receptions and no others, so one whose window was open at export is never fitted with a listening value its stored verdict will not have.
+
+**Measured and simulated alike, labelled.** A simulated reception's verdict carries `simulated = true`, copied from the observation. It is never a label or a training row (D-078). Stage 27 needs it to tell a partial reception from a decoded one on a simulated fleet.
+
+**Append-only by key.** The key is `(assignment_id, revision, method)`, and an insert that meets it does nothing. A re-run writes nothing. A refit is a new method and scores everything again beside the old rows (D-104, D-262). Each row also carries:
+- its `route`;
+- its `inputs_sha256`;
+- the `partial_below` it was fitted with, so a reader can tell partial from decoded without the model file.
+
+**Two ways to run it, one function.**
+- `meridian verdict apply --model DIR` scores everything unscored, at once.
+- The jobs service runs the same function last in each round, at most 500 receptions a round, oldest first, under the task label `verdicts`, when `VERDICT_MODEL` names a model directory. Unset, the task does not run and records nothing. A model that cannot be read stops the service at start, as a schedule that cannot be obeyed does (D-168). Writing no verdicts while looking configured would be the worse failure.
+
+**The runtime never imports `meridian.datasets`.** Reading a model directory needs the manifest checks, which live there. `prediction.verdict_files.load_verdict_model` therefore reports damage as `DamagedVerdictError`, a model error, and `meridian verdict apply` still exits 3 for it. `tests/unit/test_datasets_boundaries.py` keeps the command and the jobs module off the package.
+
+*Rejected: scoring inside observation ingest.* The verdict would be written in the same transaction as the reception, before the window closes and before the registry can answer for it. Ingest would also depend on a model file. A reception must be storable with no model at all.
+
+---
+
+## D-264 — SC-7 in the evaluation report: the verdict fitted from the run's snapshot, judged on rated receptions
+
+**2026-10-01 · accepted** · *`meridian/reports/{verdict,verdict_config,render_verdict,build,render,config}.py`, `analysis/configs/evaluation.toml.example`, Stage 26. Adds a section to Stage 22's report (D-234, D-235).*
+
+The completion gate asks for SC-7's report (Brier score against the base rate, reliability diagram and segment calibration) to regenerate from a snapshot, a configuration and a seed. Stage 22's sealed run already does that for every other criterion, so the verdict is a sixth section in it, not a report of its own.
+
+**Fitted inside the run.** The section fits the verdict from the run's raw snapshot under a new `[verdict]` table, and publishes the model under `verdicts/`, as the prediction section publishes its models. The table holds the verdict configuration's settings without the seed, plus the bootstrap's resamples. The fit's seed is derived from the master seed as `verdict`, and the bootstrap's as `bootstrap.verdict` (D-236). The run names the model by hash, so `verify` rebuilds the same one.
+
+**SC-7 is read from rated receptions only** (D-260). The section reports both judgements. SC-7's own row reads the rated one, with a station-day bootstrap interval on the skill, as SC-2's does (D-237), against the proposed 40%. It says whether the point estimate meets the target and whether the whole interval is above it.
+
+**Not measured is a result.** Without split dates, without a product manifest, or with too few rated receptions for any route, the section writes one row saying *not measured* and why. That is SC-7's honest state until station 001's receptions are rated, and a number fitted from a handful would be worse than none.
+
+**The method is `report-7`.** Stage 24's branch moves the method to `report-6` at the same time. The two are kept apart, so two runs made under different methods never share a name, whichever merges first.
+
+*Rejected: SC-7 as `meridian verdict evaluate`'s output alone.* That command is the operator's view, made on a model already fitted. The report is what regenerates from inputs and seals the result, and every other success criterion is read there.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5365,7 +5492,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | | Question | Blocks |
 |---|---|---|
 | **D-100** | Which method SC-3 is measured by, after `first_detection_at` is tested on archive data | SC-3's analysis in Stage 22 |
-| **D-106** | What label "usable" is, independent of the verdict's inputs | Stage 26 and SC-7 |
+| **D-106** | What label "usable" is, independent of the verdict's inputs | Settled 2026-10-01 by **D-260**, a blind human rating; the team confirms it with SC-7's target |
 | **D-107** | Whether an owner's contact is held, and how §16 of `PROJECT.md` changes | Stage 29 beyond team-operated stations |
 | **D-108** | Archive rows as runtime evidence; D-053 against §17; phase naming; calendar placement | — |
 
@@ -5640,6 +5767,19 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-252 Skyfield in one simulator module | `meridian_sim/sky_track.py`; `simulator/pyproject.toml`; `pyproject.toml` (its exemption); `ARCHITECTURE.md` rule 2; `tests/unit/test_simulator_sky_track.py` |
 | D-253 four faults with ground-truth causes | `meridian_sim/{faults,sky_faults,sky_effects,fleet_faults,fault_notes,fault_schedule,supervisor,station,config,virtual_station}.py`; `deploy/{docker-compose.yml,.env.example}`; `docs/SCALE-AND-FAULTS.md` § Ground-truth faults; `OPERATIONS.md` § Ground-truth faults; `tests/unit/{test_simulator_sky_faults,test_simulator_sky_ground_truth,test_simulator_cli,test_reliability_faults}.py` |
 | — the completion gate | `tests/integration/test_ground_truth_gate.py`: three stations under `sky` over a day of real passes, read from the ledger and from every table, with a planted label as the positive control |
+
+**Landed 2026-10-01**, building Stage 26's reception verdict.
+
+| Decision | Applied to |
+|---|---|
+| D-260 the label "usable", rated blind | migration 0027; `meridian/store/{ratings,snapshot_reads}.py`; `meridian/cli_verdict.py`, `cli.py`; `meridian/datasets/{usable_labels,export}.py`; `DATA-MODEL.md`; `OPERATIONS.md` § Reception verdicts; `tests/unit/{test_usable_labels,test_reception_ratings,test_snapshot_tables}.py`; `tests/integration/{test_reception_ratings,test_migrations,test_migration_lifecycle}.py` |
+| D-261 inputs, routes and the inputs hash | `meridian/prediction/{verdict_inputs,verdict_score,verdict_rows}.py`; `meridian/prediction/score.py` (`parse_linear`); `tests/unit/{test_verdict_inputs,test_verdict_score,test_verdict_rows,test_prediction_boundaries}.py` |
+| D-262 fitting and judging the verdict | `meridian/prediction/{fit,verdict_config,verdict_examples,verdict_files,verdict_evaluation,verdict_report,calibration,lineage}.py`; `meridian/cli_verdict_model.py`; `meridian/datasets/manifest_rules.py` (`verdict_model`); `deploy/verdict.toml.example`; `tests/unit/{test_verdict_fit,test_verdict_config,test_prediction_boundaries,test_datasets_boundaries}.py` |
+| D-263 writing the verdict | migration 0028; `meridian/verdict_build.py`; `meridian/store/{verdicts,snapshot_reads}.py`; `meridian/jobs/{verdict_round,job_metrics}.py`; `meridian/cli_{verdict,jobs}.py`; `meridian/config.py`; `meridian/prediction/verdict_files.py`; `deploy/{docker-compose.yml,.env.example}`; `tests/unit/{test_jobs_verdict_round,test_jobs_reliability_round,test_deferred_storage_gate,test_snapshot_tables}.py`; `tests/integration/{test_reception_verdicts,test_migrations,test_migration_lifecycle}.py` |
+| D-264 SC-7 in the evaluation report | `meridian/reports/{verdict,verdict_config,render_verdict,build,render,config}.py`; `analysis/configs/evaluation.toml.example`; `OPERATIONS.md` § Evaluation reports; `tests/unit/{test_report_verdict,test_report_cli,test_report_prediction}.py` |
+| — the completion gate | `tests/integration/test_verdict_gate.py`: 150 receptions stored, the decoded ones rated, a snapshot exported, the verdict fitted from it and applied, every measured reception then holding a versioned verdict; `tests/unit/test_report_verdict.py`: SC-7 built and verified through `meridian report`, with every socket refused |
+| — D-102 enforced | `tests/unit/test_prediction_boundaries.py`: no module on the yield path reads a rating or a verdict |
+| — the settled entry | D-106 |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
