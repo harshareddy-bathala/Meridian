@@ -139,6 +139,9 @@ MODEL_READERS = (
     SCORER,
     PREDICTION / "model_files.py",
     PREDICTION / "verdict_score.py",
+    PREDICTION / "verdict_files.py",
+    PREDICTION / "verdict_evaluation.py",
+    PREDICTION / "verdict_report.py",
 )
 
 
@@ -190,7 +193,12 @@ def test_the_standard_library_scan_would_notice_an_import(tmp_path: Path) -> Non
 
 
 PLATFORM = REPO_ROOT / "platform" / "src" / "meridian"
-COMMANDS = (PLATFORM / "cli.py", PLATFORM / "cli_model.py")
+COMMANDS = (
+    PLATFORM / "cli.py",
+    PLATFORM / "cli_model.py",
+    PLATFORM / "cli_verdict.py",
+    PLATFORM / "cli_verdict_model.py",
+)
 NEEDS_THE_EXTRA = (
     "meridian.prediction.fit",
     "meridian.prediction.evaluation",
@@ -227,6 +235,7 @@ def test_the_command_imports_the_fitter_only_when_it_fits() -> None:
 
     assert at_load == []
     assert crossings([PLATFORM / "cli_model.py"], NEEDS_THE_EXTRA)
+    assert crossings([PLATFORM / "cli_verdict_model.py"], NEEDS_THE_EXTRA)
 
 
 def test_the_load_time_scan_would_notice_an_import(tmp_path: Path) -> None:

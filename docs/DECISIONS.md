@@ -5405,6 +5405,32 @@ A reception is scored by the route with the most evidence it has, as Stage 17 ro
 
 ---
 
+## D-262 — Fitting and judging the verdict: from a raw snapshot, by date, judged twice, with the threshold read on validation
+
+**2026-10-01 · accepted** · *`meridian/prediction/{fit,verdict_config,verdict_examples,verdict_files,verdict_evaluation,verdict_report,calibration,lineage}.py`, `meridian/cli_verdict_model.py`, `meridian/datasets/manifest_rules.py`, `deploy/verdict.toml.example`, Stage 26. Applies D-155, D-162 and D-163 to the verdict.*
+
+The verdict is fitted and judged the way Stage 17 fits a yield model: stated split dates, an L2 logistic regression, Platt calibration on validation, numbers rounded to 12 significant figures, and a test span neither step sees. Five things differ.
+
+**It is fitted straight from a raw snapshot.** A yield model needs an evaluation dataset, Stage 15's labels and selection. The verdict's labels are ratings, and the snapshot already holds them (D-260), so `meridian verdict fit <raw snapshot> --config <file>` reads one directory and nothing between. Its directory, under `<datasets root>/verdicts/`, is a new manifest kind, `verdict_model`, holding one `verdict.json`. Its `derived_from` is the snapshot's hash, and `evaluate` finds the snapshot by it. A simulated reception, an unrated one and one rated under another rubric are left out, and the manifest counts each.
+
+**Each route learns from every example with its inputs.** `outcome` learns from all labelled receptions, `snr` from all with an SNR, `full` from those that also have a frames ratio. A route with fewer than 20 training or 10 validation receptions, or with one label only, is refused by name with its counts. The refusal says how many were simulated and unrated, because rating more receptions is the remedy.
+
+**The method names the fit.** `method` is `verdict-1:` and the first twelve hex digits of the hash of the rest of the document. A refit on more ratings is a new method, so its verdicts append beside the old ones rather than replacing them (D-104).
+
+**Judged twice, on every labelled reception and on rated ones only** (D-260). `meridian verdict evaluate` prints for each:
+- Brier and skill against the training span's usable rate;
+- the routes;
+- a ten-bin reliability diagram;
+- calibration by EVALUATION.md §11.1's segments: station, band, data type, decoder version, and with or without decoder statistics.
+
+`calibrate` takes its segment dimensions as a parameter, so the yield model's are unchanged. §11.1's archive segment is reported as empty, since an archive reception has no rating. `evaluate` scores with the standard library and needs no `fit` extra.
+
+**The partial threshold is read on validation, never on test.** Stage 26 asks for a verdict below which a decoded reception counts as partial, chosen from the calibrated verdict and recorded with every run. `partial_below` is configuration, 0.5 by default. `evaluate` prints how many decoded validation receptions fall each side of it and how many of each were usable. The operator chooses from that, writes it, and fits again. The threshold travels in `verdict.json`, so every verdict written by a model carries the one it was fitted with. What a partial reception counts as for SC-4 is Stage 27's capture rule, not this (D-102).
+
+*Rejected: choosing the threshold automatically, say where usable falls below half.* It is one more fitted number. Reading it on validation and writing it down keeps it visible and keeps it off the test span, which a search would not.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5705,6 +5731,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 |---|---|
 | D-260 the label "usable", rated blind | migration 0027; `meridian/store/{ratings,snapshot_reads}.py`; `meridian/cli_verdict.py`, `cli.py`; `meridian/datasets/{usable_labels,export}.py`; `DATA-MODEL.md`; `OPERATIONS.md` § Reception verdicts; `tests/unit/{test_usable_labels,test_reception_ratings,test_snapshot_tables}.py`; `tests/integration/{test_reception_ratings,test_migrations,test_migration_lifecycle}.py` |
 | D-261 inputs, routes and the inputs hash | `meridian/prediction/{verdict_inputs,verdict_score,verdict_rows}.py`; `meridian/prediction/score.py` (`parse_linear`); `tests/unit/{test_verdict_inputs,test_verdict_score,test_verdict_rows,test_prediction_boundaries}.py` |
+| D-262 fitting and judging the verdict | `meridian/prediction/{fit,verdict_config,verdict_examples,verdict_files,verdict_evaluation,verdict_report,calibration,lineage}.py`; `meridian/cli_verdict_model.py`; `meridian/datasets/manifest_rules.py` (`verdict_model`); `deploy/verdict.toml.example`; `tests/unit/{test_verdict_fit,test_verdict_config,test_prediction_boundaries,test_datasets_boundaries}.py` |
 | — the settled entry | D-106 |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.

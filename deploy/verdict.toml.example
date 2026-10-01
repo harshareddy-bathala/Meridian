@@ -1,0 +1,31 @@
+# Verdict settings for `meridian verdict fit <raw snapshot> --config <this file>`.
+#
+# Every key is optional; the values below are the defaults. An unknown key is
+# refused rather than ignored, so a misspelling cannot silently keep a default
+# you believe you changed. The verdict model's hash covers these *values*, not
+# this file's bytes.
+
+# The split dates (D-162), as UTC date-times. A reception that started before
+# train_until trains; before validate_until, it calibrates and is where the
+# partial threshold is read; from there to the snapshot's as_of, it is test and
+# is read only by `meridian verdict evaluate`. No default: `meridian verdict
+# fit` refuses a configuration that does not name both.
+# train_until = 2027-01-01T00:00:00Z
+# validate_until = 2027-02-01T00:00:00Z
+
+# scikit-learn's C for the L2 penalty (D-155): smaller is stronger. Stated,
+# never tuned, so no choice is made by looking at the test span.
+inverse_regularisation = 1.0
+
+# Handed to the solver and recorded in the model. 0 .. 4294967295.
+seed = 0
+
+# Below this verdict, a decoded reception counts as partial (D-262). Choose it
+# from what `meridian verdict evaluate` prints for decoded validation
+# receptions either side of it, then write it here and fit again. Strictly
+# between 0 and 1.
+partial_below = 0.5
+
+# The rating instructions a rated label must have been made under (D-260). A
+# rating under another rubric is a different label, left out and counted.
+rubric = "usable-1"

@@ -1,9 +1,10 @@
-"""``meridian verdict`` — the reception verdict's label, rated blind.
+"""``meridian verdict`` — the reception verdict, and its label rated blind.
 
 ``queue`` lists the measured receptions waiting for a rating. ``rate`` records
-one. The label they make is D-260's answer to D-106: a person looks at the
-decoded product and says whether it is usable, without seeing the verdict or
-anything the verdict reads.
+one. ``fit`` and ``evaluate`` work on files, not the database, and live in
+:mod:`meridian.cli_verdict_model`. The label they make is D-260's answer to
+D-106: a person looks at the decoded product and says whether it is usable,
+without seeing the verdict or anything the verdict reads.
 
 **The queue prints what to look at and nothing else**: the reception's
 identity, its time, and each product's kind, hash and place on the station.
@@ -20,6 +21,11 @@ import sys
 
 import psycopg
 
+from meridian.cli_verdict_model import (
+    MODEL_ACTIONS,
+    add_model_actions,
+    run_model_action,
+)
 from meridian.config import load_settings
 from meridian.store.pool import DatabaseUnreachableError, connect_once
 from meridian.store.ratings import (
@@ -73,10 +79,18 @@ def add_verdict_parser(
         default=DEFAULT_RUBRIC,
         help=f"the rating instructions followed (default {DEFAULT_RUBRIC})",
     )
+    add_model_actions(actions)
 
 
 def run_verdict(args: argparse.Namespace) -> int:
-    """Handle ``meridian verdict queue`` and ``meridian verdict rate``."""
+    """Handle every ``meridian verdict`` action."""
+    if args.action in MODEL_ACTIONS:
+        return run_model_action(args)
+    return _run_database(args)
+
+
+def _run_database(args: argparse.Namespace) -> int:
+    """``queue`` and ``rate``, on one short-lived connection."""
     action = _queue if args.action == "queue" else _rate
     try:
         settings = load_settings()

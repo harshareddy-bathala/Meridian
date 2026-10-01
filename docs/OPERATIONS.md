@@ -749,6 +749,20 @@ It is **unusable** if it is mostly noise, mostly missing, or decoded but shows n
 
 Rate what the product shows, not what you expected from the pass. A good image from a low pass is usable, and a broken one from a high pass is not. If a reception is genuinely ambiguous, rate it unusable and move on: a rubric that needs a judgement call on every product is a different rubric, and a change of rubric is a new name such as `usable-2`.
 
+
+### Fitting and judging the verdict
+
+```sh
+meridian snapshot export
+meridian verdict fit "$MERIDIAN_DATASETS_ROOT"/snapshots/<snapshot> --config verdict.toml
+meridian verdict evaluate "$MERIDIAN_DATASETS_ROOT"/verdicts/<model>
+```
+
+Copy `deploy/verdict.toml.example`, set `train_until` and `validate_until`, and fit from a raw snapshot exported after the ratings were made. `fit` needs the `fit` extra; `evaluate` does not. The verdict is fitted on measured receptions only, and the fit says how many simulated, unrated and other-rubric receptions it left out.
+
+**"route full: validation holds 6 receptions…"** means too few rated receptions fall in that span for that route's model. Rate more, or move the dates. Never lower the minimums to get a number.
+
+`evaluate` judges the test span twice: every labelled reception, and rated ones only (D-260). SC-7 is the second, skill against the base rate, with its proposed target of +0.40. It also prints how many decoded *validation* receptions fall either side of `partial_below`, and how many of each were usable. Choose the threshold from those lines, write it into the configuration and fit again (D-262). Never choose it from the test span.
 ---
 
 ## Scheduling
