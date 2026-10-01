@@ -5659,6 +5659,29 @@ Otherwise it says *too short* or *failed*, with the reasons, and a fault run wit
 
 ---
 
+## D-270 — Stage 27 begun before D-105's review, with the specification it was built against pinned
+
+**2026-10-01 · accepted, review owed** · *`docs/SCALE-AND-FAULTS.md` § Ground-truth faults and § A stepped clock; `tests/unit/test_fault_spec_pin.py`; Stage 27. Departs from D-105 and D-253.*
+
+D-105 answers the circularity of one team writing both the simulator's fault effects and the diagnosis that is scored on them with two mitigations: the effects are specified before the diagnoser exists (Stage 25 did that, D-253), and **a team member other than the diagnoser's author reviews the specification before Stage 27 begins**. That review had not happened on 2026-10-01, and the team chose to build Stage 27 without waiting for it. This entry records that choice rather than letting the roadmap's order imply it was kept.
+
+**The review is still owed, and still means something.** What it can no longer do is come first. What it can still do is check that the specification is a fair description of how each fault would show in a station's evidence, and say so, or say where it is not, before SC-8 is claimed. To keep that review honest:
+- **The specification is pinned.** `tests/unit/test_fault_spec_pin.py` holds the SHA-256 of § Ground-truth faults from *What each fault does* to its end, of § A stepped clock (D-277), and of the simulator modules that carry them out (`evidence.py`, `sky_faults.py`, `sky_effects.py`, and Stage 27's own clock modules). A change to any of them fails the test until the pin is updated, and the test asks that update to name this entry. The pin cannot stop the diagnoser's author editing the specification. What it does is make every edit a visible, named diff, and give the reviewer one fixed text to sign.
+- **SC-8 is not called met before the review is recorded.** The report prints *fault effects not independently reviewed* beside the number until `SCALE-AND-FAULTS.md`'s Review lines name a reviewer and a date.
+- **Where the diagnoser was designed with the effects in view**, stated so the reviewer knows where to look:
+  - the obstruction test's elevation-matched loss rests on the simulated SNR being symmetric about culmination;
+  - the interference threshold of 2 dB was set against the simulated floor's ±0.5 dB jitter;
+  - the satellite-silence window of ±45 min was set against silences of 20 to 120 ticks;
+  - the timing fault's ground truth, the stepped clock, was specified by the same author as its test, in this stage.
+
+**The roadmap's order is otherwise kept.** The stepped clock's effects (D-277) are written and pinned in this stage's first commit, before any diagnosis code exists on the branch, which is the half of D-105's mitigation an author can do alone.
+
+*Rejected: waiting for the review.* The team's call. Every later stage depends on this one, and the review can still be done against a fixed text.
+
+*Rejected: building the three causes the specification governs (silence, obstruction, interference) only after the review.* Offered and declined. It would have kept the order for those three only, at the cost of the stage's gate.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
