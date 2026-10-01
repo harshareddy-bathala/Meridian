@@ -5542,6 +5542,44 @@ The refusal names both versions and says to fit again. `meridian model show` rea
 
 ---
 
+## D-256 — Every image by digest, every Action by commit, and Dependabot to move them
+
+**2026-10-01 · accepted** · *`deploy/docker-compose.yml`, `deploy/docker-compose.public.yml`; `.github/workflows/{ci,image-publish,security}.yml`; `.github/dependabot.yml`; `deploy/.env.example`; `OPERATIONS.md` § Security scanning; `tests/unit/test_pinning.py`; Stage 24. Extends D-113.*
+
+Stage 24 asks that "all dependencies and images are pinned". Before this change, only part of that held:
+
+| Pinned already | Pinned by tag only |
+|---|---|
+| Python and npm, by their lockfiles | the five third-party images compose runs |
+| the Dockerfile's bases, by digest (D-113) | CI's test database |
+| the security scanner's own image, by digest | every Action |
+
+A tag is a name a registry or a maintainer can point at other bytes tomorrow, and an Action runs with the checkout and, in two workflows, a token that can push images. The comment in `security.yml` already claimed "like every image in deploy/", which was not yet true.
+
+**Images are named `tag@sha256:<index digest>`.** The digest is the multi-arch index, not one platform's manifest, so a single pin serves the Pi's arm64 and CI's amd64. All five were checked to carry both. The tag stays beside the digest so a reader can see the release. Once a digest is given, the tag is not consulted.
+
+**Actions are named by commit, with the release as a comment.** Each major tag the workflows used was resolved, and each pointed at exactly one release (`actions/checkout@v4` was `v4.4.0`, and so on). The pin changes no behaviour today.
+
+**One uv everywhere.** CI's `setup-uv` took the latest uv, while the image builds with 0.11.20. CI now uses 0.11.20, as `security.yml` already did. That version was checked to accept the current `uv.lock`.
+
+**Dependabot moves the pins.** A pin nobody moves becomes a known vulnerability kept on purpose. `.github/dependabot.yml` proposes updates once a week for Actions, the Dockerfile, compose, uv and npm, grouped into one pull request per ecosystem, and CI judges each like any other change. Dependabot opens pull requests and never merges, so a person still decides.
+
+**The platform's own image stays a variable.** `MERIDIAN_IMAGE` defaults to `:main` so `docker compose pull` on a Pi takes the latest build. Which build to run is the deployment's choice, not the repository's. `.env.example` says an acceptance run pins it to `sha-<commit>`, and Stage 24's long run records the digest it ran (D-257).
+
+**A test keeps it so.** `test_pinning.py` reads the compose files, the workflows and the Dockerfile. It refuses:
+- an image by tag;
+- an Action by tag or branch;
+- a `setup-uv` without a version, or a uv other than the Dockerfile's;
+- a Dependabot configuration that misses an ecosystem.
+
+Each check has a positive control.
+
+*Rejected: pinning only what runs in production.* CI's Actions decide what is tested and what is published, so a moved Action can ship an image nobody tested.
+
+*Rejected: Renovate.* It does the same, but needs an app installed on the repository. Dependabot is built into GitHub and needs only a file.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5856,6 +5894,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-254 the acceptance register and its gate | `docs/ACCEPTANCE.md`; `tests/unit/test_acceptance_gate.py`; `.github/workflows/ci.yml` (the end-to-end step) |
 | — the clauses true by construction, now asserted | `tests/unit/{test_scheduler_boundaries,test_schedule_config,test_prediction_gate,test_report_gate}.py`; `tests/integration/test_cli_invite.py`; `tests/msp_conformance/test_healthz.py`; `meridian/reports/{scheduling,prediction_rows,build}.py` (counts on SC-1, SC-2, gains; kept under `report-7`) |
 | D-255 a version for the feature code | `meridian/prediction/{features,score,fit,live,replay_models}.py`; `meridian/cli_model.py`; `meridian/reports/prediction.py`; `DATA-MODEL.md` § Model; `OPERATIONS.md` § Models; `tests/unit/{test_feature_version,test_prediction_fit,test_prediction_live}.py` |
+| D-256 pins and Dependabot | `deploy/{docker-compose.yml,docker-compose.public.yml,.env.example}`; `.github/workflows/{ci,image-publish,security}.yml`; `.github/dependabot.yml`; `OPERATIONS.md` § Security scanning; `tests/unit/test_pinning.py` |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

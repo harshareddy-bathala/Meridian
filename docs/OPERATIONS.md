@@ -1092,6 +1092,18 @@ A station's own token is rotated through a bound invite, and withdrawn with `mer
 - **The image:** a Debian package is fixed by rebuilding, since the runtime stage applies Debian's updates; a base image is fixed by moving its digest in `deploy/Dockerfile`.
 - **Nothing can be done yet:** add the advisory to `.trivyignore` at the repository root, with a comment giving the reason and an `exp:YYYY-MM-DD` after which it fails again.
 
+**Every pin, and who moves it** (D-256). Each of these is pinned, and `tests/unit/test_pinning.py` refuses an unpinned one:
+- Python and the dashboard, by their lockfiles;
+- every image compose or a workflow runs, and every base in `deploy/Dockerfile`, by digest;
+- every Action, by commit, with its release as a trailing comment;
+- the uv that reads `uv.lock`, the Dockerfile's version, everywhere.
+
+Dependabot proposes moving each pin once a week (`.github/dependabot.yml`), one grouped pull request per ecosystem, and CI judges it like any other change. To move one by hand:
+- **an image:** `docker buildx imagetools inspect <image>:<tag>` and take its top-level `Digest`. That is the index, so the same pin serves the Pi's arm64 and a laptop's amd64.
+- **an Action:** `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`.
+
+The platform's own image is the exception. It is `MERIDIAN_IMAGE`, the deployment's choice, and an acceptance run pins it to a `sha-<commit>` tag.
+
 To scan a local build the same way:
 
 ```bash
