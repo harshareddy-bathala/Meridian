@@ -98,6 +98,7 @@ meridian/
 │   ├── GIT-WORKFLOW.md   branching, commits, migration rules
 │   ├── OPERATIONS.md     the runbook: bring-up, commands, backups, alerts
 │   ├── SCALE-AND-FAULTS.md   Stage 21's fault and scale results, simulated
+│   ├── ACCEPTANCE.md     every clause of Stage 24, its status and what proves it
 │   ├── THREAT-MODEL.md   assets, trust boundaries, threats and their mitigations
 │   ├── GLOSSARY.md
 │   ├── PROJECT.md        the full project document

@@ -5474,6 +5474,40 @@ The completion gate asks for SC-7's report (Brier score against the base rate, r
 
 ---
 
+## D-254 — Software-complete is a register of every clause and its evidence, kept true by a test
+
+**2026-10-01 · accepted** · *`docs/ACCEPTANCE.md`; `tests/unit/test_acceptance_gate.py`; `.github/workflows/ci.yml` (the end-to-end step); Stage 24.*
+
+Stage 24 is a list of forty clauses in five paths. The roadmap says the project is software-complete "when all of the following are true". Almost every clause had already been made true by an earlier stage, each in its own gate, but nothing said which test proved which clause. A clause nobody had proved was therefore indistinguishable from one proved three stages ago.
+
+**The register is `docs/ACCEPTANCE.md`.** Each clause is quoted as the roadmap words it and given a status and the evidence behind it:
+- **proven** means a test or a CI step asserts it on every change;
+- **run** means a run by hand whose transcript is recorded where the row says;
+- **pending — Stage N** means it is not yet true, and Stage N owes it.
+
+**A test keeps it true.** `test_acceptance_gate.py` reads the roadmap and the register. It fails if:
+- a clause is missing, repeated, reworded or invented;
+- a cited test is not a function in the file named;
+- a cited CI step is not a step of the job named;
+- a cited section is not a heading of its document;
+- a status does not fit its evidence, such as a `proven` row citing only prose.
+
+It holds the "Proven by" column of `OPERATIONS.md` § Failure recovery to the same rule, which nothing checked before. Every check has a positive control on a small text the test writes itself.
+
+**What is pending is named, never dropped.** Two kinds of clause are not true when Stage 24's software is built:
+- **the seventy-two hour run**, which is done on the Pi by an operator (D-198) and never from a test;
+- **five of the six post-reception clauses**, which are Stages 26 to 30, the first of them waiting on D-106.
+
+The project is software-complete when the register has no pending row.
+
+**The end-to-end step no longer tolerates an empty selection.** It was written to accept pytest's exit 5 ("no tests collected") while `tests/e2e/` was empty. It holds eleven tests now, and the register cites three of them, so a suite that stopped collecting must fail CI, not pass it.
+
+*Rejected: the register as prose in the roadmap's "Where the build has got to".* A paragraph cannot be checked, and that section is a snapshot in time by its own account.
+
+*Rejected: a pytest marker on each proving test, such as `@pytest.mark.acceptance("…")`.* It puts the clause text in forty places, and it cannot cite a CI step, a document, or a clause that is pending.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5780,6 +5814,12 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the completion gate | `tests/integration/test_verdict_gate.py`: 150 receptions stored, the decoded ones rated, a snapshot exported, the verdict fitted from it and applied, every measured reception then holding a versioned verdict; `tests/unit/test_report_verdict.py`: SC-7 built and verified through `meridian report`, with every socket refused |
 | — D-102 enforced | `tests/unit/test_prediction_boundaries.py`: no module on the yield path reads a rating or a verdict |
 | — the settled entry | D-106 |
+
+**Landed 2026-10-01**, building Stage 24's final software acceptance.
+
+| Decision | Applied to |
+|---|---|
+| D-254 the acceptance register and its gate | `docs/ACCEPTANCE.md`; `tests/unit/test_acceptance_gate.py`; `.github/workflows/ci.yml` (the end-to-end step) |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

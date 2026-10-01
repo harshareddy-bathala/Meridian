@@ -212,21 +212,14 @@ jobs:
       - name: MSP conformance tests
         run: uv run pytest -m msp_conformance
 
-      # tests/e2e/ is wired and empty until Stage 10, so this selects nothing and
-      # pytest exits 5 ("no tests collected"). The step is here now rather than
-      # with the first e2e test, because the alternative is a suite that lands
-      # and silently never runs — which is exactly what happened to
-      # msp_conformance above until it was noticed. 5 is tolerated; every other
-      # non-zero code is a failure.
-      #
-      # This job has a database but not the compose stack, so it will need to
-      # move to the `image` job when there is something to run. Left here so the
-      # marker is exercised from the same place as the other three, and the move
-      # is a deliberate edit rather than a discovery.
+      # tests/e2e/ runs the platform in-process against this job's migrated
+      # database: a simulated station's round trip, its publication, and fifty
+      # stations through real MSP. The compose stack is the `image` job's.
+      # An empty selection is a failure (pytest exits 5): Stage 24's register
+      # cites these tests, and a suite that silently stops collecting must not
+      # pass (D-254).
       - name: End-to-end tests
-        run: |
-          set -euo pipefail
-          uv run pytest -m e2e || test $? -eq 5
+        run: uv run pytest -m e2e
 
   monitoring:
     # The alert rules, Prometheus's configuration and both Alertmanager files,
