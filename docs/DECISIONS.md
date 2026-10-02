@@ -5852,6 +5852,8 @@ The clean-outcome comparison is what makes a recall honest. The ledger names a p
 
 It does not measure SC-8.
 
+**The section is the evaluation report's seventh, method `report-8`.** It needs no table of its own in the configuration: its thresholds are in each sealed run, and its targets are SC-8's. Stage 24's branch also changes the method. Whichever merges second keeps `report-8` or moves past it, so no two methods share a name.
+
 *Rejected: the confusion matrix from one gate run.* A gate proves that each cause can be named. A figure needs several seeds and their spread, which a CI job cannot afford and a sealed run can carry.
 
 ---
@@ -6161,6 +6163,22 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-264 SC-7 in the evaluation report | `meridian/reports/{verdict,verdict_config,render_verdict,build,render,config}.py`; `analysis/configs/evaluation.toml.example`; `OPERATIONS.md` § Evaluation reports; `tests/unit/{test_report_verdict,test_report_cli,test_report_prediction}.py` |
 | — the completion gate | `tests/integration/test_verdict_gate.py`: 150 receptions stored, the decoded ones rated, a snapshot exported, the verdict fitted from it and applied, every measured reception then holding a versioned verdict; `tests/unit/test_report_verdict.py`: SC-7 built and verified through `meridian report`, with every socket refused |
 | — D-102 enforced | `tests/unit/test_prediction_boundaries.py`: no module on the yield path reads a rating or a verdict |
+
+**Landed 2026-10-02**, building Stage 27's loss diagnosis, before D-105's review of the fault specification, by the team's choice (D-270).
+
+| Decision | Applied to |
+|---|---|
+| D-270 begun before the review, the specification pinned | `docs/SCALE-AND-FAULTS.md` (Review lines); `tests/unit/test_fault_spec_pin.py` |
+| D-271 a partial decode is still captured for SC-4 | `meridian/reliability/classification.py` (`CAPTURED`); `tests/unit/test_reliability_boundaries.py` |
+| D-272 what is diagnosed, once per method and configuration | migration 0029; `meridian/store/{loss_diagnoses,snapshot_reads}.py`; `meridian/datasets/export.py`; `meridian/reliability/diagnosis_run.py`; `meridian/cli_diagnosis.py`, `cli.py`; `meridian/jobs/{diagnosis_round,job_metrics}.py`; `meridian/cli_jobs.py`; `deploy/prometheus/{rules,tests}/`; `DATA-MODEL.md`; `OPERATIONS.md` § Loss diagnosis; `tests/integration/{test_loss_diagnoses,test_loss_diagnosis,test_migrations,test_migration_lifecycle}.py`; `tests/unit/{test_jobs_diagnosis_round,test_deferred_storage_gate,test_snapshot_tables}.py` |
+| D-273 choosing a cause, *undetermined* an answer | `meridian/reliability/{diagnosis,diagnosis_causes,diagnosis_evidence,config}.py`; `deploy/reliability.toml.example`; `tests/unit/{test_diagnosis_choice,test_diagnosis_config,test_diagnosis_boundaries}.py` |
+| D-274 an obstruction from where signal is lost | `meridian/reliability/{obstruction_map,diagnosis_gather}.py`; `meridian/store/diagnosis_reads.py`; `tests/unit/test_diagnosis_causes.py`; `tests/integration/test_diagnosis_reads.py` |
+| D-275 interference against the station's own floor | `meridian/reliability/diagnosis_causes.py`; `meridian/store/diagnosis_reads.py` |
+| D-276 a silent satellite on contemporaneous, high attempts | `meridian/reliability/{satellite_evidence,accounting,diagnosis_causes}.py`; `meridian/store/reliability_evidence.py` |
+| D-277 the stepped clock, and the timing test | `meridian_sim/{faults,clock_faults,clock_effects,fault_schedule,supervisor,executor,fault_notes}.py`; `docs/SCALE-AND-FAULTS.md` § A stepped clock; `tests/unit/test_simulator_clock_step.py` |
+| D-278 SC-8 from sealed simulated fleets | `deploy/tools/diagnosis_runs.py`; `meridian/datasets/{diagnosis_runs,manifest_rules}.py`; `meridian/reports/{diagnosis,diagnosis_truth,render_diagnosis,build,render,verify}.py`; `meridian/cli_report.py`; `meridian_sim/faults.py` (`diagnosis`); `analysis/configs/diagnosis.toml.example`; `EVALUATION.md` §11.2; `tests/unit/{test_diagnosis_truth,test_diagnosis_runs_tool,test_report_diagnosis,test_report_cli}.py` |
+| — the completion gate | `tests/integration/test_diagnosis_gate.py`: a faulted fleet flown, every loss diagnosed, a dead receiver's and a stepped clock's losses named, nothing about a fault in any table; `tests/unit/test_report_diagnosis.py`: SC-8 built and verified through `meridian report` from sealed runs, with every socket refused |
+| — D-102 enforced | `tests/unit/test_diagnosis_boundaries.py`: no yield feature reads a diagnosis, and no diagnosis reaches the ledger, a dataset, a model or the network |
 | — the settled entry | D-106 |
 
 **Landed 2026-10-01**, building Stage 24's final software acceptance.

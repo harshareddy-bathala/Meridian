@@ -138,7 +138,7 @@ What the platform concludes once a pass is over — modules 13 to 17 in the subm
 
 **Partial reception** — a reception that decoded something, but whose verdict falls below a configured threshold. Treated as a loss for diagnosis.
 
-**Loss diagnosis** — for every failed or partial reception, the most likely cause: satellite silent, station not listening, obstruction, interference, or a timing or clock fault. Says **undetermined** when the evidence does not support a cause, which is a real answer and not a gap. A declined assignment is not a reception and is never diagnosed.
+**Loss diagnosis** — for every failed or partial reception, the most likely cause: satellite silent, station not listening, obstruction, interference, or a timing or clock fault. Says **undetermined** when the evidence does not support a cause, or two causes conflict, which is a real answer and not a gap. A declined assignment is not a reception and is never diagnosed. Every cause tested is recorded with what its test found (D-273).
 
 **Station health watch** — a comparison of a station's signal strength at each elevation against its own history, warning that the receive chain — antenna, cable, LNA — is degrading before reception fails. Its output is a **receive-chain warning**. Not the station's liveness, and not the `health` object a heartbeat carries.
 

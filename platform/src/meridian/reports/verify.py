@@ -29,6 +29,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from meridian.datasets.diagnosis_runs import (
+    DIAGNOSES,
+    DiagnosisRun,
+    read_diagnosis_run,
+)
 from meridian.datasets.fault_runs import FAULTS, FaultRun, read_fault_run
 from meridian.datasets.manifest import Manifest, content_sha256
 from meridian.datasets.publish import SnapshotDirectory, read_directory
@@ -44,13 +49,16 @@ __all__ = [
     "NotARunError",
     "SnapshotNotFoundError",
     "Verdict",
+    "locate_diagnosis_runs",
     "locate_fault_runs",
     "locate_snapshot",
     "verify_run",
 ]
 
 _SNAPSHOTS = "snapshots"
-_UNCOMPARED = frozenset(("snapshot_path", "runtime_s", "fault_run_paths"))
+_UNCOMPARED = frozenset(
+    ("snapshot_path", "runtime_s", "fault_run_paths", "diagnosis_run_paths")
+)
 """Environment entries that describe where or how long, not what, and are
 never a cause of a different number."""
 
@@ -160,11 +168,55 @@ def _fault_run(candidates: Sequence[Path], digest: str) -> FaultRun | None:
     return None
 
 
-def verify_run(
+def locate_diagnosis_runs(
+    run: Manifest, *, root: Path, given: Sequence[Path] = ()
+) -> tuple[DiagnosisRun, ...]:
+    """Every diagnosis run ``run`` judged, each found and checked by its hash.
+
+    Looked for as a fault run is: among the paths given, at the recorded path,
+    then under ``<root>/diagnoses`` (D-278).
+
+    Raises:
+        SnapshotNotFoundError: A recorded diagnosis run is nowhere searched.
+        DamagedSnapshotError: A candidate does not match its own manifest.
+    """
+    recorded = run.parameters.get("diagnosis_runs", [])
+    hints = run.environment.get("diagnosis_run_paths", {})
+    found = []
+    for wanted in recorded if isinstance(recorded, list) else []:
+        digest = str(wanted)
+        hinted = hints.get(digest) if isinstance(hints, Mapping) else None
+        candidates = [
+            *given,
+            *([Path(str(hinted))] if hinted else []),
+            *sorted((root / DIAGNOSES).glob(f"{digest[:12]}*")),
+        ]
+        match = next(
+            (
+                one
+                for one in (
+                    read_diagnosis_run(path) for path in candidates if path.is_dir()
+                )
+                if content_sha256(one.directory.manifest).hex() == digest
+            ),
+            None,
+        )
+        if match is None:
+            message = (
+                f"no diagnosis run {digest[:12]} under {root / DIAGNOSES};"
+                " name it with --diagnoses"
+            )
+            raise SnapshotNotFoundError(message)
+        found.append(match)
+    return tuple(found)
+
+
+def verify_run(  # noqa: PLR0913 — a run, its inputs, and where to build it
     run: SnapshotDirectory,
     raw: SnapshotDirectory,
     *,
     faults: tuple[FaultRun, ...] = (),
+    diagnoses: tuple[DiagnosisRun, ...] = (),
     root: Path,
     environment: Mapping[str, object],
 ) -> Verdict:
@@ -174,6 +226,8 @@ def verify_run(
         run: The run, as :func:`read_directory` verified it.
         raw: Its raw snapshot, as :func:`locate_snapshot` found it.
         faults: Its fault runs, as :func:`locate_fault_runs` found them.
+        diagnoses: Its diagnosis runs, as :func:`locate_diagnosis_runs` found
+            them.
         root: The datasets root the evaluation dataset is published under.
         environment: This machine's environment, to compare with the recorded.
 
@@ -187,7 +241,7 @@ def verify_run(
     manifest = run.manifest
     seed = _require_run(manifest)
     rebuilt = build_run(
-        RunInputs(raw, parse_report_config(run.files[CONFIG_FILE]), faults),
+        RunInputs(raw, parse_report_config(run.files[CONFIG_FILE]), faults, diagnoses),
         seed=seed,
         root=root,
         created_at=manifest.created_at,

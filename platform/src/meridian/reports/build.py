@@ -25,6 +25,7 @@ from datetime import datetime
 from pathlib import Path
 
 from meridian.datasets.canonical import canonical_line
+from meridian.datasets.diagnosis_runs import DiagnosisRun
 from meridian.datasets.evaluation import build_evaluation_dataset
 from meridian.datasets.fault_runs import FaultRun
 from meridian.datasets.manifest import Manifest, content_sha256, file_entry
@@ -39,6 +40,7 @@ from meridian.datasets.seeds import derive
 from meridian.reports.config import ConfigFile, report_config_sha256
 from meridian.reports.data import DATA_FILE, data_rows
 from meridian.reports.detections import detections
+from meridian.reports.diagnosis import DIAGNOSIS_FILE, diagnosis_rows
 from meridian.reports.fault_rows import fault_rows
 from meridian.reports.orbit import ORBIT_FILE, orbit_rows
 from meridian.reports.prediction import (
@@ -83,9 +85,10 @@ __all__ = [
     "with_environment",
 ]
 
-METHOD_VERSION = "report-7"
+METHOD_VERSION = "report-8"
 """Bumped whenever a section's method changes, so two runs made under different
-methods can never share a hash."""
+methods can never share a hash. ``report-8`` added Stage 27's loss diagnosis
+(D-278)."""
 
 REPORTS = "reports"
 """Runs published without ``--output`` live under ``<datasets root>/reports/``."""
@@ -131,6 +134,9 @@ class RunInputs:
 
     faults: tuple[FaultRun, ...] = ()
     """Sealed fault runs the reliability section judges again (D-240)."""
+
+    diagnoses: tuple[DiagnosisRun, ...] = ()
+    """Sealed simulated fleets the loss-diagnosis section judges (D-278)."""
 
 
 def build_run(
@@ -189,6 +195,9 @@ def build_run(
             "models": computed.models,
             "fault_runs": [
                 content_sha256(one.directory.manifest) for one in inputs.faults
+            ],
+            "diagnosis_runs": [
+                content_sha256(one.directory.manifest) for one in inputs.diagnoses
             ],
         },
         environment=computed.measured,
@@ -256,6 +265,7 @@ def _sections(
             ),
         ],
         VERDICT_FILE: verdict.rows,
+        DIAGNOSIS_FILE: diagnosis_rows(inputs.diagnoses, raw),
     }
     models = {
         one.variant.name: one.sha256 for one in outcomes if isinstance(one, Fitted)
@@ -273,6 +283,10 @@ def _sections(
             "fault_run_paths": {
                 content_sha256(one.directory.manifest).hex(): str(one.directory.path)
                 for one in inputs.faults
+            },
+            "diagnosis_run_paths": {
+                content_sha256(one.directory.manifest).hex(): str(one.directory.path)
+                for one in inputs.diagnoses
             },
         },
     )
