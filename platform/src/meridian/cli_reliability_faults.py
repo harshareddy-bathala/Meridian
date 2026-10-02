@@ -40,10 +40,12 @@ from meridian.reliability.faults import (
 from meridian.store.schema_revision import find_current_revision
 from meridian.store.stations import Connection
 
-__all__ = ["judge_faults"]
+__all__ = ["EXIT_FAILED", "judge_faults", "refuse", "say"]
 
 EXIT_FAILED = 1
-"""Matches ``meridian.cli.EXIT_FAILED``."""
+"""Matches ``meridian.cli.EXIT_FAILED``. Kept here, with ``say`` and ``refuse``,
+for every ``meridian reliability`` action: :mod:`meridian.cli_reliability`
+imports them, so the two cannot drift apart."""
 
 
 def judge_faults(
@@ -59,7 +61,7 @@ def judge_faults(
     """
     read = _fault_inputs(args)
     if isinstance(read, str):
-        return _refuse("faults", read)
+        return refuse("faults", read)
     ledger, faults, record = read
     alerts = prometheus_alert_history(args.prometheus) if args.prometheus else None
     try:
@@ -67,13 +69,13 @@ def judge_faults(
     except (OSError, ValueError) as exc:
         # A Prometheus that is restarting or slow is a refusal to judge the
         # alerts, said as one, not a traceback with nothing printed.
-        return _refuse("faults", f"Prometheus did not answer: {exc}")
+        return refuse("faults", f"Prometheus did not answer: {exc}")
     verdicts = tuple(judge_gathered(one) for one in gathered)
     for verdict in verdicts:
         for line in _judged(verdict):
-            _say(line)
+            say(line)
     failed = sum(not one.passed for one in verdicts)
-    _say(f"{len(verdicts)} faults judged, {failed} failed")
+    say(f"{len(verdicts)} faults judged, {failed} failed")
     if args.json is not None:
         args.json.write_text(
             json.dumps([_as_json(one) for one in verdicts], indent=2) + "\n",
@@ -136,11 +138,11 @@ def _publish(
             record=record,
         )
     except (OSError, ValueError, DamagedSnapshotError) as exc:
-        _refuse("faults", f"the fault run was judged but not published: {exc}")
+        refuse("faults", f"the fault run was judged but not published: {exc}")
         return False
     held = "written" if published.written else "already held, identically"
-    _say(f"fault run: {published.path} ({held})")
-    _say(f"  hash               {content_sha256(published.manifest).hex()}")
+    say(f"fault run: {published.path} ({held})")
+    say(f"  hash               {content_sha256(published.manifest).hex()}")
     return True
 
 
@@ -186,11 +188,13 @@ def _as_json(verdict: FaultVerdict) -> dict[str, object]:
     }
 
 
-def _say(line: str) -> None:
+def say(line: str) -> None:
+    """One line of what a ``meridian reliability`` action found."""
     print(line)  # noqa: T201 — this is a CLI; stdout is the interface
 
 
-def _refuse(action: str, reason: str) -> int:
+def refuse(action: str, reason: str) -> int:
+    """Say why an action refused, and give the exit status that says so."""
     print(  # noqa: T201 — this is a CLI; stderr is the interface
         f"meridian reliability {action}: {reason}", file=sys.stderr
     )

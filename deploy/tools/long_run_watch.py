@@ -66,6 +66,13 @@ THROTTLED_NOW = 0xF
 """``vcgencmd get_throttled``'s low bits: under-voltage, frequency capped,
 throttled and soft temperature limit, each as it stands at the moment read."""
 
+THROTTLED_SINCE_BOOT = 0xF0000
+"""The same four, each set once it has happened since boot and never cleared.
+
+Sampled every fifteen minutes, the low bits miss a throttle that came and went
+between two samples; these do not. Only a bit that appears after the first
+sample counts, so a Pi that throttled at boot is not failed for it."""
+
 
 @dataclass(frozen=True, slots=True)
 class Machine:
@@ -304,9 +311,7 @@ def judge_resources(
         ),
         "swap_used_mib_max": _most(one.swap_used_mib for one in machines),
         "temperature_c_max": _most(one.temperature_c for one in machines),
-        "throttled_seen": any(bits & THROTTLED_NOW for bits in throttled)
-        if throttled
-        else None,
+        "throttled_seen": throttled_during(throttled) if throttled else None,
         "bounds": {
             "memory_slope_mib_per_hour": slope_bound,
             "disk_free_gib": disk_floor,
@@ -322,6 +327,15 @@ def judge_resources(
     if found.figures["throttled_seen"]:
         found.failures.append("the host throttled its clock during the run")
     return found
+
+
+def throttled_during(readings: Sequence[int]) -> bool:
+    """Whether the host throttled while sampled, or between two samples."""
+    before = readings[0] & THROTTLED_SINCE_BOOT
+    return any(
+        bits & THROTTLED_NOW or bits & THROTTLED_SINCE_BOOT & ~before
+        for bits in readings
+    )
 
 
 def _ends(values: Iterable[float | None]) -> dict[str, float] | None:

@@ -183,7 +183,7 @@ It is a rehearsal of the tool, not the acceptance run: two hours on an x86 lapto
 | Peak memory | Grafana 258 MiB, API 247, database 114, Prometheus 86, jobs 70, simulator 39, Alertmanager 39 |
 | Memory growth | not judged: two hours is too few samples to fit, as it should be |
 | Database | 11.6 MiB at the start, 13.0 MiB at the end |
-| Sealed | fault run `28de65a16180`, with its record inside. A report built with it calls it **too short**, 2.001 hours, and names the run's machine, image and interruption. `report verify` regenerates that report identically |
+| Sealed | fault run `28de65a16180`, with its record inside. A report built with it calls it **too short**, and names the run's machine, image and interruption. `report verify` regenerates that report identically. Built after review, when gaps stopped counting, it reads 1.778 hours watched and 0.223 hours of gap. That gap is the sealed record's, dated from 12:06 by the fault fixed below; the true gap was thirteen seconds |
 
 **The verdict, question by question.**
 

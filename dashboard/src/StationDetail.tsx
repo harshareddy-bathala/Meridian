@@ -7,6 +7,7 @@ import type { StationUptime } from "./uptime";
 import { UptimeStrip } from "./UptimeStrip";
 import { describeValue, type Assignment, type LatestHeartbeat } from "./schedule";
 import type { Station } from "./stations";
+import { useStationCapture } from "./useStationCapture";
 import { useStationDetail } from "./useStationDetail";
 
 function ListeningState({ heartbeat }: { heartbeat: LatestHeartbeat | null | undefined }) {
@@ -204,9 +205,9 @@ interface DetailProps {
 }
 
 export function StationDetail({ station, onClear }: DetailProps) {
-  const { heartbeat, assignments, profiles, uptime, receptions, capture, error } = useStationDetail(
-    station?.stationId ?? null,
-  );
+  const stationId = station?.stationId ?? null;
+  const { heartbeat, assignments, profiles, uptime, receptions, error } = useStationDetail(stationId);
+  const capture = useStationCapture(stationId);
   return (
     <section aria-labelledby="detail-heading" className="station-detail">
       <h2 id="detail-heading">

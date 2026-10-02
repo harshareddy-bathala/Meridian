@@ -1462,7 +1462,7 @@ python deploy/tools/long_run.py --hours 72 --seed 4471 --out runs/long-72h --up 
 Otherwise the report says *too short* or *failed*, and why.
 
 **When the tool stops early.** Under SIGTERM or SIGHUP it mends the fault it was injecting before it exits.
-- `--resume`, with the same `--out` and compose options, carries the run on from `run.json`. It mends and closes any platform fault left open, and skips what fell in the gap. The gap is recorded, and the report shows it.
+- `--resume`, with the same `--out` and compose options, carries the run on from `run.json`. It mends and closes any platform fault left open, and skips what fell in the gap. The gap is recorded, the report shows it, and it does not count toward the seventy-two hours: a run with gaps needs to run longer.
 - `--judge-only` judges a finished run again from the `report.json` it kept before judging, for a judgement lost to anything but the run.
 
 `--fault-gap-minutes` shortens the mean time between platform faults for a rehearsal: an hour is right for three days and too rare for two hours. On a laptop, keep the host awake with the lid closed and idle sleep inhibited, or the run fails as not unattended.

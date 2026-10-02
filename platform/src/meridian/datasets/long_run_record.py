@@ -11,7 +11,9 @@ one hash names everything a reader needs to say the platform survived the run
 (D-257).
 
 The platform reads only what the acceptance needs, strictly:
-- the run's ``started`` and ``ended`` instants, which decide its length;
+- the run's ``started`` and ``ended`` instants, and every ``interruptions``
+  gap its tool was stopped for, which together decide its length. A gap does
+  not count: the platform ran on, but nothing injected a fault or looked;
 - ``passed`` and the ``failures`` that decided it;
 - the ``seed`` its faults were drawn from.
 
@@ -57,13 +59,21 @@ class LongRunRecord:
     passed: bool
     failures: tuple[str, ...]
     seed: int
+    interrupted_s: float
+    """Seconds the tool was stopped for, summed over every gap."""
     document: Mapping[str, object]
     """The whole record, as the tool wrote it."""
 
     @property
     def hours(self) -> float:
-        """How long the faults ran: from the start to the end of the timeline."""
-        return (self.ended - self.started).total_seconds() / 3600
+        """How long the run was watched: start to end, less every gap."""
+        span = (self.ended - self.started).total_seconds()
+        return (span - self.interrupted_s) / 3600
+
+    @property
+    def interrupted_hours(self) -> float:
+        """How long the tool was stopped for, which the run's length leaves out."""
+        return self.interrupted_s / 3600
 
 
 def parse_long_run_record(raw: bytes) -> LongRunRecord:
@@ -101,7 +111,8 @@ def parse_long_run_record(raw: bytes) -> LongRunRecord:
     if ended < started:
         message = "the run record ends before it starts"
         raise LongRunRecordError(message)
-    return LongRunRecord(started, ended, passed, tuple(failures), seed, stored)
+    gaps = _gaps(stored.get("interruptions", []), started, ended)
+    return LongRunRecord(started, ended, passed, tuple(failures), seed, gaps, stored)
 
 
 def record_bytes(record: LongRunRecord) -> bytes:
@@ -120,3 +131,19 @@ def _instant(stored: Mapping[str, object], key: str) -> datetime:
         message = f"the run record's {key} names no timezone"
         raise LongRunRecordError(message)
     return instant
+
+
+def _gaps(value: object, started: datetime, ended: datetime) -> float:
+    """Seconds inside the run the tool was stopped for, each gap clipped to it."""
+    if not isinstance(value, list):
+        message = "the run record's interruptions are not a list"
+        raise LongRunRecordError(message)
+    total = 0.0
+    for index, gap in enumerate(value):
+        if not isinstance(gap, dict):
+            message = f"the run record's interruption {index} is not an object"
+            raise LongRunRecordError(message)
+        start = max(_instant(gap, "from"), started)
+        end = min(_instant(gap, "to"), ended)
+        total += max(0.0, (end - start).total_seconds())
+    return total

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 
 import { fetchProfiles, type StationProfiles } from "./profiles";
 import { fetchRecentReceptions, type Reception } from "./receptions";
-import { fetchStationCapture, type StationCapture } from "./reliability";
 import { fetchUptime, type StationUptime } from "./uptime";
 import {
   fetchLatestHeartbeat,
@@ -22,8 +21,6 @@ export interface StationDetailState {
   uptime: StationUptime | null;
   /** Undefined while loading; null for the whole network or when the read failed. */
   receptions: Reception[] | null | undefined;
-  /** Undefined until read; null when the station has nothing counted yet. */
-  capture: StationCapture | null | undefined;
   error: string | null;
 }
 
@@ -33,7 +30,6 @@ const LOADING: StationDetailState = {
   profiles: null,
   uptime: null,
   receptions: undefined,
-  capture: undefined,
   error: null,
 };
 
@@ -62,16 +58,11 @@ export function useStationDetail(stationId: string | null): StationDetailState {
         stationId === null
           ? Promise.resolve(null)
           : fetchRecentReceptions(fetcher, stationId, controller.signal).catch(() => null),
-        // A deployment with no reliability settings answers 503 here; that
-        // leaves the figure out, it does not stop the schedule refreshing.
-        stationId === null
-          ? Promise.resolve(undefined)
-          : fetchStationCapture(fetcher, stationId, controller.signal).catch(() => undefined),
       ])
-        .then(([heartbeat, assignments, profiles, uptime, receptions, capture]) => {
+        .then(([heartbeat, assignments, profiles, uptime, receptions]) => {
           setState({
             key: stationId,
-            value: { heartbeat, assignments, profiles, uptime, receptions, capture, error: null },
+            value: { heartbeat, assignments, profiles, uptime, receptions, error: null },
           });
         })
         .catch((error: unknown) => {

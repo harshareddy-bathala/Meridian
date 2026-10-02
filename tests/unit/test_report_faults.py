@@ -131,7 +131,9 @@ def gathered(faults: tuple[InjectedFault, ...]) -> tuple[Gathered, ...]:
     )
 
 
-def run_record(hours: float, *failures: str) -> LongRunRecord:
+def run_record(
+    hours: float, *failures: str, gap: tuple[float, float] | None = None
+) -> LongRunRecord:
     """What ``deploy/tools/long_run.py`` seals of a run ``hours`` long."""
     document = {
         "format": "meridian-long-run/2",
@@ -146,7 +148,14 @@ def run_record(hours: float, *failures: str) -> LongRunRecord:
             "arch": "aarch64",
             "image_digests": ["ghcr.io/x/meridian@sha256:" + "ab" * 32],
         },
-        "interruptions": [],
+        "interruptions": []
+        if gap is None
+        else [
+            {
+                "from": (T0 + timedelta(hours=gap[0])).isoformat(),
+                "to": (T0 + timedelta(hours=gap[1])).isoformat(),
+            }
+        ],
         "resources": {
             "figures": {
                 "peak_memory_mib": {"api": 233.0},
@@ -324,6 +333,22 @@ def test_a_run_shorter_than_72_hours_is_too_short(datasets_root: Path) -> None:
     row = long_run_row(published(datasets_root, 2.0, run_record(2.0)))
 
     assert (row["status"], row["hours"]) == ("too short", 2.0)
+
+
+def test_hours_the_tool_was_stopped_for_do_not_count(datasets_root: Path) -> None:
+    """Found in review: a tool dead from hour 10 to 12 left 73 hours on the clock.
+
+    The platform ran on, but nothing injected a fault or looked, so the run
+    was watched for 71 hours, and that is too short.
+    """
+    record = run_record(73.0, gap=(10.0, 12.0))
+    row = long_run_row(published(datasets_root, 73.0, record))
+
+    assert (row["status"], row["hours"], row["interrupted_hours"]) == (
+        "too short",
+        71.0,
+        2.0,
+    )
 
 
 def test_a_run_whose_own_judgement_failed_is_not_included(datasets_root: Path) -> None:

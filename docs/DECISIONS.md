@@ -5622,7 +5622,16 @@ Each alert's `for:` also sets its false-positive grace: ten minutes, or the wait
 - **an unwritable datasets root.** Docker creates a bind mount's missing source as root, so the seal, run as the operator, was refused after the hours had run. The tool makes the root before `up` and refuses to start without write access.
 - **the gap and the skips.** A gap is dated from the tool's last act, and only faults the ledger never opened count as skipped.
 
-*A gap is recorded, not failed.* The platform ran on through it, and every fault injected is still judged from the platform's own records. A reader sees the gap in the report.
+**A gap is recorded, and does not count toward the seventy-two hours.** The platform ran on through it, and every fault injected is still judged from the platform's own records. But nothing injected a fault or looked during the gap, so a run's length is its span less every gap. Found in review: without that, a tool dead from hour 10 and resumed at hour 75 would have made a seventy-two hour run of ten watched hours.
+
+**Found in review, and fixed:**
+- two series of one alert are never joined into one stretch, which could hide a false positive;
+- a fault `--resume` closed owes no alert, because how long it held is unknown;
+- `--resume` carries on when a mend no longer applies;
+- a run that counts is chosen before a longer one that failed;
+- the seal never carries an earlier seal's name;
+- throttling between two samples is read from the bits the Pi keeps since boot, counting only those that appear after the first sample;
+- the dashboard reads a station's capture every five minutes, not every thirty seconds, because each read recounts the whole network.
 
 **Sealed with its record.** The tool writes its own judgement as `long_run.json`. Then `meridian reliability faults --publish --run-record` judges every fault in a one-off API container and seals ledger, evidence, verdicts and the record as one fault run. The platform reads only what the acceptance needs from the record:
 - `started` and `ended`;

@@ -80,8 +80,13 @@ def fault_rows(runs: Sequence[FaultRun], *, detection_max_s: int) -> list[Row]:
     return rows
 
 
-def _run(run: FaultRun, found: Sequence[FaultVerdict]) -> Row:
+def _agrees(run: FaultRun, found: Sequence[FaultVerdict]) -> bool:
+    """Whether the verdicts reached again are the ones the run was sealed with."""
     again = [json.loads(json.dumps(one)) for one in verdict_rows(found)]
+    return again == list(run.verdicts)
+
+
+def _run(run: FaultRun, found: Sequence[FaultVerdict]) -> Row:
     return {
         "row": "fault_run",
         "sha256": content_sha256(run.directory.manifest),
@@ -90,7 +95,7 @@ def _run(run: FaultRun, found: Sequence[FaultVerdict]) -> Row:
         "hours": _hours(run),
         "faults": len(found),
         "failed": sum(not one.passed for one in found),
-        "agrees_with_published": again == list(run.verdicts),
+        "agrees_with_published": _agrees(run, found),
     }
 
 
@@ -189,10 +194,16 @@ def _sc5(verdicts: Sequence[FaultVerdict], threshold: int) -> Row:
 
 
 def _long_run(judged: Sequence[tuple[FaultRun, Sequence[FaultVerdict]]]) -> Row:
-    """Stage 24's 72-hour run: the longest run with a record, judged in full."""
+    """Stage 24's 72-hour run: one that counts if any does, else the longest.
+
+    A longer run that failed must not hide a shorter one that is the
+    acceptance run, so a run that counts is chosen before length is.
+    """
     row: Row = {"row": "long_run", "hours_required": LONG_RUN_HOURS}
     recorded = [
-        (run, found, run.record) for run, found in judged if run.record is not None
+        (run, record, _why_not(run, found, record))
+        for run, found in judged
+        if (record := run.record) is not None
     ]
     if not recorded:
         return row | {
@@ -200,14 +211,20 @@ def _long_run(judged: Sequence[tuple[FaultRun, Sequence[FaultVerdict]]]) -> Row:
             "reason": "no fault run carrying a long run's record was given; seal"
             " one with deploy/tools/long_run.py and give it with --faults",
         }
-    run, found, record = max(recorded, key=lambda one: one[2].hours)
+    run, record, reasons = max(
+        recorded,
+        key=lambda one: (
+            one[1].hours >= LONG_RUN_HOURS and not one[2],
+            one[1].hours,
+        ),
+    )
     row |= {
         "sha256": content_sha256(run.directory.manifest),
         "hours": _real(record.hours),
+        "interrupted_hours": _real(record.interrupted_hours),
         "seed": record.seed,
         "record": _shown(record.document),
     }
-    reasons = _why_not(run, found, record)
     if record.hours < LONG_RUN_HOURS:
         return row | {"status": "too short", "reasons": reasons}
     if reasons:
@@ -223,8 +240,7 @@ def _why_not(
     failed = sum(not one.passed for one in found)
     if failed:
         reasons.append(f"{failed} of {len(found)} faults failed, judged again")
-    again = [json.loads(json.dumps(one)) for one in verdict_rows(found)]
-    if again != list(run.verdicts):
+    if not _agrees(run, found):
         reasons.append(
             "judged again, its verdicts differ from those it was sealed with"
         )

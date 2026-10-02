@@ -175,6 +175,9 @@ class Interval:
     name: str
     start: datetime
     end: datetime | None
+    series: str = field(default="", compare=False)
+    """Which series of ``name`` it is — an alert's labels — so two stations'
+    ``StationOffline`` are never joined into one stretch."""
 
 
 def timeline(
@@ -262,23 +265,27 @@ def parse_alert_history(body: str, step_s: float) -> list[Interval]:
     stretches: list[Interval] = []
     for series in json.loads(body).get("data", {}).get("result", []):
         name = series["metric"].get("alertname", "?")
+        labels = json.dumps(series["metric"], sort_keys=True)
         stamps = [float(at) for at, value in series.get("values", []) if value == "1"]
         start = previous = None
         for stamp in stamps:
             if start is None:
                 start = previous = stamp
             elif previous is not None and stamp - previous > step_s * 1.5:
-                stretches.append(_interval(name, start, previous))
+                stretches.append(_interval(name, start, previous, labels))
                 start = stamp
             previous = stamp
         if start is not None and previous is not None:
-            stretches.append(_interval(name, start, previous))
+            stretches.append(_interval(name, start, previous, labels))
     return sorted(stretches, key=lambda one: (one.start, one.name))
 
 
-def _interval(name: str, start: float, end: float) -> Interval:
+def _interval(name: str, start: float, end: float, series: str = "") -> Interval:
     return Interval(
-        name, datetime.fromtimestamp(start, UTC), datetime.fromtimestamp(end, UTC)
+        name,
+        datetime.fromtimestamp(start, UTC),
+        datetime.fromtimestamp(end, UTC),
+        series,
     )
 
 
@@ -557,18 +564,23 @@ def alert_history(
 
 
 def join_stretches(stretches: Sequence[Interval], step_s: float) -> list[Interval]:
-    """One stretch per alert where two pieces of history meet within a step."""
+    """One stretch per alert series where two pieces of history meet within a step.
+
+    Joined only within one series: two stations' ``StationOffline`` that
+    overlap are two firings, and one joined into the other would hide it.
+    """
     joined: list[Interval] = []
-    for one in sorted(stretches, key=lambda item: (item.name, item.start)):
+    for one in sorted(stretches, key=lambda item: (item.name, item.series, item.start)):
         last = joined[-1] if joined else None
         if (
             last is not None
             and last.name == one.name
+            and last.series == one.series
             and last.end is not None
             and (one.start - last.end).total_seconds() <= step_s * 1.5
         ):
             joined[-1] = Interval(
-                one.name, last.start, max(last.end, one.end or last.end)
+                one.name, last.start, max(last.end, one.end or last.end), one.series
             )
         else:
             joined.append(one)
@@ -709,7 +721,16 @@ def _resume(compose: Compose, host: Host, out: Path) -> RunState:
     for opened in left_open(text):
         mends = FAULTS[str(opened["kind"])].mends
         if mends:
-            _step(host, compose.command(*mends))
+            # Not _step: the break may never have taken, or a reboot undid it,
+            # and `unpause` of a running container fails. Refusing then would
+            # leave the run with no way back in.
+            status, output = host.run(compose.command(*mends), None)
+            if status != 0:
+                print(
+                    f"long_run: {' '.join(mends)} did not apply on resume:"
+                    f" {output.strip()[-200:]}",
+                    file=sys.stderr,
+                )
         append(ledger, restart_close(opened, host.now()))
     taken = _read_samples(out)
     acted = [taken[-1].at if taken else state.started, *_instants(text)]
@@ -773,7 +794,14 @@ def judge(
     # An alert raised by the host having slept is the host's, not a false one;
     # the pause itself fails the run.
     unexplained = false_positives(alerts, [*windows, *pauses], ended, waits)
-    platform = [one for one in windows if " on platform:" in one.name]
+    # A window --resume closed spans the tool's gap, not the fault: it owes no
+    # alert, since how long the service stayed broken is not known.
+    restarted = restart_closes(ledger.splitlines())
+    platform = [
+        one
+        for one in windows
+        if " on platform:" in one.name and (one.name, one.end) not in restarted
+    ]
     report["alerts_fired"] = len(alerts)
     report["alerts_by_name"] = _count(one.name for one in alerts)
     report["false_positives"] = [
@@ -834,7 +862,13 @@ def _seal(
     Run in a one-off API container on the stack's network, as the runbook
     exports a snapshot: the API's own container cannot write (D-206).
     """
-    record = {key: value for key, value in report.items() if key != "verdict"}
+    # What the seal itself adds is left out: on --judge-only the report holds a
+    # previous seal's, which would make the same run seal to a different hash.
+    record = {
+        key: value
+        for key, value in report.items()
+        if key not in {"verdict", "fault_run"}
+    }
     (out / RECORD_FILE).write_text(json.dumps(record, indent=2) + "\n", "utf-8")
     datasets = judging.datasets.resolve()
     datasets.mkdir(parents=True, exist_ok=True)
@@ -984,6 +1018,20 @@ def opened(ledger: Path) -> int:
         return 0
     rows = [json.loads(one) for one in ledger.read_text("utf-8").splitlines() if one]
     return sum(one["event"] == "open" for one in rows)
+
+
+def restart_closes(lines: Iterable[str]) -> set[tuple[str, datetime]]:
+    """Each window closed as ``ended: restart``, by its name and closing instant."""
+    found: set[tuple[str, datetime]] = set()
+    for line in lines:
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        detail = row.get("detail") or {}
+        if row["event"] == "close" and detail.get("ended") == "restart":
+            at = datetime.fromisoformat(row["at"].replace("Z", "+00:00"))
+            found.add((f"{row['kind']} on {row['target']}", at))
+    return found
 
 
 def _instants(ledger: str) -> list[str]:

@@ -138,6 +138,19 @@ def test_short_disk_and_a_throttled_host_fail_the_run(tools: SimpleNamespace) ->
     ]
 
 
+def test_a_throttle_between_two_samples_is_seen(tools: SimpleNamespace) -> None:
+    """Found in review: the low bits miss a throttle that came and went unsampled.
+
+    The bit "throttled since boot" appearing after the first sample shows it.
+    """
+    machine = tools.watch.Machine
+    calm, after = machine(throttled=0x0), machine(throttled=0x40000)
+
+    found = tools.watch.judge_resources({}, [calm, after], [])
+
+    assert found.failures == ["the host throttled its clock during the run"]
+
+
 def test_throttling_since_boot_alone_is_not_this_run(tools: SimpleNamespace) -> None:
     """Bits 16 to 19 say it happened once since boot; only the low bits are now."""
     machine = tools.watch.Machine(throttled=0x50000)
@@ -220,6 +233,18 @@ def test_history_read_in_pieces_is_joined_where_it_meets(
         (timedelta(0), 20 * minutes),
         (40 * minutes, 41 * minutes),
     ]
+
+
+def test_two_series_of_one_alert_are_never_joined(tools: SimpleNamespace) -> None:
+    minutes = timedelta(minutes=1)
+    pieces = [
+        tools.run.Interval("StationOffline", T0, T0 + 10 * minutes, "station 1"),
+        tools.run.Interval(
+            "StationOffline", T0 + 9 * minutes, T0 + 30 * minutes, "station 2"
+        ),
+    ]
+
+    assert len(tools.run.join_stretches(pieces, step_s=30)) == 2
 
 
 # --- the record and the seal -------------------------------------------------------

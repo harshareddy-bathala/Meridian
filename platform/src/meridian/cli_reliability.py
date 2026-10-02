@@ -28,13 +28,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
 
-from meridian.cli_reliability_faults import judge_faults
+from meridian.cli_reliability_faults import judge_faults, refuse, say
 from meridian.config import load_settings
 from meridian.registry.psycopg_registry import PsycopgRegistry
 from meridian.reliability.accounting import classify_settled
@@ -56,9 +55,6 @@ from meridian.store.pool import DatabaseUnreachableError, connect_once
 from meridian.store.stations import Connection
 
 __all__ = ["add_reliability_parser", "run_reliability"]
-
-EXIT_FAILED = 1
-"""Matches ``meridian.cli.EXIT_FAILED``."""
 
 
 def add_reliability_parser(
@@ -145,7 +141,7 @@ def run_reliability(args: argparse.Namespace) -> int:
             else load_deployed_reliability_config()
         )
     except ReliabilityConfigError as exc:
-        return _refuse(args.action, str(exc))
+        return refuse(args.action, str(exc))
     actions = {
         "sweep": _sweep,
         "classify": _classify,
@@ -158,7 +154,7 @@ def run_reliability(args: argparse.Namespace) -> int:
         with connect_once(load_settings()) as conn:
             return actions[args.action](conn, args, config, now)
     except (DatabaseUnreachableError, psycopg.Error) as exc:
-        return _refuse(args.action, f"the database did not answer: {exc}")
+        return refuse(args.action, f"the database did not answer: {exc}")
 
 
 def _sweep(
@@ -168,7 +164,7 @@ def _sweep(
     now: datetime,
 ) -> int:
     expired = expire_untaken_assignments(conn, now=now)
-    _say(f"expired {expired} scheduled assignments nobody took")
+    say(f"expired {expired} scheduled assignments nobody took")
     return 0
 
 
@@ -186,14 +182,14 @@ def _classify(
         now_utc=now,
     )
     report = classify_settled(conn, registry, now=now, config=config.classification)
-    _say(
+    say(
         f"expired {report.expired} untaken assignments; classified "
         f"{report.classified} passes settled by {report.settled_by.isoformat()}; "
         f"{report.written} rows written"
     )
     for name, count in report.by_class.items():
         if count:
-            _say(f"  {name:<32} {count}")
+            say(f"  {name:<32} {count}")
     return 0
 
 
@@ -202,7 +198,7 @@ def _report(
 ) -> int:
     report = read_live_report(conn, now=args.at or now, config=config)
     for line in report_lines(report):
-        _say(line)
+        say(line)
     return 0
 
 
@@ -214,14 +210,14 @@ def _explain(
 ) -> int:
     held = find_classifications_of(conn, args.assignment_id)
     if not held:
-        return _refuse(
+        return refuse(
             "explain",
             f"{args.assignment_id} is in no classified pass: it is not a "
             "scheduled assignment, or its window has not settled yet",
         )
     for one in held:
         for line in _explained(one):
-            _say(line)
+            say(line)
     return 0
 
 
@@ -248,14 +244,3 @@ def _instant(text: str) -> datetime:
     if parsed.tzinfo is None:
         raise argparse.ArgumentTypeError(f"{text} has no time zone; add Z or +00:00")
     return parsed.astimezone(UTC)
-
-
-def _say(line: str) -> None:
-    print(line)  # noqa: T201 — this is a CLI; stdout is the interface
-
-
-def _refuse(action: str, reason: str) -> int:
-    print(  # noqa: T201 — this is a CLI; stderr is the interface
-        f"meridian reliability {action}: {reason}", file=sys.stderr
-    )
-    return EXIT_FAILED

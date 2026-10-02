@@ -42,8 +42,10 @@ def long_run_lines(one: Row) -> list[str]:
     interruptions = record.get("interruptions")
     if isinstance(interruptions, list) and interruptions:
         lines.append(
-            f"The tool was stopped and resumed {len(interruptions)} time(s); the"
-            " platform ran on, and faults due in the gaps were not injected."
+            f"The tool was stopped and resumed {len(interruptions)} time(s), for"
+            f" {cell(one.get('interrupted_hours'))} hours in all, which the run's"
+            " length leaves out: the platform ran on, but nothing injected a"
+            " fault or looked."
         )
     lines.extend(_resources(_table(_table(record.get("resources")).get("figures"))))
     return [*lines, ""]
