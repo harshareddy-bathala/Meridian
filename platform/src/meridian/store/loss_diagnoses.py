@@ -54,6 +54,7 @@ class DiagnosisSubject:
     centre_freq_hz: int
     mode: str
     timing_uncertainty_s: float | None
+    max_elevation_deg: float
     simulated: bool
     classification_id: int
     classification: str
@@ -79,7 +80,8 @@ _UNDIAGNOSED = """
     )
     select a.assignment_id, a.station_id, p.satellite_id, p.id as pass_id,
            p.element_set_id, a.start_at, a.end_at, p.aos, p.los,
-           a.centre_freq_hz, a.mode, a.timing_uncertainty_s, a.simulated,
+           a.centre_freq_hz, a.mode, a.timing_uncertainty_s,
+           p.max_elevation_deg, a.simulated,
            c.classification_id, c.classification,
            c.evidence as classification_evidence,
            o.revision, o.started_at as observation_started_at,

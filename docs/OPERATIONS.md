@@ -804,6 +804,25 @@ The `jobs` service runs the same diagnosis every round, last, under the task lab
 **Only Meridian's own records are read.** No archive, and never the simulator's fault ledger (D-102, D-105). A simulated station's evidence is never read about a measured one.
 
 **The simulated fault effects these rules are scored against have not been independently reviewed** (D-270). Until `docs/SCALE-AND-FAULTS.md` records a reviewer, SC-8 is reported as unreviewed.
+
+### Measuring SC-8
+
+SC-8 is measured on simulated fleets, never on a deployment: the injected cause is the answer key, and it lives only in the simulator's ledger (D-105, D-278).
+
+```sh
+uv run python deploy/tools/diagnosis_runs.py \
+    --config analysis/configs/diagnosis.toml.example \
+    --database-url postgresql://meridian:…@localhost:5432/meridian \
+    --root "$MERIDIAN_DATASETS_ROOT"
+```
+
+- **It needs the workspace**, `uv sync`, unlike the other tools here. It runs the platform and the simulator in one process.
+- **It needs a PostgreSQL server it may create databases on.** Each fleet gets a fresh database, migrated and dropped afterwards, so a run made again from its seed is the same run.
+- **Each fleet is sealed** under `diagnoses/` with its ledger, its cases and its diagnoses. `meridian report build --diagnoses <run> …` judges the sealed runs.
+- **It is slow by design**, because every heartbeat goes through the real platform. A fleet of 6 stations over 24 h takes from 2 to 30 minutes, depending on how many passes it holds. The configuration's twelve fleets take hours, so run them on a machine that can be left alone.
+- **The rarer causes need their own fleets.** In the combined `diagnosis` scenario an obstruction, an interference source or a silence seldom loses a whole pass. A decoded pass stays decoded while one frame survives, and a silence needs another station listening high in the sky within 45 minutes. So each also runs alone. Even then, a few cases a seed is normal, and the report prints how many beside every recall.
+
+The CI gate runs one small fleet of the combined scenario (`tests/integration/test_diagnosis_gate.py`). It shows that every loss is diagnosed, that the causes the fleet lost passes to are named, and that nothing about a fault reaches the platform. It does not measure SC-8.
 ---
 
 ## Scheduling

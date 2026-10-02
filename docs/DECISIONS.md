@@ -5671,7 +5671,7 @@ D-105 answers the circularity of one team writing both the simulator's fault eff
 - **Where the diagnoser was designed with the effects in view**, stated so the reviewer knows where to look:
   - the obstruction test's elevation-matched loss rests on the simulated SNR being symmetric about culmination;
   - the interference threshold of 2 dB was set against the simulated floor's ±0.5 dB jitter;
-  - the satellite-silence window of ±45 min was set against silences of 20 to 120 ticks;
+  - the satellite-silence window of ±45 min was set against silences of 20 to 120 ticks, and its floor of 40° against the outcome model hearing nothing on most passes below 30° and none above 45°;
   - the timing fault's ground truth, the stepped clock, was specified by the same author as its test, in this stage.
 
 **The roadmap's order is otherwise kept.** The stepped clock's effects (D-277) are written and pinned in this stage's first commit, before any diagnosis code exists on the branch, which is the half of D-105's mitigation an author can do alone.
@@ -5771,11 +5771,11 @@ The roadmap compares the reception's floor with the station's `interference_prof
 
 **2026-10-02 · accepted, review owed (D-270)** · *`meridian/reliability/{diagnosis_causes,satellite_evidence}.py`; Stage 27. Uses D-147's rule on a narrower window.*
 
-The test is D-147's, `judge_satellite`, over other stations' attempts at the same satellite, in the same population, of provenance `station`, each physical pass counted once. **Over ±45 minutes, not D-147's ±12 hours.** A silence of tens of minutes is invisible over half a day, in which some station somewhere always heard the satellite. **One other station that listened and heard nothing, with none hearing it, names it**: the roadmap's "every other station … also missed it". The catalogue's flag saying the transmitter is off also names it, and since the catalogue holds only the current state, the value read is recorded.
+The test is D-147's, `judge_satellite`, over other stations' attempts at the same satellite, in the same population, of provenance `station`, each physical pass counted once. **Over ±45 minutes, not D-147's ±12 hours.** A silence of tens of minutes is invisible over half a day, in which some station somewhere always heard the satellite. **One other station that listened and heard nothing, with none hearing it, names it**: the roadmap's "every other station … also missed it". **A silence counts only from a pass that climbed 40° or more**, the loss's own included. A low pass that hears nothing is the usual case, satellite or not, and the first fleet run named natural losses silent until the floor was set; a high one hearing nothing is not. The catalogue's flag saying the transmitter is off also names it, and since the catalogue holds only the current state, the value read is recorded.
 
 **So a pass can be a confirmed miss for SC-4 and diagnosed `satellite_silent`.** The two answer different questions on different windows. Whether D-147's window should narrow is the team's to decide, and nothing here changes it.
 
-*Where the effect code was in view* (D-270): the window was set against silences of 20 to 120 ticks.
+*Where the effect code was in view* (D-270): the window was set against silences of 20 to 120 ticks, and the floor against the simulated outcome model's silence by elevation.
 
 ---
 
@@ -5798,9 +5798,11 @@ EVALUATION §11.2 names Stage 21's drifting clock as the ground truth for a timi
 - no clock offset, since virtual stations estimate none;
 - and, at a jump ahead, a few windows the client lets go of before they open, which the platform records as declines and which are never diagnosed (D-008).
 
+**A pass held while the receiver was down and the clock was wrong is named against both**, since the loop began it on the wrong clock. Its truth is then *several* causes (D-278), not one the diagnosis could only half see.
+
 **The test reads four traces** of the station's clock, against the assignment's stated timing uncertainty plus a tolerance of 30 s for a heartbeat's cadence and transit:
 - **its listening**: heartbeats naming the assignment arriving before the window opened or after it closed;
-- **its clock**: the median of `sent_at − received_at` over heartbeats from 15 minutes before the window to 15 after. `sent_at` is not trusted to say when a heartbeat was sent (D-013), which is exactly why it measures the station's clock;
+- **its clock**: the median of `sent_at − received_at` over heartbeats from a minute before the window to a minute after, so the clock read is the one the pass was received under. A wider span named passes the clock never touched, whose next hour it did. `sent_at` is not trusted to say when a heartbeat was sent (D-013), which is exactly why it measures the station's clock;
 - **its own word**: a reported `clock_offset_s` beyond its stated uncertainty;
 - **its recording**: an observation window moved the same way at both ends.
 
@@ -5809,6 +5811,48 @@ The roadmap names the last two. The first two are what a station whose time sour
 *Rejected: give the drifting clock the effect.* It moves every earlier seed's runs.
 
 *Rejected: virtual stations that estimate and report `clock_offset_s`.* That makes the timing test read the one field built to say the answer. A station whose time source failed is exactly the one that cannot say how far off it is.
+
+---
+
+## D-278 — SC-8 is measured on sealed simulated fleets, and judged only in the report
+
+**2026-10-02 · accepted, review owed (D-270)** · *`deploy/tools/diagnosis_runs.py`; `meridian/datasets/diagnosis_runs.py`; `meridian/reports/diagnosis_truth.py`; `analysis/configs/diagnosis.toml.example`; `meridian_sim/faults.py` (`diagnosis`); Stage 27. Applies D-105 and D-189.*
+
+SC-8 asks whether the diagnosis names the injected cause. The cause is in the simulator's ledger and must never reach the platform (D-105), so the figure is made in two places that meet only in files.
+
+**A fleet is run and sealed by a tool, not by the platform.** `deploy/tools/diagnosis_runs.py` runs a simulated fleet against the real platform in one process, over a day or two of real passes. The platform then classifies and diagnoses every loss from its own records, exactly as the jobs service does. The tool seals the result under `<datasets root>/diagnoses/` as a diagnosis run:
+- the run's description;
+- the ledger as the simulator wrote it;
+- every scheduled assignment with its clean outcome, recomputed from the seed;
+- every diagnosis.
+
+It is the one tool here that needs the workspace rather than the standard library, because the platform never imports the simulator (D-138). Nothing in the platform reads a ledger to diagnose, which `tests/unit/test_diagnosis_boundaries.py` holds.
+
+**A run made again from its seed is the same run.** Each fleet gets a database of its own, migrated fresh, and station ids are drawn from the seed. So pass ids, assignment ids and every pass's outcome follow from the seed and the scenario. The scheduler's time limit is the one thing that could part two runs, and a sealed run keeps what happened either way.
+
+**One scenario holds every fault SC-8 scores**: `diagnosis` is a dead receiver, a degraded decoder (the control), the stepped clock, an obstruction, interference and a silent satellite, on streams of their own. One fleet gives every cause a chance to occur beside the others. Stage 25's degradation is left out: it is SC-9's, and its loss on every pass would hide the rest.
+
+**The truth of a loss is decided in the report, from the files alone** (`meridian.reports.diagnosis_truth`):
+- **a cause**: exactly one fault acted on the pass, it has a category, and the pass came out worse than its clean outcome;
+- **`control`**: the same, for a fault with no category, whose right answer is *undetermined*;
+- **`acted_not_cause`**: a fault acted, and the pass is no worse than it would have been;
+- **`several`**: more than one fault acted;
+- **`none`**: no fault acted, and the outcome model lost it.
+
+The clean-outcome comparison is what makes a recall honest. The ledger names a pass a fault *changed* or *moved* (D-253, D-277), not one it lost.
+
+**The rarer causes get fleets of their own.** In the combined scenario an obstruction, an interference source or a silence seldom loses a whole pass. A decoded pass stays decoded while one frame survives, and a silence needs a second station listening high in the sky within 45 minutes. Four fleets of six stations over a day held one obstruction case between them, and no interference or silence case. So the SC-8 configuration also runs `obstruction`, `interference` and `silent` alone, where every station carries the fault. The report prints each cause's case count beside its recall, and a recall over a handful of cases is shown as that, not tuned towards the target.
+
+**The CI gate is one small fleet** (4 stations, 12 h, seed 4472, about four minutes), because every heartbeat goes through the real platform. It shows:
+- every loss diagnosed;
+- a dead receiver's losses named;
+- a stepped clock's losses named;
+- a loss several faults acted on given one of their causes or none;
+- nothing about a fault reaching any table.
+
+It does not measure SC-8.
+
+*Rejected: the confusion matrix from one gate run.* A gate proves that each cause can be named. A figure needs several seeds and their spread, which a CI job cannot afford and a sealed run can carry.
 
 ---
 

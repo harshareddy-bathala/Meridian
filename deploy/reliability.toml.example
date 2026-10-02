@@ -108,12 +108,18 @@ interference_min_baseline = 5
 silent_window_s = 2700
 silent_min_attempts = 1
 
+# A silence counts, the loss's own included, only from a pass that climbed at
+# least this many degrees: a low pass hearing nothing is the usual case, a high
+# one is not (D-276). 0 .. 90.
+silent_min_elevation_deg = 40.0
+
 # Added to an assignment's stated timing uncertainty before a clock, a listening
 # span or a recording is called wrong, in seconds. 0 .. 3600.
 timing_tolerance_s = 30.0
 
-# How far either side of the window a heartbeat's clock is read, in seconds.
-clock_margin_s = 900
+# How far either side of the window a heartbeat's clock is read, in seconds:
+# about one heartbeat's cadence, so the clock read is the pass's own. 0 .. 86400.
+clock_margin_s = 60
 
 # The lead the best-supported cause needs over the next to be named; within it
 # the loss is undetermined, because two causes conflict. Between 0 and 1.

@@ -91,8 +91,13 @@ def satellite_silent(evidence: LossEvidence, config: DiagnosisConfig) -> Candida
     if counts.catalogue_active is False:
         found["reason"] = "catalogue"
         return Candidate("satellite_silent", True, 1.0, found)
+    peak = counts.peak_elevation_deg
+    found["peak_elevation_deg"] = peak
     if listening.outcome != "no_signal" or not listening.listening_confirmed:
         found["reason"] = "not a confirmed silence"
+    elif peak is None or peak < config.silent_min_elevation_deg:
+        found["reason"] = "too low for its silence to say anything"
+    if "reason" in found:
         return Candidate("satellite_silent", False, 0.0, found)
     state = judge_satellite(
         signals=counts.signals,

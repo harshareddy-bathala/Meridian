@@ -140,6 +140,8 @@ class SimulatedExecutor:
         if RECEIVER_DOWN in self._faults.active:
             self._held_but_not_begun.add(assignment.assignment_id)
             self._faulted.append((RECEIVER_DOWN, assignment.assignment_id))
+            # Begun by the loop on a wrong clock too, so both are named (D-277).
+            self._note_step(assignment)
             return
         self._begun.add(assignment.assignment_id)
         self._sky_at_begin[assignment.assignment_id] = self._faults.sky

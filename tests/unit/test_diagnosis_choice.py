@@ -106,7 +106,7 @@ def test_diagnose_runs_every_test_in_order_and_abstains_on_nothing() -> None:
     end = start + timedelta(minutes=12)
     evidence = LossEvidence(
         listening=ListeningEvidence(7, "confirmed_miss", "no_signal", True, True),
-        satellite=SatelliteCounts(True, signals=2, silences=0),
+        satellite=SatelliteCounts(True, signals=2, silences=0, peak_elevation_deg=60.0),
         noise=NoiseReading(-60.0, 30.0, -60.1, 20),
         timing=TimingEvidence(
             (start, end), 4.0, (start, end), (-0.1,), (), (start, end)

@@ -86,6 +86,9 @@ class NearbyReception:
     simulated: bool
     """True if the pass, the assignment or the report is simulated."""
 
+    max_elevation_deg: float
+    """How high the pass climbed, which says how much its silence tells."""
+
 
 def find_unclassified_settled(
     conn: Connection, *, settled_by: datetime, method: str, config_sha256: bytes
@@ -220,7 +223,8 @@ def find_receptions_near(
             """
             select a.assignment_id, a.station_id, p.satellite_id, a.start_at,
                    a.end_at, a.centre_freq_hz, a.mode, o.outcome,
-                   (p.simulated or a.simulated or o.simulated) as simulated
+                   (p.simulated or a.simulated or o.simulated) as simulated,
+                   p.max_elevation_deg
             from assignments a
             join passes p on p.id = a.pass_id
             join observations_current o on o.assignment_id = a.assignment_id

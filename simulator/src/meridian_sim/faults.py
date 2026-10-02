@@ -244,6 +244,14 @@ SCENARIOS: dict[str, tuple[str, ...]] = {
     "silent": (SATELLITE_SILENT,),
     "sky": SKY_FAULTS,
     "clock": (CLOCK_STEP,),
+    "diagnosis": (
+        RECEIVER_DOWN,
+        DECODER_DEGRADED,
+        CLOCK_STEP,
+        OBSTRUCTION,
+        INTERFERENCE,
+        SATELLITE_SILENT,
+    ),
 }
 """Which faults each named scenario may inject.
 
@@ -257,6 +265,11 @@ scenario, where a station stopping is the observation being made.
 recurring fault, and is what Stage 21's long run injects. ``sky`` is Stage 25's
 four faults together, whose ground truth Stage 27's diagnosis is scored against.
 ``clock`` is Stage 27's stepped clock, on its own for the same reason.
+``diagnosis`` is every fault SC-8 scores a cause against, with the degraded
+decoder as its control, in one fleet (D-278): a dead receiver for a station not
+listening, the stepped clock for timing, and Stage 25's obstruction,
+interference and silence. Stage 25's degradation is left out: it is SC-9's, and
+its loss on every pass would hide the others.
 """
 
 

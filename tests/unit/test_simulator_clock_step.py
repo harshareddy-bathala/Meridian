@@ -49,7 +49,28 @@ SATELLITE = "norad:57166"
 LINE1 = "1 57166U 23091A   26223.50000000  .00000100  00000-0  50000-4 0  9990"
 LINE2 = "2 57166  98.7041 210.4322 0002726  80.4113 279.7297 14.22000000160126"
 
-EARLIER = tuple(name for name in SCENARIOS if name != "clock")
+EARLIER = (
+    "clean",
+    "network",
+    "upload",
+    "restart",
+    "receiver",
+    "revoked",
+    "faulty",
+    "heartbeat",
+    "partition",
+    "slow",
+    "drift",
+    "decoder",
+    "declines",
+    "chaos",
+    "degradation",
+    "obstruction",
+    "interference",
+    "silent",
+    "sky",
+)
+"""Every scenario Stage 26 left, the ones whose schedules must not move."""
 
 EARLIER_DIGEST = "c2a1bf737dce463612f3d3b7b32b2a8f8d8071896b0126790ca668a12fcc3487"
 """Every earlier scenario's schedule and clock error, stations 1 to 3, 600 ticks.
@@ -130,6 +151,7 @@ def test_the_step_is_drawn_from_the_seed_signed_and_in_range() -> None:
     assert any(one > 0 for one in steps)
     assert any(one < 0 for one in steps)
     assert all(step_for(STATION_SEED, name) == 0.0 for name in EARLIER)
+    assert set(SCENARIOS) - set(EARLIER) == {"clock", "diagnosis"}
 
 
 def test_the_clock_is_off_by_the_step_while_it_holds_and_right_otherwise() -> None:

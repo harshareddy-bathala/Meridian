@@ -211,12 +211,19 @@ class DiagnosisConfig:
     """Other stations that must have listened and heard nothing, with none
     hearing it, to name the satellite (D-276)."""
 
+    silent_min_elevation_deg: float = 40.0
+    """A silence counts, the loss's own included, only from a pass that climbed
+    this high: a low pass hearing nothing is the usual case, a high one is not
+    (D-276)."""
+
     timing_tolerance_s: float = 30.0
     """Added to the assignment's stated timing uncertainty before a clock or a
     window is called wrong: a heartbeat's own cadence and transit."""
 
-    clock_margin_s: int = 900
-    """How far either side of the window a heartbeat's clock is read."""
+    clock_margin_s: int = 60
+    """How far either side of the window a heartbeat's clock is read: one
+    heartbeat's cadence and a margin, so the clock read is the one the pass
+    was received under, not the next hour's (D-277)."""
 
     conflict_margin: float = 0.2
     """The lead the best-supported cause needs over the next to be named."""
@@ -237,6 +244,7 @@ class DiagnosisConfig:
         _whole("interference_min_baseline", self.interference_min_baseline, 1, 1000)
         _whole("silent_window_s", self.silent_window_s, 1, 7 * _DAY_S)
         _whole("silent_min_attempts", self.silent_min_attempts, 1, 100)
+        _number("silent_min_elevation_deg", self.silent_min_elevation_deg, 0.0, 90.0)
         _number("timing_tolerance_s", self.timing_tolerance_s, 0.0, 3_600.0)
         _whole("clock_margin_s", self.clock_margin_s, 0, _DAY_S)
         _share("conflict_margin", self.conflict_margin)

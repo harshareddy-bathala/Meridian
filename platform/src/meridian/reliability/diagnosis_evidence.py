@@ -91,7 +91,10 @@ class SatelliteCounts:
 
     silences: int
     """Other physical passes, of this population, that heard nothing while the
-    registry confirms they were listening."""
+    registry confirms they were listening, and climbed high enough to say so."""
+
+    peak_elevation_deg: float | None = None
+    """How high this pass climbed; ``None`` if unknown."""
 
 
 @dataclass(frozen=True, slots=True)

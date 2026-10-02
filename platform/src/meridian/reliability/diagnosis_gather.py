@@ -194,6 +194,7 @@ def _satellite(
         excluding=(subject.assignment_id,),
         simulated=subject.simulated,
         station_reported=True,
+        silent_min_elevation_deg=config.silent_min_elevation_deg,
     )
     return SatelliteCounts(
         catalogue_active=find_transmitter_active(
@@ -204,6 +205,7 @@ def _satellite(
         ),
         signals=len(signals),
         silences=len(silences),
+        peak_elevation_deg=subject.max_elevation_deg,
     )
 
 

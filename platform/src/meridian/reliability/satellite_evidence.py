@@ -67,6 +67,7 @@ def satellite_evidence(  # noqa: PLR0913 — one question's terms, each by name
     excluding: Sequence[str],
     simulated: bool,
     station_reported: bool = False,
+    silent_min_elevation_deg: float = 0.0,
 ) -> tuple[list[str], list[str]]:
     """Other receptions of the satellite in ``between``, as D-147 counts them.
 
@@ -79,6 +80,9 @@ def satellite_evidence(  # noqa: PLR0913 — one question's terms, each by name
         simulated: The pass's population; only receptions of it count.
         station_reported: Count only receptions a station reported, leaving out
             an archive's or a hand-entered one. The diagnosis asks this.
+        silent_min_elevation_deg: Count a silence only from a pass that
+            climbed this high, where hearing nothing says something. A signal
+            counts at any height. The diagnosis asks this (D-276).
 
     Returns:
         The reporting assignment of each physical pass that heard a signal, and
@@ -104,8 +108,11 @@ def satellite_evidence(  # noqa: PLR0913 — one question's terms, each by name
         )
         if best.outcome in SIGNAL:
             signals.append(best.assignment_id)
-        elif best.outcome == "no_signal" and any(
-            registry.was_listening(question(held)) for held in physical
+        elif (
+            best.outcome == "no_signal"
+            and max(held.max_elevation_deg for held in physical)
+            >= silent_min_elevation_deg
+            and any(registry.was_listening(question(held)) for held in physical)
         ):
             silences.append(best.assignment_id)
     return sorted(signals), sorted(silences)

@@ -39,6 +39,8 @@ from meridian.reliability.diagnosis_evidence import (
 from meridian.reliability.obstruction_map import build_map, lost_where_heard
 
 CONFIG = DiagnosisConfig()
+HIGH = 60.0
+"""A pass high enough that hearing nothing from it says something (D-276)."""
 START = datetime(2026, 8, 12, 3, 0, tzinfo=UTC)
 END = START + timedelta(minutes=12)
 COUNT = 25
@@ -81,7 +83,9 @@ def evidence(**changes: object) -> LossEvidence:
             heard_during_window=True,
             listening_confirmed=True,
         ),
-        satellite=SatelliteCounts(catalogue_active=True, signals=3, silences=0),
+        satellite=SatelliteCounts(
+            catalogue_active=True, signals=3, silences=0, peak_elevation_deg=HIGH
+        ),
         noise=NoiseReading(
             floor_dbfs=-60.0, gain_db=30.0, baseline_dbfs=-60.2, baseline_count=20
         ),
@@ -140,7 +144,12 @@ def test_not_listening_is_stage_20_s_answer_read_not_restated(
 
 def test_a_satellite_nobody_heard_while_others_listened_is_silent() -> None:
     found = satellite_silent(
-        evidence(satellite=SatelliteCounts(True, signals=0, silences=2)), CONFIG
+        evidence(
+            satellite=SatelliteCounts(
+                True, signals=0, silences=2, peak_elevation_deg=HIGH
+            )
+        ),
+        CONFIG,
     )
 
     assert found.fired
@@ -150,7 +159,12 @@ def test_a_satellite_nobody_heard_while_others_listened_is_silent() -> None:
 
 def test_one_other_station_hearing_it_says_it_was_transmitting() -> None:
     found = satellite_silent(
-        evidence(satellite=SatelliteCounts(True, signals=1, silences=4)), CONFIG
+        evidence(
+            satellite=SatelliteCounts(
+                True, signals=1, silences=4, peak_elevation_deg=HIGH
+            )
+        ),
+        CONFIG,
     )
 
     assert not found.fired
@@ -159,16 +173,41 @@ def test_one_other_station_hearing_it_says_it_was_transmitting() -> None:
 
 def test_no_other_attempt_is_no_evidence_either_way() -> None:
     found = satellite_silent(
-        evidence(satellite=SatelliteCounts(True, signals=0, silences=0)), CONFIG
+        evidence(
+            satellite=SatelliteCounts(
+                True, signals=0, silences=0, peak_elevation_deg=HIGH
+            )
+        ),
+        CONFIG,
     )
 
     assert not found.fired
     assert found.found["state"] == "indeterminate"
 
 
+def test_a_low_pass_hearing_nothing_says_nothing_about_the_satellite() -> None:
+    """Most passes under 30° hear nothing anyway, satellite or not."""
+    found = satellite_silent(
+        evidence(
+            satellite=SatelliteCounts(
+                True, signals=0, silences=4, peak_elevation_deg=25.0
+            )
+        ),
+        CONFIG,
+    )
+
+    assert not found.fired
+    assert found.found["reason"] == "too low for its silence to say anything"
+
+
 def test_the_catalogue_saying_it_is_off_is_categorical() -> None:
     found = satellite_silent(
-        evidence(satellite=SatelliteCounts(False, signals=5, silences=0)), CONFIG
+        evidence(
+            satellite=SatelliteCounts(
+                False, signals=5, silences=0, peak_elevation_deg=HIGH
+            )
+        ),
+        CONFIG,
     )
 
     assert found.fired
@@ -185,7 +224,9 @@ def test_only_a_confirmed_silence_can_be_the_satellite_s(
     found = satellite_silent(
         evidence(
             listening=listening(**heard),
-            satellite=SatelliteCounts(True, signals=0, silences=3),
+            satellite=SatelliteCounts(
+                True, signals=0, silences=3, peak_elevation_deg=HIGH
+            ),
         ),
         CONFIG,
     )
