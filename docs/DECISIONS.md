@@ -5682,6 +5682,103 @@ D-105 answers the circularity of one team writing both the simulator's fault eff
 
 ---
 
+## D-271 — A decode below the partial threshold is still captured for SC-4
+
+**2026-10-02 · accepted, to be confirmed by the team** · *`meridian/reliability/classification.py` (`CAPTURED`); `tests/unit/test_reliability_boundaries.py`; Stage 27. Settles the capture rule D-184 left to this stage; applies D-102.*
+
+The roadmap asks Stage 27 to decide in `meridian.reliability` whether a decoded reception below the verdict's partial threshold counts as captured for SC-4. **It does.** `CAPTURED` stays `successful_reception`, `classify` and its method `classification-1` are unchanged, and so are the labels (`labels-3`).
+
+- **SC-4 asks whether the station received the pass.** Whether what it received is usable is SC-7's question, and the verdict answers it.
+- **A verdict-dependent SC-4 would not be one figure.** It would move with every refit of a model fitted on rated receptions (method `verdict-1:<hash>`), and differ between a deployment with `VERDICT_MODEL` set and one without. It could not be counted from a snapshot without the verdict, and no verdict exists until receptions are rated (D-260).
+- **The verdict informs.** A decode below the threshold is diagnosed as a partial reception (D-272), so its cause is still sought and recorded. It does not decide SC-4, and a test holds that no code SC-4 is counted by mentions a verdict.
+
+*Rejected: a ninth class, `partial_reception`.* It needs a migration of 0020's check, a new method and labels, a new value on a metric's label, and work in the dashboard, all to make SC-4 depend on a model.
+
+---
+
+## D-272 — What is diagnosed: every settled loss, once per method and configuration
+
+**2026-10-02 · accepted** · *`meridian/store/loss_diagnoses.py`; `meridian/reliability/diagnosis_run.py`; Stage 27. Applies D-008, D-104 and D-171.*
+
+A diagnosis is written for:
+- **a failed reception**: a current observation whose outcome is not `decoded`;
+- **a partial one**: a `decoded` observation whose verdict, under the deployment's verdict model, is below that model's partial threshold. With no model configured there are none, and the run says so;
+- **an empty window**: an assignment held to the end of its window with nothing reported.
+
+**Never for an expired assignment**, which is a decline (D-008), **nor a revoked one**, which was never the station's work (D-171).
+
+**A loss waits for its pass's classification.** Stage 20's settle margin is how long a report on its way is waited for, and "not listening" is read from the stored class rather than asked again (D-180). So a diagnosis names the classification it read, and is written only once one exists under the deployment's classification method and configuration.
+
+**Once per method and configuration.** A row names the method (`diagnosis-1`) and the sha256 of the `[diagnosis]` table. A run under an unchanged method writes nothing, and a changed threshold writes every diagnosis again beside the old ones, as a classification does (D-182).
+
+---
+
+## D-273 — Choosing a cause, and when the answer is *undetermined*
+
+**2026-10-02 · accepted** · *`meridian/reliability/{diagnosis,diagnosis_causes,diagnosis_evidence}.py`; `[diagnosis]` in `deploy/reliability.toml.example`; Stage 27.*
+
+**Every cause is tested, and every test is recorded**, fired or not, with what it read. A reader of `candidates_json` sees what was considered, and not only what was concluded.
+
+**Support** is `r / (1 + r)` for a test whose evidence passed its threshold `r` times over: ½ at the threshold, rising towards 1. The station's own report and the catalogue's flag are categorical, at 1.
+
+**The order:**
+1. **A cause another explains steps aside.** A timing fault explains a station the platform could not confirm was listening: listening is judged by the platform's clock against the window, and a station whose clock was wrong listened at the wrong time. A raised floor explains signal lost in a sector, which the obstruction test applies itself, since it needs the floor.
+2. **Nothing fired → *undetermined*** (`none`).
+3. **One fired, or the best leads the next by the conflict margin, 0.2 → that cause.**
+4. **Otherwise → *undetermined*** (`conflict`).
+
+**"Not listening" includes the station's own word that it never began**: Stage 20's `station_unavailable` with a `not_attempted` report, no report, or no heartbeat in the window. An `aborted` report is not: the station began.
+
+**What a test without its evidence does: nothing.** A reception with no floor, no baseline, no placed samples or no trace of its clock fires none of the tests that need them. *Undetermined* is a correct answer and the most common honest one.
+
+**The thresholds are configuration**, the `[diagnosis]` table of the reliability file, hashed with every row (D-272).
+
+---
+
+## D-274 — An obstruction is read from where signal is lost, against the station's own history
+
+**2026-10-02 · accepted, review owed (D-270)** · *`meridian/reliability/obstruction_map.py`; Stage 27. Widens the roadmap's test.*
+
+The roadmap's test is signal lost or absent while the pass crossed a sector `horizon_profiles` marks obstructed. **The learned profile cannot mark a new obstruction.** It records where a signal is first *heard* (D-159), and a simulated station has no track to learn one from (D-158). Read literally, the test could never fire on a new obstruction, which is the one Stage 25 specified.
+
+**A sample is lost where it would have been heard** when it reads below the detection bar while the same pass was heard within 5° of its elevation on the other side of culmination. Elevation sets a pass's strength at a station, so the mirrored sample is a comparison that needs no link model. A loss on both sides, as at every pass's ends, is the pass being low.
+
+**The station's loss map** comes from its own receptions over the lookback.
+- A 10° sector is marked when its lost samples come from at least two passes and make up at least 0.6 of what it could have heard below 45°.
+- It is marked up to the highest elevation it lost a sample at.
+- A pass whose floor was raised is left out (D-275).
+- **The station's declared horizon marks too.** A loss behind its own mask is an obstruction it knew of.
+
+**A reception is obstructed** when two or more of its lost samples lie in marked sectors, or, if it heard nothing, when 80% of its samples above 10° do. The track comes from the pass's own element set at the station's registered site, computed when the diagnosis is made (the simulator's sky is pinned to the same computation, D-252). The newest learned profile is cited, not compared.
+
+*Where the effect code was in view* (D-270): the mirrored comparison rests on the simulated SNR rising and falling with elevation symmetrically.
+
+---
+
+## D-275 — Interference is a floor raised against the station's own, at the same gain
+
+**2026-10-02 · accepted, review owed (D-270)** · *`meridian/reliability/diagnosis_causes.py`; Stage 27. Widens the roadmap's test.*
+
+The roadmap compares the reception's floor with the station's `interference_profiles` cell for that azimuth and hour. **A persistent source is absorbed into its cell:** the cell learns the raised floor as normal, so a reception in it reads as not raised, and the comparison fails exactly where the interference is. **The baseline is instead the median floor of the station's own observations at the same gain**, over the lookback, from at least five readings. A floor 2 dB or more above it is raised.
+
+**The cell is cited**, with its lift, its count and whether its gains contain the reception's, so the profile's view stands beside the diagnosis.
+
+*Where the effect code was in view* (D-270): 2 dB was set against the simulated floor's ±0.5 dB jitter and against Stage 25's rise of 6 to 15 dB over part of a pass, which raises a pass's floor by a few decibels.
+
+---
+
+## D-276 — A silent satellite is judged on attempts made at about the same time
+
+**2026-10-02 · accepted, review owed (D-270)** · *`meridian/reliability/{diagnosis_causes,satellite_evidence}.py`; Stage 27. Uses D-147's rule on a narrower window.*
+
+The test is D-147's, `judge_satellite`, over other stations' attempts at the same satellite, in the same population, of provenance `station`, each physical pass counted once. **Over ±45 minutes, not D-147's ±12 hours.** A silence of tens of minutes is invisible over half a day, in which some station somewhere always heard the satellite. **One other station that listened and heard nothing, with none hearing it, names it**: the roadmap's "every other station … also missed it". The catalogue's flag saying the transmitter is off also names it, and since the catalogue holds only the current state, the value read is recorded.
+
+**So a pass can be a confirmed miss for SC-4 and diagnosed `satellite_silent`.** The two answer different questions on different windows. Whether D-147's window should narrow is the team's to decide, and nothing here changes it.
+
+*Where the effect code was in view* (D-270): the window was set against silences of 20 to 120 ticks.
+
+---
+
 ## D-277 — Timing's ground truth is a stepped clock, and a drifting one stays as it was
 
 **2026-10-02 · accepted, review owed (D-270)** · *`meridian_sim/{faults,clock_faults,clock_effects,fault_schedule,supervisor,executor,fault_notes}.py`; `docs/SCALE-AND-FAULTS.md` § A stepped clock; Stage 27. Extends D-188 and D-253.*
@@ -5700,6 +5797,14 @@ EVALUATION §11.2 names Stage 21's drifting clock as the ground truth for a timi
 - listening that names the assignment outside its window, so Stage 20 does not confirm the station was listening;
 - no clock offset, since virtual stations estimate none;
 - and, at a jump ahead, a few windows the client lets go of before they open, which the platform records as declines and which are never diagnosed (D-008).
+
+**The test reads four traces** of the station's clock, against the assignment's stated timing uncertainty plus a tolerance of 30 s for a heartbeat's cadence and transit:
+- **its listening**: heartbeats naming the assignment arriving before the window opened or after it closed;
+- **its clock**: the median of `sent_at − received_at` over heartbeats from 15 minutes before the window to 15 after. `sent_at` is not trusted to say when a heartbeat was sent (D-013), which is exactly why it measures the station's clock;
+- **its own word**: a reported `clock_offset_s` beyond its stated uncertainty;
+- **its recording**: an observation window moved the same way at both ends.
+
+The roadmap names the last two. The first two are what a station whose time source failed still leaves, since it can say nothing true about its own offset.
 
 *Rejected: give the drifting clock the effect.* It moves every earlier seed's runs.
 

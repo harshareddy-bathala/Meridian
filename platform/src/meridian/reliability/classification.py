@@ -94,8 +94,15 @@ PASS_CLASSES: tuple[PassClass, ...] = (
 """Every class, in the order manifests and reports list them."""
 
 CAPTURED: frozenset[PassClass] = frozenset({"successful_reception"})
-"""What counts as captured for SC-4. A decode below Stage 27's partial
-threshold may later count too; until that rule exists only a decode does."""
+"""What counts as captured for SC-4: a decode, whatever its verdict (D-271).
+
+A decode the reception verdict puts below its partial threshold still counts.
+SC-4 asks whether the station received the pass; whether the product is usable
+is SC-7's question, read from the verdict. Counting it lost would make SC-4
+move with every refit of a model fitted on rated receptions, and differ between
+a deployment with a verdict model and one without. The verdict informs: such a
+decode is diagnosed as a partial reception (D-102, D-272). It does not decide
+SC-4, and nothing in this module reads a verdict."""
 
 MISS: PassClass = "confirmed_miss"
 """The one class that is a miss."""
