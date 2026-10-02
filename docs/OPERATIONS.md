@@ -1275,6 +1275,39 @@ curl -s localhost:8000/api/v1/stations/<id>/uptime | python -m json.tool
 
 ---
 
+## Custody and retention
+
+Who holds each record, for how long, and what loses it (D-129, D-281). Every figure here is a constant in the code or a default of a tool; change the code, and this table with it.
+
+**Two rules decide the rest.** The station is authoritative for what it received, and the platform for what it assigned; neither overwrites the other. Reconciling after an outage is resend, not merge: the station sends again what was never acknowledged, and the platform stores it once (D-027, D-015).
+
+### The station tier: its state directory
+
+| Record | Authoritative | Kept | Lost when |
+|---|---|---|---|
+| `outbox/` — a report not yet acknowledged | the station | until acknowledged; moved to `outbox/failed/` once its `started_at` is older than thirty days, the platform's acceptance window (D-013, D-074) | the station's disk is lost before the platform acknowledged it |
+| `outbox/failed/` — a report the platform refused, or one too old to send | the station | until a person deletes it | the station's disk is lost |
+| `captures/<folder>/` recording | the station | until its result is handed to the outbox; for ever with `keep_recordings = true` (D-123) | the result is handed over, by design |
+| `captures/<folder>/` manifest, decoder report, logs | the station | thirty days after hand-over (D-123) | pruned, by design |
+| `products/<sha256>` — decoded products | **the station, and only the station**: the platform holds the hash and size (D-029, D-176) | under `products_max_bytes`, 2 GiB by default; oldest evicted first | evicted, or the station's disk is lost |
+| `held.json` — the assignments the station holds | the platform, for the assignment; the station, for what it holds | until the work is handed over | a damaged file stops the client rather than being read as empty (§ Failure recovery) |
+| `credentials.json`, `registration_key` | the station | for the station's life; never copied by any tool here | § Failure recovery says what to do |
+
+### The platform tier
+
+| Record | Authoritative | Kept | Lost when |
+|---|---|---|---|
+| The database: assignments, passes, schedules | the platform | indefinitely | the database is lost: restore a dump (§ Backup and restore) |
+| The database: observations | the station; this is a copy of what it reported | indefinitely | the database is lost; a station resends only what it still holds unacknowledged |
+| Database dumps, `backups/` | — | the last 7 days, the newest of each of 4 weeks and of 6 months; the newest always | the host's disk is lost, unless copied off it |
+| Ingest raw store, `data/ingest/raw` | the source, as retrieved (D-141) | until a person deletes it; not in a dump | the host's disk is lost, unless copied; it cannot be fetched again if the source withdrew it |
+| Raw dataset snapshots, `data/datasets/snapshots` | — | until a person deletes them; not in a dump (D-144) | the host's disk is lost; **cannot be recreated** |
+| Evaluation datasets, models, report runs, under the datasets root | — | until a person deletes them | regenerable from a raw snapshot, a configuration and a seed |
+| The evidence dataset package | — | Stage 30 has not been built; it adds its row (D-280) | — |
+| Prometheus series | — | Prometheus's default, fifteen days | by design |
+
+---
+
 ## Backup and restore
 
 Host tools, standard library only (D-115). They reach the database through `compose exec db`, so no password appears on the host's command line.

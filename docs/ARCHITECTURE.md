@@ -196,6 +196,8 @@ Everything in Docker Compose. Postgres + TimescaleDB on the Pi's NVMe. Public ac
 
 **The single machine is the deployment of record** (D-130). A cloud tier may be added for archive processing, model training and public service, funded by student credit that may lapse before submission — so no success criterion, demonstration step or roadmap completion gate may depend on it, and the one-machine path stays supported and measured by CI. What a lapse costs is throughput, never a claim. Which host, on whose account, is open (D-135).
 
+**Custody.** Who holds each record on either tier, for how long, and what loses it is one table, `OPERATIONS.md` § Custody and retention (D-281). A station's unacknowledged report is deliverable for thirty days, the platform's acceptance window, and its decoded products exist only on the station.
+
 `docker compose up` on a clean machine must produce a working platform in under ten minutes. CI measures it on every pull request. `docs/OPERATIONS.md` is the runbook.
 
 ```mermaid

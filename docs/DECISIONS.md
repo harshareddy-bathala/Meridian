@@ -5862,6 +5862,43 @@ It does not measure SC-8.
 
 ---
 
+## D-280 — Stage 33 is built ahead of Stage 30
+
+**2026-10-02 · accepted** · *`SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 33*
+
+The roadmap has Stage 33 depend on Stages 12, 13 and 30. Twelve and thirteen are built. **What Stage 33 takes from Stage 30 is one row:** how long an exported evidence package is kept, in the custody table D-281 starts. The drills, the resend, the last snapshot and the restore on another machine need nothing Stage 30 makes.
+
+Stages 28 to 30 all wait on Stage 27, which is being built beside this one. Stage 33 touches deployment, the station client, the dashboard and CI, and none of Stage 27's modules, so building it now costs a keep-both merge in three documents and nothing else.
+
+**Stage 30 adds its row when it lands.** Until then the table says the package does not exist yet, rather than leaving the line out.
+
+*Rejected: waiting for Stage 30.* It would serialise four stages behind one, for a dependency that is a sentence in a table.
+
+---
+
+## D-281 — A station's unacknowledged reception is deliverable for thirty days, and who holds what is one table
+
+**2026-10-02 · proposed, for the team to confirm** · *`OPERATIONS.md` § Custody and retention; `ARCHITECTURE.md` Deployment; Stage 33. Answers the station half of D-135.*
+
+D-135 asks how long a station retains an unacknowledged reception. **The code already answers it, in three places that were never put side by side:**
+- the outbox keeps a report until the platform acknowledges it, and moves it to `outbox/failed/` once its `started_at` is older than the platform's thirty-day acceptance window, because the platform would refuse it from then on (D-013, D-074). It is kept there, not deleted;
+- a capture folder loses its recording when its result is handed to the outbox, unless `keep_recordings` is set, and the folder goes thirty days after that (D-123);
+- products are kept by hash in the station's product store, under `products_max_bytes`, two gibibytes by default, and evicted oldest first (D-176).
+
+**So the figure is thirty days, and it is the platform's, not the station's.** A station that kept trying for longer would hold reports no platform accepts. A station figure shorter than the window would throw away reports the platform still wants. Either way the two would disagree, which is why it is not a station setting. An outage longer than thirty days loses the reports from its start, which stay on the station in `outbox/failed/` for a person to read.
+
+**The station is the only holder of its products.** MSP has no transfer (D-029), so the platform's row is a hash and a size. A product evicted from the cap, or lost with the station's disk, is gone. That is a stated limit, not a defect this stage fixes; `deploy/tools/station_archive.py` is how an operator keeps a copy.
+
+**The custody table** in `OPERATIONS.md` names, for every kind of record on either tier: who is authoritative for it, where it lives, how long it is kept, and what loses it. It is written from the code's constants and the backup tools' defaults, not from intent.
+
+**Proposed rather than accepted** because D-135 was opened for the team. The thirty days follow from D-013 and D-074 and need no new code; what the team confirms is that no longer station figure is wanted. The other half of D-135 — which cloud host, on whose account, and what happens when the credit lapses — stays open, and blocks nothing: no gate may depend on a cloud host (D-130).
+
+*Rejected: never expiring an unacknowledged report.* It would retry, forever, a body the platform refuses as `malformed`, which is the stuck queue D-074 removed.
+
+*Rejected: stopping reception when the product store is full instead of evicting.* A pass never repeats. A station that stops receiving to protect old waterfalls gives up a new reception for an old picture of one, and reports nothing while it does (D-176).
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5888,7 +5925,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 
 | | Question | Blocks |
 |---|---|---|
-| **D-135** | Which cloud host and tier, on whose account, what happens when the credit lapses, and how long a station retains an unacknowledged reception | Stage 33 |
+| **D-135** | Which cloud host and tier, on whose account, and what happens when the credit lapses. *How long a station retains an unacknowledged reception is proposed by D-281: thirty days, the platform's acceptance window* | Nothing — no gate may need a cloud host (D-130) |
 | **D-136** | Whether any ingested source's terms permit its records to be republished inside the evidence dataset, which decides that dataset's own licence | Stage 30's licence entry |
 | **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Publishing anything about an area. D-227 holds its place in the meantime: operator-only, unpublished |
 
