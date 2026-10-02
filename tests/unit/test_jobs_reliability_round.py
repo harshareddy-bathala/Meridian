@@ -70,4 +70,4 @@ def test_each_success_is_recorded_under_its_own_task() -> None:
         assert REGISTRY.get_sample_value(
             "meridian_job_last_success_timestamp_seconds", {"task": task}
         )
-    assert TASKS[-3:-1] == (EXPIRY_SWEEP, RELIABILITY)
+    assert TASKS[-4:-2] == (EXPIRY_SWEEP, RELIABILITY)

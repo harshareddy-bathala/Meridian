@@ -148,17 +148,18 @@ groups:
       - alert: ScheduledTaskStalled
         # 900 s is three rounds at the default SCHEDULE_INTERVAL_S=300: one
         # failed round is logged and retried, three in a row is a problem.
-        expr: time() - meridian_job_last_success_timestamp_seconds{task!="profiles"} > 900
+        expr: time() - meridian_job_last_success_timestamp_seconds{task!~"profiles|diagnosis"} > 900
         labels:
           severity: critical
         annotations:
           summary: "The {{ $labels.task }} task has not completed in over 15 minutes."
           runbook: docs/OPERATIONS.md#scheduledtaskstalled
 
-      # The profiles task at warning: it builds what is shown and cited, and a
-      # round that cannot build it still receives and schedules (D-174).
+      # The profiles and diagnosis tasks at warning: one builds what is shown and
+      # cited, the other explains losses afterwards, and a round that cannot do
+      # either still receives and schedules (D-174, D-272).
       - alert: ScheduledTaskStalled
-        expr: time() - meridian_job_last_success_timestamp_seconds{task="profiles"} > 900
+        expr: time() - meridian_job_last_success_timestamp_seconds{task=~"profiles|diagnosis"} > 900
         labels:
           severity: warning
         annotations:
@@ -215,6 +216,20 @@ groups:
           task: reliability
         annotations:
           summary: The reliability task has not completed once since the jobs process started.
+          runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+      # Warning, not critical: a diagnosis explains a loss after it happened, and a
+      # round that cannot diagnose still receives and schedules (D-272).
+      - alert: ScheduledTaskNeverSucceeded
+        expr: >-
+          time() - process_start_time_seconds{job="meridian-jobs"} > 900
+          unless on(job, instance)
+          meridian_job_last_success_timestamp_seconds{task="diagnosis"}
+        labels:
+          severity: warning
+          task: diagnosis
+        annotations:
+          summary: The diagnosis task has not completed once since the jobs process started.
           runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
 
       # Warning, not critical: profiles are for showing and for diagnosis, and a

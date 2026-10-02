@@ -62,8 +62,8 @@ def test_a_failure_is_counted_and_survived() -> None:
     assert sample("meridian_job_failures_total") == before + 1
 
 
-def test_the_verdict_task_runs_last() -> None:
-    assert TASKS[-1] == VERDICTS
+def test_the_verdict_task_runs_before_the_diagnosis_that_reads_it() -> None:
+    assert TASKS[-2] == VERDICTS
 
 
 def test_apply_says_what_it_did() -> None:

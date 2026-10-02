@@ -17,6 +17,7 @@ from __future__ import annotations
 from prometheus_client import Counter, Gauge, Histogram
 
 __all__ = [
+    "DIAGNOSIS",
     "EXPIRY_SWEEP",
     "HISTORY_AGE",
     "LAST_SUCCESS",
@@ -40,11 +41,21 @@ PROFILES = "profiles"
 EXPIRY_SWEEP = "expiry_sweep"
 RELIABILITY = "reliability"
 VERDICTS = "verdicts"
-TASKS = (PASS_GENERATION, SCHEDULE, PROFILES, EXPIRY_SWEEP, RELIABILITY, VERDICTS)
-"""The six tasks a round runs, in order, and the only values ``task`` takes.
+DIAGNOSIS = "diagnosis"
+TASKS = (
+    PASS_GENERATION,
+    SCHEDULE,
+    PROFILES,
+    EXPIRY_SWEEP,
+    RELIABILITY,
+    VERDICTS,
+    DIAGNOSIS,
+)
+"""The seven tasks a round runs, in order, and the only values ``task`` takes.
 The profile build follows scheduling (D-174). Then Stage 20's two: expiring
 work nobody took (D-183), then classifying every pass that has settled
-(D-182). Last, Stage 26's verdicts, when a model is configured (D-263)."""
+(D-182). Then Stage 26's verdicts, when a model is configured (D-263). Last,
+Stage 27's diagnosis, which reads both (D-272)."""
 
 TASK_DURATION = Histogram(
     "meridian_job_duration_seconds",

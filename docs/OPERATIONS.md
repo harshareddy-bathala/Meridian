@@ -773,6 +773,37 @@ meridian verdict apply --model "$MERIDIAN_DATASETS_ROOT"/verdicts/<model>
 `apply` writes a verdict for every observation whose assignment window has closed and which has none by this model. That includes simulated ones, labelled so, and ones that received nothing. Run it again and it writes nothing. A refitted model is a new method, so its verdicts sit beside the old ones (D-263).
 
 To have the jobs service do this every round, set `VERDICT_MODEL` in `deploy/.env` to the model's directory as the container sees it, such as `/datasets/verdicts/<model>`, and restart `jobs`. It scores at most 500 receptions a round, oldest first, under the task label `verdicts`. A model that cannot be read stops `jobs` at start with the reason. Unset `VERDICT_MODEL` to stop writing verdicts; the ones written stay.
+
+---
+
+## Loss diagnosis
+
+Why each lost reception was lost: a satellite that was silent, a station that was not listening, an obstruction, interference, or a timing fault — or *undetermined*, which is a correct answer whenever the evidence does not show one (D-273). Every failed reception is diagnosed, and every window a station held with nothing reported. So is every decode the verdict model puts below its partial threshold, when one is deployed. Expired and revoked assignments are not: an expiry is a decline (D-008, D-272).
+
+Decisions this section puts into practice: D-270 to D-277.
+
+### Running it
+
+```sh
+compose exec api meridian diagnosis run
+compose exec api meridian diagnosis explain <assignment_id>
+```
+
+The `jobs` service runs the same diagnosis every round, last, under the task label `diagnosis`, at most 500 losses a round and oldest first. A loss waits until its pass is classified (§ Reliability), because "not listening" is read from that classification and never asked again. So a loss is diagnosed about a day after its window, the classification's settle margin.
+
+`explain` prints each diagnosis with **every cause tested**, whether it fired, its support and what its test found. That is where to look before believing a cause, and where an *undetermined* says what was missing.
+
+- **A partial decode needs a verdict model.** `run` reads decodes against `VERDICT_MODEL`'s model, or the one `--verdict-method` names. With neither it says no decode was diagnosed as partial.
+- **Thresholds are configuration.** They are the `[diagnosis]` table of the reliability file (`deploy/reliability.toml.example`). Each row records the table's hash, so a changed threshold diagnoses every loss again beside the old rows, and a run under the same thresholds writes nothing.
+- **What each cause rests on** is listed in `DATA-MODEL.md` § `loss_diagnoses`. Briefly:
+  - an obstruction is read from where the station's own earlier passes lost signal, and from its declared horizon;
+  - interference is a floor raised against the station's own at the same gain;
+  - a timing fault comes from the station's heartbeats and recording;
+  - a silent satellite means other stations listened within 45 minutes and none heard it.
+
+**Only Meridian's own records are read.** No archive, and never the simulator's fault ledger (D-102, D-105). A simulated station's evidence is never read about a measured one.
+
+**The simulated fault effects these rules are scored against have not been independently reviewed** (D-270). Until `docs/SCALE-AND-FAULTS.md` records a reviewer, SC-8 is reported as unreviewed.
 ---
 
 ## Scheduling
@@ -1660,7 +1691,7 @@ If every station was switched off on purpose, this is expected.
 
 ### ScheduledTaskStalled
 
-**Critical** for every task but `profiles`, which is a **warning**. A task (`task` label: `pass_generation`, `schedule`, `profiles`, `expiry_sweep` or `reliability`) has not completed in over 15 minutes, which is three rounds at the default interval. One failed round is logged and retried; three in a row is a problem.
+**Critical** for every task but `profiles` and `diagnosis`, which are **warnings**. A task (`task` label: `pass_generation`, `schedule`, `profiles`, `expiry_sweep`, `reliability`, `verdicts` or `diagnosis`) has not completed in over 15 minutes, which is three rounds at the default interval. One failed round is logged and retried; three in a row is a problem.
 
 1. `compose logs --since 30m jobs`. Each failed round logs `<task> failed; the next round will try again` with the exception.
 2. The *Task failures per hour* panel shows whether it fails every round or only some.
@@ -1668,13 +1699,15 @@ If every station was switched off on purpose, this is expected.
 
 ### ScheduledTaskNeverSucceeded
 
-**Critical** for every task but `profiles`, which is a **warning**. The jobs process has been up for 15 minutes and the named task has not completed once. After a restart there is no earlier success to measure a stall from, so this alert covers that case.
+**Critical** for every task but `profiles` and `diagnosis`, which are **warnings**. The jobs process has been up for 15 minutes and the named task has not completed once. After a restart there is no earlier success to measure a stall from, so this alert covers that case.
 
 The first checks are the same as `ScheduledTaskStalled`. A failure on every round from start-up usually means a database the jobs process cannot reach, or one at a migration it does not expect (`meridian db status`).
 
 An empty catalogue is not a failure: rounds complete with zero passes, and `meridian_passes_computed` reads 0. Nor is having no labelled dataset: `profiles` completes having written only the declared masks. A `profiles` task that fails every round usually means a newest dataset that no longer matches its manifest; `uv run meridian snapshot verify <dir>` says which.
 
 A failing `reliability` task stops new passes being classified, and so freezes every reliability figure where it was. It reads the file `MERIDIAN_RELIABILITY_CONFIG` names, and refuses to start on one it cannot obey; the log says which setting.
+
+A failing `diagnosis` task leaves losses undiagnosed and receiving untouched. `meridian diagnosis run` shows the error at a prompt.
 
 ### LossBudgetThresholdReached
 

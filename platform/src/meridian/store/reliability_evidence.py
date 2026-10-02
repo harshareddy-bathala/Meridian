@@ -196,6 +196,7 @@ def find_receptions_near(
     satellite_id: str,
     between: tuple[datetime, datetime],
     excluding: Sequence[str],
+    station_reported: bool = False,
 ) -> list[NearbyReception]:
     """Reported passes of a satellite that began and ended inside ``between``.
 
@@ -207,6 +208,8 @@ def find_receptions_near(
             loss of signal at or before the end.
         excluding: Assignments of the pass being judged, which are not
             evidence about themselves.
+        station_reported: Only reports a station sent (``provenance =
+            'station'``), never an archive's or a hand-entered one.
 
     Returns:
         Each reported, scheduled assignment's latest report, in id order.
@@ -226,8 +229,9 @@ def find_receptions_near(
               and p.aos >= %s and p.aos <= %s
               and p.los <= %s
               and not (a.assignment_id = any(%s))
+              and (not %s or o.provenance = 'station')
             order by a.assignment_id
             """,
-            (satellite_id, start, end, end, list(excluding)),
+            (satellite_id, start, end, end, list(excluding), station_reported),
         )
         return cur.fetchall()

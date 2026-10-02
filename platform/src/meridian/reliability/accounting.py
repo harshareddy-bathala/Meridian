@@ -40,34 +40,32 @@ Reference: docs/DECISIONS.md D-146, D-147, D-165, D-171, D-180, D-182.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Protocol, TypeVar
 
-from meridian.registry import ListeningQuery, Registry
+from meridian.registry import Registry
 from meridian.reliability.classification import (
     METHOD,
-    OUTCOME_ORDER,
     PASS_CLASSES,
     PassClass,
     PassEvidence,
     classify,
 )
 from meridian.reliability.config import ClassificationConfig
-from meridian.reliability.satellite_silence import (
-    SIGNAL,
-    SatelliteState,
-    judge_satellite,
+from meridian.reliability.satellite_evidence import (
+    informativeness,
+    overlapping,
+    question,
+    satellite_evidence,
 )
+from meridian.reliability.satellite_silence import SatelliteState, judge_satellite
 from meridian.store.assignment_expiry import expire_untaken_assignments
 from meridian.store.pass_classifications import NewClassification, insert_classification
 from meridian.store.reliability_evidence import (
     LatestReport,
-    NearbyReception,
     SettledAssignment,
     find_latest_reports,
-    find_receptions_near,
     find_unclassified_settled,
     heard_during,
 )
@@ -97,22 +95,6 @@ class AccountingReport:
 
     deferred: int = 0
     """Settled passes left for the next run by ``limit``."""
-
-
-class _Windowed(Protocol):
-    @property
-    def assignment_id(self) -> str: ...
-    @property
-    def station_id(self) -> str: ...
-    @property
-    def satellite_id(self) -> str: ...
-    @property
-    def start_at(self) -> datetime: ...
-    @property
-    def end_at(self) -> datetime: ...
-
-
-W = TypeVar("W", bound=_Windowed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,36 +189,8 @@ def classify_settled(
 
 def _pool(assignments: Sequence[SettledAssignment]) -> Iterator[_Pass]:
     """Group assignments of one station and satellite whose windows overlap."""
-    for group in _overlapping(assignments):
+    for group in overlapping(assignments):
         yield _Pass(group)
-
-
-def _overlapping(held: Iterable[W]) -> Iterator[tuple[W, ...]]:
-    """Assignments of one station and satellite whose windows overlap, grouped.
-
-    Ordered by station, satellite and start, a group is extended while the next
-    assignment begins before the group's end.
-    """
-    group: list[W] = []
-    for one in sorted(
-        held,
-        key=lambda one: (
-            one.station_id,
-            one.satellite_id,
-            one.start_at,
-            one.assignment_id,
-        ),
-    ):
-        if group and (
-            (one.station_id, one.satellite_id)
-            != (group[0].station_id, group[0].satellite_id)
-            or one.start_at >= max(held.end_at for held in group)
-        ):
-            yield tuple(group)
-            group = []
-        group.append(one)
-    if group:
-        yield tuple(group)
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,12 +211,12 @@ def _classify(
     reports = find_latest_reports(conn, one.assignment_ids)
     report = min(
         reports.values(),
-        key=lambda one: _informativeness(one.outcome, one.assignment_id),
+        key=lambda one: informativeness(one.outcome, one.assignment_id),
         default=None,
     )
     kept = [held for held in one.assignments if held.revoked_reason is None]
     listening = {
-        held.assignment_id: registry.was_listening(_question(held)) for held in kept
+        held.assignment_id: registry.was_listening(question(held)) for held in kept
     }
     heard = heard_during(
         conn, target.station_id, [(held.start_at, held.end_at) for held in kept]
@@ -271,9 +225,17 @@ def _classify(
         held.simulated for held in reports.values()
     )
     satellite: dict[str, object] = {}
+    window = timedelta(seconds=config.silent_window_s)
 
     def judge() -> SatelliteState:
-        signals, silences = _satellite_evidence(conn, registry, one, simulated, config)
+        signals, silences = satellite_evidence(
+            conn,
+            registry,
+            satellite_id=target.satellite_id,
+            between=(target.aos - window, target.los + window),
+            excluding=one.assignment_ids,
+            simulated=simulated,
+        )
         state = judge_satellite(
             signals=len(signals),
             silences=len(silences),
@@ -320,73 +282,6 @@ def _classify(
         "parameters": config.parameters(),
     }
     return _Decided(classification, evidence, simulated)
-
-
-def _satellite_evidence(
-    conn: Connection,
-    registry: Registry,
-    one: _Pass,
-    simulated: bool,
-    config: ClassificationConfig,
-) -> tuple[list[str], list[str]]:
-    """Other receptions of the satellite near the pass, as D-147 counts them.
-
-    Only receptions of the pass's own population count: a simulated reception
-    is never evidence about a measured pass, nor the other way round. Each
-    other physical pass counts once, by its most informative report, as the
-    snapshot labeller counts it; one that heard nothing counts as a silence
-    only if the registry confirms the station was listening for any of its
-    assignments, as for the pass itself.
-
-    Returns:
-        The reporting assignment of each physical pass that heard a signal,
-        and of each that heard nothing while confirmed listening.
-    """
-    target = one.representative
-    window = timedelta(seconds=config.silent_window_s)
-    nearby = [
-        reception
-        for reception in find_receptions_near(
-            conn,
-            satellite_id=target.satellite_id,
-            between=(target.aos - window, target.los + window),
-            excluding=one.assignment_ids,
-        )
-        if reception.simulated == simulated
-    ]
-    signals: list[str] = []
-    silences: list[str] = []
-    for physical in _overlapping(nearby):
-        best = min(
-            physical,
-            key=lambda held: _informativeness(held.outcome, held.assignment_id),
-        )
-        if best.outcome in SIGNAL:
-            signals.append(best.assignment_id)
-        elif best.outcome == "no_signal" and any(
-            registry.was_listening(_question(held)) for held in physical
-        ):
-            silences.append(best.assignment_id)
-    return sorted(signals), sorted(silences)
-
-
-def _question(held: SettledAssignment | NearbyReception) -> ListeningQuery:
-    """The listening question for one assignment, on the assignment's own terms."""
-    return ListeningQuery(
-        station_id=held.station_id,
-        satellite_id=held.satellite_id,
-        centre_freq_hz=held.centre_freq_hz,
-        mode=held.mode,
-        window=(held.start_at, held.end_at),
-    )
-
-
-def _informativeness(outcome: str, assignment_id: str) -> tuple[int, str]:
-    """Rank a report by :data:`OUTCOME_ORDER`, then by id, as the labeller does."""
-    rank = (
-        OUTCOME_ORDER.index(outcome) if outcome in OUTCOME_ORDER else len(OUTCOME_ORDER)
-    )
-    return rank, assignment_id
 
 
 def _report(report: LatestReport) -> dict[str, object]:
