@@ -99,6 +99,17 @@ compose stop api        # then the same curl: STALE, and the Date the api gave i
 compose start api
 ```
 
+**`front-warm` keeps a copy of every view**, not only of the views someone opened (D-283). Every `FRONT_WARM_INTERVAL_S`, five minutes by default, it asks the front for the page, its assets and each route in `deploy/front/snapshot-routes.txt` for every station, and prints one line:
+
+```bash
+compose logs --tail 3 front-warm
+# warmed 21 views for 3 stations: 0 failed, 0 stale
+```
+
+`N stale` means the api did not answer during that round and the front served its copies; nothing was refreshed. A failed view is named with its status. To warm once by hand on a laptop, `python deploy/tools/front_warm.py`, against `:8080`.
+
+**A new view in the dashboard needs a route in that file.** `npm test` fails until the file and the dashboard's requests agree.
+
 The copies are on the `front-cache` volume and survive a restart. To drop them, `compose stop front && docker volume rm meridian_front-cache && compose up -d front`.
 
 ### Database roles

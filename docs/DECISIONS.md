@@ -5908,7 +5908,7 @@ D-135 asks how long a station retains an unacknowledged reception. **The code al
 **The front is nginx, in front of everything.** The tunnel's origin is `front:8080`, and the front forwards every request to the api unchanged. For three paths — `/`, `/assets/` and `/api/v1/` — it also keeps the api's last `200`:
 - every copy is stale a second after it is stored, so the next request goes to the api, and **a visitor gets the api's answer whenever the api gives one**;
 - a copy is served only on a failure to connect, a timeout, or a `502`, `503` or `504` from the api;
-- every kept path carries `Meridian-Cache` — `HIT`, `MISS`, `EXPIRED` or `STALE` — and keeps the api's own `Date`, so a stale copy says when the api made it. The dashboard reads both (D-283);
+- every kept path carries `Meridian-Cache` — `HIT`, `MISS`, `EXPIRED` or `STALE` — and keeps the api's own `Date`, so a stale copy says when the api made it. The dashboard reads both (D-284);
 - **nothing else is kept.** MSP, `/metrics` and `/healthz` fall to a location with no cache: forwarded, forgotten.
 
 **A copy is shared between visitors, and that is safe only because of what is kept.** Every kept path is public and the same for every caller, and a `200` from the api carries no per-client header; only a `429` does, and a `429` is never kept. The api's security headers are kept with the body, so a stale page has the same content-security policy as a live one.
@@ -5926,6 +5926,32 @@ D-135 asks how long a station retains an unacknowledged reception. **The code al
 *Rejected: publishing a snapshot beside the public site on Cloudflare Pages.* It survives the Pi being off, but the drill would then pass only with a cloud host reachable, which D-130 forbids for a gate.
 
 *Rejected: a snapshot file the jobs process writes each round.* It needs a serving process anyway, and a second copy of every public response shaped differently from the api's, which the dashboard would have to read two ways.
+
+---
+
+## D-283 — Every view is warmed through the front, from one list the dashboard is checked against
+
+**2026-10-02 · accepted** · *`deploy/front/snapshot-routes.txt`; `deploy/tools/front_warm.py`; `deploy/docker-compose.yml` (`front-warm`); `dashboard/src/snapshotRoutes.test.ts`; `tests/unit/test_front_warm.py`; Stage 33*
+
+The front keeps a copy only of what passed through it (D-282). Left to visitors, the copies would be of the views somebody happened to open, and a station page nobody opened before the outage would be empty during it. §12.2 is about a visitor who arrives during the outage, so **every view is asked for on a schedule**.
+
+**One list, read on both sides.** `deploy/front/snapshot-routes.txt` holds each route the dashboard requests, with `{station}` where a station id goes. `front_warm.py` reads it. `dashboard/src/snapshotRoutes.test.ts` runs the dashboard's own fetch functions and fails unless their requests are exactly the list. The front keys a copy on the exact path and query, so a route that drifted — `hours=24` for `hours=48` — would be warmed under a key no browser asks for, and nothing else would notice. The test was seen to fail on exactly that.
+
+**The warmer asks as the browser asks.**
+- **The page and its assets:** `/`, every `/assets/` file the page names, and every asset a stylesheet names.
+- **The directory:** walked through `next_cursor`, as the dashboard walks it.
+- **Each route for each station.** An id is encoded as `encodeURIComponent` does in a path, and as `URLSearchParams` does in a query. The two differ, on a space and on `~` among others, and the test pins both against what Node gives.
+- **Pacing:** four requests a second, under the public API's five per caller (D-202), and a `429` is waited out once.
+
+**It runs as a compose service, `front-warm`, not a host timer.** The public file gives the front no host port, so only something inside the compose network can reach it. A service also runs the same on a laptop, in CI and on the Pi. It uses the platform image, which is already present, with the tool and the list mounted read-only, and reaches nothing but the front. A round every `FRONT_WARM_INTERVAL_S`, five minutes by default; each round prints one line, and writes its counts to a status file the healthcheck reads. **It is healthy while rounds keep finishing**, whatever they found: whether the api answers is the api's healthcheck's question.
+
+**A round answered from copies says so.** `STALE` answers mean the api did not answer and nothing was refreshed, and the line says that rather than "warmed". Measured on a local stack with three simulated stations: twenty-one views a round. With the api stopped, a station's uptime, receptions and profiles, which no browser had opened, came back `STALE` with the time they were warmed. The next round reported twenty-one stale.
+
+*Rejected: a systemd timer on the host.* The host cannot reach a front with no port, and a laptop and CI have no systemd.
+
+*Rejected: warming from the jobs process.* It is the platform's scheduler, and has no business making HTTP requests to its own front. It would also put this stage in the files Stage 27 is changing.
+
+*Rejected: discovering routes by crawling the page.* The dashboard builds its requests in code, not in links, so there is nothing to crawl.
 
 ---
 

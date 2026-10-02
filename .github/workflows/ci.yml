@@ -353,7 +353,7 @@ jobs:
           curl -fsS -o /dev/null "http://localhost:8000/api/v1/observations?limit=1"
 
       - name: Every service with a healthcheck reports healthy
-        # db, api, jobs, prometheus, alertmanager and grafana. A service that is
+        # db, api, front, front-warm, jobs, prometheus, alertmanager and grafana. A service that is
         # running but unhealthy is exactly what an operator would otherwise
         # discover from a blank Grafana panel.
         run: |

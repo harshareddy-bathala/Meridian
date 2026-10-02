@@ -178,6 +178,8 @@ convention = "google"
 "deploy/tools/restore_drill.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/scheduled_backup.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/diagnosis_runs.py" = ["T201", "D", "ANN", "PLR", "C90", "SLF001"]
+# The front's warmer prints one line a round, as its log (D-283).
+"deploy/tools/front_warm.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
 # The ban below is global; this is the one module exempt from it, so the boundary
 # is checked by CI rather than remembered by a reviewer.

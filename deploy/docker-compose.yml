@@ -16,7 +16,7 @@
 #   --profile metrics   Prometheus, Alertmanager and Grafana
 #   --profile sim       a simulated station
 #
-# The default profile is db, migrate, api, front and jobs. Two override files add to it:
+# The default profile is db, migrate, api, front, front-warm and jobs. Two override files add to it:
 #
 #   -f docker-compose.secrets.yml   secrets read from files (D-201)
 #   -f docker-compose.public.yml    the Cloudflare tunnel, and no API port on the
@@ -226,6 +226,41 @@ services:
       timeout: 5s
       retries: 6
       start_period: 5s
+
+  front-warm:
+    # Asks the front, every FRONT_WARM_INTERVAL_S, for every view the dashboard
+    # can show, so a visitor arriving during an outage finds a copy of each, not
+    # only of the views someone opened before it (D-283). Inside this network,
+    # because the public deployment gives the front no host port. The tool is
+    # standard library only; the platform image is used because it is already
+    # here, and the tool reaches nothing but the front.
+    <<: *platform
+    restart: unless-stopped
+    depends_on:
+      front:
+        condition: service_healthy
+    volumes:
+      - ./tools/front_warm.py:/warm/tools/front_warm.py:ro
+      - ./front/snapshot-routes.txt:/warm/front/snapshot-routes.txt:ro
+    command:
+      - python
+      - /warm/tools/front_warm.py
+      - --base
+      - http://front:8080
+      - --every
+      - ${FRONT_WARM_INTERVAL_S:-300}
+      - --status-file
+      - /tmp/front-warm.json
+    # Healthy while rounds keep finishing, stale copies or not: whether the api
+    # answered is the api's healthcheck's question, not this one's.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/front-warm.json') < 3 * float(os.environ.get('FRONT_WARM_INTERVAL_S', '300')) else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 120s
+    environment:
+      FRONT_WARM_INTERVAL_S: ${FRONT_WARM_INTERVAL_S:-300}
 
   jobs:
     # Pass generation, then scheduling, every SCHEDULE_INTERVAL_S over the next

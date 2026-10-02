@@ -213,11 +213,12 @@ flowchart LR
     P --> G[Grafana]
 ```
 
-**Processes.** One image runs as four services with different commands, and the stock nginx image runs a fifth.
+**Processes.** One image runs as four services with different commands, the stock nginx image runs a fifth, and the same image runs the front's warmer.
 - **`migrate`** applies the schema once and exits.
 - **`api`** is `meridian serve`: MSP, the public read API and the dashboard, in several worker processes (D-109).
 - **`jobs`** is `meridian jobs run`: it generates passes and schedules them every five minutes, so a deployment schedules with no simulator and no operator (D-110).
 - **`front`** is nginx before the api. It forwards everything, and keeps the last good copy of the dashboard and the public read API, served marked `STALE` only when the api does not answer (D-282).
+- **`front-warm`** asks the front for every view, every five minutes, so a station page nobody opened before an outage still has a copy during it (D-283).
 - **The `sim` profile** adds the simulated fleet on the same image.
 
 **Metrics** (D-109, D-111).
