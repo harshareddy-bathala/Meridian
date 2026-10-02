@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -156,7 +157,11 @@ def build_station(
     transport = type(
         "Transport",
         (),
-        {"heartbeat": platform.heartbeat, "observations": platform.observations_},
+        {
+            "heartbeat": platform.heartbeat,
+            "observations": platform.observations_,
+            "time_limit": staticmethod(lambda _seconds: nullcontext()),
+        },
     )()
     loop = StationLoop(
         transport,  # type: ignore[arg-type]

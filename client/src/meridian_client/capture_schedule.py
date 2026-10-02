@@ -102,12 +102,18 @@ def select_capture(
     return min(open_now, key=lambda one: (one.start_at, one.assignment_id))
 
 
-def next_edge(windows: Mapping[str, CaptureWindow], now: datetime) -> datetime | None:
+def next_edge(
+    windows: Mapping[str, CaptureWindow], now: datetime, *, inclusive: bool = False
+) -> datetime | None:
     """The first instant after ``now`` at which any capture opens or closes.
 
     Args:
         windows: From :func:`clip_to_next`.
         now: Timezone-aware UTC.
+        inclusive: Count an edge at ``now`` itself. A tick stamped exactly on a
+            closing edge does not act on it, since a capture ends only once its
+            window has closed, so the loop needs to know that edge is still owed
+            (D-285).
 
     Returns:
         That instant, or ``None`` when nothing held has an edge still to come.
@@ -118,7 +124,7 @@ def next_edge(windows: Mapping[str, CaptureWindow], now: datetime) -> datetime |
         edge
         for window in windows.values()
         for edge in (window.opens_at, window.closes_at)
-        if edge > now
+        if edge > now or (inclusive and edge == now)
     ]
     return min(edges, default=None)
 

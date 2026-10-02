@@ -190,19 +190,22 @@ class StationLoop:
         self._captures.forget_handed_over(now)
         work = TickOutcome(False, (), began, ended, not_begun=not_begun)
 
-        try:
-            response = self._send_heartbeat(now)
-        except ProtocolError as exc:
-            return self._outcome_for_protocol_error(exc, work)
-        except httpx.HTTPError as exc:
-            # Unreachable, not refused. The station keeps executing and keeps
-            # what it holds; the next tick carries the same statement. Nothing is
-            # submitted either — the queue is on disk and loses nothing by waiting.
-            _log.warning("heartbeat could not reach the platform: %s", exc)
-            return work
+        # The network is done by the next capture edge, or abandoned (D-285).
+        with self._transport.time_limit(self._network_time_limit(now)):
+            try:
+                response = self._send_heartbeat(now)
+            except ProtocolError as exc:
+                return self._outcome_for_protocol_error(exc, work)
+            except httpx.HTTPError as exc:
+                # Unreachable, not refused. The station keeps executing and keeps
+                # what it holds; the next tick carries the same statement. Nothing
+                # is submitted either — the queue is on disk and loses nothing by
+                # waiting.
+                _log.warning("heartbeat could not reach the platform: %s", exc)
+                return work
 
-        accepted = self._record.accept(response.assignments)
-        run = submit_pending(self._transport, self._queue, now)
+            accepted = self._record.accept(response.assignments)
+            run = submit_pending(self._transport, self._queue, now)
         return replace(
             work,
             heartbeat_sent=True,
@@ -241,7 +244,10 @@ class StationLoop:
         ticks = 0
 
         while stop_after_ticks is None or ticks < stop_after_ticks:
-            outcome = self.tick(_wall_clock())
+            now = _wall_clock()
+            # Inclusive: an edge at this very instant is not acted on by it.
+            edge = self._captures.next_edge(now, inclusive=True)
+            outcome = self.tick(now)
             ticks += 1
             if outcome.stop_reason is not None:
                 return outcome.stop_reason
@@ -251,9 +257,31 @@ class StationLoop:
                 due_at = _next_due_at(due_at, interval_s)
             if stop_after_ticks is not None and ticks >= stop_after_ticks:
                 break
+            # An edge the tick reached or ran past is met now, not at the next
+            # heartbeat: next_edge looks only forward, and would sleep straight
+            # over it. The margin puts the next tick on its far side (D-285).
+            if edge is not None and _wall_clock() >= edge:
+                _sleep(max(0.0, (edge - _wall_clock()).total_seconds() + EDGE_MARGIN_S))
+                continue
             _sleep(self._seconds_until_next_tick(due_at))
 
         return None
+
+    def _network_time_limit(self, now: datetime) -> float | None:
+        """How long this tick's requests may take: until just past the next edge.
+
+        Past it by :data:`EDGE_MARGIN_S`, where the loop aims its own wake, so
+        the tick that follows lands on the far side of the edge and acts on it.
+        Inclusive of an edge at ``now``, which this tick does not act on. ``None``
+        with nothing held, where the retry policy's fit inside one interval is
+        bound enough. A healthy platform answers in milliseconds, so this cuts
+        only a request that was going to be late: one waiting out a dead route,
+        which would otherwise hold a capture off its edge (EVALUATION.md §12.1).
+        """
+        edge = self._captures.next_edge(now, inclusive=True)
+        if edge is None:
+            return None
+        return max(0.0, (edge - now).total_seconds()) + EDGE_MARGIN_S
 
     def _seconds_until_next_tick(self, due_at: float) -> float:
         """The wait until the next heartbeat or the next capture edge, if sooner."""
