@@ -65,7 +65,7 @@ curl http://localhost:8000/healthz
 
 ### Going public
 
-The public deployment is an override file, `deploy/docker-compose.public.yml`, not a profile (D-206). It adds the Cloudflare tunnel, tells the API to trust the edge's `CF-Connecting-IP` for rate limits, and **removes the API's port from the host**, because a profile can add a service but cannot take a port away. It needs Docker Compose 2.24.4 or later.
+The public deployment is an override file, `deploy/docker-compose.public.yml`, not a profile (D-206). It adds the Cloudflare tunnel, removes the front's host port, tells the API to trust the edge's `CF-Connecting-IP` for rate limits, and **removes the API's port from the host**, because a profile can add a service but cannot take a port away. It needs Docker Compose 2.24.4 or later.
 
 ```bash
 python deploy/tools/rotate_secret.py init                    # once, § Rotating secrets
@@ -83,6 +83,23 @@ compose exec api python -c "import urllib.request; print(urllib.request.urlopen(
 `compose` in the commands elsewhere on this page then means all three files.
 
 **Keep Cloudflare's Rocket Loader, e-mail obfuscation and Web Analytics off for the tunnel hostname.** Each injects a script, and the dashboard's content-security policy refuses anything not served by the platform itself (D-208), so the page would load without them and log a violation in the browser's console.
+
+### The front
+
+`front` is nginx before the api (D-282). It forwards every request, and keeps the last good copy of the dashboard and the public read API. **A visitor gets the api's answer whenever the api gives one**; a kept copy is served only when the api does not answer, marked `Meridian-Cache: STALE` and carrying the time the api made it. MSP, `/metrics` and `/healthz` are never kept.
+
+- **On a laptop or in CI** the dashboard is on `http://localhost:8080` through the front, and on `:8000` straight from the api. Set `FRONT_PORT` in `deploy/.env` to move it.
+- **On the public deployment** the front has no host port, like the api. **Set the tunnel's origin to `http://front:8080`** in Cloudflare's dashboard, under the tunnel's public hostname; the token carries it, not this repository. An origin left at `http://api:8000` still works, but bypasses the front, so the dashboard goes down with the api.
+
+See what it would serve with the api down:
+
+```bash
+curl -sI http://localhost:8080/api/v1/reliability | grep -i -e meridian-cache -e '^date'
+compose stop api        # then the same curl: STALE, and the Date the api gave it
+compose start api
+```
+
+The copies are on the `front-cache` volume and survive a restart. To drop them, `compose stop front && docker volume rm meridian_front-cache && compose up -d front`.
 
 ### Database roles
 
@@ -1305,6 +1322,7 @@ Who holds each record, for how long, and what loses it (D-129, D-281). Every fig
 | Evaluation datasets, models, report runs, under the datasets root | — | until a person deletes them | regenerable from a raw snapshot, a configuration and a seed |
 | The evidence dataset package | — | Stage 30 has not been built; it adds its row (D-280) | — |
 | Prometheus series | — | Prometheus's default, fifteen days | by design |
+| The front's kept copies, `front-cache` | the api; a copy of its last answers (D-282) | thirty days unread, 256 MiB at most | dropped by design; refilled by the next visitor or warm |
 
 ---
 

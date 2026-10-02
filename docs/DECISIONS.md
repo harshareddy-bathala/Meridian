@@ -5899,6 +5899,36 @@ D-135 asks how long a station retains an unacknowledged reception. **The code al
 
 ---
 
+## D-282 — The front: nginx before the api, keeping the last good copy of the public views
+
+**2026-10-02 · accepted** · *`deploy/front/{nginx,snapshot}.conf`; `deploy/docker-compose.yml` (`front`); `deploy/docker-compose.public.yml`; `tests/unit/{test_front_config,test_compose_hardening}.py`; Stage 33; `EVALUATION.md` §12.2*
+
+§12.2 asks that the dashboard render its last snapshot, saying how old it is, with the platform unreachable. The api serves the dashboard on its own origin (D-081), so the page went down with the process it reports on. **Something that is not the api has to answer, and has to have kept something to answer with.**
+
+**The front is nginx, in front of everything.** The tunnel's origin is `front:8080`, and the front forwards every request to the api unchanged. For three paths — `/`, `/assets/` and `/api/v1/` — it also keeps the api's last `200`:
+- every copy is stale a second after it is stored, so the next request goes to the api, and **a visitor gets the api's answer whenever the api gives one**;
+- a copy is served only on a failure to connect, a timeout, or a `502`, `503` or `504` from the api;
+- every kept path carries `Meridian-Cache` — `HIT`, `MISS`, `EXPIRED` or `STALE` — and keeps the api's own `Date`, so a stale copy says when the api made it. The dashboard reads both (D-283);
+- **nothing else is kept.** MSP, `/metrics` and `/healthz` fall to a location with no cache: forwarded, forgotten.
+
+**A copy is shared between visitors, and that is safe only because of what is kept.** Every kept path is public and the same for every caller, and a `200` from the api carries no per-client header; only a `429` does, and a `429` is never kept. The api's security headers are kept with the body, so a stale page has the same content-security policy as a live one.
+
+**A dead api is a failure in two seconds**, not a hang: a two-second connect timeout and a fifteen-second read timeout. A view nobody fetched before the outage answers `504`, which the dashboard says plainly. Warming every view is D-283's.
+
+**It starts without the api and survives its own restart.** `server api:8000 resolve`, with Docker's resolver, lets nginx start while the name does not resolve and find the api when it appears, at whatever address. The copies are on a volume, so a Pi rebooted mid-outage still has something to show. Measured on a scratch network before commit: a stopped api gave `STALE` with the original `Date` in two seconds, a front restarted with no api served its copies at once, and an api restarted on a new address was found within the resolver's ten seconds.
+
+**The same rule as the api's port.** The front forwards `CF-Connecting-IP` as it receives it, so the public file removes its host port too, and the tunnel is the only way in (D-206). On a laptop it is published on `:8080`, where the api trusts no such header, and every browser behind the front shares the front's address in the api's rate limits. That is the local deployment only; the public one keys on Cloudflare's header as before.
+
+**nginx, not ours.** CLAUDE.md's test: writing a caching reverse proxy teaches nothing this project is about, and its failures — request smuggling, header handling, timeouts — are exactly what a mature proxy has already met. The image is `nginxinc/nginx-unprivileged`, which runs as uid 101 on port 8080, pinned by digest (D-256). It runs hardened like every other service, with its entrypoint scripts bypassed because they edit files under the read-only `/etc/nginx`.
+
+*Rejected: a service worker in the dashboard.* A visitor who had never loaded the page before the outage would get nothing, and §12.2 is about a visitor.
+
+*Rejected: publishing a snapshot beside the public site on Cloudflare Pages.* It survives the Pi being off, but the drill would then pass only with a cloud host reachable, which D-130 forbids for a gate.
+
+*Rejected: a snapshot file the jobs process writes each round.* It needs a serving process anyway, and a second copy of every public response shaped differently from the api's, which the dashboard would have to read two ways.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

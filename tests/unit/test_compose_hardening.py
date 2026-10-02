@@ -105,3 +105,20 @@ def test_the_tunnel_exists_only_with_the_public_file() -> None:
     tunnel = _services("docker-compose.public.yml")["tunnel"]
     assert tunnel["environment"]["TUNNEL_TOKEN_FILE"].endswith("/tunnel_token")
     assert "TUNNEL_TOKEN" not in tunnel["environment"]
+
+
+def test_the_public_file_removes_the_front_port_and_points_the_tunnel_at_it() -> None:
+    """The front forwards CF-Connecting-IP as sent, so it gets the api's rule."""
+    assert _services("docker-compose.yml")["front"]["ports"]
+    assert _services("docker-compose.public.yml")["front"]["ports"] == {
+        "__tag__": "!reset",
+        "value": [],
+    }
+    tunnel = _services("docker-compose.public.yml")["tunnel"]
+    assert tunnel["depends_on"] == {"front": {"condition": "service_healthy"}}
+
+
+def test_the_front_starts_without_waiting_for_the_api() -> None:
+    """It must come up when the api cannot, or it has nothing to serve a copy for."""
+    front = _services("docker-compose.yml")["front"]
+    assert front["depends_on"] == {"api": {"condition": "service_started"}}

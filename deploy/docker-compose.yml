@@ -16,7 +16,7 @@
 #   --profile metrics   Prometheus, Alertmanager and Grafana
 #   --profile sim       a simulated station
 #
-# The default profile is db, migrate, api and jobs. Two override files add to it:
+# The default profile is db, migrate, api, front and jobs. Two override files add to it:
 #
 #   -f docker-compose.secrets.yml   secrets read from files (D-201)
 #   -f docker-compose.public.yml    the Cloudflare tunnel, and no API port on the
@@ -186,6 +186,46 @@ services:
       timeout: 5s
       retries: 6
       start_period: 20s
+
+  front:
+    # What a visitor, a station and the tunnel reach first (D-282). It forwards
+    # everything to the api, and keeps the last good copy of the dashboard and
+    # the public read API, which it serves, marked STALE, only when the api does
+    # not answer (EVALUATION.md §12.2). MSP, /metrics and /healthz are forwarded
+    # and never kept. deploy/front/nginx.conf says the rest.
+    <<: *hardening
+    image: nginxinc/nginx-unprivileged:1.30.5-alpine@sha256:ed04ec1ff34502c339ee5c3ae3f855442398edc1d05591e2b98981dcbbd20b1e
+    restart: unless-stopped
+    logging: *logging
+    # Straight to nginx: the image's entrypoint scripts rewrite files under
+    # /etc/nginx, which is read-only here, and this configuration needs none.
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    # Started, not healthy: the front must come up when the api cannot, or it
+    # could not serve the copy it exists to keep. It finds the api by name at
+    # run time (`resolve`), whenever the api appears.
+    depends_on:
+      api:
+        condition: service_started
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./front/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./front/snapshot.conf:/etc/nginx/meridian/snapshot.conf:ro
+      # The last good copies, which a restart of the front, or of the host, must
+      # not lose: a Pi rebooted during an outage still has something to show.
+      - front-cache:/var/cache/nginx
+    # The dashboard's address on a laptop and in CI. docker-compose.public.yml
+    # removes it, as it removes the api's (D-206).
+    ports:
+      - "${FRONT_PORT:-8080}:8080"
+    healthcheck:
+      # nginx serving, not the api answering: a front that is up while the api
+      # is down is the case it is for.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/front-ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
 
   jobs:
     # Pass generation, then scheduling, every SCHEDULE_INTERVAL_S over the next
@@ -407,6 +447,7 @@ services:
 
 volumes:
   db-data:
+  front-cache:
   prometheus-data:
   alertmanager-data:
   grafana-data:
