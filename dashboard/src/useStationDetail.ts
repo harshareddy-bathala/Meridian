@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { fetchProfiles, type StationProfiles } from "./profiles";
+import { fetchRecentReceptions, type Reception } from "./receptions";
 import { fetchUptime, type StationUptime } from "./uptime";
 import {
   fetchLatestHeartbeat,
@@ -18,6 +19,8 @@ export interface StationDetailState {
   profiles: StationProfiles | null;
   /** Null for the whole network, while loading, or when the read failed. */
   uptime: StationUptime | null;
+  /** Undefined while loading; null for the whole network or when the read failed. */
+  receptions: Reception[] | null | undefined;
   error: string | null;
 }
 
@@ -26,6 +29,7 @@ const LOADING: StationDetailState = {
   assignments: null,
   profiles: null,
   uptime: null,
+  receptions: undefined,
   error: null,
 };
 
@@ -51,9 +55,15 @@ export function useStationDetail(stationId: string | null): StationDetailState {
         stationId === null
           ? Promise.resolve(null)
           : fetchUptime(fetcher, stationId, controller.signal).catch(() => null),
+        stationId === null
+          ? Promise.resolve(null)
+          : fetchRecentReceptions(fetcher, stationId, controller.signal).catch(() => null),
       ])
-        .then(([heartbeat, assignments, profiles, uptime]) => {
-          setState({ key: stationId, value: { heartbeat, assignments, profiles, uptime, error: null } });
+        .then(([heartbeat, assignments, profiles, uptime, receptions]) => {
+          setState({
+            key: stationId,
+            value: { heartbeat, assignments, profiles, uptime, receptions, error: null },
+          });
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted) {

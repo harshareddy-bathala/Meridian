@@ -12,10 +12,15 @@
 * **Loading every scheduler module, and the live path it scores with, leaves
   scikit-learn, scipy and the fitter unimported.** The source scan sees direct
   imports; a fresh interpreter sees what they drag in.
+* **The oracle cannot be deployed** (D-172, D-254). It values a pass by the
+  frames that pass actually decoded, which no live round can know. Nothing the
+  jobs service, the API or a live scheduling round imports reaches the oracle
+  or the replay that runs it, followed through every ``meridian`` module they
+  import; and ``schedule.toml`` names configurations A to D only.
 
 Each has a positive control.
 
-Reference: docs/DECISIONS.md D-155, D-169, D-172; docs/ARCHITECTURE.md.
+Reference: docs/DECISIONS.md D-155, D-169, D-172, D-254; docs/ARCHITECTURE.md.
 """
 
 from __future__ import annotations
@@ -27,7 +32,18 @@ from collections.abc import Iterator
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCHEDULER = REPO_ROOT / "platform" / "src" / "meridian" / "scheduler"
+SOURCE = REPO_ROOT / "platform" / "src"
+SCHEDULER = SOURCE / "meridian" / "scheduler"
+
+LIVE = ("meridian.jobs", "meridian.api.app", "meridian.scheduler.run")
+"""What runs unattended: the jobs service, the API, and a scheduling round."""
+
+NOT_DEPLOYABLE = (
+    "meridian.scheduler.oracle",
+    "meridian.scheduler.replay",
+    "meridian.prediction.replay",
+)
+"""The oracle, and the retrospective replay that is the only thing to run it."""
 
 OBSERVATION_STORE = (
     "meridian.observations",
@@ -133,3 +149,60 @@ def test_loading_the_scheduler_leaves_the_fit_extra_unimported() -> None:
 def test_the_fresh_import_would_notice_a_module_loaded() -> None:
     """Positive control: the solver is loaded, and is seen to be."""
     assert "highspy" in loaded_after_import(("highspy",)).split()
+
+
+def _module_file(module: str) -> Path | None:
+    stem = SOURCE / module.replace(".", "/")
+    for path in (stem.with_suffix(".py"), stem / "__init__.py"):
+        if path.is_file():
+            return path
+    return None
+
+
+def _meridian_imports(path: Path) -> set[str]:
+    """What one module imports from ``meridian``, a ``from`` import's names too."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            found.add(node.module)
+            found.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return {one for one in found if one.startswith("meridian") and _module_file(one)}
+
+
+def reached_from(starts: tuple[str, ...]) -> set[str]:
+    """Every ``meridian`` module the starts import, and what those import."""
+    packages = [
+        f"{one}.{path.stem}"
+        for one in starts
+        if (SOURCE / one.replace(".", "/")).is_dir()
+        for path in (SOURCE / one.replace(".", "/")).glob("*.py")
+    ]
+    reached: set[str] = set()
+    waiting = [*starts, *packages]
+    while waiting:
+        module = waiting.pop()
+        path = _module_file(module)
+        if module in reached or path is None:
+            continue
+        reached.add(module)
+        parents = module.split(".")
+        waiting.extend(".".join(parents[:i]) for i in range(1, len(parents)))
+        waiting.extend(_meridian_imports(path))
+    return reached
+
+
+def test_nothing_live_reaches_the_oracle() -> None:
+    reached = reached_from(LIVE)
+
+    assert len(reached) > 50
+    assert sorted(one for one in reached if reaches(one, NOT_DEPLOYABLE)) == []
+
+
+def test_the_reach_would_notice_the_oracle() -> None:
+    """Positive control: the comparison command does run it, and is seen to."""
+    reached = reached_from(("meridian.cli_schedule",))
+
+    assert "meridian.scheduler.oracle" in reached

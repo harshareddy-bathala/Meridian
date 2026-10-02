@@ -46,7 +46,7 @@ services:
     # exception to request from college IT — which is the actual constraint SC-6
     # runs into. TLS terminates at the edge, so the origin stays plain HTTP
     # inside this network, which MSP §3 already anticipates.
-    image: cloudflare/cloudflared:2026.7.3
+    image: cloudflare/cloudflared:2026.7.3@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf
     restart: unless-stopped
     logging: *logging
     cap_drop: [ALL]

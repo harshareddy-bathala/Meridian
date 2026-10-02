@@ -21,7 +21,12 @@ element-set age, the station's own record, and the learned environment of
 D-159 from :mod:`meridian.prediction.profiles`; ``conditions`` is what public
 sources published before the pass (:mod:`meridian.prediction.conditions`).
 
-Reference: docs/DECISIONS.md D-148, D-157, D-159, D-160, D-161.
+**The feature code has a version of its own**, ``FEATURE_VERSION``, written
+into every model it fits. A model is scored only by the code it was fitted on:
+features computed differently would feed its coefficients numbers it never
+learned from, and nothing about the score would say so (D-255).
+
+Reference: docs/DECISIONS.md D-148, D-157, D-159, D-160, D-161, D-255.
 """
 
 from __future__ import annotations
@@ -37,14 +42,23 @@ from meridian.prediction.feature_rows import FeatureRows, PassGeometry
 from meridian.prediction.geometry import circle, peak_and_sweep
 from meridian.prediction.history import RECENT, History, Rate
 from meridian.prediction.profiles import ENVIRONMENT, Environment
+from meridian.prediction.score import MalformedModelError, Model
 
 __all__ = [
     "FEATURES",
+    "FEATURE_VERSION",
     "RECENT",
     "Feature",
     "FeatureVector",
     "compute_features",
+    "require_current_features",
 ]
+
+FEATURE_VERSION = "features-1"
+"""The version of the code that turns a pass into features: this module and
+what it reads in :mod:`meridian.prediction`. Bumped with any change to what a
+feature's value would be; ``tests/unit/test_feature_version.py`` fails until it
+is (D-255)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,3 +185,17 @@ def _geometry(one: LabelledPass, geometry: PassGeometry) -> tuple[float, ...]:
 
 def _rate(rate: Rate) -> tuple[float, float]:
     return rate.smoothed, float(rate.trials)
+
+
+def require_current_features(model: Model) -> None:
+    """Refuse a model fitted on other feature code than this.
+
+    Raises:
+        MalformedModelError: The model names another feature version.
+    """
+    if model.feature_version != FEATURE_VERSION:
+        message = (
+            f"the model was fitted on {model.feature_version} and this code"
+            f" computes {FEATURE_VERSION}; fit it again"
+        )
+        raise MalformedModelError(message)

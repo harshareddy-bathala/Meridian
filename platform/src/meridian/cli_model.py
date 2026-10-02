@@ -44,6 +44,7 @@ from meridian.datasets.manifest import MalformedManifestError, content_sha256
 from meridian.datasets.publish import DamagedSnapshotError, read_directory
 from meridian.datasets.result_reader import NoSelectionError, read_results
 from meridian.datasets.row_fields import MalformedSnapshotError
+from meridian.prediction.features import require_current_features
 from meridian.prediction.lineage import (
     LineageError,
     config_of,
@@ -199,6 +200,7 @@ def _evaluate(args: argparse.Namespace) -> int:
 
     root = datasets_root(args.root)
     held = read_model(args.model)
+    require_current_features(held.model)
     config = config_of(held.directory)
     dataset = dataset_of(held.directory, root=root, path=args.dataset)
     raw = raw_of(dataset, root=root, path=args.snapshot)

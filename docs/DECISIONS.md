@@ -5474,6 +5474,185 @@ The completion gate asks for SC-7's report (Brier score against the base rate, r
 
 ---
 
+## D-254 — Software-complete is a register of every clause and its evidence, kept true by a test
+
+**2026-10-01 · accepted** · *`docs/ACCEPTANCE.md`; `tests/unit/test_acceptance_gate.py`; `.github/workflows/ci.yml` (the end-to-end step); Stage 24.*
+
+Stage 24 is a list of forty clauses in five paths. The roadmap says the project is software-complete "when all of the following are true". Almost every clause had already been made true by an earlier stage, each in its own gate, but nothing said which test proved which clause. A clause nobody had proved was therefore indistinguishable from one proved three stages ago.
+
+**The register is `docs/ACCEPTANCE.md`.** Each clause is quoted as the roadmap words it and given a status and the evidence behind it:
+- **proven** means a test or a CI step asserts it on every change;
+- **run** means a run by hand whose transcript is recorded where the row says;
+- **pending — Stage N** means it is not yet true, and Stage N owes it.
+
+**A test keeps it true.** `test_acceptance_gate.py` reads the roadmap and the register. It fails if:
+- a clause is missing, repeated, reworded or invented;
+- a cited test is not a function in the file named;
+- a cited CI step is not a step of the job named;
+- a cited section is not a heading of its document;
+- a status does not fit its evidence, such as a `proven` row citing only prose.
+
+It holds the "Proven by" column of `OPERATIONS.md` § Failure recovery to the same rule, which nothing checked before. Every check has a positive control on a small text the test writes itself.
+
+**What is pending is named, never dropped.** Two kinds of clause are not true when Stage 24's software is built:
+- **the seventy-two hour run**, which is done on the Pi by an operator (D-198) and never from a test;
+- **five of the six post-reception clauses**, which are Stages 26 to 30, the first of them waiting on D-106.
+
+The project is software-complete when the register has no pending row.
+
+**The end-to-end step no longer tolerates an empty selection.** It was written to accept pytest's exit 5 ("no tests collected") while `tests/e2e/` was empty. It holds eleven tests now, and the register cites three of them, so a suite that stopped collecting must fail CI, not pass it.
+
+**Four clauses were true by construction and are now asserted.** Each test has a positive control.
+- **The oracle.** `schedule.toml` refuses `configuration = "oracle"`. An import walk from the jobs service, the API and a live round never reaches the oracle or the replay that runs it, while the same walk from `meridian schedule evaluate` does reach it.
+- **The shuffle ban.** It reads the whole platform and the archive ingest, where it used to read `prediction/` alone.
+- **Invites.** `meridian invite revoke` is tested through its handler, and the registry then refuses the revoked invite.
+- **`/healthz`.** Its body and status are pinned both ways.
+
+**Every result now carries its count.** A walk over every results file found SC-1, SC-2 and the gain and regret rows each stating an interval without what it was drawn from. They now carry the station-days their bootstrap resampled, and SC-2 its test passes too, as `n`. The counts arrive under `report-7`, the method Stage 26 named for SC-7 (D-264), which this branch had first named `report-6`. One name for both is kept, as D-264 asks, and no run is published between the two, so no `report-7` run lacks the counts.
+
+**The dashboard shows results.** It showed stations, schedules, uptime and the sky, and no outcome, so "shows stations and results" did not hold. A selected station now shows:
+- its recent receptions from `/api/v1/observations`: outcome, signal and peak SNR, the number of products held, and a simulated badge on every simulated row;
+- its capture rate from `/api/v1/reliability`, as the count, the rate and its Wilson interval, labelled simulated when the station is found among the simulated population.
+
+Nothing was added to the public API. It has no frame count, and the privacy review pins its fields (D-210), so the list shows what is already published. An outcome is coloured only when it is a decode. A quiet pass is not a miss until the platform has read its heartbeats (rule 7), so the page does not draw one as a failure. CI's image job now requires the served bundle to read both routes.
+
+*Rejected: the register as prose in the roadmap's "Where the build has got to".* A paragraph cannot be checked, and that section is a snapshot in time by its own account.
+
+*Rejected: a pytest marker on each proving test, such as `@pytest.mark.acceptance("…")`.* It puts the clause text in forty places, and it cannot cite a CI step, a document, or a clause that is pending.
+
+---
+
+## D-255 — Feature code has a version, and a model is scored only by the code it was fitted on
+
+**2026-10-01 · accepted** · *`meridian/prediction/{features,score,fit,live,replay_models}.py`; `meridian/cli_model.py`; `meridian/reports/prediction.py`; `DATA-MODEL.md` § Model; `tests/unit/test_feature_version.py`; Stage 24. Amends D-163.*
+
+Stage 24 asks that "snapshots and feature generation are versioned". Snapshots were already versioned: `labels-3`, hashed manifests, and `model-1` for the fitting procedure. Feature generation had no version of its own. A change to how a feature is computed left the model's file and hash unchanged. Live scoring then fed the model's coefficients numbers they were never learned from, and no score showed it.
+
+**`FEATURE_VERSION`, `features-1`, lives beside the features** in `meridian/prediction/features.py`. Every model writes it into `model.json` as `feature_version`, and a model without one is malformed.
+
+**Everything that computes features for a model refuses one fitted on other feature code:**
+- live scoring;
+- the replay;
+- `meridian model evaluate`;
+- the evaluation report.
+
+The refusal names both versions and says to fit again. `meridian model show` reads the file without computing anything, so it still shows an old model.
+
+**A test keeps the version honest.** `test_feature_version.py` pins a digest of the feature code to each version. The digest is taken over the syntax tree of every module that `features` reaches inside `prediction`, with docstrings removed. Changing what a feature computes without bumping the version fails the test, and the failure gives the new digest to add. Rewording a docstring does not move the digest, and changing a number does; both are checked. A module that starts being imported by the feature code is noticed too, because the set is read from the imports and compared with the list.
+
+**Nothing published moves.** No model of real data exists yet (D-155), so the models that change are the ones tests fit.
+
+*Rejected: the version as a hash of the source, computed at fit time.* Any reformat would then orphan every model, and a version nobody chose explains nothing in a viva. The digest decides only *when* the version must change; a person decides *that* it changes.
+
+*Rejected: bumping `MODEL_VERSION` for a feature change.* That names the fitting procedure, which a feature change does not alter, and it would not stop a model being scored by other feature code.
+
+---
+
+## D-256 — Every image by digest, every Action by commit, and Dependabot to move them
+
+**2026-10-01 · accepted** · *`deploy/docker-compose.yml`, `deploy/docker-compose.public.yml`; `.github/workflows/{ci,image-publish,security}.yml`; `.github/dependabot.yml`; `deploy/.env.example`; `OPERATIONS.md` § Security scanning; `tests/unit/test_pinning.py`; Stage 24. Extends D-113.*
+
+Stage 24 asks that "all dependencies and images are pinned". Before this change, only part of that held:
+
+| Pinned already | Pinned by tag only |
+|---|---|
+| Python and npm, by their lockfiles | the five third-party images compose runs |
+| the Dockerfile's bases, by digest (D-113) | CI's test database |
+| the security scanner's own image, by digest | every Action |
+
+A tag is a name a registry or a maintainer can point at other bytes tomorrow, and an Action runs with the checkout and, in two workflows, a token that can push images. The comment in `security.yml` already claimed "like every image in deploy/", which was not yet true.
+
+**Images are named `tag@sha256:<index digest>`.** The digest is the multi-arch index, not one platform's manifest, so a single pin serves the Pi's arm64 and CI's amd64. All five were checked to carry both. The tag stays beside the digest so a reader can see the release. Once a digest is given, the tag is not consulted.
+
+**Actions are named by commit, with the release as a comment.** Each major tag the workflows used was resolved, and each pointed at exactly one release (`actions/checkout@v4` was `v4.4.0`, and so on). The pin changes no behaviour today.
+
+**One uv everywhere.** CI's `setup-uv` took the latest uv, while the image builds with 0.11.20. CI now uses 0.11.20, as `security.yml` already did. That version was checked to accept the current `uv.lock`.
+
+**Dependabot moves the pins.** A pin nobody moves becomes a known vulnerability kept on purpose. `.github/dependabot.yml` proposes updates once a week for Actions, the Dockerfile, compose, uv and npm, grouped into one pull request per ecosystem, and CI judges each like any other change. Dependabot opens pull requests and never merges, so a person still decides.
+
+**The platform's own image stays a variable.** `MERIDIAN_IMAGE` defaults to `:main` so `docker compose pull` on a Pi takes the latest build. Which build to run is the deployment's choice, not the repository's. `.env.example` says an acceptance run pins it to `sha-<commit>`, and Stage 24's long run records the digest it ran (D-257).
+
+**A test keeps it so.** `test_pinning.py` reads the compose files, the workflows and the Dockerfile. It refuses:
+- an image by tag;
+- an Action by tag or branch;
+- a `setup-uv` without a version, or a uv other than the Dockerfile's;
+- a Dependabot configuration that misses an ecosystem.
+
+Each check has a positive control.
+
+*Rejected: pinning only what runs in production.* CI's Actions decide what is tested and what is published, so a moved Action can ship an image nobody tested.
+
+*Rejected: Renovate.* It does the same, but needs an app installed on the repository. Dependabot is built into GitHub and needs only a file.
+
+---
+
+## D-257 — The 72-hour run judges its resources, survives its own tool, and is sealed with its record
+
+**2026-10-01 · accepted** · *`deploy/tools/{long_run,long_run_watch,long_run_state}.py`; `meridian/datasets/{long_run_record,fault_runs,manifest_rules}.py`; `meridian/cli_reliability_faults.py` (`--run-record`); `meridian/reports/{fault_rows,render_long_run}.py`; `OPERATIONS.md` § The long run; `tests/unit/{test_long_run_watch,test_report_faults}.py`; `tests/integration/test_cli_reliability.py`; Stage 24. Amends D-198 and D-240.*
+
+D-198's tool ran the long run and judged it, but three things kept its result from being Stage 24's acceptance evidence:
+- **it sealed nothing**, so a report could not name the run it relied on;
+- **it could not outlive itself.** A lost SSH session, a reboot or a crash lost the run's start, and a signal mid-fault could leave the API paused;
+- **`report build` counted any fault run spanning seventy-two hours as the long run.** It counted from the first fault opening, whether or not the run had passed.
+
+**Surviving is judged on resources too** (`long_run_watch.py`). The run fails when:
+- a container is unhealthy after settling;
+- memory, fitted by least squares over the run's *second* half, grows faster than 4 MiB/h. The first half is left out because caches and pools fill there, and that is not a leak. The slope is judged only once the half holds eight samples, so a two-hour rehearsal says nothing about leaks;
+- free disk falls under 5 GiB;
+- the Pi throttled.
+
+The database's and Prometheus's sizes, free memory, swap and temperature are recorded unjudged. Each bound is a flag, and the record keeps the bounds it ran under.
+
+**Alerts get a positive control, as the stations' faults have `alerted`.** A platform fault that lasts longer than an alert's `for:` plus two minutes owes that alert a firing. Today that is `SchedulerUnavailable` for the five-minute `scheduler_down`. A twenty-second pause and a restart owe nothing, because `ApiUnavailable` and `DatabaseUnavailable` wait a minute; the rehearsal saw neither fire, as it should not have.
+
+Each alert's `for:` also sets its false-positive grace: ten minutes, or the wait and five more. `ObservationsOverdue`, which waits thirty minutes, was otherwise unexplained by the fault that caused it. Alert history is read in twelve-hour pieces and joined, as D-192's checker reads it.
+
+**Data loss is measured with nothing broken.** When the timeline ends, the simulator is restarted under `clean`. It closes the faults it held as `ended: restart` (D-189) and opens none, so the settle window's queue is what the platform failed to take, not what a still-open `upload_blocked` held back. Only a stack the tool brought up is restarted, because only then does it know how that fleet was configured.
+
+**The run survives its tool** (`long_run_state.py`):
+- `run.json` is written before the first fault, with the start, the settings and what ran: commit, image and digest, architecture, and Docker and Compose versions;
+- an `--out` or a simulator volume holding an earlier run is refused;
+- SIGTERM and SIGHUP leave through the injector's mend;
+- `--resume` mends and closes what was left open, skips what fell in the gap and records the gap;
+- the report is written before judging, so `--judge-only` always has one;
+- `--preflight` asks the Pi, before anything starts, the questions that would otherwise fail the run on the host's account: architecture, the database's disk, the clock, free disk, a pinned image, Compose, cooling, and a fresh `--out`.
+
+**Found by the rehearsal**, and fixed:
+- **an unreadable metrics token.** At mode 600, Prometheus, which runs as `nobody`, cannot read `deploy/prometheus/metrics_token`, and every platform alert fires for the whole run. `--preflight` checks it.
+- **an unwritable datasets root.** Docker creates a bind mount's missing source as root, so the seal, run as the operator, was refused after the hours had run. The tool makes the root before `up` and refuses to start without write access.
+- **the gap and the skips.** A gap is dated from the tool's last act, and only faults the ledger never opened count as skipped.
+
+**A gap is recorded, and does not count toward the seventy-two hours.** The platform ran on through it, and every fault injected is still judged from the platform's own records. But nothing injected a fault or looked during the gap, so a run's length is its span less every gap. Found in review: without that, a tool dead from hour 10 and resumed at hour 75 would have made a seventy-two hour run of ten watched hours.
+
+**Found in review, and fixed:**
+- two series of one alert are never joined into one stretch, which could hide a false positive;
+- a fault `--resume` closed owes no alert, because how long it held is unknown;
+- `--resume` carries on when a mend no longer applies;
+- a run that counts is chosen before a longer one that failed;
+- the seal never carries an earlier seal's name;
+- throttling between two samples is read from the bits the Pi keeps since boot, counting only those that appear after the first sample;
+- the dashboard reads a station's capture every five minutes, not every thirty seconds, because each read recounts the whole network.
+
+**Sealed with its record.** The tool writes its own judgement as `long_run.json`. Then `meridian reliability faults --publish --run-record` judges every fault in a one-off API container and seals ledger, evidence, verdicts and the record as one fault run. The platform reads only what the acceptance needs from the record:
+- `started` and `ended`;
+- `passed`, which must be true exactly when `failures` is empty;
+- `seed`.
+
+The rest is kept and shown. This also answers "every experiment has a config and seed" for fault runs: the seed and the settings are in the sealed record. A non-derived manifest carries no parameters.
+
+**`report build` counts the long run only from a sealed record.** It counts only when all of these hold:
+- the record spans seventy-two hours from start to end, not from the first fault, which opens minutes in;
+- its own judgement passed;
+- every fault passes when judged again here, and agrees with what was sealed.
+
+Otherwise it says *too short* or *failed*, with the reasons, and a fault run without a record is *not run*. The paragraph names the architecture, the image digest, peak memory and its growth, and the database at both ends.
+
+*Rejected: the record in the manifest.* A fault run is read from the database, not derived, so its manifest holds no parameters (D-144). A sealed file is hashed all the same.
+
+*Rejected: requiring every platform alert to fire.* A twenty-second fault cannot raise an alert that waits a minute, so every good run would fail.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5780,6 +5959,20 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the completion gate | `tests/integration/test_verdict_gate.py`: 150 receptions stored, the decoded ones rated, a snapshot exported, the verdict fitted from it and applied, every measured reception then holding a versioned verdict; `tests/unit/test_report_verdict.py`: SC-7 built and verified through `meridian report`, with every socket refused |
 | — D-102 enforced | `tests/unit/test_prediction_boundaries.py`: no module on the yield path reads a rating or a verdict |
 | — the settled entry | D-106 |
+
+**Landed 2026-10-01**, building Stage 24's final software acceptance.
+
+| Decision | Applied to |
+|---|---|
+| D-254 the acceptance register and its gate | `docs/ACCEPTANCE.md`; `tests/unit/test_acceptance_gate.py`; `.github/workflows/ci.yml` (the end-to-end step) |
+| — the clauses true by construction, now asserted | `tests/unit/{test_scheduler_boundaries,test_schedule_config,test_prediction_gate,test_report_gate}.py`; `tests/integration/test_cli_invite.py`; `tests/msp_conformance/test_healthz.py`; `meridian/reports/{scheduling,prediction_rows,build}.py` (counts on SC-1, SC-2, gains; kept under `report-7`) |
+| D-255 a version for the feature code | `meridian/prediction/{features,score,fit,live,replay_models}.py`; `meridian/cli_model.py`; `meridian/reports/prediction.py`; `DATA-MODEL.md` § Model; `OPERATIONS.md` § Models; `tests/unit/{test_feature_version,test_prediction_fit,test_prediction_live}.py` |
+| D-256 pins and Dependabot | `deploy/{docker-compose.yml,docker-compose.public.yml,.env.example}`; `.github/workflows/{ci,image-publish,security}.yml`; `.github/dependabot.yml`; `OPERATIONS.md` § Security scanning; `tests/unit/test_pinning.py` |
+| — the dashboard shows results | `dashboard/src/{receptions,reliability,StationDetail,useStationDetail,format}.ts(x)`, `app.css`, and their tests; `.github/workflows/ci.yml` (the image job's dashboard step); `SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 11's later views |
+| D-257 the 72-hour run's resources, resume and seal | `deploy/tools/{long_run,long_run_watch,long_run_state}.py`; `meridian/datasets/{long_run_record,fault_runs,manifest_rules}.py`; `meridian/{cli_reliability,cli_reliability_faults}.py`; `meridian/reports/{fault_rows,render_reliability,render_long_run}.py`; `OPERATIONS.md` § The long run; `tests/unit/{test_long_run_watch,test_report_faults,test_datasets_manifest,test_datasets_boundaries}.py`; `tests/integration/test_cli_reliability.py` |
+| — the amended entries | D-198, whose run now seals itself and judges its resources; D-240, whose long-run row now needs a sealed, passed record |
+| — the Pi's run, prepared | `deploy/tools/long_run_preflight.py` (`--preflight`); `OPERATIONS.md` § The 72-hour acceptance run on the Pi; `SCALE-AND-FAULTS.md` § The long run, the Stage 24 rehearsal; `docs/ACCEPTANCE.md`; `SOFTWARE-IMPLEMENTATION-ROADMAP.md` "Where the build has got to" |
+| — D-253 kept, found by CI | `meridian_sim/executor.py`: a silence is never named against a pass that aborts on its own, since the abort, not the silence, decided it. It was named at the pass's start whatever followed, and showed only when a randomly minted assignment id drew an abort. `tests/unit/test_simulator_sky_ground_truth.py` |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

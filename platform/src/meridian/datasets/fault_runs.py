@@ -6,13 +6,16 @@ a content-addressed directory under ``<datasets root>/faults/``:
 * ``ledger.jsonl`` — the ledger as the run wrote it, ending in a newline;
 * ``evidence.jsonl`` — what the platform held about each fault when it was
   judged (:mod:`meridian.reliability.fault_record`);
-* ``verdicts.jsonl`` — every verdict, each check with its latency.
+* ``verdicts.jsonl`` — every verdict, each check with its latency;
+* ``long_run.json`` — for a long run only, the run's record of itself: how long
+  it ran, what it ran on, and whether its own judgement passed
+  (:mod:`meridian.datasets.long_run_record`, D-257).
 
 It is read from the live database like a raw snapshot, so it names no parent;
 its ``as_of`` is when the evidence was read. An evaluation report names it by
 hash and judges it again from these files alone (D-240).
 
-Reference: docs/DECISIONS.md D-144, D-189, D-192, D-240.
+Reference: docs/DECISIONS.md D-144, D-189, D-192, D-240, D-257.
 """
 
 from __future__ import annotations
@@ -25,6 +28,12 @@ from datetime import datetime
 from pathlib import Path
 
 from meridian.datasets.canonical import canonical_line
+from meridian.datasets.long_run_record import (
+    RUN_RECORD_FILE,
+    LongRunRecord,
+    parse_long_run_record,
+    record_bytes,
+)
 from meridian.datasets.manifest import Manifest, content_sha256, file_entry
 from meridian.datasets.publish import (
     PublishedDirectory,
@@ -72,15 +81,18 @@ class FaultRun:
     gathered: tuple[Gathered, ...]
     verdicts: tuple[dict[str, object], ...]
     """The verdicts as they were judged when the run was published."""
+    record: LongRunRecord | None = None
+    """A long run's record of itself; None for any other fault run."""
 
 
-def publish_fault_run(
+def publish_fault_run(  # noqa: PLR0913 — what was judged, where, and its record
     ledger: str,
     gathered: Sequence[Gathered],
     verdicts: Sequence[FaultVerdict],
     *,
     root: Path,
     stamp: tuple[str, datetime],
+    record: LongRunRecord | None = None,
 ) -> PublishedDirectory:
     """Seal a judged fault run under ``root/faults``.
 
@@ -90,6 +102,7 @@ def publish_fault_run(
         verdicts: Each fault's verdict, in the same order.
         root: The datasets root.
         stamp: The database's schema revision, and when the evidence was read.
+        record: A long run's record of itself, sealed beside them (D-257).
     """
     schema_revision, as_of = stamp
     files = {
@@ -97,6 +110,8 @@ def publish_fault_run(
         EVIDENCE_FILE: b"".join(canonical_line(one) for one in evidence_rows(gathered)),
         VERDICTS_FILE: b"".join(canonical_line(one) for one in verdict_rows(verdicts)),
     }
+    if record is not None:
+        files[RUN_RECORD_FILE] = record_bytes(record)
     opened = [one.fault.opened_at for one in gathered]
     manifest = Manifest(
         kind="fault_run",
@@ -124,6 +139,7 @@ def read_fault_run(path: Path) -> FaultRun:
         NotAFaultRunError: It is another kind of directory.
         FaultLedgerError: Its ledger cannot be read.
         FaultRecordError: Its evidence does not match its ledger.
+        LongRunRecordError: Its run record cannot be read.
     """
     directory = read_directory(path)
     if directory.manifest.kind != "fault_run":
@@ -138,4 +154,9 @@ def read_fault_run(path: Path) -> FaultRun:
         faults=faults,
         gathered=gathered_from_rows(faults, evidence),
         verdicts=tuple(json.loads(line) for line in files[VERDICTS_FILE].splitlines()),
+        record=(
+            parse_long_run_record(files[RUN_RECORD_FILE])
+            if RUN_RECORD_FILE in files
+            else None
+        ),
     )

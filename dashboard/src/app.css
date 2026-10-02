@@ -193,6 +193,20 @@ tr.selected {
   color: var(--dim);
 }
 
+/* Outcomes, in words: only a decode is coloured, and nothing is coloured as a
+   failure, because a quiet pass is not a miss until the platform says so. */
+.badge-outcome {
+  color: var(--dim);
+}
+
+.badge-outcome.badge-decoded {
+  color: var(--online);
+}
+
+.badge-outcome + .badge-simulated {
+  margin-left: 0.4em;
+}
+
 /* The sky plot. Neutral tokens only: the signal colours mean above and below
    horizon for a pass, and a horizon profile is not a pass. */
 .horizon {

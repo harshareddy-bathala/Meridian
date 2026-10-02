@@ -31,6 +31,7 @@ from meridian.datasets.publish import publish_directory, read_directory
 from meridian.prediction.configurations import CONFIGURATIONS, FALLBACK
 from meridian.prediction.examples import own_examples
 from meridian.prediction.feature_rows import read_feature_rows
+from meridian.prediction.features import FEATURE_VERSION
 from meridian.prediction.live import (
     LivePass,
     LiveScorer,
@@ -213,10 +214,18 @@ class HandWritten:
     counts: Mapping[str, int]
 
 
-def a_model(root: Path, dataset: Path, name: str, *, history: int = 5) -> Path:
+def a_model(
+    root: Path,
+    dataset: Path,
+    name: str,
+    *,
+    history: int = 5,
+    features: str = FEATURE_VERSION,
+) -> Path:
     configuration = CONFIGURATIONS[name]
     document = {
         "model_format": 1,
+        "feature_version": features,
         "configuration": name,
         "reads_history": configuration.reads_history,
         "min_station_history": history,
@@ -443,6 +452,16 @@ def unsealed(under: Path) -> None:
 
 
 # --- refusals -----------------------------------------------------------------
+
+
+def test_a_model_fitted_on_other_feature_code_is_refused(labelled: Label) -> None:
+    """D-255: its coefficients were learned from features this code no longer
+    computes, and the score would not say so."""
+    root, dataset_path = labelled("world")
+    model = a_model(root, dataset_path, "A", features="features-0")
+
+    with pytest.raises(LiveScoringError, match="fitted on features-0"):
+        load_live_scorer(model, root=root)
 
 
 def test_a_model_reading_history_with_no_dataset_is_refused(

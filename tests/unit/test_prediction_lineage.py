@@ -31,6 +31,7 @@ from meridian.prediction.examples import (
     weighted,
 )
 from meridian.prediction.feature_rows import read_bands, read_feature_rows
+from meridian.prediction.features import FEATURE_VERSION
 from meridian.prediction.fit import FittedModel
 from meridian.prediction.lineage import (
     LineageError,
@@ -165,6 +166,7 @@ def published_model(
     }
     document: dict[str, object] = {
         "model_format": MODEL_FORMAT,
+        "feature_version": FEATURE_VERSION,
         "configuration": "A",
         "population": "own",
         "reads_history": False,

@@ -18,7 +18,11 @@ leaves every fitted figure alone; one changed row changes the hash and names
 the file; a run whose numbers were rewritten and resealed passes its own
 manifest and fails verification; a changed setting is caught the same way.
 
-Reference: docs/DECISIONS.md D-234 to D-240; ``EVALUATION.md`` §9.
+Stage 24 adds one clause, *every result includes sample size and
+uncertainty*: every estimate in every results file carries its interval, and
+every interval the count it was drawn from (D-254).
+
+Reference: docs/DECISIONS.md D-234 to D-240, D-254; ``EVALUATION.md`` §9, §10.
 """
 
 from __future__ import annotations
@@ -238,6 +242,49 @@ def of(rows: Sequence[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
     return [one for one in rows if one["row"] == kind]
 
 
+COUNTS = ("n", "denominator", "station_days")
+"""What an interval was drawn from: passes, a proportion's denominator, or the
+station-days a bootstrap resampled."""
+
+
+def _intervals(value: object, where: str) -> list[tuple[str, Mapping[str, Any]]]:
+    """Every mapping inside ``value`` that states an estimate or an interval."""
+    if isinstance(value, list):
+        return [
+            found
+            for i, one in enumerate(value)
+            for found in _intervals(one, f"{where}[{i}]")
+        ]
+    if not isinstance(value, Mapping):
+        return []
+    found = [
+        (f"{where}.{key}", value)
+        for key, held in value.items()
+        if (key == "interval" or key.endswith("_interval")) and held is not None
+    ]
+    if value.get("estimate") is not None:
+        found.append((f"{where}.estimate", value))
+    return found + [
+        one for key, held in value.items() for one in _intervals(held, f"{where}.{key}")
+    ]
+
+
+def unstated(rows: Mapping[str, Sequence[Mapping[str, Any]]]) -> list[str]:
+    """Each estimate without its interval, and each interval without its count."""
+    problems = []
+    for name, held in rows.items():
+        for row in held:
+            for where, holder in _intervals(row, f"{name}:{row['row']}"):
+                has_interval = holder.get("interval") is not None or (
+                    "low" in holder and "high" in holder
+                )
+                if where.endswith(".estimate") and not has_interval:
+                    problems.append(f"{where} has no interval")
+                if not any(key in holder or key in row for key in COUNTS):
+                    problems.append(f"{where} has no count")
+    return problems
+
+
 # --- every section has something to say ----------------------------------------
 
 
@@ -433,3 +480,37 @@ def test_a_run_whose_fault_run_is_gone_cannot_be_verified(gate: Gate) -> None:
 
     assert gate.verify(run) == 1
     assert "no fault run" in gate.capsys.readouterr().err
+
+
+# --- every result states its sample size and its uncertainty -------------------
+
+
+def test_every_estimate_carries_its_interval_and_its_count(gate: Gate) -> None:
+    rows = parsed(gate.build())
+
+    assert len(unstated({"": [{"row": "x", "interval": {}}]})) == 1
+    assert sum(len(_intervals(one, "")) for held in rows.values() for one in held)
+    assert unstated(rows) == []
+
+
+@pytest.mark.parametrize(
+    ("row", "found"),
+    [
+        ({"row": "sc", "interval": {"low": 0.1, "high": 0.2}}, "has no count"),
+        ({"row": "rate", "n": 9, "share": {"estimate": 0.5}}, "has no interval"),
+        (
+            {"row": "rate", "share": {"estimate": 0.5, "low": 0.2, "high": 0.8}},
+            "has no count",
+        ),
+    ],
+)
+def test_an_estimate_missing_its_interval_or_its_count_is_found(
+    row: dict[str, Any], found: str
+) -> None:
+    assert any(found in one for one in unstated({"results": [row]}))
+
+
+def test_an_estimate_stated_whole_is_not() -> None:
+    row = {"row": "rate", "share": {"estimate": 0.5, "low": 0.2, "high": 0.8, "n": 9}}
+
+    assert unstated({"results": [row]}) == []

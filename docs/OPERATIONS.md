@@ -689,7 +689,7 @@ The figures are unweighted even after an `ipw` fit, and the report says so: weig
 | | Means |
 |---|---|
 | 0 | It ran and succeeded |
-| 1 | It ran and refused. Possible reasons:<br>• too few examples, or one outcome only;<br>• no split dates;<br>• a setting refused;<br>• the `fit` extra missing;<br>• a dataset, snapshot or model that is not the one named;<br>• an empty test span |
+| 1 | It ran and refused. Possible reasons:<br>• too few examples, or one outcome only;<br>• no split dates;<br>• a setting refused;<br>• the `fit` extra missing;<br>• a dataset, snapshot or model that is not the one named;<br>• a model fitted on another version of the feature code: fit it again (D-255);<br>• an empty test span |
 | 2 | The command line was wrong |
 | **3** | **A dataset, snapshot or model no longer matches its manifest** |
 
@@ -1092,6 +1092,18 @@ A station's own token is rotated through a bound invite, and withdrawn with `mer
 - **The image:** a Debian package is fixed by rebuilding, since the runtime stage applies Debian's updates; a base image is fixed by moving its digest in `deploy/Dockerfile`.
 - **Nothing can be done yet:** add the advisory to `.trivyignore` at the repository root, with a comment giving the reason and an `exp:YYYY-MM-DD` after which it fails again.
 
+**Every pin, and who moves it** (D-256). Each of these is pinned, and `tests/unit/test_pinning.py` refuses an unpinned one:
+- Python and the dashboard, by their lockfiles;
+- every image compose or a workflow runs, and every base in `deploy/Dockerfile`, by digest;
+- every Action, by commit, with its release as a trailing comment;
+- the uv that reads `uv.lock`, the Dockerfile's version, everywhere.
+
+Dependabot proposes moving each pin once a week (`.github/dependabot.yml`), one grouped pull request per ecosystem, and CI judges it like any other change. To move one by hand:
+- **an image:** `docker buildx imagetools inspect <image>:<tag>` and take its top-level `Digest`. That is the index, so the same pin serves the Pi's arm64 and a laptop's amd64.
+- **an Action:** `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`.
+
+The platform's own image is the exception. It is `MERIDIAN_IMAGE`, the deployment's choice, and an acceptance run pins it to a `sha-<commit>` tag.
+
 To scan a local build the same way:
 
 ```bash
@@ -1411,23 +1423,111 @@ The probe needs `METRICS_TOKEN`. The jobs process's metrics are on `JOBS_METRICS
 
 ### The long run
 
-`deploy/tools/long_run.py` runs the whole stack for hours: stations under `chaos`, platform faults from `chaos.py`'s seeded plan, and a sample of the stack every `--sample-every-minutes`. It then settles, judges and writes `report.json` (D-198):
+`deploy/tools/long_run.py` runs the whole stack for hours. Stations run under `chaos`, platform faults come from `chaos.py`'s seeded plan, and the stack is sampled every `--sample-every-minutes` (fifteen by default). It then stops the stations' own faults, settles, judges, and **seals the run** (D-198, D-257):
 
 ```sh
 python deploy/tools/long_run.py --hours 72 --seed 4471 --out runs/long-72h --up --stations 10
 ```
 
-`--up` brings the stack up with the `sim` and `metrics` profiles. Run it under its own `--project-name`, with `API_PORT` and `GRAFANA_PORT` set, to keep it away from a stack already running.
+`--up` brings the stack up with the `sim` and `metrics` profiles. Run it under its own `--project-name`, with `API_PORT` and `GRAFANA_PORT` set, to keep it away from a stack already running. Pin `MERIDIAN_IMAGE` to a `sha-<commit>` tag, so the record names the software that ran (D-256). The Pi's own procedure is § The 72-hour acceptance run on the Pi, below.
 
-It exits 1 on any of:
-- an alert with no fault near it;
-- a container that died on its own, or is not running at the end;
-- observations still queued after settling;
-- a failed verdict.
+**A run starts fresh.** An `--out` that holds a run is refused, and so is a project whose simulator volume already holds a ledger. Either would be judged as part of this run. Use a new `--out` and `--project-name`, or `docker compose down -v`.
 
-`--fault-gap-minutes` shortens the mean time between platform faults for a rehearsal: an hour is right for three days and too rare for two hours.
+**What each sample reads:**
+- every container's state, restart count and healthcheck;
+- CPU and memory;
+- the alerts firing;
+- the upload queues;
+- the database's size and Prometheus's;
+- free space on Docker's data root;
+- the host's free memory, swap and temperature;
+- on a Raspberry Pi, whether it throttled.
 
-`--judge-only` judges a finished run again from `--out` and the stack it left standing, without re-running it: for a judgement lost to anything but the run. On a laptop, keep the host awake with the lid closed and idle sleep inhibited, or the run fails as not unattended.
+**It fails, and exits 1, on any of these:**
+- the host slept;
+- an alert fired with no fault able to cause it. The grace after a fault is ten minutes, or the alert's own `for:` and five more;
+- a platform fault outlasted an alert's `for:` and the alert never fired, such as `SchedulerUnavailable` for a five-minute `scheduler_down`;
+- a container restarted on its own, or is not running, or is unhealthy after settling;
+- observations still queued after settling. The stations' faults were stopped first, by restarting the simulator under `clean`, so what is queued is what the platform did not take;
+- memory growing faster than `--memory-slope-bound` (4 MiB/h) over the run's second half, judged once that half holds eight samples;
+- free disk under `--disk-floor-gib` (5 GiB);
+- the host throttling;
+- a failed verdict, or a run it could not seal.
+
+**Sealed.** The tool's own judgement is written as `long_run.json`. Then `meridian reliability faults --publish --run-record long_run.json` runs in a one-off API container, judges every fault and seals the ledger, the evidence, the verdicts and that record under `--datasets` (default `data/datasets`) as one fault run. `report.json` names its hash, and `logs/compose.log` keeps every service's log. `meridian report build --faults <it>` counts it as the seventy-two hour run only if all of these hold:
+- the record spans seventy-two hours;
+- its judgement passed;
+- every fault passes when judged again.
+
+Otherwise the report says *too short* or *failed*, and why.
+
+**When the tool stops early.** Under SIGTERM or SIGHUP it mends the fault it was injecting before it exits.
+- `--resume`, with the same `--out` and compose options, carries the run on from `run.json`. It mends and closes any platform fault left open, and skips what fell in the gap. The gap is recorded, the report shows it, and it does not count toward the seventy-two hours: a run with gaps needs to run longer.
+- `--judge-only` judges a finished run again from the `report.json` it kept before judging, for a judgement lost to anything but the run.
+
+`--fault-gap-minutes` shortens the mean time between platform faults for a rehearsal: an hour is right for three days and too rare for two hours. On a laptop, keep the host awake with the lid closed and idle sleep inhibited, or the run fails as not unattended.
+
+### The 72-hour acceptance run on the Pi
+
+Stage 24's last acceptance item: *the platform survives a 72-hour unattended simulation* (`docs/ACCEPTANCE.md`). It runs on the Pi that will host the deployment, by an operator, never from a test or a chat. Budget three days and a quarter, and a Pi doing nothing else.
+
+**1. Pin the software and check the host.** In the checkout at `/opt/meridian`, on the commit you mean to accept:
+
+```sh
+export MERIDIAN_IMAGE=ghcr.io/harshareddy-bathala/meridian:sha-$(git rev-parse --short=7 HEAD)
+docker compose -f deploy/docker-compose.yml --profile sim --profile metrics pull
+python3 deploy/tools/long_run.py --hours 72 --out runs/long-72h --preflight
+```
+
+The pre-flight starts nothing. It must print no `fail`:
+- **architecture:** arm64;
+- **database disk:** Docker's data root on the NVMe, looked for beneath an encrypted volume too;
+- **clock:** synchronised by NTP. A Pi has no real-time clock, and a step mid-run reads as a host that slept;
+- **free disk:** at least 20 GiB;
+- **image:** pinned to a commit, and present;
+- **compose:** 2.24.4 or later;
+- **cooling:** not throttled and under 70 °C at idle;
+- **metrics token:** `deploy/prometheus/metrics_token` readable by the Prometheus container, which runs as `nobody`. At mode 600 every scrape fails, and every platform alert fires for the whole run. Stage 24's first rehearsal found exactly that, so `chmod 644` it;
+- **fresh start:** an empty `--out`.
+
+Fix what fails before starting. A run that fails on the host's account proves nothing about the platform.
+
+**2. Start it so it outlives the session.** Use the deployment's own project name, so the nightly backup and the weekly restore drill run against it as they would in service:
+
+```sh
+loginctl enable-linger "$USER"         # once: user units survive logout
+systemd-run --user --unit meridian-long-run --same-dir --collect \
+  --setenv=MERIDIAN_IMAGE="$MERIDIAN_IMAGE" -p TimeoutStopSec=600 \
+  systemd-inhibit --what=sleep:idle --who=meridian --why="72-hour run" \
+  python3 deploy/tools/long_run.py --hours 72 --seed 4471 --out runs/long-72h \
+    --up --stations 10
+```
+
+The user needs to be in the `docker` group. `systemd-inhibit` keeps an idle Pi from suspending, which a Pi rarely does anyway. If it refuses for want of a login session, drop it and the run is no less unattended.
+
+**3. Watch it, do not touch it.**
+- `journalctl --user -u meridian-long-run -f` shows the faults as they are injected.
+- Grafana on `GRAFANA_PORT` shows the stack.
+- `runs/long-72h/samples.json` grows every fifteen minutes.
+
+Changing anything on the Pi, including the stack, during the run makes the run measure the change.
+
+**4. If it stops early.**
+- `systemctl --user stop meridian-long-run`, a lost session or a crash: the tool mends the fault it was injecting as it leaves.
+- To carry on, start the same unit with the same arguments and `--resume` in place of `--up`. The gap is recorded and shown in the report.
+- A Pi that rebooted resumes the same way. Its containers' restarts will be judged, as they should be.
+- A run that finished but whose judgement failed for the tool's own reasons: `--judge-only` again from `runs/long-72h`.
+
+**5. Afterwards.** The tool exits 0 only if the run passed and was sealed. `runs/long-72h/report.json` says why it did not, if it did not, and names the sealed fault run. Bring both to the machine that builds reports, export a snapshot that covers the run, and build:
+
+```sh
+rsync -a pi:/opt/meridian/runs/long-72h runs/
+rsync -a pi:/opt/meridian/data/datasets/faults/<hash12> data/datasets/faults/
+uv run meridian report build --snapshot <raw snapshot> --config analysis/configs/evaluation.toml.example \
+  --seed 4471 --faults data/datasets/faults/<hash12>
+```
+
+`report.md` then says *included*, with the hash, the hours, the architecture and the image. Add the run to `docs/SCALE-AND-FAULTS.md` § The long run, and in `docs/ACCEPTANCE.md` move the clause from `pending` to `run`, citing that section.
 
 ### Ground-truth faults
 

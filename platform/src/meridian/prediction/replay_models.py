@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from meridian.datasets.publish import SnapshotDirectory
+from meridian.prediction.features import require_current_features
 from meridian.prediction.lineage import config_of
 from meridian.prediction.model_config import ModelConfig
 from meridian.prediction.model_files import read_model
@@ -74,6 +75,7 @@ def check_models(
     configs: dict[str, ModelConfig] = {}
     for name in MODELLED:
         fitted = read_model(paths[name])
+        require_current_features(fitted.model)
         if fitted.model.configuration != name:
             message = (
                 f"{paths[name]} is configuration {fitted.model.configuration},"

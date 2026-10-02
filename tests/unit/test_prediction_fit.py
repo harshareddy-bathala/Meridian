@@ -40,7 +40,7 @@ from meridian.datasets.manifest import MalformedManifestError, Manifest, content
 from meridian.datasets.publish import DamagedSnapshotError, read_directory
 from meridian.prediction.configurations import CONFIGURATIONS, FALLBACK
 from meridian.prediction.examples import Example, ExampleSet, weighted
-from meridian.prediction.features import FEATURES
+from meridian.prediction.features import FEATURE_VERSION, FEATURES
 from meridian.prediction.fit import ModelFitError, fit_model, rounded
 from meridian.prediction.model_config import ModelConfig
 from meridian.prediction.model_files import MODEL_FILE, publish_model, read_model
@@ -551,6 +551,7 @@ def _document() -> dict[str, Any]:
         (lambda d: d["configured"]["scale"].__setitem__(0, 0.0), "not positive"),
         (lambda d: d["configured"].update(intercept="0"), "intercept is '0'"),
         (lambda d: d.update(min_station_history=True), "not a whole number"),
+        (lambda d: d.pop("feature_version"), "no 'feature_version'"),
     ],
 )
 def test_a_damaged_model_file_is_refused_by_name(damage: Any, refusal: str) -> None:
@@ -559,6 +560,10 @@ def test_a_damaged_model_file_is_refused_by_name(damage: Any, refusal: str) -> N
 
     with pytest.raises(MalformedModelError, match=refusal):
         parse_model(json.dumps(document).encode())
+
+
+def test_a_model_names_the_feature_code_it_was_fitted_on() -> None:
+    assert _document()["feature_version"] == FEATURE_VERSION
 
 
 def test_a_model_holding_nan_is_refused() -> None:

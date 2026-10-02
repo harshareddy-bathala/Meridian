@@ -10,9 +10,11 @@ unbegun work at 12:02:00, and ``StationOffline`` fires at 12:02:10.
 written; the verdicts reached again from it are the ones published, and a
 changed piece of evidence changes them; a run built with the fault run
 regenerates, and fails to without it; a tampered fault run is refused; and the
-72-hour run is only included when a run spans 72 hours.
+72-hour run is only included from a sealed long run's own record that spans
+72 hours and passed, with every fault passing when judged again — a short run,
+a failed one and a run without a record each say why not (D-257).
 
-Reference: docs/DECISIONS.md D-189, D-192, D-240.
+Reference: docs/DECISIONS.md D-189, D-192, D-240, D-257.
 """
 
 from __future__ import annotations
@@ -29,6 +31,11 @@ import pytest
 from meridian.cli import main
 from meridian.cli_snapshot import EXIT_CORRUPT
 from meridian.datasets.fault_runs import publish_fault_run, read_fault_run
+from meridian.datasets.long_run_record import (
+    LongRunRecord,
+    LongRunRecordError,
+    parse_long_run_record,
+)
 from meridian.reliability.fault_ledger import InjectedFault
 from meridian.reliability.fault_model import (
     Gathered,
@@ -124,13 +131,52 @@ def gathered(faults: tuple[InjectedFault, ...]) -> tuple[Gathered, ...]:
     )
 
 
-def published(root: Path, hours: float = 0.25) -> Path:
+def run_record(
+    hours: float, *failures: str, gap: tuple[float, float] | None = None
+) -> LongRunRecord:
+    """What ``deploy/tools/long_run.py`` seals of a run ``hours`` long."""
+    document = {
+        "format": "meridian-long-run/2",
+        "simulated": True,
+        "started": T0.isoformat(),
+        "ended": (T0 + timedelta(hours=hours)).isoformat(),
+        "seed": 4471,
+        "stations": 10,
+        "passed": not failures,
+        "failures": list(failures),
+        "environment": {
+            "arch": "aarch64",
+            "image_digests": ["ghcr.io/x/meridian@sha256:" + "ab" * 32],
+        },
+        "interruptions": []
+        if gap is None
+        else [
+            {
+                "from": (T0 + timedelta(hours=gap[0])).isoformat(),
+                "to": (T0 + timedelta(hours=gap[1])).isoformat(),
+            }
+        ],
+        "resources": {
+            "figures": {
+                "peak_memory_mib": {"api": 233.0},
+                "memory_slope_mib_per_hour": {"api": 0.4},
+                "database_mib": {"first": 120.0, "last": 340.0},
+            },
+            "failures": [],
+        },
+    }
+    return parse_long_run_record(json.dumps(document).encode())
+
+
+def published(
+    root: Path, hours: float = 0.25, record: LongRunRecord | None = None
+) -> Path:
     text = ledger(hours)
     found = gathered(faults_of(text))
     verdicts = [judge_gathered(one) for one in found]
     as_of = max(T0 + timedelta(hours=2), T0 + timedelta(hours=hours))
     return publish_fault_run(
-        text, found, verdicts, root=root, stamp=("0025", as_of)
+        text, found, verdicts, root=root, stamp=("0025", as_of), record=record
     ).path
 
 
@@ -260,15 +306,82 @@ def test_without_a_fault_run_the_figures_that_need_one_are_not_measured(
     assert of(found, "indicators", population="measured")
 
 
+def long_run_row(run: Path) -> dict[str, Any]:
+    from meridian.reports.fault_rows import fault_rows
+
+    found = fault_rows([read_fault_run(run)], detection_max_s=90)
+    return next(one for one in found if one["row"] == "long_run")
+
+
 def test_the_long_run_is_included_only_when_a_run_spans_72_hours(
     raw_snapshot: Any, archive_world: Any, datasets_root: Path, capsys: Any
 ) -> None:
-    long = published(datasets_root, hours=73.0)
+    long = published(datasets_root, hours=73.0, record=run_record(73.0))
     found = rows(build(datasets_root, raw_snapshot(archive_world), long, capsys=capsys))
 
     long_run = of(found, "long_run")[0]
     assert long_run["status"] == "included"
     assert long_run["hours"] >= 72
+    assert long_run["record"]["environment"]["arch"] == "aarch64"
+    report = (long.parent.parent / "reports").glob("*/report.md")
+    text = next(report).read_text("utf-8")
+    assert "72-hour run**: included" in text
+    assert "on aarch64" in text
+
+
+def test_a_run_shorter_than_72_hours_is_too_short(datasets_root: Path) -> None:
+    row = long_run_row(published(datasets_root, 2.0, run_record(2.0)))
+
+    assert (row["status"], row["hours"]) == ("too short", 2.0)
+
+
+def test_hours_the_tool_was_stopped_for_do_not_count(datasets_root: Path) -> None:
+    """Found in review: a tool dead from hour 10 to 12 left 73 hours on the clock.
+
+    The platform ran on, but nothing injected a fault or looked, so the run
+    was watched for 71 hours, and that is too short.
+    """
+    record = run_record(73.0, gap=(10.0, 12.0))
+    row = long_run_row(published(datasets_root, 73.0, record))
+
+    assert (row["status"], row["hours"], row["interrupted_hours"]) == (
+        "too short",
+        71.0,
+        2.0,
+    )
+
+
+def test_a_run_whose_own_judgement_failed_is_not_included(datasets_root: Path) -> None:
+    record = run_record(73.0, "the host slept 1 time(s)")
+    row = long_run_row(published(datasets_root, 73.0, record))
+
+    assert row["status"] == "failed"
+    assert row["reasons"] == ["the host slept 1 time(s)"]
+
+
+def test_a_fault_run_without_a_record_is_not_a_long_run(datasets_root: Path) -> None:
+    """Positive control: 73 hours of faults alone do not make the acceptance run."""
+    row = long_run_row(published(datasets_root, hours=73.0))
+
+    assert row["status"] == "not run"
+
+
+def test_a_record_that_contradicts_itself_is_refused() -> None:
+    document = json.loads(json.dumps(run_record(73.0).document))
+    document["passed"] = False
+
+    with pytest.raises(LongRunRecordError, match="passed"):
+        parse_long_run_record(json.dumps(document).encode())
+    with pytest.raises(LongRunRecordError, match="format"):
+        parse_long_run_record(b'{"format": "something-else"}')
+
+
+def test_the_record_is_sealed_with_the_run(datasets_root: Path) -> None:
+    run = read_fault_run(published(datasets_root, 73.0, run_record(73.0)))
+
+    assert run.record is not None
+    assert run.record.seed == 4471
+    assert "long_run.json" in run.directory.files
 
 
 def test_verify_finds_a_fault_run_that_moved_and_refuses_a_tampered_one(

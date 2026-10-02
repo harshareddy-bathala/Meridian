@@ -334,8 +334,11 @@ def test_a_reports_configuration_need_not_end_with_a_newline() -> None:
     assert entry.rows == 0
 
 
-@pytest.mark.parametrize("name", ["report.md", "config.toml", "figure.svg"])
+@pytest.mark.parametrize(
+    "name", ["report.md", "config.toml", "figure.svg", "long_run.json"]
+)
 def test_a_report_file_in_a_raw_snapshot_is_refused(name: str) -> None:
+    """A long run's record belongs to a fault run alone (D-257)."""
     with pytest.raises(MalformedManifestError, match="does not hold"):
         raw(files=(file_entry(name, b"x\n"),))
 

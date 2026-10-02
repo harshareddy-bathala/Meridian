@@ -71,6 +71,12 @@ export function formatWindow(startIso: string, endIso: string): string {
   return `${hhmm(start)}–${hhmm(new Date(endIso))} UTC, ${String(start.getUTCDate())} ${month}`;
 }
 
+/** "14 Sep": the day alone, for a span of days. */
+export function formatDay(iso: string): string {
+  const day = new Date(iso);
+  return `${String(day.getUTCDate())} ${MONTHS[day.getUTCMonth()] ?? ""}`;
+}
+
 /** "137.9 MHz". */
 export function formatFrequency(hz: number): string {
   return `${String(Math.round(hz / 100_000) / 10)} MHz`;

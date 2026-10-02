@@ -27,20 +27,14 @@ Reference: docs/DECISIONS.md D-182, D-183, D-184, D-185, D-192.
 from __future__ import annotations
 
 import argparse
-import io
 import json
-import sys
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
 
-from meridian.cli_snapshot import datasets_root
+from meridian.cli_reliability_faults import judge_faults, refuse, say
 from meridian.config import load_settings
-from meridian.datasets.fault_runs import publish_fault_run
-from meridian.datasets.manifest import content_sha256
-from meridian.datasets.publish import DamagedSnapshotError
 from meridian.registry.psycopg_registry import PsycopgRegistry
 from meridian.reliability.accounting import classify_settled
 from meridian.reliability.config import (
@@ -50,14 +44,6 @@ from meridian.reliability.config import (
     load_deployed_reliability_config,
     load_reliability_config,
 )
-from meridian.reliability.fault_check import gather_evidence, prometheus_alert_history
-from meridian.reliability.faults import (
-    FaultLedgerError,
-    FaultVerdict,
-    Gathered,
-    judge_gathered,
-    read_fault_ledger,
-)
 from meridian.reliability.live import read_live_report
 from meridian.reliability.report import report_lines
 from meridian.store.assignment_expiry import expire_untaken_assignments
@@ -66,13 +52,9 @@ from meridian.store.pass_classifications import (
     find_classifications_of,
 )
 from meridian.store.pool import DatabaseUnreachableError, connect_once
-from meridian.store.schema_revision import find_current_revision
 from meridian.store.stations import Connection
 
 __all__ = ["add_reliability_parser", "run_reliability"]
-
-EXIT_FAILED = 1
-"""Matches ``meridian.cli.EXIT_FAILED``."""
 
 
 def add_reliability_parser(
@@ -140,6 +122,14 @@ def add_reliability_parser(
         help="datasets root for --publish (default: $MERIDIAN_DATASETS_ROOT,"
         " else data/datasets)",
     )
+    faults.add_argument(
+        "--run-record",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="with --publish: a long run's record of itself, sealed beside the"
+        " verdicts as long_run.json (D-257)",
+    )
 
 
 def run_reliability(args: argparse.Namespace) -> int:
@@ -151,20 +141,20 @@ def run_reliability(args: argparse.Namespace) -> int:
             else load_deployed_reliability_config()
         )
     except ReliabilityConfigError as exc:
-        return _refuse(args.action, str(exc))
+        return refuse(args.action, str(exc))
     actions = {
         "sweep": _sweep,
         "classify": _classify,
         "report": _report,
         "explain": _explain,
-        "faults": _faults,
+        "faults": judge_faults,
     }
     now = datetime.now(UTC)
     try:
         with connect_once(load_settings()) as conn:
             return actions[args.action](conn, args, config, now)
     except (DatabaseUnreachableError, psycopg.Error) as exc:
-        return _refuse(args.action, f"the database did not answer: {exc}")
+        return refuse(args.action, f"the database did not answer: {exc}")
 
 
 def _sweep(
@@ -174,7 +164,7 @@ def _sweep(
     now: datetime,
 ) -> int:
     expired = expire_untaken_assignments(conn, now=now)
-    _say(f"expired {expired} scheduled assignments nobody took")
+    say(f"expired {expired} scheduled assignments nobody took")
     return 0
 
 
@@ -192,14 +182,14 @@ def _classify(
         now_utc=now,
     )
     report = classify_settled(conn, registry, now=now, config=config.classification)
-    _say(
+    say(
         f"expired {report.expired} untaken assignments; classified "
         f"{report.classified} passes settled by {report.settled_by.isoformat()}; "
         f"{report.written} rows written"
     )
     for name, count in report.by_class.items():
         if count:
-            _say(f"  {name:<32} {count}")
+            say(f"  {name:<32} {count}")
     return 0
 
 
@@ -208,7 +198,7 @@ def _report(
 ) -> int:
     report = read_live_report(conn, now=args.at or now, config=config)
     for line in report_lines(report):
-        _say(line)
+        say(line)
     return 0
 
 
@@ -220,126 +210,15 @@ def _explain(
 ) -> int:
     held = find_classifications_of(conn, args.assignment_id)
     if not held:
-        return _refuse(
+        return refuse(
             "explain",
             f"{args.assignment_id} is in no classified pass: it is not a "
             "scheduled assignment, or its window has not settled yet",
         )
     for one in held:
         for line in _explained(one):
-            _say(line)
+            say(line)
     return 0
-
-
-def _faults(
-    conn: Connection,
-    args: argparse.Namespace,
-    _config: ReliabilityConfig,
-    now: datetime,
-) -> int:
-    try:
-        # "-" so a ledger on the host can be judged inside the API's container,
-        # whose filesystem is read-only (D-206): piped, not copied in.
-        ledger = (
-            sys.stdin.read()
-            if str(args.ledger) == "-"
-            else args.ledger.read_text(encoding="utf-8")
-        )
-        faults = read_fault_ledger(io.StringIO(ledger))
-    except (OSError, FaultLedgerError) as exc:
-        return _refuse("faults", f"cannot read {args.ledger}: {exc}")
-    alerts = prometheus_alert_history(args.prometheus) if args.prometheus else None
-    try:
-        gathered = gather_evidence(conn, faults, now=now, alerts=alerts)
-    except (OSError, ValueError) as exc:
-        # A Prometheus that is restarting or slow is a refusal to judge the
-        # alerts, said as one, not a traceback with nothing printed.
-        return _refuse("faults", f"Prometheus did not answer: {exc}")
-    verdicts = tuple(judge_gathered(one) for one in gathered)
-    for verdict in verdicts:
-        for line in _judged(verdict):
-            _say(line)
-    failed = sum(not one.passed for one in verdicts)
-    _say(f"{len(verdicts)} faults judged, {failed} failed")
-    if args.json is not None:
-        args.json.write_text(
-            json.dumps([_as_json(one) for one in verdicts], indent=2) + "\n",
-            encoding="utf-8",
-        )
-    if args.publish and not _publish(conn, args, (ledger, gathered, verdicts), now):
-        return EXIT_FAILED
-    return EXIT_FAILED if failed else 0
-
-
-def _publish(
-    conn: Connection,
-    args: argparse.Namespace,
-    run: tuple[str, Sequence[Gathered], Sequence[FaultVerdict]],
-    now: datetime,
-) -> bool:
-    """Seal what was read and judged, so a report can judge it again (D-240).
-
-    Returns False, having said why, when it could not be sealed — a read-only
-    filesystem, as inside the API's container (D-206), or a clash on disk.
-    """
-    ledger, gathered, verdicts = run
-    try:
-        published = publish_fault_run(
-            ledger,
-            gathered,
-            verdicts,
-            root=datasets_root(args.root),
-            stamp=(find_current_revision(conn) or "unknown", now),
-        )
-    except (OSError, ValueError, DamagedSnapshotError) as exc:
-        _refuse("faults", f"the fault run was judged but not published: {exc}")
-        return False
-    held = "written" if published.written else "already held, identically"
-    _say(f"fault run: {published.path} ({held})")
-    _say(f"  hash               {content_sha256(published.manifest).hex()}")
-    return True
-
-
-_MARKS = {True: "pass", False: "FAIL", None: "  - "}
-
-
-def _judged(verdict: FaultVerdict) -> list[str]:
-    fault = verdict.fault
-    closed = fault.closed_at.isoformat() if fault.closed_at else "still open"
-    return [
-        f"{'ok  ' if verdict.passed else 'FAIL'} {fault.kind} on {fault.target} "
-        f"({fault.station_id or 'platform'}), {fault.opened_at.isoformat()} … {closed}",
-        *(
-            f"       {_MARKS[one.passed]}  {one.name:<18} {one.detail}"
-            for one in verdict.checks
-        ),
-    ]
-
-
-def _as_json(verdict: FaultVerdict) -> dict[str, object]:
-    fault = verdict.fault
-    return {
-        "run_id": fault.run_id,
-        # Injected, and against a station only the simulator drives: a station
-        # fault's verdict is about simulated work (rule 5). A platform fault
-        # was done to the platform itself, which is not simulated.
-        "simulated": not fault.on_platform,
-        "kind": fault.kind,
-        "target": fault.target,
-        "station_id": fault.station_id,
-        "opened_at": fault.opened_at.isoformat(),
-        "closed_at": fault.closed_at.isoformat() if fault.closed_at else None,
-        "passed": verdict.passed,
-        "checks": [
-            {
-                "name": one.name,
-                "passed": one.passed,
-                "detail": one.detail,
-                "latency_s": one.latency_s,
-            }
-            for one in verdict.checks
-        ],
-    }
 
 
 def _explained(one: StoredClassification) -> list[str]:
@@ -365,14 +244,3 @@ def _instant(text: str) -> datetime:
     if parsed.tzinfo is None:
         raise argparse.ArgumentTypeError(f"{text} has no time zone; add Z or +00:00")
     return parsed.astimezone(UTC)
-
-
-def _say(line: str) -> None:
-    print(line)  # noqa: T201 — this is a CLI; stdout is the interface
-
-
-def _refuse(action: str, reason: str) -> int:
-    print(  # noqa: T201 — this is a CLI; stderr is the interface
-        f"meridian reliability {action}: {reason}", file=sys.stderr
-    )
-    return EXIT_FAILED

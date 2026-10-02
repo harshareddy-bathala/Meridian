@@ -12,15 +12,19 @@ env:
   PYTHON_VERSION: "3.11"
   # Pinned for the same reason every image tag in deploy/ is pinned: the
   # database CI tests against and the database on the Pi should be one build.
-  TIMESCALE_IMAGE: "timescale/timescaledb:2.29.0-pg16"
+  # The uv the image builds with (deploy/Dockerfile), as security.yml pins it:
+  # a lockfile checked by one uv and installed by another is two answers.
+  UV_VERSION: "0.11.20"
+  TIMESCALE_IMAGE: "timescale/timescaledb:2.29.0-pg16@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631"
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
+          version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --dev
       - name: ruff check
@@ -96,8 +100,8 @@ jobs:
     # installs and a lockfile sync here would only be waiting.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -126,8 +130,8 @@ jobs:
       run:
         working-directory: dashboard
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           # The same release deploy/Dockerfile builds with.
           node-version: "24.21.0"
@@ -146,9 +150,10 @@ jobs:
   types:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
+          version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --dev
       - run: uv run mypy platform/src client/src simulator/src ingest/src
@@ -157,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       db:
-        image: timescale/timescaledb:2.29.0-pg16
+        image: timescale/timescaledb:2.29.0-pg16@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
         env:
           POSTGRES_USER: meridian
           POSTGRES_PASSWORD: meridian
@@ -180,9 +185,10 @@ jobs:
       # integration tests against an empty database.
       DATABASE_URL: postgresql://meridian:meridian@localhost:5432/meridian_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
+          version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --dev
 
@@ -212,21 +218,14 @@ jobs:
       - name: MSP conformance tests
         run: uv run pytest -m msp_conformance
 
-      # tests/e2e/ is wired and empty until Stage 10, so this selects nothing and
-      # pytest exits 5 ("no tests collected"). The step is here now rather than
-      # with the first e2e test, because the alternative is a suite that lands
-      # and silently never runs — which is exactly what happened to
-      # msp_conformance above until it was noticed. 5 is tolerated; every other
-      # non-zero code is a failure.
-      #
-      # This job has a database but not the compose stack, so it will need to
-      # move to the `image` job when there is something to run. Left here so the
-      # marker is exercised from the same place as the other three, and the move
-      # is a deliberate edit rather than a discovery.
+      # tests/e2e/ runs the platform in-process against this job's migrated
+      # database: a simulated station's round trip, its publication, and fifty
+      # stations through real MSP. The compose stack is the `image` job's.
+      # An empty selection is a failure (pytest exits 5): Stage 24's register
+      # cites these tests, and a suite that silently stops collecting must not
+      # pass (D-254).
       - name: End-to-end tests
-        run: |
-          set -euo pipefail
-          uv run pytest -m e2e || test $? -eq 5
+        run: uv run pytest -m e2e
 
   monitoring:
     # The alert rules, Prometheus's configuration and both Alertmanager files,
@@ -240,8 +239,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Find the images compose runs
         run: |
           set -euo pipefail
@@ -291,8 +289,7 @@ jobs:
     # Without a cap a hung step runs to GitHub's six-hour default.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Compose file is valid
         # Catches a typo in docker-compose.yml here rather than on the Pi at the
         # moment someone is trying to bring the platform up.
@@ -341,13 +338,19 @@ jobs:
         # The platform starts without a dashboard when DASHBOARD_DIR holds no
         # build (D-091), so a broken COPY in the Dockerfile would still pass the
         # health check above. The asset is fetched too: an index.html whose
-        # hashed script 404s is a blank page that answered 200.
+        # hashed script 404s is a blank page that answered 200. And it must
+        # read results as well as stations, which is Stage 24's clause "the
+        # public dashboard shows stations and results" (D-254); both routes
+        # it reads them from must answer.
         run: |
           set -euo pipefail
           curl -fsS http://localhost:8000/ > /tmp/index.html
           grep -q '<div id="root"></div>' /tmp/index.html
           script=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' /tmp/index.html)
-          curl -fsS -o /dev/null "http://localhost:8000${script}"
+          curl -fsS "http://localhost:8000${script}" > /tmp/dashboard.js
+          grep -q '/api/v1/observations' /tmp/dashboard.js
+          grep -q '/api/v1/reliability' /tmp/dashboard.js
+          curl -fsS -o /dev/null "http://localhost:8000/api/v1/observations?limit=1"
 
       - name: Every service with a healthcheck reports healthy
         # db, api, jobs, prometheus, alertmanager and grafana. A service that is
@@ -616,7 +619,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Commit subjects are Conventional Commits with a known scope

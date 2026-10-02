@@ -113,7 +113,7 @@ done
 
 ## The long run
 
-`deploy/tools/long_run.py` runs the whole compose stack under faults for hours, samples it, and judges it (D-198). The seventy-two hour run is Stage 24's acceptance item and **has not been run**; what follows is its two-hour rehearsal.
+`deploy/tools/long_run.py` runs the whole compose stack under faults for hours, samples it, and judges it (D-198). Since Stage 24 it also judges the machine's resources, resumes after its own interruption, and seals itself (D-257). The seventy-two hour run is Stage 24's acceptance item and **has not been run**. It is done on the Pi, from `OPERATIONS.md` § The 72-hour acceptance run on the Pi. What follows are its two rehearsals: Stage 21's, then Stage 24's of the sealed tool.
 
 **The rehearsal, 2026-09-30, 06:59 to 09:09 UTC**, on the laptop above:
 - ten stations under `chaos`, and seed 4471's four platform faults: the scheduler stopped for five minutes, the API paused past a station's timeout, the API restarted and the database restarted;
@@ -159,6 +159,61 @@ python deploy/tools/long_run.py --hours 2 --seed 4471 --sample-every-minutes 15 
 ```
 
 The laptop was kept awake with its lid closed (a user-level `handle-lid-switch` inhibitor) and idle sleep inhibited. A seventy-two hour run on a laptop needs both.
+
+### Stage 24's rehearsal: interrupted, resumed and sealed
+
+**2026-10-01, 11:36 to 13:46 UTC**, on the laptop above. The setup was:
+- the image built from `feat/stage-24` rebased on Stage 26 (`7069385`);
+- ten stations under `chaos`, and seed 4471's four platform faults;
+- a sample every fifteen minutes, and ten minutes to settle;
+- `SIGTERM` sent to the tool on purpose seven seconds into the API pause, then `--resume`.
+
+It is a rehearsal of the tool, not the acceptance run: two hours on an x86 laptop.
+
+| Recorded | Result |
+|---|---|
+| Faults judged | **375, none failed**: 371 station faults of ten kinds, and the four platform faults |
+| Interrupted | once. The tool unpaused the API and closed the fault at the second it was stopped, and `--resume` carried on 13 s later, skipping nothing |
+| Host asleep | none |
+| Containers | none restarted on their own, none unhealthy, all running after settling |
+| Alerts | 95 — `StationStale` 58, `StationOffline` 36, `SchedulerUnavailable` 1 |
+| False positives | **none** |
+| Owed alerts | none missed: `SchedulerUnavailable` fired for the five-minute `scheduler_down` |
+| Upload queue | empty throughout, and after the stations' faults were stopped for settling |
+| Peak memory | Grafana 258 MiB, API 247, database 114, Prometheus 86, jobs 70, simulator 39, Alertmanager 39 |
+| Memory growth | not judged: two hours is too few samples to fit, as it should be |
+| Database | 11.6 MiB at the start, 13.0 MiB at the end |
+| Sealed | fault run `28de65a16180`, with its record inside. A report built with it calls it **too short**, and names the run's machine, image and interruption. `report verify` regenerates that report identically. Built after review, when gaps stopped counting, it reads 1.778 hours watched and 0.223 hours of gap. That gap is the sealed record's, dated from 12:06 by the fault fixed below; the true gap was thirteen seconds |
+
+**The verdict, question by question.**
+
+| Question | Passed | Did not apply |
+|---|---|---|
+| `held` | 127 | 244 |
+| `detected` | 159 | 212 |
+| `no_new_work` | 169 | 202 |
+| `replanned` | 23 | 348 |
+| `no_false_miss` | 324 | 51 |
+| `declines_honoured` | 4 | 367 |
+| `recovered` | 164 | 211 |
+| `alerted` | 22 | 349 |
+
+**It found four things, each fixed before Stage 24 merged:**
+- **The first attempt measured nothing.** This laptop's `deploy/prometheus/metrics_token` was at mode 600. Prometheus runs as `nobody`, so every scrape failed and `ApiUnavailable` and `SchedulerUnavailable` fired from the first minute. The run would have failed on them as false positives, which is right. `--preflight` now checks the file can be read, and the runbook says to `chmod 644` it. The rehearsal ran from a copy of `deploy/` with its own token.
+- **The seal was refused at the end.** `data/datasets` did not exist before `up`, so Docker created it as root when it mounted it into the jobs service, and the seal, run as the operator, could not write. The tool now makes the datasets root before `up` and refuses to start if it cannot write there. The run was sealed afterwards with `--judge-only`, which is what that flag is for.
+- **`--resume` counted the faults injected before the stop as skipped,** two here. It now counts only faults its ledger never opened.
+- **`--resume` dated the gap from the last sample, thirteen minutes early.** It now dates it from the tool's last act, sample or fault.
+
+The sealed record was made before the last two fixes, so it says two faults were skipped and the gap began at 12:06. The table above gives what happened, read from the ledger.
+
+**Regenerating it** (the rehearsal's compose directory was `git archive HEAD deploy`, with a fresh `metrics_token` and an env file of the example's values on its own ports):
+
+```sh
+python deploy/tools/long_run.py --hours 2 --seed 4471 --sample-every-minutes 15 \
+    --fault-gap-minutes 20 --settle-minutes 10 --out data/long-2h-s24 \
+    --compose-file data/rehearsal/deploy/docker-compose.yml --env-file data/rehearsal.env \
+    --project-name meridian-s24 --up --stations 10 --datasets data/datasets
+```
 
 ---
 

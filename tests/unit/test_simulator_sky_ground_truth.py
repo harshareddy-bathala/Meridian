@@ -27,7 +27,7 @@ from meridian_client.observation_message import (
     ObservationResult,
     build_observation_body,
 )
-from meridian_sim.config import profile_for_station, seed_for_station
+from meridian_sim.config import profile_for_station, seed_for_pass, seed_for_station
 from meridian_sim.executor import SimulatedExecutor
 from meridian_sim.fault_notes import FaultNotes
 from meridian_sim.fault_schedule import schedule_for
@@ -41,6 +41,7 @@ from meridian_sim.faults import (
 )
 from meridian_sim.fleet_faults import FleetFaults
 from meridian_sim.ledger import FaultLedger, read_ledger
+from meridian_sim.outcomes import decide_outcome
 from meridian_sim.sky_faults import (
     ActiveSkyFault,
     Degradation,
@@ -178,6 +179,33 @@ def test_a_silence_is_named_when_the_pass_begins() -> None:
     assert executor.take_faulted() == ()
     (result,) = executor.take_completed()
     assert result.outcome == "no_signal"
+
+
+def test_a_pass_that_aborts_on_its_own_is_never_named_against_a_silence() -> None:
+    """Found by CI on Stage 24: a silence named at the start of a pass that then
+    aborted. The abort, not the silence, decided that pass (D-253), and the
+    draw is keyed on the platform's assignment id, so it showed only sometimes.
+    """
+    silence = every_fault()[3]
+    executor = SimulatedExecutor(
+        STATION_SEED, FaultState(frozenset({SATELLITE_SILENT}), (silence,)), SITE
+    )
+    aborting = next(
+        one
+        for one in (f"as_{i:05d}" for i in range(20_000))
+        if decide_outcome(
+            seed_for_pass(STATION_SEED, one),
+            assignment(one).expected_max_elevation_deg,
+        ).outcome
+        == "aborted"
+    )
+
+    executor.begin(assignment(aborting))
+    executor.end(assignment(aborting))
+
+    assert executor.take_faulted() == ()
+    (result,) = executor.take_completed()
+    assert result.outcome == "aborted"
 
 
 def test_a_fault_in_force_only_after_a_pass_began_does_not_touch_it() -> None:

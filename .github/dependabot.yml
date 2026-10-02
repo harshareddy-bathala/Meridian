@@ -1,0 +1,46 @@
+# Every dependency is pinned (D-256): Python and npm by their lockfiles, images
+# by digest, Actions by commit. A pin nobody moves goes stale, and a stale pin
+# is a known vulnerability kept on purpose, so each ecosystem is proposed for
+# update once a week, grouped so a week is one pull request each, and every one
+# of them goes through CI like any other change.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+    groups:
+      base-images:
+        patterns: ["*"]
+
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly
+    groups:
+      compose-images:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /dashboard
+    schedule:
+      interval: weekly
+    groups:
+      dashboard:
+        patterns: ["*"]

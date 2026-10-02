@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from meridian.prediction.features import FEATURE_VERSION
 from meridian.prediction.live import LiveScorer, LiveScoringError, Scored
 from meridian.prediction.score import Linear, Model, Prediction
 from meridian.scheduler import scoring
@@ -34,6 +35,7 @@ def a_scorer() -> LiveScorer:
             min_station_history=0,
             configured=LINEAR,
             fallback=None,
+            feature_version=FEATURE_VERSION,
         ),
         bytes(32),
     )

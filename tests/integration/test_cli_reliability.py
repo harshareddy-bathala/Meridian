@@ -166,3 +166,87 @@ def test_faults_publish_seals_what_it_read_so_a_report_judges_it_again(
     assert run.directory.manifest.kind == "fault_run"
     assert run.directory.manifest.counts["faults"] == 2
     assert run.directory.manifest.schema_revision != "unknown"
+
+
+def _ledger_file(tmp_path: Any) -> Any:
+    import json
+
+    stamp = AOS.isoformat().replace("+00:00", "Z")
+    closed = (AOS + timedelta(minutes=2)).isoformat().replace("+00:00", "Z")
+    lines = [
+        {"event": "open", "at": stamp},
+        {"event": "close", "at": closed},
+    ]
+    ledger = tmp_path / "faults.jsonl"
+    ledger.write_text(
+        "".join(
+            json.dumps(
+                {"ledger": 1, "run_id": "r", "kind": "api_paused"}
+                | {"target": "platform:api"}
+                | one
+            )
+            + "\n"
+            for one in lines
+        ),
+        encoding="utf-8",
+    )
+    return ledger
+
+
+def test_a_long_run_s_record_is_sealed_with_its_faults(
+    tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D-257: the tool's own judgement, under the same hash as the verdicts.
+
+    What the command prints is what ``deploy/tools/long_run.py`` reads the
+    sealed run's name and hash back from.
+    """
+    import json
+    import re
+
+    from meridian.datasets.fault_runs import read_fault_run
+
+    record = tmp_path / "long_run.json"
+    record.write_text(
+        json.dumps(
+            {
+                "format": "meridian-long-run/2",
+                "started": AOS.isoformat(),
+                "ended": (AOS + timedelta(hours=72)).isoformat(),
+                "passed": True,
+                "failures": [],
+                "seed": 4471,
+            }
+        ),
+        encoding="utf-8",
+    )
+    root = tmp_path / "datasets"
+    arguments = ["reliability", "faults", "--ledger", str(_ledger_file(tmp_path))]
+
+    main([*arguments, "--publish", "--root", str(root), "--run-record", str(record)])
+    out = capsys.readouterr().out
+
+    assert re.search(r"^fault run: \S*/([0-9a-f]{12}) ", out, re.M)
+    assert re.search(r"^\s+hash\s+([0-9a-f]{64})\s*$", out, re.M)
+    run = read_fault_run(next((root / "faults").iterdir()))
+    assert run.record is not None
+    assert (run.record.seed, run.record.hours) == (4471, 72.0)
+
+
+def test_a_record_without_publish_or_that_is_not_one_is_refused(
+    tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ledger = str(_ledger_file(tmp_path))
+    record = tmp_path / "long_run.json"
+    record.write_text('{"format": "meridian-long-run/2"}', encoding="utf-8")
+    root = str(tmp_path / "datasets")
+
+    assert (
+        main(["reliability", "faults", "--ledger", ledger, "--run-record", str(record)])
+        == 1
+    )
+    assert "give --publish" in capsys.readouterr().err
+    refused = ["--publish", "--root", root, "--run-record", str(record)]
+    assert main(["reliability", "faults", "--ledger", ledger, *refused]) == 1
+    assert "failures" in capsys.readouterr().err
+    assert not (tmp_path / "datasets" / "faults").exists()
