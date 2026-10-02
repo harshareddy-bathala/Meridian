@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { fetchPlatformHealth, type PlatformHealth } from "./health";
 import { StationDetail } from "./StationDetail";
 import { StationList } from "./StationList";
+import { snapshotClass } from "./snapshot";
+import { SnapshotNote } from "./SnapshotNote";
 import { StationMap } from "./StationMap";
 import { useHashSelection } from "./useHashSelection";
 import { useStations } from "./useStations";
@@ -22,7 +24,7 @@ function usePlatformHealth(): Load {
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
-          setLoad({ kind: "failed", reason: String(error) });
+          setLoad({ kind: "failed", reason: error instanceof Error ? error.message : String(error) });
         }
       });
     return () => {
@@ -49,13 +51,17 @@ function PlatformStatus({ load }: { load: Load }) {
 }
 
 function Stations() {
-  const { stations, fetchedAt, error } = useStations();
+  const { stations, fetchedAt, snapshot, error } = useStations();
   const [selectedId, select] = useHashSelection();
   const selected = stations?.find((station) => station.stationId === selectedId) ?? null;
   return (
     <>
-      <section aria-labelledby="stations-heading">
+      <section aria-labelledby="stations-heading" className={snapshotClass("", snapshot)}>
         <h2 id="stations-heading">Stations</h2>
+        <SnapshotNote snapshot={snapshot} what="The station list and map show">
+          {" "}
+          Liveness and heartbeat ages are as of then.
+        </SnapshotNote>
         {error !== null && (
           <p role="alert">
             The station directory could not be refreshed: {error}

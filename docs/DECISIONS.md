@@ -5955,6 +5955,35 @@ The front keeps a copy only of what passed through it (D-282). Left to visitors,
 
 ---
 
+## D-284 — The dashboard says, in words, when a view is a snapshot and how old it is
+
+**2026-10-02 · accepted** · *`dashboard/src/{snapshot,api,health,useStations,useStationDetail,useStationCapture,SnapshotNote,App,StationDetail}.ts(x)`, `app.css`; `dashboard/src/snapshot.test.ts`; Stage 33; `EVALUATION.md` §12.2*
+
+§12.2 fails a dashboard that "shows figures that look live when they are not", and calls that the serious failure. The front now serves kept copies (D-282) and keeps one of every view (D-283). The dashboard has to tell them apart from the platform's answers, and say so on the page.
+
+**Each view says it for itself.** Every refresh runs its requests through a watch, which reads `Meridian-Cache` and `Date` from each answer. A view built from any `STALE` answer is a snapshot, as old as the oldest copy it used. The station list and map, and the station panel, each show a line when they are one:
+
+> **Not live.** The platform is not answering. This panel shows a snapshot taken 15:08 UTC, 53 s ago.
+
+- **The line is in words,** with a ruled margin beside the view, not a colour alone. It has to survive a screenshot, a screen reader and a greyscale print, as the simulated badge does (rule 5). It has its own colour token, `--snapshot`, because "stale" already means a station's liveness.
+- **The panel takes the older of its two sources:** the detail refresh, every thirty seconds, and the capture rate, every five minutes.
+- **The station list's liveness is computed as of the snapshot,** not as of now, and the line says so: "Liveness and heartbeat ages are as of then." A station that was online in the copy is not called offline by the clock of a reader who cannot see the platform.
+- **A watch lives for one refresh.** The first refresh after the platform answers again clears the line, and a copy from the outage is never reported after it.
+
+**Nothing waits on a dead upstream.** Every request has a twenty-second timeout, joined to the view's own abort signal. The front gives up on the api in two seconds (D-282), so this is the bound for the case where the front itself has gone.
+
+**A view the front kept no copy of says that, plainly.** The front answers it with its own `504` page, which is not JSON. `getJson` now reports it as "the platform did not answer (HTTP 504), and no copy of it was kept", not as a JSON syntax error. `/healthz` is never kept, so the header reads "the platform did not answer". A platform refusal in D-084's envelope is still reported in the platform's words.
+
+**Seen in a browser,** on a local stack through the front, with three simulated stations:
+- with the api stopped, both views carried the line and the margin, and the header said the platform did not answer;
+- with the api started again, the next refresh cleared both, and the stations read `Stale`, which they then were, having missed heartbeats during the outage.
+
+*Rejected: one banner for the whole page.* Views refresh on their own timers. A single banner would be either cleared by the first live answer while another view still showed a copy, or kept up by a copy no longer on screen.
+
+*Rejected: computing ages in a snapshot from now.* A station's liveness is the platform's judgement at the moment it answered. Recomputing it on the reader's clock would invent a judgement the platform never made.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

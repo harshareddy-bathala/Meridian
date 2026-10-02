@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { fetchProfiles, type StationProfiles } from "./profiles";
 import { fetchRecentReceptions, type Reception } from "./receptions";
+import { type Snapshot, watchSnapshots } from "./snapshot";
 import { fetchUptime, type StationUptime } from "./uptime";
 import {
   fetchLatestHeartbeat,
@@ -21,6 +22,8 @@ export interface StationDetailState {
   uptime: StationUptime | null;
   /** Undefined while loading; null for the whole network or when the read failed. */
   receptions: Reception[] | null | undefined;
+  /** Set when anything above is the front's kept copy rather than the platform's answer. */
+  snapshot: Snapshot | null;
   error: string | null;
 }
 
@@ -30,6 +33,7 @@ const LOADING: StationDetailState = {
   profiles: null,
   uptime: null,
   receptions: undefined,
+  snapshot: null,
   error: null,
 };
 
@@ -42,8 +46,9 @@ export function useStationDetail(stationId: string | null): StationDetailState {
 
   useEffect(() => {
     const controller = new AbortController();
-    const fetcher = (url: string, init: { signal: AbortSignal }) => fetch(url, init);
     const refresh = () => {
+      const watch = watchSnapshots();
+      const { fetcher } = watch;
       Promise.all([
         stationId === null ? Promise.resolve(null) : fetchLatestHeartbeat(fetcher, stationId, controller.signal),
         fetchUpcomingAssignments(fetcher, stationId, controller.signal),
@@ -62,7 +67,15 @@ export function useStationDetail(stationId: string | null): StationDetailState {
         .then(([heartbeat, assignments, profiles, uptime, receptions]) => {
           setState({
             key: stationId,
-            value: { heartbeat, assignments, profiles, uptime, receptions, error: null },
+            value: {
+              heartbeat,
+              assignments,
+              profiles,
+              uptime,
+              receptions,
+              snapshot: watch.snapshot(),
+              error: null,
+            },
           });
         })
         .catch((error: unknown) => {

@@ -99,6 +99,8 @@ compose stop api        # then the same curl: STALE, and the Date the api gave i
 compose start api
 ```
 
+**The dashboard says when it is showing a copy** (D-284): each view drawn from one carries a "Not live" line with the time the platform made it and its age, and clears it on the first refresh after the platform answers. A view nobody warmed says the platform did not answer and no copy was kept.
+
 **`front-warm` keeps a copy of every view**, not only of the views someone opened (D-283). Every `FRONT_WARM_INTERVAL_S`, five minutes by default, it asks the front for the page, its assets and each route in `deploy/front/snapshot-routes.txt` for every station, and prints one line:
 
 ```bash
