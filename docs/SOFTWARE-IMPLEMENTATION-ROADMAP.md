@@ -48,6 +48,35 @@ flowchart TD
 
 *Snapshot taken 2026-10-01. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
+**Stage 24's software is built** (2026-10-01): everything but the run it ends with. **The seventy-two hour run is next, on the Pi**, by an operator, from `docs/OPERATIONS.md` § The 72-hour acceptance run on the Pi. Stage 26 merged first; Stages 27 to 30 are the rest of the post-reception path, and Stage 27 waits on the review of the fault specification that D-105 requires. Its decisions are D-254 through D-257, and it added no migration.
+- **Software-complete is a register.** `docs/ACCEPTANCE.md` quotes all forty clauses with each one's status and evidence. `tests/unit/test_acceptance_gate.py` fails on a clause missing, reworded or repeated, on a cited test, CI step or section that does not exist, and on a status its evidence does not support (D-254). It is the first thing to read for "is it done":
+  - 35 clauses are proven, Stage 26's verdict among them, though SC-7 is *not measured* until receptions are rated;
+  - the 72-hour run is pending on the Pi;
+  - four post-reception clauses are pending on Stages 27 to 30.
+- **What was true only by construction is now asserted** (D-254, D-255):
+  - the oracle cannot be reached from the live path;
+  - the shuffle ban covers the whole platform;
+  - feature code has a version, `features-1`, written into every model, and a model is scored only by the code it was fitted on;
+  - `invite revoke` and `/healthz` are tested;
+  - every estimate in a report carries its interval and its count.
+- **Every image is pinned by digest and every Action by commit,** with Dependabot to move them and a test that refuses a tag (D-256).
+- **The dashboard shows results:** a station's recent receptions and its capture rate with interval and count, simulated ones badged.
+- **The 72-hour run judges its resources, survives its own tool and seals itself** (D-257):
+  - memory growth, disk, health, throttling, and alerts owed by long platform faults;
+  - the stations' faults stopped before settling;
+  - `run.json`, `--resume` and a mend on SIGTERM;
+  - `--preflight` for the Pi;
+  - a fault run carrying the run's own record, which `report build` counts only if it spans seventy-two hours and passed.
+- **Found on the way, each fixed:**
+  - SC-1, SC-2 and the scheduling gains stated intervals without their counts;
+  - the long-run tool crashed on a command the host lacked;
+  - `report build` counted any fault run spanning seventy-two hours as the long run, passed or not;
+  - CI's end-to-end step accepted an empty selection.
+- **Not built, or not yet shown:**
+  - **the seventy-two hour run itself;**
+  - `report-7` names both this stage's counts and Stage 26's SC-7, one method, as D-264 asks;
+  - a network-wide results view and the loss budget on the dashboard.
+
 **Stage 26's software is built** (2026-10-01). It settles D-106: "usable" is a person's rating of the decoded product, made blind to the verdict (D-260). Its decisions are D-260 through D-264, `docs/OPERATIONS.md` § Reception verdicts is its runbook, and its migrations are `0027` and `0028`. Stage 24 is being built beside it; Stage 27 now waits on the review of Stage 25's fault specification (D-105), not on this stage.
 - **The completion gate passes, in two halves.** *Every measured reception carries a versioned verdict, and SC-7's report — Brier score against the base rate, reliability diagram and segment calibration — regenerates from a snapshot, a configuration and a seed.*
   - `tests/integration/test_verdict_gate.py` stores 150 receptions and rates the decoded ones. It exports a snapshot, fits the verdict from it and applies it. Every closed, scheduled measured reception then has a verdict with the model's method. A simulated one has one too, labelled, and never reached the fit. A removed verdict is the positive control.

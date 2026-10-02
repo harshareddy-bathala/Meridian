@@ -18,11 +18,12 @@ A clause cannot pass by being left out, and evidence cannot quietly stop existin
 - **run** — a run by hand whose transcript is recorded where the row says.
 - **pending — Stage N** — not yet true. The stage named owes it.
 
-**What is pending, and why.** As of 2026-10-01:
+**Where it stands.** As of 2026-10-01, 35 of the 40 clauses are proven. Stage 26's verdict is among them, though its SC-7 is *not measured* until station 001's receptions are rated (D-260). Five are pending:
 
-- **The seventy-two hour run** is done on the Pi, by an operator, from the runbook. It is never started from a test.
-- **Five of the six post-reception clauses** belong to Stages 26 to 30. Stage 26 waits on D-106, what "usable" means.
-- **Every other pending row is Stage 24's own,** and is closed by this stage's later changes.
+- **The seventy-two hour run.** It is done on the Pi by an operator, from `OPERATIONS.md § The 72-hour acceptance run on the Pi`, and is never started from a test. Its tool, its seal and the report's reading of it are all proven. When the run passes, its row becomes `run`, citing `SCALE-AND-FAULTS.md § The long run`.
+- **Four of the six post-reception clauses.** These belong to Stages 27 to 30. Stage 27 waits on the review of the fault specification that D-105 requires.
+
+The project is software-complete when no row is pending.
 
 Evidence is cited as `tests/<path>::<test>`, `ci.yml › <job> › <step>`, `<DOC>.md § <section>`, or a path in the repository.
 
@@ -84,7 +85,7 @@ Evidence is cited as `tests/<path>::<test>`, `ci.yml › <job> › <step>`, `<DO
 
 | Clause | Status | Evidence |
 |---|---|---|
-| every measured reception carries a versioned, calibrated verdict | pending — Stage 26 | Waits on D-106 |
+| every measured reception carries a versioned, calibrated verdict | proven | Every closed, scheduled measured reception holds a verdict naming its model's method, scored by a Platt-calibrated model: `tests/integration/test_verdict_gate.py::test_every_measured_reception_carries_a_versioned_verdict`. SC-7, how well calibrated, is built and verified through `meridian report`: `tests/unit/test_report_verdict.py::test_sc7_is_measured_and_drawn`; `tests/unit/test_report_verdict.py::test_the_report_and_figures_regenerate_from_the_results`. **SC-7 is *not measured* until receptions are rated** (D-260): `tests/unit/test_report_verdict.py::test_without_dates_sc7_is_not_measured`; `OPERATIONS.md § Reception verdicts` |
 | every loss has a diagnosed cause or says undetermined | pending — Stage 27 | Its ground truth is built: `SCALE-AND-FAULTS.md § Ground-truth faults` |
 | receive-chain warnings precede failure on injected degradation | pending — Stage 28 | The degradation it is scored on is built: `tests/unit/test_simulator_sky_faults.py::test_every_fault_is_reproducible_from_its_seed` |
 | owner reports are delivered and regenerate to their recorded hash | pending — Stage 29 | |

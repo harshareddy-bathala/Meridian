@@ -71,7 +71,12 @@ def _resources(figures: Mapping[str, object]) -> list[str]:
     lines = [
         "Peak memory: "
         + (
-            ", ".join(f"{name} {cell(peaks[name])} MiB" for name in sorted(peaks))
+            ", ".join(
+                f"{name} {cell(peaks[name])} MiB"
+                for name in sorted(peaks)
+                # A one-shot service that had finished before any sample used none.
+                if peaks[name]
+            )
             or "—"
         )
         + ". Growth over the second half: "

@@ -5614,7 +5614,13 @@ Each alert's `for:` also sets its false-positive grace: ten minutes, or the wait
 - an `--out` or a simulator volume holding an earlier run is refused;
 - SIGTERM and SIGHUP leave through the injector's mend;
 - `--resume` mends and closes what was left open, skips what fell in the gap and records the gap;
-- the report is written before judging, so `--judge-only` always has one.
+- the report is written before judging, so `--judge-only` always has one;
+- `--preflight` asks the Pi, before anything starts, the questions that would otherwise fail the run on the host's account: architecture, the database's disk, the clock, free disk, a pinned image, Compose, cooling, and a fresh `--out`.
+
+**Found by the rehearsal**, and fixed:
+- **an unreadable metrics token.** At mode 600, Prometheus, which runs as `nobody`, cannot read `deploy/prometheus/metrics_token`, and every platform alert fires for the whole run. `--preflight` checks it.
+- **an unwritable datasets root.** Docker creates a bind mount's missing source as root, so the seal, run as the operator, was refused after the hours had run. The tool makes the root before `up` and refuses to start without write access.
+- **the gap and the skips.** A gap is dated from the tool's last act, and only faults the ledger never opened count as skipped.
 
 *A gap is recorded, not failed.* The platform ran on through it, and every fault injected is still judged from the platform's own records. A reader sees the gap in the report.
 
@@ -5956,6 +5962,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the dashboard shows results | `dashboard/src/{receptions,reliability,StationDetail,useStationDetail,format}.ts(x)`, `app.css`, and their tests; `.github/workflows/ci.yml` (the image job's dashboard step); `SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 11's later views |
 | D-257 the 72-hour run's resources, resume and seal | `deploy/tools/{long_run,long_run_watch,long_run_state}.py`; `meridian/datasets/{long_run_record,fault_runs,manifest_rules}.py`; `meridian/{cli_reliability,cli_reliability_faults}.py`; `meridian/reports/{fault_rows,render_reliability,render_long_run}.py`; `OPERATIONS.md` § The long run; `tests/unit/{test_long_run_watch,test_report_faults,test_datasets_manifest,test_datasets_boundaries}.py`; `tests/integration/test_cli_reliability.py` |
 | — the amended entries | D-198, whose run now seals itself and judges its resources; D-240, whose long-run row now needs a sealed, passed record |
+| — the Pi's run, prepared | `deploy/tools/long_run_preflight.py` (`--preflight`); `OPERATIONS.md` § The 72-hour acceptance run on the Pi; `SCALE-AND-FAULTS.md` § The long run, the Stage 24 rehearsal; `docs/ACCEPTANCE.md`; `SOFTWARE-IMPLEMENTATION-ROADMAP.md` "Where the build has got to" |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

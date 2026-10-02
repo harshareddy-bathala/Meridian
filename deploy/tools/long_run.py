@@ -69,6 +69,7 @@ from pathlib import Path
 
 from chaos import FAULTS, Effects, Planned, append, inject, plan
 from compose_db import Compose, ToolError, add_compose_arguments, compose_from
+from long_run_preflight import preflight
 from long_run_state import (
     PLATFORM_LEDGER,
     REPORT_FILE,
@@ -384,9 +385,14 @@ def real_host() -> Host:
     """Commands on this machine, real waiting, the wall clock."""
 
     def run(command: list[str], stdin: str | None) -> tuple[int, str]:
-        result = subprocess.run(
-            command, input=stdin, text=True, capture_output=True, check=False
-        )
+        try:
+            result = subprocess.run(
+                command, input=stdin, text=True, capture_output=True, check=False
+            )
+        except FileNotFoundError:
+            # As a shell says it: a command this host lacks is an answer, not a
+            # crash — `vcgencmd` exists only on a Pi, `timedatectl` only with systemd.
+            return 127, f"{command[0]}: command not found"
         # Standard output alone when it worked: `compose run` narrates on
         # stderr, and its narration must not become part of a ledger. Both
         # when it failed, so the error says why.
@@ -593,14 +599,12 @@ def run_long(args: argparse.Namespace, host: Host) -> dict[str, object]:
         sleep=waiter.sleep,
         now=host.now,
     )
-    skipped = 0
     for at_s, kind, fault in timeline(
         faults, state.hours, state.sample_every_minutes * 60
     ):
         if at_s < resumed_at_s:
             # What fell while the tool was stopped did not happen; it is not
             # done late, which would crowd it against what comes next.
-            skipped += kind == "fault"
             continue
         waiter.until(started + timedelta(seconds=at_s))
         if kind == "fault" and fault is not None:
@@ -625,9 +629,10 @@ def run_long(args: argparse.Namespace, host: Host) -> dict[str, object]:
     report = _report(state, started, ended, samples, settled)
     report["fleet_stopped"] = host.now().isoformat()
     report["station_faults_stopped_at_end"] = stopped_faults
+    planned = len([one for one in faults if one.at_s < state.hours * 3600])
     report["faults_injected"] = {
-        "platform": len([one for one in faults if one.at_s < state.hours * 3600]),
-        "skipped_while_interrupted": skipped,
+        "platform": planned,
+        "skipped_while_interrupted": max(0, planned - opened(platform_ledger)),
     }
     # Kept before judging: a judgement that fails can be had again with
     # --judge-only, from this, without running the hours again.
@@ -637,7 +642,7 @@ def run_long(args: argparse.Namespace, host: Host) -> dict[str, object]:
 
 def _begin(args: argparse.Namespace, compose: Compose, host: Host) -> RunState:
     """Refuse a run that is not fresh, bring the stack up, and record the start."""
-    refused = refuse_taken(args.out)
+    refused = refuse_taken(args.out) or unwritable(args.datasets)
     if refused:
         raise ToolError(refused)
     if args.up:
@@ -672,6 +677,27 @@ def _begin(args: argparse.Namespace, compose: Compose, host: Host) -> RunState:
     return state
 
 
+def unwritable(datasets: Path) -> str | None:
+    """Why the run could not be sealed under ``datasets``, or None if it can.
+
+    Made here, before `up`, and checked: a bind mount whose source is missing
+    is created by Docker as root, and the seal, which runs as this user,
+    would then be refused at the end of three days. Stage 24's rehearsal
+    found it so.
+    """
+    try:
+        datasets.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return f"the datasets root {datasets} cannot be made: {exc}"
+    if not os.access(datasets, os.W_OK):
+        return (
+            f"the datasets root {datasets} is not writable by this user, so the run"
+            " could not be sealed: Docker makes a missing bind mount as root."
+            " Make it as yourself before the stack first starts"
+        )
+    return None
+
+
 def _resume(compose: Compose, host: Host, out: Path) -> RunState:
     """Carry a run on: mend what its tool left broken, and record the gap."""
     try:
@@ -686,7 +712,8 @@ def _resume(compose: Compose, host: Host, out: Path) -> RunState:
             _step(host, compose.command(*mends))
         append(ledger, restart_close(opened, host.now()))
     taken = _read_samples(out)
-    since = taken[-1].at if taken else state.started
+    acted = [taken[-1].at if taken else state.started, *_instants(text)]
+    since = max(acted, key=datetime.fromisoformat)
     state.interruptions.append({"from": since, "to": host.now().isoformat()})
     write_state(out, state)
     return state
@@ -951,6 +978,23 @@ def _merged_ledger(
     return merged
 
 
+def opened(ledger: Path) -> int:
+    """How many platform faults the run opened, across every resume."""
+    if not ledger.exists():
+        return 0
+    rows = [json.loads(one) for one in ledger.read_text("utf-8").splitlines() if one]
+    return sum(one["event"] == "open" for one in rows)
+
+
+def _instants(ledger: str) -> list[str]:
+    """Every instant a ledger records, as ISO text a datetime reads."""
+    return [
+        str(json.loads(one)["at"]).replace("Z", "+00:00")
+        for one in ledger.splitlines()
+        if one.strip()
+    ]
+
+
 def _ledger_command(compose: Compose) -> list[str]:
     """Print the simulator's ledger from its volume, whether or not it runs."""
     return compose.command(
@@ -1046,6 +1090,11 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
         help="carry on a run in --out whose tool stopped, from its run.json",
     )
     again.add_argument(
+        "--preflight",
+        action="store_true",
+        help="ask whether this host is ready for the run, and start nothing",
+    )
+    again.add_argument(
         "--judge-only",
         action="store_true",
         help="judge a finished run again from --out and the stack it left up",
@@ -1065,6 +1114,26 @@ def _judge_again(args: argparse.Namespace) -> dict[str, object]:
     )
 
 
+def _preflight(args: argparse.Namespace, host: Host) -> int:
+    """``--preflight``: each question, its answer, and 1 if any failed."""
+    compose = compose_from(args)
+    status, config = host.run(compose.command("config", "--format", "json"), None)
+    image_ref = None
+    if status == 0:
+        services = json.loads(config).get("services", {})
+        image_ref = services.get("api", {}).get("image")
+    checks = preflight(
+        lambda command: host.run(command, None),
+        args.out,
+        image_ref,
+        args.disk_floor_gib,
+        Path(args.compose_file).parent / "prometheus" / "metrics_token",
+    )
+    for one in checks:
+        print(f"{one.status:<5} {one.name:<14} {one.detail}")
+    return 1 if any(one.status == "fail" for one in checks) else 0
+
+
 def _stopped(signum: int, _frame: object) -> None:
     """Leave by an exception, so a fault being injected is mended on the way."""
     raise SystemExit(128 + signum)
@@ -1072,6 +1141,8 @@ def _stopped(signum: int, _frame: object) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _arguments(argv)
+    if args.preflight:
+        return _preflight(args, real_host())
     if args.up:
         os.environ.setdefault("SIMULATOR_SCENARIO", "chaos")
         os.environ.setdefault("SIMULATOR_STATION_COUNT", str(args.stations))

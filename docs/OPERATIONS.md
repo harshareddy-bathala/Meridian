@@ -1467,6 +1467,68 @@ Otherwise the report says *too short* or *failed*, and why.
 
 `--fault-gap-minutes` shortens the mean time between platform faults for a rehearsal: an hour is right for three days and too rare for two hours. On a laptop, keep the host awake with the lid closed and idle sleep inhibited, or the run fails as not unattended.
 
+### The 72-hour acceptance run on the Pi
+
+Stage 24's last acceptance item: *the platform survives a 72-hour unattended simulation* (`docs/ACCEPTANCE.md`). It runs on the Pi that will host the deployment, by an operator, never from a test or a chat. Budget three days and a quarter, and a Pi doing nothing else.
+
+**1. Pin the software and check the host.** In the checkout at `/opt/meridian`, on the commit you mean to accept:
+
+```sh
+export MERIDIAN_IMAGE=ghcr.io/harshareddy-bathala/meridian:sha-$(git rev-parse --short=7 HEAD)
+docker compose -f deploy/docker-compose.yml --profile sim --profile metrics pull
+python3 deploy/tools/long_run.py --hours 72 --out runs/long-72h --preflight
+```
+
+The pre-flight starts nothing. It must print no `fail`:
+- **architecture:** arm64;
+- **database disk:** Docker's data root on the NVMe, looked for beneath an encrypted volume too;
+- **clock:** synchronised by NTP. A Pi has no real-time clock, and a step mid-run reads as a host that slept;
+- **free disk:** at least 20 GiB;
+- **image:** pinned to a commit, and present;
+- **compose:** 2.24.4 or later;
+- **cooling:** not throttled and under 70 °C at idle;
+- **metrics token:** `deploy/prometheus/metrics_token` readable by the Prometheus container, which runs as `nobody`. At mode 600 every scrape fails, and every platform alert fires for the whole run. Stage 24's first rehearsal found exactly that, so `chmod 644` it;
+- **fresh start:** an empty `--out`.
+
+Fix what fails before starting. A run that fails on the host's account proves nothing about the platform.
+
+**2. Start it so it outlives the session.** Use the deployment's own project name, so the nightly backup and the weekly restore drill run against it as they would in service:
+
+```sh
+loginctl enable-linger "$USER"         # once: user units survive logout
+systemd-run --user --unit meridian-long-run --same-dir --collect \
+  --setenv=MERIDIAN_IMAGE="$MERIDIAN_IMAGE" -p TimeoutStopSec=600 \
+  systemd-inhibit --what=sleep:idle --who=meridian --why="72-hour run" \
+  python3 deploy/tools/long_run.py --hours 72 --seed 4471 --out runs/long-72h \
+    --up --stations 10
+```
+
+The user needs to be in the `docker` group. `systemd-inhibit` keeps an idle Pi from suspending, which a Pi rarely does anyway. If it refuses for want of a login session, drop it and the run is no less unattended.
+
+**3. Watch it, do not touch it.**
+- `journalctl --user -u meridian-long-run -f` shows the faults as they are injected.
+- Grafana on `GRAFANA_PORT` shows the stack.
+- `runs/long-72h/samples.json` grows every fifteen minutes.
+
+Changing anything on the Pi, including the stack, during the run makes the run measure the change.
+
+**4. If it stops early.**
+- `systemctl --user stop meridian-long-run`, a lost session or a crash: the tool mends the fault it was injecting as it leaves.
+- To carry on, start the same unit with the same arguments and `--resume` in place of `--up`. The gap is recorded and shown in the report.
+- A Pi that rebooted resumes the same way. Its containers' restarts will be judged, as they should be.
+- A run that finished but whose judgement failed for the tool's own reasons: `--judge-only` again from `runs/long-72h`.
+
+**5. Afterwards.** The tool exits 0 only if the run passed and was sealed. `runs/long-72h/report.json` says why it did not, if it did not, and names the sealed fault run. Bring both to the machine that builds reports, export a snapshot that covers the run, and build:
+
+```sh
+rsync -a pi:/opt/meridian/runs/long-72h runs/
+rsync -a pi:/opt/meridian/data/datasets/faults/<hash12> data/datasets/faults/
+uv run meridian report build --snapshot <raw snapshot> --config analysis/configs/evaluation.toml.example \
+  --seed 4471 --faults data/datasets/faults/<hash12>
+```
+
+`report.md` then says *included*, with the hash, the hours, the architecture and the image. Add the run to `docs/SCALE-AND-FAULTS.md` § The long run, and in `docs/ACCEPTANCE.md` move the clause from `pending` to `run`, citing that section.
+
 ### Ground-truth faults
 
 Stage 25's four faults change what a station *measures*, not whether it can reach the platform. They are the ground truth Stage 27's diagnosis and Stage 28's health watch will be scored against (D-253). Their effects are specified in `docs/SCALE-AND-FAULTS.md` § Ground-truth faults.

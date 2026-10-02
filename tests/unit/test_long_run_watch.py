@@ -24,7 +24,14 @@ import pytest
 TOOLS = Path(__file__).resolve().parents[2] / "deploy/tools"
 T0 = datetime(2026, 9, 29, 12, 0, tzinfo=UTC)
 HOUR = timedelta(hours=1)
-MODULES = ("long_run", "long_run_watch", "long_run_state", "chaos", "compose_db")
+MODULES = (
+    "long_run",
+    "long_run_watch",
+    "long_run_state",
+    "long_run_preflight",
+    "chaos",
+    "compose_db",
+)
 
 
 @pytest.fixture(scope="module")
@@ -41,6 +48,7 @@ def tools() -> Iterator[SimpleNamespace]:
             run=module,
             watch=sys.modules["long_run_watch"],
             state=sys.modules["long_run_state"],
+            preflight=sys.modules["long_run_preflight"],
             compose=sys.modules["compose_db"],
         )
     finally:
@@ -343,9 +351,10 @@ def test_resuming_mends_and_closes_what_the_stopped_tool_left_open(
         "api_paused",
         {"ended": "restart"},
     )
-    assert state.interruptions == [
-        {"from": T0.isoformat(), "to": (T0 + 2 * HOUR).isoformat()}
-    ]
+    # The gap runs from the tool's last act, the pause it opened, not from
+    # its last sample: what it did after sampling was still the run.
+    gap = {"from": (T0 + HOUR).isoformat(), "to": (T0 + 2 * HOUR).isoformat()}
+    assert state.interruptions == [gap]
 
 
 def test_there_is_nothing_to_resume_without_a_run(
@@ -473,10 +482,129 @@ def test_a_project_holding_an_earlier_ledger_is_refused_before_anything_starts(
     stack.up = True
     host = tools.run.Host(run=stack.run, sleep=stack.sleep, now=stack.now)
     args = tools.run._arguments(
-        ["--hours", "1", "--out", str(tmp_path / "run"), "--up"]
+        [
+            *("--hours", "1", "--out", str(tmp_path / "run"), "--up"),
+            *("--datasets", str(tmp_path / "datasets")),
+        ]
     )
 
     with pytest.raises(tools.compose.ToolError, match="already holds a fault ledger"):
         tools.run.run_long(args, host)
 
     assert not any("up" in one for one in stack.commands)
+
+
+# --- before the run: is this host ready? -------------------------------------------
+
+
+def statuses(checks: list[object]) -> list[str]:
+    return [one.status for one in checks]  # type: ignore[attr-defined]
+
+
+def test_a_pi_on_its_nvme_with_a_pinned_image_is_ready(tools: SimpleNamespace) -> None:
+    check = tools.preflight
+    mounts = (
+        "/dev/mmcblk0p2 / ext4 rw 0 0\n/dev/nvme0n1p1 /var/lib/docker ext4 rw 0 0\n"
+    )
+    source = check.mount_source(mounts, Path("/var/lib/docker"))
+    pinned = "ghcr.io/x/meridian:sha-4181c8c"
+
+    found = [
+        check.architecture("aarch64"),
+        check.database_disk(source, "aarch64"),
+        check.clock("yes\n"),
+        check.free_disk(120.0, 5.0),
+        check.image(pinned, present=True),
+        check.compose("2.29.1"),
+        check.cooling("throttled=0x0\n", "48312\n"),
+    ]
+
+    assert source == "/dev/nvme0n1p1"
+    assert statuses(found) == ["pass"] * 7
+
+
+@pytest.mark.parametrize(
+    ("which", "why"),
+    [
+        ("disk", "an SD card under the database"),
+        ("clock", "a clock NTP has not set"),
+        ("room", "too little free disk"),
+        ("main", "the image is :main, which names no commit"),
+        ("absent", "a pinned image that is neither here nor pullable"),
+        ("compose", "a Compose too old for !reset"),
+        ("throttled", "a Pi already throttling"),
+        ("hot", "a Pi already hot"),
+    ],
+)
+def test_each_way_a_host_is_not_ready_fails(
+    tools: SimpleNamespace, which: str, why: str
+) -> None:
+    check = tools.preflight
+    failing = {
+        "disk": lambda: check.database_disk("/dev/mmcblk0p2", "aarch64"),
+        "clock": lambda: check.clock("no"),
+        "room": lambda: check.free_disk(12.0, 5.0),
+        "main": lambda: check.image("ghcr.io/x/meridian:main", present=True),
+        "absent": lambda: check.image("ghcr.io/x/meridian:sha-4181c8c", present=False),
+        "compose": lambda: check.compose("2.20.2"),
+        "throttled": lambda: check.cooling("throttled=0x4", "50000"),
+        "hot": lambda: check.cooling("throttled=0x0", "74000"),
+    }
+
+    assert failing[which]().status == "fail", why
+
+
+def test_a_laptop_is_a_rehearsal_not_a_failure(tools: SimpleNamespace) -> None:
+    check = tools.preflight
+
+    assert check.architecture("x86_64").status == "warn"
+    assert check.database_disk("/dev/sda2", "x86_64").status == "warn"
+    assert check.cooling(None, None).status == "skip"
+
+
+def test_a_metrics_token_prometheus_cannot_read_fails(
+    tools: SimpleNamespace, tmp_path: Path
+) -> None:
+    """Found by Stage 24's rehearsal: at mode 600 every scrape failed all run."""
+    token = tmp_path / "metrics_token"
+    token.write_text("a-token\n", "utf-8")
+
+    token.chmod(0o600)
+    assert tools.preflight.metrics_token(token).status == "fail"
+    token.chmod(0o644)
+    assert tools.preflight.metrics_token(token).status == "pass"
+    assert tools.preflight.metrics_token(tmp_path / "absent").status == "fail"
+
+
+def test_a_datasets_root_the_seal_cannot_write_is_refused_before_anything_starts(
+    tools: SimpleNamespace, tmp_path: Path
+) -> None:
+    """Found by Stage 24's rehearsal: Docker made it as root, and the seal failed."""
+    made = tmp_path / "datasets"
+    assert tools.run.unwritable(made) is None
+    assert made.is_dir()
+
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o555)
+    try:
+        assert "not writable" in tools.run.unwritable(locked)
+    finally:
+        locked.chmod(0o755)
+
+
+def test_only_faults_the_ledger_never_opened_count_as_skipped(
+    tools: SimpleNamespace, tmp_path: Path
+) -> None:
+    """Found in the rehearsal: faults done before the stop were counted skipped."""
+    chaos = sys.modules["chaos"]
+    ledger = tmp_path / "platform-faults.jsonl"
+    ledger.write_text(
+        chaos.ledger_line("open", "long-run", "scheduler_down", T0)
+        + chaos.ledger_line("close", "long-run", "scheduler_down", T0 + HOUR)
+        + chaos.ledger_line("open", "long-run", "api_paused", T0 + 2 * HOUR),
+        "utf-8",
+    )
+
+    assert tools.run.opened(ledger) == 2
+    assert tools.run.opened(tmp_path / "none.jsonl") == 0
