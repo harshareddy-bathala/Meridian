@@ -5,8 +5,8 @@ than the diagnosis's author before the diagnosis is written. Stage 27 began
 without that review (D-270), so the specification it was built against is held
 here: the effect sections of ``docs/SCALE-AND-FAULTS.md`` and the simulator
 modules that carry them out. Changing either fails this test until the pin is
-updated, and **an update names D-270 in its commit**, so every change to the
-answer key after the diagnoser exists is a visible diff rather than a quiet one.
+updated, and **an update names D-270 in its commit or its PR**, so every change
+to the answer key after the diagnoser exists is a visible diff, not a quiet one.
 
 The Review lines sit above the pinned text on purpose: a reviewer signing them
 does not move the pin, and signs exactly what is pinned.
@@ -32,12 +32,18 @@ SECTIONS = {
         "704b5ab7d37aa243b4839e83d761279ed34b56a55feecf4754d0eccc292e2a4b"
     ),
     "### What the fault does": (
-        "91eee1d652b4e3920dd55dbd7f21799652e3369a3e094100ebe6039eba75ad15"
+        "a5f8cd4686361c3a4fe9ebced462ab824907a07947ee007bcc1bd07270b134a6"
     ),
 }
 """Each pinned section, by the heading it starts at, to the next ``##``."""
 
 MODULES = {
+    "clock_effects.py": (
+        "29e16a0b7597eae926fd9e01578eaebf0c01b811c8ef1e2644405abc39179efe"
+    ),
+    "clock_faults.py": (
+        "e4dfca9e8693de26e643b6c585a5304670e94e0cfe29aa802fbdd9c3abbbe3fa"
+    ),
     "evidence.py": "a2d4f7d272496630f2239cba12d78f40b465ad5977c627f136b8dfdfb93b935f",
     "sky_faults.py": "851b1487ff42ca4a141ae846fc2a0a6ab0977d3917fb0a9180a13da16c22d11f",
     "sky_effects.py": (

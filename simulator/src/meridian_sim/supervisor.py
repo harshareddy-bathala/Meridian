@@ -194,11 +194,7 @@ class Supervisor:
                 tick=tick,
                 now=now,
             )
-            member.previous = active
-            member.faults.active = active
-            member.faults.sky = member.sky.update(
-                member.schedule.sky + self._fleet.sky, active, now
-            )
+            self._set_faults(member, active, tick, now)
             if member.schedule.restarts_at(tick):
                 self._restart(member)
                 restarted.append(member.index)
@@ -225,6 +221,17 @@ class Supervisor:
             stopped=tuple(stopped),
             submitted=tuple(submitted),
             heard=tuple(heard),
+        )
+
+    def _set_faults(
+        self, member: _Member, active: frozenset[str], tick: int, now: datetime
+    ) -> None:
+        """Write what is broken on this round where the station's parts read it."""
+        member.previous = active
+        member.faults.active = active
+        member.faults.clock_step_s = member.schedule.step_at(tick)
+        member.faults.sky = member.sky.update(
+            member.schedule.sky + self._fleet.sky, active, now
         )
 
     def run(

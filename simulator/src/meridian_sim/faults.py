@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CLOCK_DRIFT",
+    "CLOCK_STEP",
     "DECLINES",
     "DECODER_DEGRADED",
     "HEARTBEAT_DELAYED",
@@ -140,6 +141,16 @@ then stamps its heartbeats and places its captures by that clock, as a real one 
 a failed time source would. The window closing is a resync, not a slow return.
 """
 
+CLOCK_STEP = "clock_step"
+"""The station's clock is wrong by a fixed step, and records a pass that far off.
+
+Stage 27's timing fault (D-277), because a drifting clock loses no pass: the
+supervisor hands the loop ``now`` plus the step for the whole window, and the
+receiver records a heard pass begun inside it moved by the step, losing one end
+of it (:mod:`~meridian_sim.clock_effects`). Specified in
+``docs/SCALE-AND-FAULTS.md`` § A stepped clock.
+"""
+
 DECODER_DEGRADED = "decoder_degraded"
 """The receiver hears the satellite and the decoder cannot make frames of it.
 
@@ -232,6 +243,7 @@ SCENARIOS: dict[str, tuple[str, ...]] = {
     "interference": (INTERFERENCE,),
     "silent": (SATELLITE_SILENT,),
     "sky": SKY_FAULTS,
+    "clock": (CLOCK_STEP,),
 }
 """Which faults each named scenario may inject.
 
@@ -244,6 +256,7 @@ scenario, where a station stopping is the observation being made.
 ``faulty`` is Stage 10's set and keeps its exact schedules; ``chaos`` is every
 recurring fault, and is what Stage 21's long run injects. ``sky`` is Stage 25's
 four faults together, whose ground truth Stage 27's diagnosis is scored against.
+``clock`` is Stage 27's stepped clock, on its own for the same reason.
 """
 
 
@@ -264,6 +277,13 @@ class FaultState:
 
     Read by the receiver when a pass begins, not by the transport: they change
     what a station measures, never whether it can reach the platform.
+    """
+
+    clock_step_s: float = 0.0
+    """How far ahead of true time a stepped clock is, negative for behind.
+
+    Zero unless :data:`CLOCK_STEP` holds. Read by the receiver when a pass
+    begins: the recording follows the clock in force then (D-277).
     """
 
 

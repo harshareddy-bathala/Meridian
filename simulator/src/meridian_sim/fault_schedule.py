@@ -17,8 +17,10 @@ import hashlib
 import random
 from dataclasses import dataclass
 
+from meridian_sim.clock_faults import CLOCK_STEP_CYCLE, step_for
 from meridian_sim.faults import (
     CLOCK_DRIFT,
+    CLOCK_STEP,
     DECLINES,
     DECODER_DEGRADED,
     HEARTBEAT_DELAYED,
@@ -70,6 +72,7 @@ _STAGE_21_CYCLES = {
     CLOCK_DRIFT: ((60, 180), (5, 20)),
     DECODER_DEGRADED: ((50, 150), (4, 20)),
     DECLINES: ((40, 120), (2, 6)),
+    CLOCK_STEP: CLOCK_STEP_CYCLE,
 }
 """Stage 21's recurring faults, in the same units as :data:`_CYCLES`.
 
@@ -82,6 +85,9 @@ result unrepeatable.
 A delayed heartbeat lasts one to five ticks so that a long run sees both sides
 of the thresholds: one missed heartbeat is ``stale`` at most, and three are
 ``offline``.
+
+Stage 27's stepped clock (D-277) is drawn the same way, from ranges its own
+module holds.
 """
 
 _PARTITION_CYCLE = ((60, 180), (3, 8))
@@ -172,6 +178,8 @@ class FaultSchedule:
     revoked_from: int | None = None
     drift_s_per_tick: float = 0.0
     """How fast this station's clock runs away while :data:`CLOCK_DRIFT` holds."""
+    clock_step_s: float = 0.0
+    """How far this station's clock steps while :data:`CLOCK_STEP` holds."""
     sky: tuple[SkyFault, ...] = ()
     """Stage 25's faults on this station's own sky and chain (D-253). A silent
     satellite is the fleet's, and the supervisor adds it."""
@@ -203,14 +211,22 @@ class FaultSchedule:
         Zero outside a :data:`CLOCK_DRIFT` window. Inside one, the error grows by
         :attr:`drift_s_per_tick` each tick from the first, and returns to zero
         when the window closes — a resync, which is how a station that finds its
-        time source again corrects itself.
+        time source again corrects itself. A stepped clock's step is added while
+        :data:`CLOCK_STEP` holds.
         """
         for one in self.cycles:
             if one.kind == CLOCK_DRIFT:
                 into = one.ticks_into(tick)
                 if into is not None:
-                    return (into + 1) * self.drift_s_per_tick
-        return 0.0
+                    return (into + 1) * self.drift_s_per_tick + self.step_at(tick)
+        return self.step_at(tick)
+
+    def step_at(self, tick: int) -> float:
+        """The stepped clock's error on ``tick``: the step while it holds, else 0."""
+        stepped = any(
+            one.kind == CLOCK_STEP and one.active_at(tick) for one in self.cycles
+        )
+        return self.clock_step_s if stepped else 0.0
 
     def windows(self, until_tick: int) -> tuple[FaultWindow, ...]:
         """Every fault window that opens before ``until_tick``, in tick order.
@@ -284,6 +300,7 @@ def schedule_for(station_seed: int, scenario: str) -> FaultSchedule:
         cycles=cycles + later,
         revoked_from=revoked_from,
         drift_s_per_tick=round(drift, 3),
+        clock_step_s=step_for(station_seed, scenario),
         sky=sky_faults_for(station_seed, scenario),
     )
 

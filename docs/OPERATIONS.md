@@ -1544,8 +1544,9 @@ python -m meridian_sim.station --scenario sky --count 5 --silent-satellite norad
 | `interference` | the noise floor rises in a sector for a few hours each day |
 | `silent` | the named satellite stops transmitting, at every station, for a while |
 | `sky` | all four together |
+| `clock` | Stage 27's stepped clock: the station's clock is 15 to 25 minutes off for a while, so it records the wrong stretch of time (D-277, § A stepped clock) |
 
-`silent` and `sky` need the satellite named, as the catalogue names it, with `--silent-satellite` or `SIMULATOR_SILENT_SATELLITE`. The simulator never sees the catalogue, and a run that names none is refused before any station registers.
+`clock` is kept out of `sky`, so `sky`'s seeds give the runs they always gave; it is a timing fault, not one in the sky. `silent` and `sky` need the satellite named, as the catalogue names it, with `--silent-satellite` or `SIMULATOR_SILENT_SATELLITE`. The simulator never sees the catalogue, and a run that names none is refused before any station registers.
 
 The ledger records each fault with the parameters it was drawn with, and every pass it changed. None of it reaches MSP or the database (D-105). `meridian reliability faults` reads such a ledger without complaint, and answers each question with a dash, since none of these faults silences a station. Scoring them is Stage 27's job.
 

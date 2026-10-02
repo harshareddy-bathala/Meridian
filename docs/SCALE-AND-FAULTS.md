@@ -299,20 +299,22 @@ The negative control is Stage 21's `decoder_degraded`, which has no cause catego
 
 | Fault | Scenario | Shape, drawn from the seed | Effect on a pass that began while it held |
 |---|---|---|---|
-| `clock_step` | `clock` | a cycle of 180 to 480 ticks, in force for 40 to 120 of them; a step of 180 to 480 s, ahead or behind | the station's clock is wrong by the step for the whole window, and a heard pass is recorded that far off the true one: its SNR series is moved by the step, and what falls outside the satellite's window is noise. The floor does not move |
+| `clock_step` | `clock` | a cycle of 180 to 480 ticks, in force for 40 to 120 of them; a step of 900 to 1500 s, ahead or behind | the station's clock is wrong by the step for the whole window, so it records the wrong stretch of time: a heard pass's SNR series is moved by the step, and what falls outside the satellite's window is noise. The floor does not move |
 
 **The station's clock, not its radio.** The supervisor hands the station's loop the true instant plus the step, as it does a drifting clock's error, and the station keeps time by it for the whole window. At the window's close the clock is corrected at once.
-- **A station whose clock is ahead begins early.** It listens from the true start minus the step and stops that much before the pass ends, so it loses the end of the pass.
-- **One whose clock is behind begins late**, and loses the beginning.
+- **A station whose clock is ahead begins early**, from the true start minus the step, and stops that much early.
+- **One whose clock is behind begins late**, and stops late.
+
+**Why fifteen to twenty-five minutes.** A decoded pass stays decoded while a single frame above the bar survives, so a step that leaves the culmination inside the recording moves a pass without losing it. Measured on the simulator's own passes, a step loses a heard pass only once it is about four-fifths of the window or more. A step longer than most passes takes the recording off the pass altogether, which is what a station whose time source failed by that much does, and the only shape of timing fault that loses passes often enough to be scored.
 
 **What the station records.** The step is read when the pass begins, and moves the 25 samples D-251 draws:
 - with the samples Δ seconds apart, the step is `k = round(step / Δ)` samples;
 - sample `i` reads the clean sample `i − k` while that lies inside the pass, and noise otherwise, drawn from the pass's own stream;
 - the floor, the gain and the decoder are unchanged. The reported window is still the assignment's own, because the station believes it recorded exactly that.
 
-**How the outcome follows** is the rule above, by the frame count every pass uses: a decoded pass stays decoded while frames above the 5 dB bar remain, a heard pass with a sample at or above 3 dB is `signal_no_decode`, and otherwise it is `no_signal`. A pass that heard nothing, an aborted one and one never attempted are not touched: there was no signal to misplace.
+**How the outcome follows** is the rule above, by the frame count every pass uses: a decoded pass stays decoded while frames above the 5 dB bar remain, a heard pass with a sample at or above 3 dB is `signal_no_decode`, and otherwise it is `no_signal`. A pass that heard nothing keeps its evidence, because noise moved is noise. An aborted pass and one never attempted are not touched.
 
-**What the ledger records.** `clock_step` opens and closes on the station, as every cycled fault does, and its `detail` holds `step_s`, signed, positive for a clock ahead. **Every heard pass begun inside the window is named** in an `act` line, written when the pass begins, because the window may close before the pass ends. A pass named is one the step moved, which is not the same as one it lost: a step smaller than the pass's margin moves a decoded pass and it stays decoded.
+**What the ledger records.** `clock_step` opens and closes on the station, as every cycled fault does, and its `detail` holds `step_s`, signed, positive for a clock ahead. **Every pass begun inside the window is named** in an `act` line, heard or not, because what the station recorded was the wrong stretch of time whatever was in it. It is written when the pass begins, because the window may close before the pass ends. A pass named is one whose recording the step moved, which is not the same as one it lost: a pass that would have heard nothing anyway was not lost by the clock.
 
 **Kept apart from everything before it.**
 - `clock` is a scenario of its own, and `clock_step` is drawn on streams of its own, so no seed of an earlier scenario moves.
@@ -322,9 +324,10 @@ The negative control is Stage 21's `decoder_degraded`, which has no cause catego
 ### What a diagnosis can and cannot see
 
 - **Its heartbeats are stamped by the wrong clock.** Each one's `sent_at` differs from the platform's `received_at` by the step, plus the time in transit.
-- **Its listening is in the wrong place.** The heartbeats that name the assignment arrive from the true start minus the step to the true end minus it.
-- **Its recording is not.** The reported window is the assignment's own, and the SNR series looks like a pass cut short at one end.
+- **Its listening is in the wrong place.** The heartbeats that name the assignment arrive from the true start minus the step to the true end minus it, mostly outside the window altogether, so the platform does not confirm the station was listening (Stage 20).
+- **Its recording is not.** The reported window is the assignment's own, and a lost pass's SNR series is noise from end to end, or a pass cut short at one end.
 - **It reports no clock offset**, so the one field built for this is empty, as it is on a station whose time source failed.
+- **A pass the jump skips is let go of, not lost.** A clock that steps ahead past a window about to open makes the station's client treat that window as closed before it began, so it stops naming the assignment and the platform records a decline. A decline is never diagnosed (D-008), so it is no case of a timing fault, and a run of the `clock` scenario shows a few.
 
 The negative control is unchanged: a degraded decoder should be *undetermined*.
 

@@ -5682,6 +5682,31 @@ D-105 answers the circularity of one team writing both the simulator's fault eff
 
 ---
 
+## D-277 — Timing's ground truth is a stepped clock, and a drifting one stays as it was
+
+**2026-10-02 · accepted, review owed (D-270)** · *`meridian_sim/{faults,clock_faults,clock_effects,fault_schedule,supervisor,executor,fault_notes}.py`; `docs/SCALE-AND-FAULTS.md` § A stepped clock; Stage 27. Extends D-188 and D-253.*
+
+EVALUATION §11.2 names Stage 21's drifting clock as the ground truth for a timing fault. It cannot be one. A virtual station reports the assignment's own window (D-077), and a drift reaches a minute at most, so a drifting station loses no pass and the ledger names none. A cause with no case of it has no recall to measure.
+
+**A new fault, `clock_step`, in a scenario of its own, `clock`.** While it holds, the station's clock is wrong by a fixed step of 15 to 25 minutes, ahead or behind, and the station records the wrong stretch of time. The effect is specified in `docs/SCALE-AND-FAULTS.md` § A stepped clock and pinned with Stage 25's (D-270).
+- **The step is that large on purpose.** A decoded pass stays decoded while one frame survives, so on the simulator's own passes a step loses a heard pass only once it is about four-fifths of the window or more. A smaller step would name passes it moved and lose almost none of them.
+- **Every pass begun inside the window is named, heard or not.** The recording was of the wrong stretch of time whatever was in it, and the report decides from the clean outcome, recomputed from the seed, whether the clock is what lost it. Only a heard pass's evidence changes, because noise moved is noise.
+- **Drawn on streams of its own.** No earlier scenario's schedule or clock moves, which `tests/unit/test_simulator_clock_step.py` holds against a digest taken before the change. MSP carries nothing new.
+
+**A drifting clock is left as it was.** Making it move recordings too would change every `drift` and `chaos` run at every seed (D-188). The two clocks now disagree about whether a clock moves a recording, and this entry is where that is said.
+
+**What a stepped clock leaves for a diagnosis:**
+- heartbeats whose `sent_at` differs from their `received_at` by the step;
+- listening that names the assignment outside its window, so Stage 20 does not confirm the station was listening;
+- no clock offset, since virtual stations estimate none;
+- and, at a jump ahead, a few windows the client lets go of before they open, which the platform records as declines and which are never diagnosed (D-008).
+
+*Rejected: give the drifting clock the effect.* It moves every earlier seed's runs.
+
+*Rejected: virtual stations that estimate and report `clock_offset_s`.* That makes the timing test read the one field built to say the answer. A station whose time source failed is exactly the one that cannot say how far off it is.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
