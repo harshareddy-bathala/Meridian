@@ -124,6 +124,8 @@ def test_all_expected_tables_exist(conn) -> None:
         # calibrated against it (0028, D-263).
         "reception_ratings",
         "reception_verdicts",
+        # Why each loss happened (0029, D-272).
+        "loss_diagnoses",
     }
     assert expected <= tables
 
@@ -184,6 +186,7 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:
         "products",
         "reception_ratings",
         "reception_verdicts",
+        "loss_diagnoses",
     } <= carrying
     # D-049: element_sets is the deliberate exception. Its provenance lives in
     # `source`, which distinguishes celestrak from spacetrack from manual as

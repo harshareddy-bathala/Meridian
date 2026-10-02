@@ -229,6 +229,15 @@ SNAPSHOT_TABLES: tuple[SnapshotTable, ...] = (
         " order by assignment_id, revision, method",
     ),
     SnapshotTable(
+        "loss_diagnoses",
+        "select diagnosis_id, assignment_id, revision, observation_started_at,"
+        " station_id, classification_id, cause, candidates_json, evidence_json,"
+        " method, config_sha256, verdict_method, computed_at, simulated"
+        f" from loss_diagnoses where assignment_id in ({_SCOPED_ASSIGNMENTS})"
+        " and computed_at <= %(as_of)s"
+        " order by assignment_id, diagnosis_id",
+    ),
+    SnapshotTable(
         "heartbeats",
         "select h.id, h.station_id, h.sent_at, h.received_at, h.state,"
         " h.held_assignments, h.listening_assignment_id, h.listening_satellite_id,"

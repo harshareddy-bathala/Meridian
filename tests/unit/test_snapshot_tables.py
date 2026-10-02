@@ -54,6 +54,8 @@ def test_the_snapshot_holds_what_d_143_lists() -> None:
         "reception_ratings",
         # Each reception's verdict, by method (D-263).
         "reception_verdicts",
+        # Each loss's diagnosis, by method and configuration (D-272).
+        "loss_diagnoses",
         "heartbeats",
         "element_sets",
         "stations",
