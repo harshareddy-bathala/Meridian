@@ -140,12 +140,14 @@ class SimulatedExecutor:
         self._sky_at_begin[assignment.assignment_id] = self._faults.sky
         # A silence is written down as the pass begins, while its window is
         # certainly open: it may close before this pass ends, and the ledger
-        # refuses an act on a window that has closed.
+        # refuses an act on a window that has closed. Only a pass it changes is
+        # named (D-253), and a pass that will abort measures nothing a silence
+        # could change; whether it aborts is its seed's, known already.
         if any(
             isinstance(one.fault.shape, Silence)
             and one.fault.shape.satellite_id == assignment.satellite_id
             for one in self._faults.sky
-        ):
+        ) and not self._aborts(assignment):
             self._faulted.append((SATELLITE_SILENT, assignment.assignment_id))
 
     def end(self, assignment: Assignment) -> None:
@@ -240,6 +242,12 @@ class SimulatedExecutor:
             client_notes=_notes_for(seed),
             decode=decode_for(outcome, evidence, window_s),
         )
+
+    def _aborts(self, assignment: Assignment) -> bool:
+        """Whether this pass will abort on its own, as :meth:`_observe` decides."""
+        seed = self._pass_seed(assignment)
+        outcome = decide_outcome(seed, assignment.expected_max_elevation_deg)
+        return outcome.outcome == "aborted"
 
     def _pass_seed(self, assignment: Assignment) -> int:
         """The seed deciding this station's experience of this assignment."""
