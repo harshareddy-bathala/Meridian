@@ -5984,6 +5984,40 @@ The front keeps a copy only of what passed through it (D-282). Left to visitors,
 
 ---
 
+## D-285 — A tick's requests are done by the next capture edge, and an edge the loop reached is met at once
+
+**2026-10-02 · accepted** · *`client/src/meridian_client/{time_limit,transport,station_loop,capture_schedule,capture_sequence}.py`; `tests/msp_conformance/test_independence_drill.py`; `tests/unit/{test_transport_retries,test_transport_time_limit_socket,test_station_loop,test_capture_schedule}.py`; Stage 33; `EVALUATION.md` §12.1*
+
+§12.1 fails a station if "the client blocks on the network at any point during the pass". The outage tests built so far point the transport at a closed port, which refuses at once, and those passed. **A dropped tunnel or a dead route refuses nothing.** Every request waits out its whole timeout:
+- five seconds to connect, or ten to read;
+- three attempts at a thirty-second interval (D-030), with backoff between them.
+
+The station loop is one thread (D-121), so while a heartbeat waits, no capture starts or stops.
+
+**Measured, by the drill this stage adds.** The drill runs the real loop, the real transport with the retry policy `station_wiring` gives it, the application and the database. A blackhole stands in for the route, and costs each request exactly its timeout on a virtual clock. The pass's window was swept across one heartbeat interval at five offsets, for a dropped route and for a half-open one, with backoff at its longest. **Seven of the ten met an edge late, by 17 to 56 seconds.** Two faults compounded:
+
+1. **A heartbeat in the hole held the loop past the edge.** Nothing bounded a tick's requests except the retry budget's fit inside one interval, and that fit is thirty seconds wide.
+2. **An edge the loop ran past was then slept over.** `next_edge` looks strictly forward, so after the hang the loop found no edge to wake for, and waited for the next heartbeat. A tick stamped exactly on a closing edge did the same: the capture ends only once its window has closed, so that tick did not end it, and the edge was neither passed nor to come. That second case was found by the drill's exact clock. On a real clock it needs a heartbeat to land on the closing instant, which is rare but not impossible.
+
+**The fix:**
+- **Each tick's requests are bounded to just past the next capture edge** (`StationLoop._network_time_limit`). The bound is the edge plus `EDGE_MARGIN_S`, where the loop aims its own wake, and includes an edge at the tick's own instant. With nothing held, there is no bound beyond the retry budget.
+- **The transport keeps to the bound** (`MspTransport.time_limit`, in `time_limit.py`). Each attempt's connect and read timeouts are cut to the time left, a backoff is cut short, and an attempt with nothing left is not made. It then raises `DeadlineReached`, an `httpx` timeout, so the loop treats it as an unreachable platform, as it should. **A healthy platform answers in milliseconds,** so the bound cuts only a request that was going to be late.
+- **The limit is a duration, turned into an instant on the transport's own clock.** The first version passed an instant from the loop's clock to the transport's. The drill, which substitutes the loop's clock, then saw every request abandoned before it was sent, and passed for the wrong reason. It now asserts that the station kept sending throughout the outage.
+- **An edge reached during a tick is met at once.** Before each tick the loop notes the next edge, at or after the tick's instant. If the tick ends at or past it, the loop waits out the margin and ticks again, rather than sleeping to the heartbeat grid.
+
+**After the fix, all ten alignments meet both edges within a second**, and the same drill against the code before it fails seven. A real loopback socket that accepts and never answers holds a three-attempt heartbeat under a one-second limit for under two seconds.
+
+**What the drill then checks, as §12.1 asks:**
+- the result was queued during the outage and nothing reached the platform;
+- on reconnection, one tick resent it, and the platform holds one observation at revision 1;
+- replaying the same body returns the same `observation_id` and writes nothing (D-027, D-015).
+
+*Rejected: a thread for the network.* It would make the loop's one-thread property false (D-121), and with it the reasoning every earlier decision about ordering — queue before heartbeat, execution before the body — rests on.
+
+*Rejected: shorter timeouts everywhere.* A slow but working platform would then fail on every tick, not only near an edge.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
