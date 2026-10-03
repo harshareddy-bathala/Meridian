@@ -4,7 +4,7 @@ PostgreSQL with TimescaleDB. Observations and heartbeats are hypertables.
 
 > **Phase 1 scope.** D-018 builds eight of the tables below plus `invite_tokens` (D-020) and `satellite_transmitters` (D-021). `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles` were deferred — see D-018 for why each one waited — and Stage 19 built them once each had a producer and a consumer (migration `0023`, D-173 to D-176). Two derived views and an hourly heartbeat aggregate followed (migration `0024`, D-177, D-178).
 >
-> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below. Stage 26 built the first two, `reception_ratings` and `reception_verdicts` (migrations `0027` and `0028`, D-260, D-263); the rest are **planned, not built**. The rules they share are D-104.
+> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below. Stage 26 built the first two, `reception_ratings` and `reception_verdicts` (migrations `0027` and `0028`, D-260, D-263), and Stage 27 the third, `loss_diagnoses` (migration `0029`, D-272); the rest are **planned, not built**. The rules they share are D-104.
 
 ---
 
@@ -253,7 +253,7 @@ A station's noise floor by 45° sector of the pass's peak and 4-hour band of loc
 
 ## Post-reception tables
 
-Seven tables for modules 13–17. `reception_ratings` and `reception_verdicts` are built (migrations `0027` and `0028`, D-260, D-263). The others do not exist yet, and their column tuples are the intent, settled finally when each stage writes its migration. What they share is decided in D-104:
+Seven tables for modules 13–17. `reception_ratings`, `reception_verdicts` and `loss_diagnoses` are built (migrations `0027`, `0028` and `0029`, D-260, D-263, D-272). The others do not exist yet, and their column tuples are the intent, settled finally when each stage writes its migration. What they share is decided in D-104:
 
 - **Append-only, bound to what they describe.** A verdict belongs to one observation revision; a new revision gets a new verdict and the old one stays, exactly as D-015 keeps the old observation.
 - **Every row names the method that produced it** — a versioned string, as `method` on the orbit service's uncertainty (D-060). A new model version appends; it never rewrites an earlier conclusion, because the evidence dataset must be able to say which version concluded what.
@@ -283,23 +283,31 @@ One row per observation revision per method. `probability_usable` is `0..1` and 
 
 A plain table rather than a hypertable: its volume is the observation count, not the heartbeat count.
 
-### `loss_diagnoses` *(planned)*
-`(id, assignment_id, revision, cause, candidates_json, evidence_json, method, computed_at, simulated)`
+### `loss_diagnoses`
+`(diagnosis_id, assignment_id, revision, observation_started_at, station_id, classification_id, cause, candidates_json, evidence_json, method, config_sha256, verdict_method, computed_at, simulated)`, unique on `(assignment_id, revision, method, config_sha256)` with nulls not distinct, with foreign keys to the assignment, the observation revision and the Stage 20 classification it read.
 
-Written for every **failed or partial reception** — an observation whose outcome is not `decoded`, or whose verdict falls below the configured partial threshold — and for every held assignment whose window passed with **no observation at all**, which is why `revision` is nullable. An `expired` assignment is a decline and gets no row (D-008).
+Written for every **failed or partial reception**: a current observation whose outcome is not `decoded`, or a `decoded` one whose verdict, under the deployment's verdict model, is below that model's `partial_below`. Also for every held assignment whose window passed with **no observation at all**, which is why `revision` and `observation_started_at` are nullable, and null together. An `expired` assignment is a decline and gets no row (D-008), and nor does a revoked one (D-171). A loss is diagnosed once its pass is classified, since "not listening" is read from that classification (D-272).
 
 `cause` is exactly one of:
 
 | Value | Meaning | Evidence it rests on |
 |---|---|---|
-| `satellite_silent` | The transmitter was not transmitting | catalogue `active` status; the network's other receptions of the same pass |
-| `station_not_listening` | Registry evidence does not confirm the station was listening — Stage 15's "station not confirmed listening" label, under one name | `heartbeats` listening blocks, via `Registry.was_listening()` |
-| `obstruction` | Signal lost in a direction the horizon profile marks obstructed | `horizon_profiles`, pass azimuth track |
-| `interference` | The noise floor was raised against this station's profile | observation-sourced `noise_measurements` against `interference_profiles` |
-| `timing_fault` | The station's clock or recording window did not match the pass | `clock_offset_s`, `clock_uncertainty_s`, recording start against assignment window |
+| `satellite_silent` | The transmitter was not transmitting | catalogue `active` status; other stations' receptions of the satellite within 45 minutes (D-276) |
+| `station_not_listening` | The station was not confirmed listening, or never began: Stage 20's class, read and not restated (D-273) | the pass's `pass_classifications` row, which asked `Registry.was_listening()` |
+| `obstruction` | Signal lost in sectors the station's own earlier passes lost it in, or behind its declared horizon (D-274) | the station's observations and their `snr_samples`, the pass's track from its element set, declared `horizon_profiles` |
+| `interference` | The noise floor was raised against the station's own at the same gain (D-275) | observation-sourced `noise_measurements`; the `interference_profiles` cell is cited |
+| `timing_fault` | The station's clock, listening or recording was off by more than the stated timing uncertainty allows (D-277) | `heartbeats` (`sent_at`, `received_at`, the listening block, `clock_offset_s`, `clock_uncertainty_s`); the observation's window against the assignment's |
 | `undetermined` | The evidence does not support any cause | — |
 
-`undetermined` is a value, never a null: "we looked and cannot say" and "we have not looked" must stay distinguishable. `candidates_json` keeps every cause considered with its support, and `evidence_json` records what each test found, so an owner report and the evidence dataset can both show *why*, not only *what*.
+`undetermined` is a value, never a null: "we looked and cannot say" and "we have not looked" must stay distinguishable. `candidates_json` keeps every cause tested, fired or not, with its support and what its test found; `evidence_json` records what the diagnosis read and the thresholds it read it under. So an owner report and the evidence dataset can both show *why*, not only *what* (D-273).
+
+- **Producer:** `meridian.reliability.diagnosis_run`, run by `meridian diagnosis run` and by the jobs service.
+- **Consumers:** `meridian diagnosis explain`; the raw snapshot's `loss_diagnoses.jsonl`, measured and simulated counted apart; the evaluation report's real cases (SC-8's simulated matrix is joined to the simulator's ledger outside the database, D-105); Stages 28, 29 and 30.
+- **`simulated`** is copied from the assignment. A simulated reception is never evidence about a measured station's loss.
+- **Method and configuration:** `method` is `diagnosis-N`, and `config_sha256` hashes the `[diagnosis]` thresholds. A re-run under both writes nothing; a changed threshold diagnoses every loss again beside the old rows (D-182).
+- **Retention:** never dropped.
+
+A plain table: its volume is the loss count.
 
 ### `signal_baselines` *(planned)*
 `(id, station_id, capability_id, elevation_bin_deg, snr_db_median, snr_db_p10, sample_count, trained_from, trained_to, method, computed_at, simulated)`
@@ -513,7 +521,7 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `station_capabilities.band` | `vhf`, `uhf`, `l`, `s`, `other` |
 | `station_capabilities.polarisation` | `rhcp`, `lhcp`, `linear_v`, `linear_h`, `linear`, `none` |
 | `station_capabilities.modes` | free-text lowercase array in Phase 1 — decoder naming varies too much to freeze |
-| `loss_diagnoses.cause` *(planned)* | `satellite_silent`, `station_not_listening`, `obstruction`, `interference`, `timing_fault`, `undetermined` — D-104 |
+| `loss_diagnoses.cause` | `satellite_silent`, `station_not_listening`, `obstruction`, `interference`, `timing_fault`, `undetermined` — D-104 |
 | `report_deliveries.kind` *(planned)* | `pass`, `weekly` — D-098 |
 | `report_deliveries.channel` *(planned)* | `email`, `telegram` — D-098 |
 | `ingest_sources.access_constraint` | `none`, `key_counted`, `registration` — D-132 |

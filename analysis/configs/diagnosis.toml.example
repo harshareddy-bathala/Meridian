@@ -1,0 +1,31 @@
+# The simulated fleets SC-8 is measured on, for
+#
+#   uv run python deploy/tools/diagnosis_runs.py \
+#       --config analysis/configs/diagnosis.toml.example \
+#       --database-url <a PostgreSQL server the tool may create databases on> \
+#       --root "$MERIDIAN_DATASETS_ROOT"
+#
+# One fleet per scenario and seed, each in a database of its own, sealed under
+# <root>/diagnoses/ with its fault ledger (D-278). `meridian report build
+# --diagnoses <run> …` then judges every sealed run. Every row is simulated, and
+# SC-8 claims only that evidence of a simulated fault's shape is attributed to
+# it (D-105).
+
+# Which fault scenarios to run. `diagnosis` is every fault SC-8 scores a cause
+# against, with the degraded decoder as its control, in one fleet. In it, an
+# obstruction, an interference source or a silence seldom loses a whole pass,
+# so each also runs alone, on every station, to give it cases at all.
+scenarios = ["diagnosis", "obstruction", "interference", "silent"]
+
+# Master seeds. Each gives its own fleet; the report shows the spread between
+# them. A seed and a scenario decide every fault, every station and every pass.
+seeds = [4471, 4472, 4473]
+
+# Virtual stations per fleet, and how long each fleet runs from `start`.
+stations = 6
+hours = 48.0
+start = "2026-08-12T00:00:00+00:00"
+
+# The satellite a `silent` fault silences, as the development catalogue names
+# it. Required by every scenario with a silent satellite in it.
+silent_satellite = "norad:57166"

@@ -773,6 +773,58 @@ meridian verdict apply --model "$MERIDIAN_DATASETS_ROOT"/verdicts/<model>
 `apply` writes a verdict for every observation whose assignment window has closed and which has none by this model. That includes simulated ones, labelled so, and ones that received nothing. Run it again and it writes nothing. A refitted model is a new method, so its verdicts sit beside the old ones (D-263).
 
 To have the jobs service do this every round, set `VERDICT_MODEL` in `deploy/.env` to the model's directory as the container sees it, such as `/datasets/verdicts/<model>`, and restart `jobs`. It scores at most 500 receptions a round, oldest first, under the task label `verdicts`. A model that cannot be read stops `jobs` at start with the reason. Unset `VERDICT_MODEL` to stop writing verdicts; the ones written stay.
+
+---
+
+## Loss diagnosis
+
+Why each lost reception was lost: a satellite that was silent, a station that was not listening, an obstruction, interference, or a timing fault — or *undetermined*, which is a correct answer whenever the evidence does not show one (D-273). Every failed reception is diagnosed, and every window a station held with nothing reported. So is every decode the verdict model puts below its partial threshold, when one is deployed. Expired and revoked assignments are not: an expiry is a decline (D-008, D-272).
+
+Decisions this section puts into practice: D-270 to D-277.
+
+### Running it
+
+```sh
+compose exec api meridian diagnosis run
+compose exec api meridian diagnosis explain <assignment_id>
+```
+
+The `jobs` service runs the same diagnosis every round, last, under the task label `diagnosis`, at most 500 losses a round and oldest first. A loss waits until its pass is classified (§ Reliability), because "not listening" is read from that classification and never asked again. So a loss is diagnosed about a day after its window, the classification's settle margin.
+
+`run` names any loss it could not read, with why, under `unreadable`. Such a loss has no row and is tried again next time, and the others are diagnosed regardless.
+
+`explain` prints each diagnosis with **every cause tested**, whether it fired, its support and what its test found. That is where to look before believing a cause, and where an *undetermined* says what was missing.
+
+- **A partial decode needs a verdict model.** `run` reads decodes against `VERDICT_MODEL`'s model, or the one `--verdict-method` names. With neither it says no decode was diagnosed as partial.
+- **Thresholds are configuration.** They are the `[diagnosis]` table of the reliability file (`deploy/reliability.toml.example`). Each row records the table's hash, so a changed threshold diagnoses every loss again beside the old rows, and a run under the same thresholds writes nothing.
+- **What each cause rests on** is listed in `DATA-MODEL.md` § `loss_diagnoses`. Briefly:
+  - an obstruction is read from where the station's own earlier passes lost signal, and from its declared horizon;
+  - interference is a floor raised against the station's own at the same gain;
+  - a timing fault comes from the station's heartbeats and recording;
+  - a silent satellite means other stations listened within 45 minutes and none heard it.
+
+**Only Meridian's own records are read.** No archive, and never the simulator's fault ledger (D-102, D-105). A simulated station's evidence is never read about a measured one.
+
+**The simulated fault effects these rules are scored against have not been independently reviewed** (D-270). Until `docs/SCALE-AND-FAULTS.md` records a reviewer, SC-8 is reported as unreviewed.
+
+### Measuring SC-8
+
+SC-8 is measured on simulated fleets, never on a deployment: the injected cause is the answer key, and it lives only in the simulator's ledger (D-105, D-278).
+
+```sh
+uv run python deploy/tools/diagnosis_runs.py \
+    --config analysis/configs/diagnosis.toml.example \
+    --database-url postgresql://meridian:…@localhost:5432/meridian \
+    --root "$MERIDIAN_DATASETS_ROOT"
+```
+
+- **It needs the workspace**, `uv sync`, unlike the other tools here. It runs the platform and the simulator in one process.
+- **It needs a PostgreSQL server it may create databases on.** Each fleet gets a fresh database, migrated and dropped afterwards, so a run made again from its seed is the same run.
+- **Each fleet is sealed** under `diagnoses/` with its ledger, its cases and its diagnoses. `meridian report build --diagnoses <run> …` judges the sealed runs.
+- **It is slow by design**, because every heartbeat goes through the real platform. A fleet of 6 stations over 24 h takes from 2 to 30 minutes, depending on how many passes it holds. The configuration's twelve fleets take hours, so run them on a machine that can be left alone.
+- **The rarer causes need their own fleets.** In the combined `diagnosis` scenario an obstruction, an interference source or a silence seldom loses a whole pass. A decoded pass stays decoded while one frame survives, and a silence needs another station listening high in the sky within 45 minutes. So each also runs alone. Even then, a few cases a seed is normal, and the report prints how many beside every recall.
+
+The CI gate runs one small fleet of the combined scenario (`tests/integration/test_diagnosis_gate.py`). It shows that every loss is diagnosed, that the causes the fleet lost passes to are named, and that nothing about a fault reaches the platform. It does not measure SC-8.
 ---
 
 ## Scheduling
@@ -1544,8 +1596,9 @@ python -m meridian_sim.station --scenario sky --count 5 --silent-satellite norad
 | `interference` | the noise floor rises in a sector for a few hours each day |
 | `silent` | the named satellite stops transmitting, at every station, for a while |
 | `sky` | all four together |
+| `clock` | Stage 27's stepped clock: the station's clock is 15 to 25 minutes off for a while, so it records the wrong stretch of time (D-277, § A stepped clock) |
 
-`silent` and `sky` need the satellite named, as the catalogue names it, with `--silent-satellite` or `SIMULATOR_SILENT_SATELLITE`. The simulator never sees the catalogue, and a run that names none is refused before any station registers.
+`clock` is kept out of `sky`, so `sky`'s seeds give the runs they always gave; it is a timing fault, not one in the sky. `silent` and `sky` need the satellite named, as the catalogue names it, with `--silent-satellite` or `SIMULATOR_SILENT_SATELLITE`. The simulator never sees the catalogue, and a run that names none is refused before any station registers.
 
 The ledger records each fault with the parameters it was drawn with, and every pass it changed. None of it reaches MSP or the database (D-105). `meridian reliability faults` reads such a ledger without complaint, and answers each question with a dash, since none of these faults silences a station. Scoring them is Stage 27's job.
 
@@ -1659,7 +1712,7 @@ If every station was switched off on purpose, this is expected.
 
 ### ScheduledTaskStalled
 
-**Critical** for every task but `profiles`, which is a **warning**. A task (`task` label: `pass_generation`, `schedule`, `profiles`, `expiry_sweep` or `reliability`) has not completed in over 15 minutes, which is three rounds at the default interval. One failed round is logged and retried; three in a row is a problem.
+**Critical** for every task but `profiles` and `diagnosis`, which are **warnings**. A task (`task` label: `pass_generation`, `schedule`, `profiles`, `expiry_sweep`, `reliability`, `verdicts` or `diagnosis`) has not completed in over 15 minutes, which is three rounds at the default interval. One failed round is logged and retried; three in a row is a problem.
 
 1. `compose logs --since 30m jobs`. Each failed round logs `<task> failed; the next round will try again` with the exception.
 2. The *Task failures per hour* panel shows whether it fails every round or only some.
@@ -1667,13 +1720,15 @@ If every station was switched off on purpose, this is expected.
 
 ### ScheduledTaskNeverSucceeded
 
-**Critical** for every task but `profiles`, which is a **warning**. The jobs process has been up for 15 minutes and the named task has not completed once. After a restart there is no earlier success to measure a stall from, so this alert covers that case.
+**Critical** for every task but `profiles` and `diagnosis`, which are **warnings**. The jobs process has been up for 15 minutes and the named task has not completed once. After a restart there is no earlier success to measure a stall from, so this alert covers that case.
 
 The first checks are the same as `ScheduledTaskStalled`. A failure on every round from start-up usually means a database the jobs process cannot reach, or one at a migration it does not expect (`meridian db status`).
 
 An empty catalogue is not a failure: rounds complete with zero passes, and `meridian_passes_computed` reads 0. Nor is having no labelled dataset: `profiles` completes having written only the declared masks. A `profiles` task that fails every round usually means a newest dataset that no longer matches its manifest; `uv run meridian snapshot verify <dir>` says which.
 
 A failing `reliability` task stops new passes being classified, and so freezes every reliability figure where it was. It reads the file `MERIDIAN_RELIABILITY_CONFIG` names, and refuses to start on one it cannot obey; the log says which setting.
+
+A failing `diagnosis` task leaves losses undiagnosed and receiving untouched. `meridian diagnosis run` shows the error at a prompt.
 
 ### LossBudgetThresholdReached
 

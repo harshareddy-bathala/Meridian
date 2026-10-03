@@ -159,13 +159,22 @@ def test_faults_publish_seals_what_it_read_so_a_report_judges_it_again(
 
     assert code in {0, 1}
     assert "fault run: " in out
-    path = next((root / "faults").iterdir())
-    run = read_fault_run(path)
+    run = read_fault_run(_sealed(root / "faults"))
     again = verdict_rows([judge_gathered(one) for one in run.gathered])
     assert json.loads(json.dumps(again)) == list(run.verdicts)
     assert run.directory.manifest.kind == "fault_run"
     assert run.directory.manifest.counts["faults"] == 2
     assert run.directory.manifest.schema_revision != "unknown"
+
+
+def _sealed(parent: Any) -> Any:
+    """The one run published under ``parent``, not the staging directory beside it.
+
+    ``iterdir`` lists in the filesystem's order, which put ``.incoming`` first
+    on CI once a migration changed the run's name.
+    """
+    (run,) = (one for one in parent.iterdir() if not one.name.startswith("."))
+    return run
 
 
 def _ledger_file(tmp_path: Any) -> Any:
@@ -228,7 +237,7 @@ def test_a_long_run_s_record_is_sealed_with_its_faults(
 
     assert re.search(r"^fault run: \S*/([0-9a-f]{12}) ", out, re.M)
     assert re.search(r"^\s+hash\s+([0-9a-f]{64})\s*$", out, re.M)
-    run = read_fault_run(next((root / "faults").iterdir()))
+    run = read_fault_run(_sealed(root / "faults"))
     assert run.record is not None
     assert (run.record.seed, run.record.hours) == (4471, 72.0)
 

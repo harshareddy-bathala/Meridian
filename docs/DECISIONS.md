@@ -5659,6 +5659,209 @@ Otherwise it says *too short* or *failed*, with the reasons, and a fault run wit
 
 ---
 
+## D-270 — Stage 27 begun before D-105's review, with the specification it was built against pinned
+
+**2026-10-01 · accepted, review owed** · *`docs/SCALE-AND-FAULTS.md` § Ground-truth faults and § A stepped clock; `tests/unit/test_fault_spec_pin.py`; Stage 27. Departs from D-105 and D-253.*
+
+D-105 answers the circularity of one team writing both the simulator's fault effects and the diagnosis that is scored on them with two mitigations: the effects are specified before the diagnoser exists (Stage 25 did that, D-253), and **a team member other than the diagnoser's author reviews the specification before Stage 27 begins**. That review had not happened on 2026-10-01, and the team chose to build Stage 27 without waiting for it. This entry records that choice rather than letting the roadmap's order imply it was kept.
+
+**The review is still owed, and still means something.** What it can no longer do is come first. What it can still do is check that the specification is a fair description of how each fault would show in a station's evidence, and say so, or say where it is not, before SC-8 is claimed. To keep that review honest:
+- **The specification is pinned.** `tests/unit/test_fault_spec_pin.py` holds the SHA-256 of § Ground-truth faults from *What each fault does* to its end, of § A stepped clock (D-277), and of the simulator modules that carry them out (`evidence.py`, `sky_faults.py`, `sky_effects.py`, and Stage 27's own clock modules). A change to any of them fails the test until the pin is updated, and the test asks that update to name this entry. The pin cannot stop the diagnoser's author editing the specification. What it does is make every edit a visible, named diff, and give the reviewer one fixed text to sign.
+- **SC-8 is not called met before the review is recorded.** The report prints *fault effects not independently reviewed* beside the number until `SCALE-AND-FAULTS.md`'s Review lines name a reviewer and a date.
+- **Where the diagnoser was designed with the effects in view**, stated so the reviewer knows where to look:
+  - the obstruction test's elevation-matched loss rests on the simulated SNR being symmetric about culmination;
+  - the interference threshold of 2 dB was set against the simulated floor's ±0.5 dB jitter;
+  - the satellite-silence window of ±45 min was set against silences of 20 to 120 ticks, and its floor of 40° against the outcome model hearing nothing on most passes below 30° and none above 45°;
+  - the timing fault's ground truth, the stepped clock, was specified by the same author as its test, in this stage.
+
+**The roadmap's order is otherwise kept.** The stepped clock's effects (D-277) are written and pinned in this stage's first commit, before any diagnosis code exists on the branch, which is the half of D-105's mitigation an author can do alone.
+
+*Rejected: waiting for the review.* The team's call. Every later stage depends on this one, and the review can still be done against a fixed text.
+
+*Rejected: building the three causes the specification governs (silence, obstruction, interference) only after the review.* Offered and declined. It would have kept the order for those three only, at the cost of the stage's gate.
+
+---
+
+## D-271 — A decode below the partial threshold is still captured for SC-4
+
+**2026-10-02 · accepted, to be confirmed by the team** · *`meridian/reliability/classification.py` (`CAPTURED`); `tests/unit/test_reliability_boundaries.py`; Stage 27. Settles the capture rule D-184 left to this stage; applies D-102.*
+
+The roadmap asks Stage 27 to decide in `meridian.reliability` whether a decoded reception below the verdict's partial threshold counts as captured for SC-4. **It does.** `CAPTURED` stays `successful_reception`, `classify` and its method `classification-1` are unchanged, and so are the labels (`labels-3`).
+
+- **SC-4 asks whether the station received the pass.** Whether what it received is usable is SC-7's question, and the verdict answers it.
+- **A verdict-dependent SC-4 would not be one figure.** It would move with every refit of a model fitted on rated receptions (method `verdict-1:<hash>`), and differ between a deployment with `VERDICT_MODEL` set and one without. It could not be counted from a snapshot without the verdict, and no verdict exists until receptions are rated (D-260).
+- **The verdict informs.** A decode below the threshold is diagnosed as a partial reception (D-272), so its cause is still sought and recorded. It does not decide SC-4, and a test holds that no code SC-4 is counted by mentions a verdict.
+
+*Rejected: a ninth class, `partial_reception`.* It needs a migration of 0020's check, a new method and labels, a new value on a metric's label, and work in the dashboard, all to make SC-4 depend on a model.
+
+---
+
+## D-272 — What is diagnosed: every settled loss, once per method and configuration
+
+**2026-10-02 · accepted** · *`meridian/store/loss_diagnoses.py`; `meridian/reliability/diagnosis_run.py`; Stage 27. Applies D-008, D-104 and D-171.*
+
+A diagnosis is written for:
+- **a failed reception**: a current observation whose outcome is not `decoded`;
+- **a partial one**: a `decoded` observation whose verdict, under the deployment's verdict model, is below that model's partial threshold. With no model configured there are none, and the run says so;
+- **an empty window**: an assignment held to the end of its window with nothing reported.
+
+**Never for an expired assignment**, which is a decline (D-008), **nor a revoked one**, which was never the station's work (D-171).
+
+**A loss waits for its pass's classification.** Stage 20's settle margin is how long a report on its way is waited for, and "not listening" is read from the stored class rather than asked again (D-180). So a diagnosis names the classification it read, and is written only once one exists under the deployment's classification method and configuration.
+
+**A loss whose evidence cannot be read gets no row, and stops nothing.** An element set gone, or a sample that is not a number, is named in the run's report and logged. The losses behind it are diagnosed, and the next run tries it again. No row means nobody could look, which is what the absence of a row says (D-104). A run takes the oldest losses first, so one that failed the whole batch would head every later one.
+
+**Once per method and configuration.** A row names the method (`diagnosis-1`) and the sha256 of the `[diagnosis]` table. A real threshold is hashed as a real however the file spells it, so `2` and `2.0` are one configuration. A run under an unchanged method writes nothing, and a changed threshold writes every diagnosis again beside the old ones, as a classification does (D-182).
+
+---
+
+## D-273 — Choosing a cause, and when the answer is *undetermined*
+
+**2026-10-02 · accepted** · *`meridian/reliability/{diagnosis,diagnosis_causes,diagnosis_evidence}.py`; `[diagnosis]` in `deploy/reliability.toml.example`; Stage 27.*
+
+**Every cause is tested, and every test is recorded**, fired or not, with what it read. A reader of `candidates_json` sees what was considered, and not only what was concluded.
+
+**Support** is `r / (1 + r)` for a test whose evidence passed its threshold `r` times over: ½ at the threshold, rising towards 1. The station's own report and the catalogue's flag are categorical, at 1.
+
+**The order:**
+1. **A cause another explains steps aside.** A timing fault explains a station the platform could not confirm was listening: listening is judged by the platform's clock against the window, and a station whose clock was wrong listened at the wrong time. A raised floor explains signal lost in a sector, which the obstruction test applies itself, since it needs the floor.
+2. **Nothing fired → *undetermined*** (`none`).
+3. **One fired, or the best leads the next by the conflict margin, 0.2 → that cause.**
+4. **Otherwise → *undetermined*** (`conflict`).
+
+**"Not listening" includes the station's own word that it never began**: Stage 20's `station_unavailable` with a `not_attempted` report, no report, or no heartbeat in the window. An `aborted` report is not: the station began.
+
+**What a test without its evidence does: nothing.** A reception with no floor, no baseline, no placed samples or no trace of its clock fires none of the tests that need them. *Undetermined* is a correct answer and the most common honest one.
+
+**The thresholds are configuration**, the `[diagnosis]` table of the reliability file, hashed with every row (D-272).
+
+---
+
+## D-274 — An obstruction is read from where signal is lost, against the station's own history
+
+**2026-10-02 · accepted, review owed (D-270)** · *`meridian/reliability/obstruction_map.py`; Stage 27. Widens the roadmap's test.*
+
+The roadmap's test is signal lost or absent while the pass crossed a sector `horizon_profiles` marks obstructed. **The learned profile cannot mark a new obstruction.** It records where a signal is first *heard* (D-159), and a simulated station has no track to learn one from (D-158). Read literally, the test could never fire on a new obstruction, which is the one Stage 25 specified.
+
+**A sample is lost where it would have been heard** when it reads below the detection bar while the same pass was heard within 5° of its elevation on the other side of culmination. Elevation sets a pass's strength at a station, so the mirrored sample is a comparison that needs no link model. A loss on both sides, as at every pass's ends, is the pass being low.
+
+**The station's loss map** comes from its own receptions over the lookback.
+- A 10° sector is marked when its lost samples come from at least two passes and make up at least 0.6 of what it could have heard below 45°.
+- It is marked up to the highest elevation it lost a sample at.
+- A pass whose floor was raised is left out (D-275).
+- **The station's declared horizon marks too.** A loss behind its own mask is an obstruction it knew of.
+
+**A reception is obstructed** when two or more of its lost samples lie in marked sectors, or, if it heard nothing, when 80% of its samples above 10° do. The track comes from the pass's own element set at the station's registered site, computed when the diagnosis is made (the simulator's sky is pinned to the same computation, D-252). The newest learned profile is cited, not compared.
+
+*Where the effect code was in view* (D-270): the mirrored comparison rests on the simulated SNR rising and falling with elevation symmetrically.
+
+---
+
+## D-275 — Interference is a floor raised against the station's own, at the same gain
+
+**2026-10-02 · accepted, review owed (D-270)** · *`meridian/reliability/diagnosis_causes.py`; Stage 27. Widens the roadmap's test.*
+
+The roadmap compares the reception's floor with the station's `interference_profiles` cell for that azimuth and hour. **A persistent source is absorbed into its cell:** the cell learns the raised floor as normal, so a reception in it reads as not raised, and the comparison fails exactly where the interference is. **The baseline is instead the median floor of the station's own receptions at the same gain**, over the lookback, from at least five. Each reception counts once, by its latest revision: a resubmission writes a noise row of its own and is still one reading. A floor 2 dB or more above it is raised.
+
+**The cell is cited**, with its lift, its count and whether its gains contain the reception's, so the profile's view stands beside the diagnosis.
+
+*Where the effect code was in view* (D-270): 2 dB was set against the simulated floor's ±0.5 dB jitter and against Stage 25's rise of 6 to 15 dB over part of a pass, which raises a pass's floor by a few decibels.
+
+---
+
+## D-276 — A silent satellite is judged on attempts made at about the same time
+
+**2026-10-02 · accepted, review owed (D-270)** · *`meridian/reliability/{diagnosis_causes,satellite_evidence}.py`; Stage 27. Uses D-147's rule on a narrower window.*
+
+The test is D-147's, `judge_satellite`, over other stations' attempts at the same satellite, in the same population, of provenance `station`, each physical pass counted once. **Over ±45 minutes, not D-147's ±12 hours.** A silence of tens of minutes is invisible over half a day, in which some station somewhere always heard the satellite. **One other station that listened and heard nothing, with none hearing it, names it**: the roadmap's "every other station … also missed it". **A silence counts only from a pass that climbed 40° or more**, the loss's own included. A low pass that hears nothing is the usual case, satellite or not, and the first fleet run named natural losses silent until the floor was set; a high one hearing nothing is not. The catalogue's flag saying the transmitter is off also names it, and since the catalogue holds only the current state, the value read is recorded. **Never for a reception that heard the satellite**: a transmitter retired since would otherwise turn every earlier `signal_no_decode` into a silent satellite when history is diagnosed again.
+
+**The station's own other assignments of the pass are no witness.** Stage 20 pools every assignment a station held of one physical pass. A second one that also heard nothing is the same loss reported twice, not another station's silence. One that heard the satellite still counts, because it was heard.
+
+**So a pass can be a confirmed miss for SC-4 and diagnosed `satellite_silent`.** The two answer different questions on different windows. Whether D-147's window should narrow is the team's to decide, and nothing here changes it.
+
+*Where the effect code was in view* (D-270): the window was set against silences of 20 to 120 ticks, and the floor against the simulated outcome model's silence by elevation.
+
+---
+
+## D-277 — Timing's ground truth is a stepped clock, and a drifting one stays as it was
+
+**2026-10-02 · accepted, review owed (D-270)** · *`meridian_sim/{faults,clock_faults,clock_effects,fault_schedule,supervisor,executor,fault_notes}.py`; `docs/SCALE-AND-FAULTS.md` § A stepped clock; Stage 27. Extends D-188 and D-253.*
+
+EVALUATION §11.2 names Stage 21's drifting clock as the ground truth for a timing fault. It cannot be one. A virtual station reports the assignment's own window (D-077), and a drift reaches a minute at most, so a drifting station loses no pass and the ledger names none. A cause with no case of it has no recall to measure.
+
+**A new fault, `clock_step`, in a scenario of its own, `clock`.** While it holds, the station's clock is wrong by a fixed step of 15 to 25 minutes, ahead or behind, and the station records the wrong stretch of time. The effect is specified in `docs/SCALE-AND-FAULTS.md` § A stepped clock and pinned with Stage 25's (D-270).
+- **The step is that large on purpose.** A decoded pass stays decoded while one frame survives, so on the simulator's own passes a step loses a heard pass only once it is about four-fifths of the window or more. A smaller step would name passes it moved and lose almost none of them.
+- **Every pass begun inside the window is named, heard or not.** The recording was of the wrong stretch of time whatever was in it, and the report decides from the clean outcome, recomputed from the seed, whether the clock is what lost it. Only a heard pass's evidence changes, because noise moved is noise.
+- **Drawn on streams of its own.** No earlier scenario's schedule or clock moves, which `tests/unit/test_simulator_clock_step.py` holds against a digest taken before the change. MSP carries nothing new.
+
+**A drifting clock is left as it was.** Making it move recordings too would change every `drift` and `chaos` run at every seed (D-188). The two clocks now disagree about whether a clock moves a recording, and this entry is where that is said.
+
+**What a stepped clock leaves for a diagnosis:**
+- heartbeats whose `sent_at` differs from their `received_at` by the step;
+- listening that names the assignment outside its window, so Stage 20 does not confirm the station was listening;
+- no clock offset, since virtual stations estimate none;
+- and, at a jump ahead, a few windows the client lets go of before they open, which the platform records as declines and which are never diagnosed (D-008).
+
+**A pass held while the receiver was down and the clock was wrong is named against both**, since the loop began it on the wrong clock. Its truth is then *several* causes (D-278), not one the diagnosis could only half see.
+
+**The test reads four traces** of the station's clock, against the assignment's stated timing uncertainty plus a tolerance of 30 s for a heartbeat's cadence and transit:
+- **its listening**: heartbeats naming the assignment arriving before the window opened or after it closed;
+- **its clock**: the median of `sent_at − received_at` over heartbeats from a minute before the window to a minute after, so the clock read is the one the pass was received under. A wider span named passes the clock never touched, whose next hour it did. `sent_at` is not trusted to say when a heartbeat was sent (D-013), which is exactly why it measures the station's clock;
+- **its own word**: a reported `clock_offset_s` beyond its stated uncertainty;
+- **its recording**: an observation window moved the same way at both ends.
+
+The roadmap names the last two. The first two are what a station whose time source failed still leaves, since it can say nothing true about its own offset.
+
+*Rejected: give the drifting clock the effect.* It moves every earlier seed's runs.
+
+*Rejected: virtual stations that estimate and report `clock_offset_s`.* That makes the timing test read the one field built to say the answer. A station whose time source failed is exactly the one that cannot say how far off it is.
+
+---
+
+## D-278 — SC-8 is measured on sealed simulated fleets, and judged only in the report
+
+**2026-10-02 · accepted, review owed (D-270)** · *`deploy/tools/diagnosis_runs.py`; `meridian/datasets/diagnosis_runs.py`; `meridian/reports/diagnosis_truth.py`; `analysis/configs/diagnosis.toml.example`; `meridian_sim/faults.py` (`diagnosis`); Stage 27. Applies D-105 and D-189.*
+
+SC-8 asks whether the diagnosis names the injected cause. The cause is in the simulator's ledger and must never reach the platform (D-105), so the figure is made in two places that meet only in files.
+
+**A fleet is run and sealed by a tool, not by the platform.** `deploy/tools/diagnosis_runs.py` runs a simulated fleet against the real platform in one process, over a day or two of real passes. The platform then classifies and diagnoses every loss from its own records, exactly as the jobs service does. The tool seals the result under `<datasets root>/diagnoses/` as a diagnosis run:
+- the run's description;
+- the ledger as the simulator wrote it;
+- every scheduled assignment with its clean outcome, recomputed from the seed;
+- every diagnosis.
+
+It is the one tool here that needs the workspace rather than the standard library, because the platform never imports the simulator (D-138). Nothing in the platform reads a ledger to diagnose, which `tests/unit/test_diagnosis_boundaries.py` holds.
+
+**A run made again from its seed is the same run.** Each fleet gets a database of its own, migrated fresh, and station ids are drawn from the seed. So pass ids, assignment ids and every pass's outcome follow from the seed and the scenario. The scheduler's time limit is the one thing that could part two runs, and a sealed run keeps what happened either way.
+
+**One scenario holds every fault SC-8 scores**: `diagnosis` is a dead receiver, a degraded decoder (the control), the stepped clock, an obstruction, interference and a silent satellite, on streams of their own. One fleet gives every cause a chance to occur beside the others. Stage 25's degradation is left out: it is SC-9's, and its loss on every pass would hide the rest.
+
+**The truth of a loss is decided in the report, from the files alone** (`meridian.reports.diagnosis_truth`):
+- **a cause**: exactly one fault acted on the pass, it has a category, and the pass came out worse than its clean outcome;
+- **`control`**: the same, for a fault with no category, whose right answer is *undetermined*;
+- **`acted_not_cause`**: a fault acted, and the pass is no worse than it would have been;
+- **`several`**: more than one fault acted;
+- **`none`**: no fault acted, and the outcome model lost it.
+
+The clean-outcome comparison is what makes a recall honest. The ledger names a pass a fault *changed* or *moved* (D-253, D-277), not one it lost.
+
+**The rarer causes get fleets of their own.** In the combined scenario an obstruction, an interference source or a silence seldom loses a whole pass. A decoded pass stays decoded while one frame survives, and a silence needs a second station listening high in the sky within 45 minutes. Four fleets of six stations over a day held one obstruction case between them, and no interference or silence case. So the SC-8 configuration also runs `obstruction`, `interference` and `silent` alone, where every station carries the fault. The report prints each cause's case count beside its recall, and a recall over a handful of cases is shown as that, not tuned towards the target.
+
+**The CI gate is one small fleet** (4 stations, 12 h, seed 4472, about four minutes), because every heartbeat goes through the real platform. It shows:
+- every loss diagnosed;
+- a dead receiver's losses named;
+- a stepped clock's losses named;
+- a loss several faults acted on given one of their causes or none;
+- nothing about a fault reaching any table.
+
+It does not measure SC-8.
+
+**The section is the evaluation report's seventh, method `report-8`.** It needs no table of its own in the configuration: its thresholds are in each sealed run, and its targets are SC-8's. Stage 24's branch also changes the method. Whichever merges second keeps `report-8` or moves past it, so no two methods share a name.
+
+*Rejected: the confusion matrix from one gate run.* A gate proves that each cause can be named. A figure needs several seeds and their spread, which a CI job cannot afford and a sealed run can carry.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5964,6 +6167,22 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-264 SC-7 in the evaluation report | `meridian/reports/{verdict,verdict_config,render_verdict,build,render,config}.py`; `analysis/configs/evaluation.toml.example`; `OPERATIONS.md` § Evaluation reports; `tests/unit/{test_report_verdict,test_report_cli,test_report_prediction}.py` |
 | — the completion gate | `tests/integration/test_verdict_gate.py`: 150 receptions stored, the decoded ones rated, a snapshot exported, the verdict fitted from it and applied, every measured reception then holding a versioned verdict; `tests/unit/test_report_verdict.py`: SC-7 built and verified through `meridian report`, with every socket refused |
 | — D-102 enforced | `tests/unit/test_prediction_boundaries.py`: no module on the yield path reads a rating or a verdict |
+
+**Landed 2026-10-02**, building Stage 27's loss diagnosis, before D-105's review of the fault specification, by the team's choice (D-270).
+
+| Decision | Applied to |
+|---|---|
+| D-270 begun before the review, the specification pinned | `docs/SCALE-AND-FAULTS.md` (Review lines); `tests/unit/test_fault_spec_pin.py` |
+| D-271 a partial decode is still captured for SC-4 | `meridian/reliability/classification.py` (`CAPTURED`); `tests/unit/test_reliability_boundaries.py` |
+| D-272 what is diagnosed, once per method and configuration | migration 0029; `meridian/store/{loss_diagnoses,snapshot_reads}.py`; `meridian/datasets/export.py`; `meridian/reliability/diagnosis_run.py`; `meridian/cli_diagnosis.py`, `cli.py`; `meridian/jobs/{diagnosis_round,job_metrics}.py`; `meridian/cli_jobs.py`; `deploy/prometheus/{rules,tests}/`; `DATA-MODEL.md`; `OPERATIONS.md` § Loss diagnosis; `tests/integration/{test_loss_diagnoses,test_loss_diagnosis,test_migrations,test_migration_lifecycle}.py`; `tests/unit/{test_jobs_diagnosis_round,test_deferred_storage_gate,test_snapshot_tables}.py` |
+| D-273 choosing a cause, *undetermined* an answer | `meridian/reliability/{diagnosis,diagnosis_causes,diagnosis_evidence,config}.py`; `deploy/reliability.toml.example`; `tests/unit/{test_diagnosis_choice,test_diagnosis_config,test_diagnosis_boundaries}.py` |
+| D-274 an obstruction from where signal is lost | `meridian/reliability/{obstruction_map,diagnosis_gather}.py`; `meridian/store/diagnosis_reads.py`; `tests/unit/test_diagnosis_causes.py`; `tests/integration/test_diagnosis_reads.py` |
+| D-275 interference against the station's own floor | `meridian/reliability/diagnosis_causes.py`; `meridian/store/diagnosis_reads.py` |
+| D-276 a silent satellite on contemporaneous, high attempts | `meridian/reliability/{satellite_evidence,accounting,diagnosis_causes}.py`; `meridian/store/reliability_evidence.py` |
+| D-277 the stepped clock, and the timing test | `meridian_sim/{faults,clock_faults,clock_effects,fault_schedule,supervisor,executor,fault_notes}.py`; `docs/SCALE-AND-FAULTS.md` § A stepped clock; `tests/unit/test_simulator_clock_step.py` |
+| D-278 SC-8 from sealed simulated fleets | `deploy/tools/diagnosis_runs.py`; `meridian/datasets/{diagnosis_runs,manifest_rules}.py`; `meridian/reports/{diagnosis,diagnosis_truth,render_diagnosis,build,render,verify}.py`; `meridian/cli_report.py`; `meridian_sim/faults.py` (`diagnosis`); `analysis/configs/diagnosis.toml.example`; `EVALUATION.md` §11.2; `tests/unit/{test_diagnosis_truth,test_diagnosis_runs_tool,test_report_diagnosis,test_report_cli}.py` |
+| — the completion gate | `tests/integration/test_diagnosis_gate.py`: a faulted fleet flown, every loss diagnosed, a dead receiver's and a stepped clock's losses named, nothing about a fault in any table; `tests/unit/test_report_diagnosis.py`: SC-8 built and verified through `meridian report` from sealed runs, with every socket refused |
+| — D-102 enforced | `tests/unit/test_diagnosis_boundaries.py`: no yield feature reads a diagnosis, and no diagnosis reaches the ledger, a dataset, a model or the network |
 | — the settled entry | D-106 |
 
 **Landed 2026-10-01**, building Stage 24's final software acceptance.

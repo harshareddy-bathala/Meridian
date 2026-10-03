@@ -46,7 +46,35 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-10-01. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-10-02. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stage 27's software is built** (2026-10-02), **before D-105's review of the fault specification**, by the team's choice (D-270). The specification is pinned so the review can still read exactly what the diagnosis was built against. Its decisions are D-270 through D-278, `docs/OPERATIONS.md` § Loss diagnosis is its runbook, and its migration is `0029`. Stage 24 merged before it, and its seventy-two hour run on the Pi is still owed. Stage 28 is next in order; Stages 29, 30 and 33 now wait only on stages after this one.
+- **The completion gate passes, in two halves.** *SC-8's confusion matrix, per-cause recall, wrong-cause fraction and undetermined fraction regenerate from the simulator's seeds, labelled as simulated and reported apart from any real labelled cases.*
+  - `tests/integration/test_diagnosis_gate.py` flies a faulted fleet of four stations for twelve hours through the harness SC-8's runs are made with. It asserts:
+    - every loss is diagnosed;
+    - a dead receiver's losses are named "not listening", and a stepped clock's losses a timing fault;
+    - a loss several faults acted on is given one of their causes or none;
+    - nothing about a fault reaches any table, with a planted positive control;
+    - every row is simulated, and a rerun writes nothing.
+  - `tests/unit/test_report_diagnosis.py` builds SC-8 from sealed runs through `meridian report build --diagnoses` and `verify` with every socket refused, and regenerates `report.md` from the results.
+- **Every loss is diagnosed** (D-272): a failed reception, a decode below the verdict's partial threshold, and a window held with nothing reported. Never an expired or revoked assignment. This happens once per method and thresholds, by `meridian diagnosis run` and by the jobs service.
+- **Five causes, each from Meridian's own records, or *undetermined*** (D-273 to D-277). Every cause tested is recorded with what it found:
+  - an obstruction is read from where the station's own passes lose signal;
+  - interference is a floor raised against the station's own;
+  - a silent satellite means other high passes heard nothing within 45 minutes;
+  - a timing fault comes from the station's heartbeats and recording.
+- **A decode below the partial threshold still counts as captured for SC-4** (D-271), for the team to confirm.
+- **A stepped clock is timing's ground truth** (D-277). Stage 21's drifting clock loses no pass.
+- **SC-8 from sealed simulated fleets** (D-278): `deploy/tools/diagnosis_runs.py` seals them, and the report judges them in the seventh section, method `report-8`.
+- **D-102 is enforced:** no yield feature reads a diagnosis, and no diagnosis reaches the simulator's ledger.
+- **Owed, not done:**
+  - **the review of the fault specification**, of the pinned text, by a team member other than this stage's author. Until it is recorded, SC-8 is not claimed;
+  - **SC-8's measured figure.** The configuration's twelve fleets take hours, and have not been run;
+  - the team's confirmation of D-271 and of SC-8's proposed targets.
+- **Known limits:**
+  - in the simulator, an obstruction, interference or silence seldom loses a whole pass. Their recalls rest on few cases, even in fleets of their own, and the report prints the counts;
+  - the CI gate's fleet is too small to show those three, and measures no figure;
+  - every threshold was set with the simulated fault effects in view, as D-270 lists.
 
 **Stage 24's software is built** (2026-10-01): everything but the run it ends with. **The seventy-two hour run is next, on the Pi**, by an operator, from `docs/OPERATIONS.md` § The 72-hour acceptance run on the Pi. Stage 26 merged first; Stages 27 to 30 are the rest of the post-reception path, and Stage 27 waits on the review of the fault specification that D-105 requires. Its decisions are D-254 through D-257, and it added no migration.
 - **Software-complete is a register.** `docs/ACCEPTANCE.md` quotes all forty clauses with each one's status and evidence. `tests/unit/test_acceptance_gate.py` fails on a clause missing, reworded or repeated, on a cited test, CI step or section that does not exist, and on a status its evidence does not support (D-254). It is the first thing to read for "is it done":

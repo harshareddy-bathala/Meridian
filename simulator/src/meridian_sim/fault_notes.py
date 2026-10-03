@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from meridian_sim.fault_schedule import FaultSchedule
-from meridian_sim.faults import CLOCK_DRIFT, PARTITION, SATELLITE_SILENT
+from meridian_sim.faults import CLOCK_DRIFT, CLOCK_STEP, PARTITION, SATELLITE_SILENT
 from meridian_sim.fleet_faults import FleetFaults
 from meridian_sim.ledger import FaultLedger
 
@@ -84,8 +84,12 @@ class FaultNotes:
 
     def _detail(self, schedule: FaultSchedule, kind: str) -> dict[str, object]:
         """What a reader of the ledger needs to know about one fault's shape."""
-        if kind == CLOCK_DRIFT:
-            return {"drift_s_per_tick": schedule.drift_s_per_tick}
+        clocks = {
+            CLOCK_DRIFT: {"drift_s_per_tick": schedule.drift_s_per_tick},
+            CLOCK_STEP: {"step_s": schedule.clock_step_s},
+        }
+        if kind in clocks:
+            return dict(clocks[kind])
         if kind == PARTITION:
             return {"members": sorted(self.fleet.partition.members)}
         if kind == SATELLITE_SILENT and self.fleet.silence is not None:

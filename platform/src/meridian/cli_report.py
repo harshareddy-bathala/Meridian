@@ -33,6 +33,7 @@ from meridian.cli_snapshot import (
     EXIT_CORRUPT,
     datasets_root,
 )
+from meridian.datasets.diagnosis_runs import read_diagnosis_run
 from meridian.datasets.fault_runs import read_fault_run
 from meridian.datasets.manifest import content_sha256
 from meridian.datasets.publish import DamagedSnapshotError, read_directory
@@ -51,6 +52,7 @@ from meridian.reports.config import load_report_config
 from meridian.reports.environment import run_environment
 from meridian.reports.verify import (
     SnapshotNotFoundError,
+    locate_diagnosis_runs,
     locate_fault_runs,
     locate_snapshot,
     verify_run,
@@ -105,6 +107,15 @@ def add_report_parser(
         " repeat for several (D-240)",
     )
     build.add_argument(
+        "--diagnoses",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="a simulated fleet sealed by deploy/tools/diagnosis_runs.py;"
+        " repeat for several (D-278)",
+    )
+    build.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -125,6 +136,14 @@ def add_report_parser(
         default=[],
         metavar="DIR",
         help="a fault run the run judged, if it is not under the datasets root",
+    )
+    verify.add_argument(
+        "--diagnoses",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="a diagnosis run the run judged, if it is not under the datasets root",
     )
 
 
@@ -180,6 +199,7 @@ def _made(args: argparse.Namespace, root: Path) -> Run:
         read_directory(args.snapshot),
         config,
         tuple(read_fault_run(path) for path in args.faults),
+        tuple(read_diagnosis_run(path) for path in args.diagnoses),
     )
     run = build_run(inputs, seed=args.seed, root=root, created_at=started)
     elapsed = (datetime.now(UTC) - started).total_seconds()
@@ -207,10 +227,12 @@ def _verify(args: argparse.Namespace) -> int:
         run = read_directory(args.run)
         raw = locate_snapshot(run.manifest, root=root, given=args.snapshot)
         faults = locate_fault_runs(run.manifest, root=root, given=args.faults)
+        diagnoses = locate_diagnosis_runs(run.manifest, root=root, given=args.diagnoses)
         verdict = verify_run(
             run,
             raw,
             faults=faults,
+            diagnoses=diagnoses,
             root=root,
             environment=run_environment(raw.path),
         )

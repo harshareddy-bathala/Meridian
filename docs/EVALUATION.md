@@ -302,9 +302,18 @@ How modules 13–17 are proven (D-095). Everything above applies to them — tem
 
 **Method.**
 
-- **Ground truth comes from injected faults** with known causes (roadmap Stage 25): gradual signal degradation, a new obstruction, interference and a silent satellite, alongside the existing receiver-down fault for a station not listening and clock drift for timing. The cause is written to the simulator's run record, **never sent over MSP and never stored by the platform**, and is joined to diagnoses only here (D-105).
+- **Ground truth comes from injected faults** with known causes:
+  - a new obstruction, interference and a silent satellite (Stage 25);
+  - a dead receiver for a station not listening (Stage 10);
+  - **a stepped clock for timing** (Stage 27, D-277). Stage 21's drifting clock loses no pass, so it is no timing case.
+
+  The cause is written to the simulator's run record, **never sent over MSP and never stored by the platform**, and is joined to diagnoses only here (D-105).
+- **A fault acting is not a fault causing the loss.** A loss is a case of a cause only when exactly one fault acted on its pass and the pass came out worse than the outcome its seed gives with nothing wrong (D-278). A loss several faults acted on, one a fault acted on without making worse, and one no fault touched are counted in rows of their own.
+- **A cause is wrongly named** when no fault that acted on the pass has it. Naming a fault that was there is not wrong; *undetermined* never is.
 - **Negative control.** Stage 21's degraded decoder is a failure with no category in the list. The correct diagnosis is *undetermined*, and how often it is reported as something else is reported.
-- **Report.** A confusion matrix with injected causes as rows and diagnosed causes, *undetermined* included, as columns; per-cause recall; the fraction naming a wrong cause; and the *undetermined* fraction, which is never folded into either. Several seeds per cause, with the spread between seeds.
+- **Report.** A confusion matrix with injected causes as rows and diagnosed causes, *undetermined* included, as columns; per-cause recall with its case count and a Wilson interval; the fraction naming a wrong cause; and the *undetermined* fraction, which is never folded into either. Several seeds per cause, with the spread between seeds.
+- **From sealed fleets.** `deploy/tools/diagnosis_runs.py` runs and seals simulated fleets, and `meridian report build --diagnoses` judges them (D-278). The rarer causes, obstruction, interference and silence, also run in fleets of their own, because they seldom lose a whole pass beside the others. A recall over a handful of cases is printed as that.
+- **Not claimed until reviewed.** The fault effects SC-8 is scored against are pinned and owe the independent review D-105 asks for (D-270). Until `SCALE-AND-FAULTS.md` records it, the report says SC-8 is not claimed, whatever the number.
 - **Real cases** the team can label are reported in their own table, however few, and never added to the simulated matrix.
 
 **It does not claim** real-world diagnostic accuracy. SC-8 shows that evidence of the shape a fault produces is attributed to that fault. Whether real faults produce that shape is what the real cases begin to answer, and the report says so beside the number.

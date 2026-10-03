@@ -308,7 +308,11 @@ def test_every_training_example_scored_live_has_its_training_features(
     root, dataset_path = labelled("world")
     scorer = load_live_scorer(a_model(root, dataset_path, "D"), root=root)
     dataset = read_directory(dataset_path)
-    raw = read_directory(next((root / "snapshots").iterdir()))
+    # Not `next(iterdir())`: the staging directory sits beside the snapshot.
+    (held,) = (
+        one for one in (root / "snapshots").iterdir() if not one.name.startswith(".")
+    )
+    raw = read_directory(held)
     rows = read_feature_rows(raw.files)
     passes = read_labels(dataset.files)
     settle = whole(dataset.manifest.parameters["settle_margin_s"], "settle")

@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from meridian.reports.markdown import cell, table
 from meridian.reports.render_data import render_data
+from meridian.reports.render_diagnosis import render_diagnosis
 from meridian.reports.render_orbit import render_orbit
 from meridian.reports.render_prediction import render_prediction
 from meridian.reports.render_reliability import render_reliability
@@ -33,6 +34,7 @@ SECTIONS: tuple[tuple[str, Callable[[Sequence[Row]], list[str]]], ...] = (
     ("orbit", render_orbit),
     ("reliability", render_reliability),
     ("verdict", render_verdict),
+    ("diagnosis", render_diagnosis),
 )
 """Each section in the order the report prints it, by its results file's name."""
 

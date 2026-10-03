@@ -25,10 +25,16 @@ Reference: docs/DECISIONS.md D-235.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, TypeVar
 
+from meridian.datasets.diagnosis_runs import (
+    DIAGNOSES,
+    DiagnosisRun,
+    read_diagnosis_run,
+)
 from meridian.datasets.fault_runs import FAULTS, FaultRun, read_fault_run
 from meridian.datasets.manifest import Manifest, content_sha256
 from meridian.datasets.publish import SnapshotDirectory, read_directory
@@ -44,13 +50,26 @@ __all__ = [
     "NotARunError",
     "SnapshotNotFoundError",
     "Verdict",
+    "locate_diagnosis_runs",
     "locate_fault_runs",
     "locate_snapshot",
     "verify_run",
 ]
 
+
+class _Sealed(Protocol):
+    """A sealed run of either kind: what a report needs to know it by."""
+
+    @property
+    def directory(self) -> SnapshotDirectory: ...
+
+
+_R = TypeVar("_R", bound=_Sealed)
+
 _SNAPSHOTS = "snapshots"
-_UNCOMPARED = frozenset(("snapshot_path", "runtime_s", "fault_run_paths"))
+_UNCOMPARED = frozenset(
+    ("snapshot_path", "runtime_s", "fault_run_paths", "diagnosis_run_paths")
+)
 """Environment entries that describe where or how long, not what, and are
 never a cause of a different number."""
 
@@ -129,8 +148,48 @@ def locate_fault_runs(
         SnapshotNotFoundError: A recorded fault run is nowhere searched.
         DamagedSnapshotError: A candidate does not match its own manifest.
     """
-    recorded = run.parameters.get("fault_runs", [])
-    hints = run.environment.get("fault_run_paths", {})
+    return _locate_runs(
+        run, ("fault_run", FAULTS, "--faults"), read_fault_run, root, given
+    )
+
+
+def locate_diagnosis_runs(
+    run: Manifest, *, root: Path, given: Sequence[Path] = ()
+) -> tuple[DiagnosisRun, ...]:
+    """Every diagnosis run ``run`` judged, each found and checked by its hash.
+
+    Looked for as a fault run is: among the paths given, at the recorded path,
+    then under ``<root>/diagnoses`` (D-278).
+
+    Raises:
+        SnapshotNotFoundError: A recorded diagnosis run is nowhere searched.
+        DamagedSnapshotError: A candidate does not match its own manifest.
+    """
+    return _locate_runs(
+        run,
+        ("diagnosis_run", DIAGNOSES, "--diagnoses"),
+        read_diagnosis_run,
+        root,
+        given,
+    )
+
+
+def _locate_runs(
+    run: Manifest,
+    kind: tuple[str, str, str],
+    read: Callable[[Path], _R],
+    root: Path,
+    given: Sequence[Path],
+) -> tuple[_R, ...]:
+    """Every sealed run of one kind that ``run`` recorded, in recorded order.
+
+    ``kind`` is the manifest kind, the folder under the datasets root, and the
+    flag that names one by hand; the run records each under ``<kind>s`` in its
+    parameters and ``<kind>_paths`` in its environment.
+    """
+    key, folder, flag = kind
+    recorded = run.parameters.get(f"{key}s", [])
+    hints = run.environment.get(f"{key}_paths", {})
     found = []
     for wanted in recorded if isinstance(recorded, list) else []:
         digest = str(wanted)
@@ -138,33 +197,32 @@ def locate_fault_runs(
         candidates = [
             *given,
             *([Path(str(hinted))] if hinted else []),
-            *sorted((root / FAULTS).glob(f"{digest[:12]}*")),
+            *sorted((root / folder).glob(f"{digest[:12]}*")),
         ]
-        match = _fault_run(candidates, digest)
+        match = next(
+            (
+                one
+                for one in (read(path) for path in candidates if path.is_dir())
+                if content_sha256(one.directory.manifest).hex() == digest
+            ),
+            None,
+        )
         if match is None:
             message = (
-                f"no fault run {digest[:12]} under {root / FAULTS};"
-                " name it with --faults"
+                f"no {key.replace('_', ' ')} {digest[:12]} under {root / folder};"
+                f" name it with {flag}"
             )
             raise SnapshotNotFoundError(message)
         found.append(match)
     return tuple(found)
 
 
-def _fault_run(candidates: Sequence[Path], digest: str) -> FaultRun | None:
-    for path in candidates:
-        if path.is_dir():
-            run = read_fault_run(path)
-            if content_sha256(run.directory.manifest).hex() == digest:
-                return run
-    return None
-
-
-def verify_run(
+def verify_run(  # noqa: PLR0913 — a run, its inputs, and where to build it
     run: SnapshotDirectory,
     raw: SnapshotDirectory,
     *,
     faults: tuple[FaultRun, ...] = (),
+    diagnoses: tuple[DiagnosisRun, ...] = (),
     root: Path,
     environment: Mapping[str, object],
 ) -> Verdict:
@@ -174,6 +232,8 @@ def verify_run(
         run: The run, as :func:`read_directory` verified it.
         raw: Its raw snapshot, as :func:`locate_snapshot` found it.
         faults: Its fault runs, as :func:`locate_fault_runs` found them.
+        diagnoses: Its diagnosis runs, as :func:`locate_diagnosis_runs` found
+            them.
         root: The datasets root the evaluation dataset is published under.
         environment: This machine's environment, to compare with the recorded.
 
@@ -187,7 +247,7 @@ def verify_run(
     manifest = run.manifest
     seed = _require_run(manifest)
     rebuilt = build_run(
-        RunInputs(raw, parse_report_config(run.files[CONFIG_FILE]), faults),
+        RunInputs(raw, parse_report_config(run.files[CONFIG_FILE]), faults, diagnoses),
         seed=seed,
         root=root,
         created_at=manifest.created_at,

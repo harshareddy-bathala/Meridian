@@ -70,6 +70,11 @@ class DatabaseVerdictWork:
         self._registry_for = registry_for
         self._model = model
 
+    @property
+    def method(self) -> str:
+        """The model's method, which the diagnosis reads partial decodes by."""
+        return self._model.method
+
     def apply(self, now: datetime) -> VerdictBuildReport:
         """Run the writer exactly as ``meridian verdict apply`` does, batched."""
         with self._connect() as conn:

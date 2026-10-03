@@ -86,6 +86,9 @@ class NearbyReception:
     simulated: bool
     """True if the pass, the assignment or the report is simulated."""
 
+    max_elevation_deg: float
+    """How high the pass climbed, which says how much its silence tells."""
+
 
 def find_unclassified_settled(
     conn: Connection, *, settled_by: datetime, method: str, config_sha256: bytes
@@ -196,6 +199,7 @@ def find_receptions_near(
     satellite_id: str,
     between: tuple[datetime, datetime],
     excluding: Sequence[str],
+    station_reported: bool = False,
 ) -> list[NearbyReception]:
     """Reported passes of a satellite that began and ended inside ``between``.
 
@@ -207,6 +211,8 @@ def find_receptions_near(
             loss of signal at or before the end.
         excluding: Assignments of the pass being judged, which are not
             evidence about themselves.
+        station_reported: Only reports a station sent (``provenance =
+            'station'``), never an archive's or a hand-entered one.
 
     Returns:
         Each reported, scheduled assignment's latest report, in id order.
@@ -217,7 +223,8 @@ def find_receptions_near(
             """
             select a.assignment_id, a.station_id, p.satellite_id, a.start_at,
                    a.end_at, a.centre_freq_hz, a.mode, o.outcome,
-                   (p.simulated or a.simulated or o.simulated) as simulated
+                   (p.simulated or a.simulated or o.simulated) as simulated,
+                   p.max_elevation_deg
             from assignments a
             join passes p on p.id = a.pass_id
             join observations_current o on o.assignment_id = a.assignment_id
@@ -226,8 +233,9 @@ def find_receptions_near(
               and p.aos >= %s and p.aos <= %s
               and p.los <= %s
               and not (a.assignment_id = any(%s))
+              and (not %s or o.provenance = 'station')
             order by a.assignment_id
             """,
-            (satellite_id, start, end, end, list(excluding)),
+            (satellite_id, start, end, end, list(excluding), station_reported),
         )
         return cur.fetchall()

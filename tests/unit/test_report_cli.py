@@ -91,6 +91,7 @@ def test_a_run_is_built_from_a_snapshot_alone_and_verifies(
     assert names == {
         "config.toml",
         "data.jsonl",
+        "diagnosis.jsonl",
         "orbit.jsonl",
         "prediction.jsonl",
         "reliability.jsonl",

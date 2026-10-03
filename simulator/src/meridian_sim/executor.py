@@ -19,7 +19,9 @@ by the test.
 instant is derived from it, which is what makes two runs at one seed produce
 byte-identical bodies (D-077). A real station's window drifts by seconds against
 its assignment; a virtual one has no rotator to be slow and no reason to invent
-the difference.
+the difference. The one exception is Stage 27's stepped clock (D-277): the
+reported window is still the assignment's, as the station believes, while what
+it recorded is moved by the step (:mod:`~meridian_sim.clock_effects`).
 
 What is decided here is only *when*: :mod:`~meridian_sim.outcomes` decides what
 was heard, from the seed and the pass geometry, and this places those numbers on
@@ -40,6 +42,7 @@ from meridian_client.execution import (
     assignment_status,
 )
 from meridian_client.observation_message import ObservationResult
+from meridian_sim.clock_effects import names_pass, samples_moved, shift_recording
 from meridian_sim.config import seed_for_pass
 from meridian_sim.evidence import (
     SNR_SAMPLE_COUNT,
@@ -47,6 +50,7 @@ from meridian_sim.evidence import (
     station_noise_floor_dbfs,
 )
 from meridian_sim.faults import (
+    CLOCK_STEP,
     DECODER_DEGRADED,
     RECEIVER_DOWN,
     SATELLITE_SILENT,
@@ -104,6 +108,7 @@ class SimulatedExecutor:
         self._station_seed = station_seed
         self._site = site
         self._sky_at_begin: dict[str, tuple[ActiveSkyFault, ...]] = {}
+        self._step_at_begin: dict[str, float] = {}
         self._noise_floor_dbfs = station_noise_floor_dbfs(station_seed)
         self._faults = faults if faults is not None else FaultState()
         self._begun: set[str] = set()
@@ -135,6 +140,8 @@ class SimulatedExecutor:
         if RECEIVER_DOWN in self._faults.active:
             self._held_but_not_begun.add(assignment.assignment_id)
             self._faulted.append((RECEIVER_DOWN, assignment.assignment_id))
+            # Begun by the loop on a wrong clock too, so both are named (D-277).
+            self._note_step(assignment)
             return
         self._begun.add(assignment.assignment_id)
         self._sky_at_begin[assignment.assignment_id] = self._faults.sky
@@ -149,6 +156,7 @@ class SimulatedExecutor:
             for one in self._faults.sky
         ) and not self._aborts(assignment):
             self._faulted.append((SATELLITE_SILENT, assignment.assignment_id))
+        self._note_step(assignment)
 
     def end(self, assignment: Assignment) -> None:
         """Stop receiving, and decide what the pass produced.
@@ -227,7 +235,12 @@ class SimulatedExecutor:
             self._sky_at_begin.pop(assignment.assignment_id, ()),
             self._context(assignment, seed, window_s),
         )
-        outcome, evidence = affected.outcome, affected.evidence
+        outcome, evidence = shift_recording(
+            affected.outcome,
+            affected.evidence,
+            self._step_at_begin.pop(assignment.assignment_id, 0.0),
+            self._context(assignment, seed, window_s),
+        )
         self._faulted.extend(
             (kind, assignment.assignment_id)
             for kind in affected.kinds
@@ -248,6 +261,24 @@ class SimulatedExecutor:
         seed = self._pass_seed(assignment)
         outcome = decide_outcome(seed, assignment.expected_max_elevation_deg)
         return outcome.outcome == "aborted"
+
+    def _note_step(self, assignment: Assignment) -> None:
+        """Keep a stepped clock's error for this pass, and name the pass.
+
+        Named as the pass begins, for the reason a silence is: the window may
+        close before the pass ends. Whether it moves is decided from the clean
+        outcome, which is all that exists yet (D-277).
+        """
+        step = self._faults.clock_step_s
+        if step == 0:
+            return
+        self._step_at_begin[assignment.assignment_id] = step
+        window_s = (assignment.end_at - assignment.start_at).total_seconds()
+        clean = decide_outcome(
+            self._pass_seed(assignment), assignment.expected_max_elevation_deg
+        )
+        if names_pass(clean, samples_moved(step, window_s, SNR_SAMPLE_COUNT)):
+            self._faulted.append((CLOCK_STEP, assignment.assignment_id))
 
     def _pass_seed(self, assignment: Assignment) -> int:
         """The seed deciding this station's experience of this assignment."""

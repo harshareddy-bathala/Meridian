@@ -48,6 +48,8 @@ tests:
         values: "0+15x100"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
         values: "0+15x100"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
+        values: "0+15x100"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+15x100"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
@@ -238,6 +240,8 @@ tests:
         values: "0x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
         values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
+        values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
@@ -268,6 +272,8 @@ tests:
       - series: 'process_start_time_seconds{job="meridian-jobs", instance="jobs:9464"}'
         values: "0x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+60x30"
@@ -318,6 +324,8 @@ tests:
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
         values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
+        values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="profiles"}'
@@ -341,6 +349,8 @@ tests:
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="schedule"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+60x30"
@@ -370,6 +380,8 @@ tests:
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
         values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
+        values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
@@ -381,4 +393,57 @@ tests:
           - exp_labels: {severity: warning, job: meridian-jobs, instance: "jobs:9464", task: profiles}
             exp_annotations:
               summary: "The profiles task has not completed in over 15 minutes."
+              runbook: docs/OPERATIONS.md#scheduledtaskstalled
+
+  - name: the diagnosis task has failed every round, and receiving carries on
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="meridian-jobs", instance="jobs:9464"}'
+        values: "0x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="schedule"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="profiles"}'
+        values: "0+60x30"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ScheduledTaskNeverSucceeded
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: ScheduledTaskNeverSucceeded
+        exp_alerts:
+          - exp_labels: {severity: warning, job: meridian-jobs, instance: "jobs:9464", task: diagnosis}
+            exp_annotations:
+              summary: The diagnosis task has not completed once since the jobs process started.
+              runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+  - name: the diagnosis task stalls after succeeding, and only warns
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="meridian-jobs", instance="jobs:9464"}'
+        values: "0x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
+        values: "0x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="schedule"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="profiles"}'
+        values: "0+60x30"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ScheduledTaskStalled
+        exp_alerts:
+          - exp_labels: {severity: warning, job: meridian-jobs, instance: "jobs:9464", task: diagnosis}
+            exp_annotations:
+              summary: "The diagnosis task has not completed in over 15 minutes."
               runbook: docs/OPERATIONS.md#scheduledtaskstalled

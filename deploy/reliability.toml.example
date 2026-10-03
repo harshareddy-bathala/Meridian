@@ -56,3 +56,71 @@ submission_delay_p95_max_s = 3600
 # SC-5: a failure detected within this many seconds. Measured from Stage 21's
 # injected failures. 1 .. 3600.
 failure_detection_max_s = 90
+
+[diagnosis]
+
+# The thresholds a lost reception's cause is judged by (D-273 to D-277). Every
+# stored diagnosis records the sha256 of these, so changing one diagnoses every
+# loss again beside the old rows. Each was chosen with the simulator's fault
+# effects in view, which D-270 records.
+
+# A sample at or above this many dB heard the satellite. 0 .. 30.
+heard_snr_db = 3.0
+
+# How far back a station's own history is read, for its loss map and its noise
+# baseline, in seconds. 0 .. 7776000 (90 days).
+lookback_s = 1209600
+
+# The loss map: sectors of this many degrees. 1 .. 90.
+obstruction_sector_deg = 10.0
+
+# No loss above this elevation is read as an obstruction. 0 .. 90.
+obstruction_ceiling_deg = 45.0
+
+# A lost sample counts when the same pass was heard within this many degrees of
+# its elevation on the far side of culmination. 0.1 .. 30.
+elevation_match_deg = 5.0
+
+# A sector is marked when its losses come from at least this many earlier
+# passes, 1 .. 100, and make up at least this share of what it could have
+# heard, between 0 and 1.
+obstruction_min_passes = 2
+obstruction_min_lost_share = 0.6
+
+# A heard reception is obstructed when at least this many of its lost samples
+# lie in marked sectors. 1 .. 100.
+obstruction_min_samples = 2
+
+# A reception that heard nothing is obstructed when at least this share of its
+# samples above audible_min_elevation_deg lie in marked sectors.
+obstruction_absent_share = 0.8
+audible_min_elevation_deg = 10.0
+
+# A floor this many dB above the station's own median at the same gain is
+# raised, once the station has at least interference_min_baseline readings.
+interference_lift_db = 2.0
+interference_min_baseline = 5
+
+# Another station's attempt within this many seconds of the pass is evidence
+# about the satellite, contemporaneous unlike [classification]'s (D-276), and
+# this many other confirmed silences, with no other station hearing it, name it
+# silent.
+silent_window_s = 2700
+silent_min_attempts = 1
+
+# A silence counts, the loss's own included, only from a pass that climbed at
+# least this many degrees: a low pass hearing nothing is the usual case, a high
+# one is not (D-276). 0 .. 90.
+silent_min_elevation_deg = 40.0
+
+# Added to an assignment's stated timing uncertainty before a clock, a listening
+# span or a recording is called wrong, in seconds. 0 .. 3600.
+timing_tolerance_s = 30.0
+
+# How far either side of the window a heartbeat's clock is read, in seconds:
+# about one heartbeat's cadence, so the clock read is the pass's own. 0 .. 86400.
+clock_margin_s = 60
+
+# The lead the best-supported cause needs over the next to be named; within it
+# the loss is undetermined, because two causes conflict. Between 0 and 1.
+conflict_margin = 0.2

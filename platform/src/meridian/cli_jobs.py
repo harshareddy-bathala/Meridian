@@ -4,7 +4,9 @@ The process the ``jobs`` service runs in every deployment (D-110). Each round
 generates passes over the next ``SCHEDULE_HORIZON_S`` and schedules them under
 the ``schedule.toml`` named by ``SCHEDULE_CONFIG`` — configuration A on the
 elevation proxy when none is (D-168, D-170) — then expires work nobody took and
-classifies every pass that has settled (D-182, D-183), then waits
+classifies every pass that has settled (D-182, D-183), applies the verdict
+model if one is configured (D-263) and diagnoses every classified loss (D-272),
+then waits
 ``SCHEDULE_INTERVAL_S``; SIGTERM or SIGINT ends the wait and the process exits
 after the task in hand. Its metrics are served on ``JOBS_METRICS_PORT`` behind
 the same token as the API's (D-109).
@@ -56,6 +58,7 @@ from meridian.scheduler.scoring import ScorerSource
 from meridian.store.pool import CONNECT_TIMEOUT_S
 
 if TYPE_CHECKING:
+    from meridian.jobs.diagnosis_round import DatabaseDiagnosisWork
     from meridian.jobs.reliability_round import DatabaseReliabilityWork
     from meridian.jobs.rounds import DatabaseRoundWork
     from meridian.jobs.verdict_round import DatabaseVerdictWork
@@ -197,9 +200,56 @@ def _verdicts(settings: Settings) -> DatabaseVerdictWork | None:
     )
 
 
+def _diagnosis(
+    settings: Settings, verdicts: DatabaseVerdictWork | None
+) -> DatabaseDiagnosisWork:
+    """The diagnosis task, reading partial decodes against the verdict model's method.
+
+    Raises:
+        ReliabilityConfigError: The deployment's reliability file is refused.
+    """
+    # Inside the function: see the module docstring.
+    from meridian.jobs.diagnosis_round import DatabaseDiagnosisWork  # noqa: PLC0415
+    from meridian.reliability.config import (  # noqa: PLC0415
+        load_deployed_reliability_config,
+    )
+    from meridian.verdict_build import registry_for  # noqa: PLC0415
+
+    url = settings.psycopg_url
+    return DatabaseDiagnosisWork(
+        lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
+        lambda conn, now: registry_for(conn, settings, now),
+        SkyfieldOrbitService(),
+        config=load_deployed_reliability_config(),
+        verdict_method=None if verdicts is None else verdicts.method,
+    )
+
+
+def _configured(
+    settings: Settings,
+) -> tuple[
+    ScheduleConfig,
+    ScorerSource,
+    DatabaseReliabilityWork,
+    DatabaseVerdictWork | None,
+    DatabaseDiagnosisWork,
+]:
+    """Every task a round runs, as configured, each refused before any round."""
+    config, scorers = _schedule(settings)
+    verdicts = _verdicts(settings)
+    return (
+        config,
+        scorers,
+        _reliability(settings),
+        verdicts,
+        _diagnosis(settings, verdicts),
+    )
+
+
 def run_jobs(args: argparse.Namespace) -> int:
     """Handle ``meridian jobs run``."""
     # Inside the function: see the module docstring.
+    from meridian.jobs.diagnosis_round import run_diagnosis_round  # noqa: PLC0415
     from meridian.jobs.metrics_listener import start_metrics_listener  # noqa: PLC0415
     from meridian.jobs.reliability_round import (  # noqa: PLC0415
         run_reliability_round,
@@ -221,9 +271,7 @@ def run_jobs(args: argparse.Namespace) -> int:
         return _EXIT_FAILED
 
     try:
-        config, scorers = _schedule(settings)
-        reliability = _reliability(settings)
-        verdicts = _verdicts(settings)
+        config, scorers, reliability, verdicts, diagnosis = _configured(settings)
     except (
         ScheduleConfigError,
         LiveScoringError,
@@ -250,12 +298,14 @@ def run_jobs(args: argparse.Namespace) -> int:
         outcome = run_round(work, plan, now)
         checked = run_reliability_round(reliability, now)
         applied = run_verdict_round(verdicts, now)
+        diagnosed = run_diagnosis_round(diagnosis, now)
         return None not in (
             outcome.generated,
             outcome.scheduled,
             outcome.profiled,
             checked.expired,
             checked.classified,
+            diagnosed,
         ) and (verdicts is None or applied is not None)
 
     if args.once:
