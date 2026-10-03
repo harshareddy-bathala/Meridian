@@ -5570,6 +5570,12 @@ A tag is a name a registry or a maintainer can point at other bytes tomorrow, an
 
 **Dependabot moves the pins.** A pin nobody moves becomes a known vulnerability kept on purpose. `.github/dependabot.yml` proposes updates once a week for Actions, the Dockerfile, compose, uv and npm, grouped into one pull request per ecosystem, and CI judges each like any other change. Dependabot opens pull requests and never merges, so a person still decides.
 
+*Amended 2026-10-03.* The configuration as merged could not pass CI, and its first five pull requests (#74 to #78) all failed:
+- **Every one failed `conventions`.** Dependabot writes `chore(deps)`, and `deps` is not a scope (`GIT-WORKFLOW.md` Rule 3). Each ecosystem now names a prefix the job accepts, by what it moves. The job waives the subject's length for Dependabot's commits alone, since a single update's subject names both versions and cannot be shortened.
+- **Two proposed migrations, not updates, and failed the build.** One moved the base images to Python 3.14 and Node 26. The other moved the dashboard to TypeScript 7, which its linter does not accept. Python's minor version, and Node's and TypeScript's major, are now ignored. The project is written for Python 3.11, and a later one is a decision somebody takes with the Pi's wheels checked, not a weekly pull request.
+
+`test_pinning.py` holds each prefix to the pattern in `ci.yml`, and the three ignores.
+
 **The platform's own image stays a variable.** `MERIDIAN_IMAGE` defaults to `:main` so `docker compose pull` on a Pi takes the latest build. Which build to run is the deployment's choice, not the repository's. `.env.example` says an acceptance run pins it to `sha-<commit>`, and Stage 24's long run records the digest it ran (D-257).
 
 **A test keeps it so.** `test_pinning.py` reads the compose files, the workflows and the Dockerfile. It refuses:

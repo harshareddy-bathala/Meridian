@@ -71,6 +71,17 @@ Use the module name: `orbit`, `prediction`, `scheduler`, `registry`, `observatio
 
 There is no `platform` scope and no `sim` scope: name the module, or use `repo` for a change that genuinely spans several.
 
+**Dependabot's commits follow the same rule.** `.github/dependabot.yml` gives each ecosystem a prefix by what it moves:
+
+| Ecosystem | Prefix |
+|---|---|
+| Actions | `ci(repo)` |
+| the Dockerfile's bases and compose's images | `chore(deploy)` |
+| `uv.lock` | `chore(repo)` |
+| the dashboard's packages | `chore(dashboard)` |
+
+Its subjects are held to the types and scopes above, but **not to the length**: "bump `<image>` from `<tag>` to `<tag>` in /deploy" names what moved and nobody can shorten it. The `conventions` job waives the length for its commits alone.
+
 Two of these are easy to confuse:
 
 | Scope | Use for |

@@ -3,12 +3,26 @@
 # is a known vulnerability kept on purpose, so each ecosystem is proposed for
 # update once a week, grouped so a week is one pull request each, and every one
 # of them goes through CI like any other change.
+#
+# Each ecosystem names the commit prefix its pull requests use. Left to itself
+# Dependabot writes `chore(deps)`, and `deps` is not a scope: the `conventions`
+# job refused every pull request it opened (GIT-WORKFLOW.md Rule 3). The
+# prefixes below are a type and a scope that job accepts, by what is moved.
+#
+# Some updates are not a bot's to propose, and are ignored here so a week's
+# pull request is not failed by them:
+# - Python's minor version. The project is written for 3.11 (CLAUDE.md), and
+#   3.12 or later is a migration somebody decides, with the Pi's wheels checked.
+# - Node's and TypeScript's major versions, which the dashboard's toolchain
+#   takes when its own dependencies accept them.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "ci(repo)"
     groups:
       actions:
         patterns: ["*"]
@@ -17,6 +31,16 @@ updates:
     directory: /deploy
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "chore(deploy)"
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+      - dependency-name: "node"
+        update-types:
+          - "version-update:semver-major"
     groups:
       base-images:
         patterns: ["*"]
@@ -25,6 +49,8 @@ updates:
     directory: /deploy
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "chore(deploy)"
     groups:
       compose-images:
         patterns: ["*"]
@@ -33,6 +59,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "chore(repo)"
     groups:
       python:
         patterns: ["*"]
@@ -41,6 +69,13 @@ updates:
     directory: /dashboard
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "chore(dashboard)"
+      prefix-development: "chore(dashboard)"
+    ignore:
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
     groups:
       dashboard:
         patterns: ["*"]
