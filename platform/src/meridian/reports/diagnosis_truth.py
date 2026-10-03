@@ -29,7 +29,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from meridian.datasets.diagnosis_runs import DiagnosisRun
+from meridian.datasets.diagnosis_runs import DiagnosisRun, NotADiagnosisRunError
 from meridian.reliability.classification import OUTCOME_ORDER
 from meridian.reliability.fault_ledger import InjectedFault
 
@@ -90,16 +90,25 @@ def judge_run(run: DiagnosisRun) -> list[Judged]:
         One per diagnosis, in the order the run holds them.
 
     Raises:
-        KeyError: A diagnosis of an assignment the run has no case for, or a
-            run without a master seed: a damaged run is refused, not guessed.
+        NotADiagnosisRunError: A diagnosis of an assignment the run has no case
+            for, or a run without a master seed: a damaged run is refused, not
+            guessed, and with a sentence the report command can print.
     """
     acted = acting(run.faults)
-    cases = {str(one["assignment_id"]): one for one in run.cases}
+    cases = {str(one.get("assignment_id")): one for one in run.cases}
+    if "master_seed" not in run.run:
+        raise NotADiagnosisRunError(f"{run.directory.path} records no master seed")
     seed = int(str(run.run["master_seed"]))
     judged = []
     for diagnosis in run.diagnoses:
-        assignment_id = str(diagnosis["assignment_id"])
-        case = cases[assignment_id]
+        assignment_id = str(diagnosis.get("assignment_id"))
+        case = cases.get(assignment_id)
+        if case is None:
+            message = (
+                f"{run.directory.path} holds a diagnosis of {assignment_id}"
+                " and no case for it"
+            )
+            raise NotADiagnosisRunError(message)
         kinds = tuple(sorted(acted.get(assignment_id, ())))
         worse = _rank(case.get("outcome")) > _rank(case.get("clean_outcome"))
         judged.append(

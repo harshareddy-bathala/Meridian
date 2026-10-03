@@ -179,3 +179,24 @@ def test_another_kind_of_directory_is_refused_by_name(tmp_path: Path) -> None:
 
     with pytest.raises(NotADiagnosisRunError, match="fault run, not a diagnosis"):
         read_diagnosis_run(other)
+
+
+def test_a_diagnosis_with_no_case_is_refused_with_a_sentence(tmp_path: Path) -> None:
+    """A ``ValueError`` the report command prints, never a ``KeyError`` traceback."""
+    stray = [*DIAGNOSED, diagnosis("as_nobody", "obstruction")]
+    path = publish_diagnosis_run(
+        LEDGER, RUN, CASES, stray, root=tmp_path, stamp=STAMP
+    ).path
+
+    with pytest.raises(NotADiagnosisRunError, match="as_nobody and no case"):
+        judge_run(read_diagnosis_run(path))
+
+
+def test_a_run_without_its_seed_is_refused_with_a_sentence(tmp_path: Path) -> None:
+    unseeded = {key: value for key, value in RUN.items() if key != "master_seed"}
+    path = publish_diagnosis_run(
+        LEDGER, unseeded, CASES, DIAGNOSED, root=tmp_path, stamp=STAMP
+    ).path
+
+    with pytest.raises(NotADiagnosisRunError, match="no master seed"):
+        judge_run(read_diagnosis_run(path))

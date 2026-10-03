@@ -74,24 +74,36 @@ DIAGNOSIS_MODULES = (
 YIELD_PATH = ("prediction", "scheduler")
 
 
-def imported_modules(path: Path) -> Iterator[tuple[int, str]]:
-    """Each import in ``path``, as its line and full dotted module."""
+def imported_modules(path: Path) -> Iterator[tuple[int, tuple[str, ...]]]:
+    """Each import in ``path``: its line, and every module it may be importing.
+
+    ``from a.b import c`` imports the module ``a.b.c`` whenever ``c`` is one,
+    which is how this package imports its own (``from meridian.reliability
+    import classification``). So it is read as ``a.b`` and as ``a.b.c``, or a
+    module reached that way would pass unseen.
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                yield node.lineno, alias.name
+                yield node.lineno, (alias.name,)
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            yield node.lineno, node.module
+            named = (f"{node.module}.{alias.name}" for alias in node.names)
+            yield node.lineno, (node.module, *named)
 
 
 def reaching(path: Path, prefixes: tuple[str, ...]) -> list[str]:
-    """Every import in ``path`` of a module under one of ``prefixes``."""
-    return [
-        f"{path.name}:{line} imports {module}"
-        for line, module in imported_modules(path)
-        if any(module == one or module.startswith(f"{one}.") for one in prefixes)
-    ]
+    """Every import in ``path`` of a module under one of ``prefixes``, once each."""
+    found = []
+    for line, modules in imported_modules(path):
+        under = [
+            module
+            for module in modules
+            if any(module == one or module.startswith(f"{one}.") for one in prefixes)
+        ]
+        if under:
+            found.append(f"{path.name}:{line} imports {under[0]}")
+    return found
 
 
 def test_the_diagnosis_never_reaches_its_answer_key() -> None:
@@ -139,6 +151,22 @@ def test_the_scan_sees_a_diagnosis_reaching_the_ledger(tmp_path: Path) -> None:
 
     assert reaching(module, ANSWER_KEY) == [
         "diagnosis_run.py:1 imports meridian.reliability.fault_ledger"
+    ]
+
+
+def test_the_scan_sees_a_module_imported_from_its_package(tmp_path: Path) -> None:
+    """Positive control for the form this package imports its own modules by."""
+    module = tmp_path / "diagnosis_run.py"
+    module.write_text(
+        "from meridian.reliability import classification, fault_ledger\n"
+        "from meridian import datasets\n"
+    )
+
+    assert reaching(module, ANSWER_KEY) == [
+        "diagnosis_run.py:1 imports meridian.reliability.fault_ledger"
+    ]
+    assert reaching(module, ELSEWHERE) == [
+        "diagnosis_run.py:2 imports meridian.datasets"
     ]
 
 

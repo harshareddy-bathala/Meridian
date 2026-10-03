@@ -74,6 +74,17 @@ def test_every_threshold_moves_the_hash(one: str) -> None:
     assert moved.sha256() != base.sha256()
 
 
+def test_a_real_threshold_written_whole_is_the_same_configuration() -> None:
+    """``2`` and ``2.0`` are one threshold, so they must be one hash (D-272)."""
+    whole = parse_reliability_config(
+        "[diagnosis]\ninterference_lift_db = 2\nheard_snr_db = 3\n"
+    ).diagnosis
+
+    assert whole.parameters() == DiagnosisConfig().parameters()
+    assert whole.sha256() == DiagnosisConfig().sha256()
+    assert isinstance(whole.parameters()["lookback_s"], int)
+
+
 def test_the_classification_s_hash_did_not_move() -> None:
     """Its rows are found by this hash; a new table must not change it."""
     assert ReliabilityConfig().classification.sha256().hex() == (CLASSIFICATION_SHA256)

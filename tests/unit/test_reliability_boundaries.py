@@ -56,25 +56,38 @@ Held to the same standard, so a rule cannot look up its own answer."""
 PURE = SHARED_RULES | DIAGNOSIS_RULES
 
 
+PACKAGE = "meridian.reliability"
+
+
 def imported_modules(path: Path) -> Iterator[tuple[int, str]]:
-    """Each import in ``path``, as its line and full dotted module."""
+    """Each import in ``path``, as its line and full dotted module.
+
+    ``from meridian.reliability import x`` is read as ``meridian.reliability.x``:
+    the package's ``__init__`` imports nothing, so whatever is taken from it is
+    one of its modules, and is held to the rule its own name would be.
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 yield node.lineno, alias.name
         elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                yield node.lineno, "." * node.level + (node.module or "")
-            elif node.module:
-                yield node.lineno, node.module
+            for module in _from(node):
+                yield node.lineno, module
+
+
+def _from(node: ast.ImportFrom) -> list[str]:
+    """The modules one ``from … import …`` names."""
+    if node.level:
+        return ["." * node.level + (node.module or "")]
+    if node.module == PACKAGE:
+        return [f"{PACKAGE}.{alias.name}" for alias in node.names]
+    return [node.module] if node.module else []
 
 
 def beyond_the_standard_library(path: Path) -> list[str]:
     """Every import that is neither the standard library nor a shared rule."""
-    allowed = {"meridian.reliability"} | {
-        f"meridian.reliability.{name.removesuffix('.py')}" for name in PURE
-    }
+    allowed = {f"{PACKAGE}.{name.removesuffix('.py')}" for name in PURE}
     return [
         f"{path.name}:{line} imports {module}"
         for line, module in imported_modules(path)
@@ -124,6 +137,18 @@ def test_a_diagnosis_rule_reaching_the_ledger_is_caught(tmp_path: Path) -> None:
 
     assert beyond_the_standard_library(module) == [
         "diagnosis_causes.py:1 imports meridian.reliability.fault_ledger"
+    ]
+
+
+def test_a_rule_taking_the_ledger_from_the_package_is_caught(tmp_path: Path) -> None:
+    """Positive control for the form ``diagnosis.py`` imports its causes by."""
+    module = tmp_path / "diagnosis.py"
+    module.write_text(
+        "from meridian.reliability import diagnosis_causes, fault_ledger\n"
+    )
+
+    assert beyond_the_standard_library(module) == [
+        "diagnosis.py:1 imports meridian.reliability.fault_ledger"
     ]
 
 

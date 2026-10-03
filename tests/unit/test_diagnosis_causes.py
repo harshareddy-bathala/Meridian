@@ -215,6 +215,25 @@ def test_the_catalogue_saying_it_is_off_is_categorical() -> None:
     assert found.found["reason"] == "catalogue"
 
 
+@pytest.mark.parametrize("outcome", ["decoded", "signal_no_decode"])
+def test_a_reception_that_heard_it_is_never_the_satellite_s_silence(
+    outcome: str,
+) -> None:
+    """The catalogue holds only today's flag; a signal heard is its own proof."""
+    found = satellite_silent(
+        evidence(
+            listening=listening(outcome=outcome),
+            satellite=SatelliteCounts(
+                False, signals=0, silences=3, peak_elevation_deg=HIGH
+            ),
+        ),
+        CONFIG,
+    )
+
+    assert not found.fired
+    assert found.found["reason"] == "heard the satellite"
+
+
 @pytest.mark.parametrize(
     "heard", [{"outcome": "signal_no_decode"}, {"listening_confirmed": False}]
 )

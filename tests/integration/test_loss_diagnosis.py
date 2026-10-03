@@ -14,6 +14,8 @@ evidence one cause leaves, and the run is read back from ``loss_diagnoses``:
   other way round: two simulated stations hearing nothing beside a measured one
   that heard the satellite name it silent for themselves only;
 * a re-run writes nothing, and changed thresholds diagnose again beside;
+* one loss whose evidence cannot be read is named and left without a row, and
+  does not stop the losses behind it;
 * **nothing reaches for a network** while it runs, with the real orbit service
   placing every sample.
 
@@ -33,6 +35,7 @@ pytest.importorskip("psycopg")
 
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.registry import ListeningQuery
+from meridian.reliability import diagnosis_run
 from meridian.reliability.classification import METHOD as CLASSIFIED
 from meridian.reliability.config import (
     DiagnosisConfig,
@@ -353,3 +356,30 @@ def test_a_bounded_run_takes_the_oldest_and_says_more_remain(world: Any) -> None
 
     assert report.diagnosed == 2
     assert report.deferred
+
+
+def test_one_unreadable_loss_does_not_stop_the_rest(
+    world: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Oldest first and nothing skipped would put it at the head of every run."""
+    gather = diagnosis_run.gather
+
+    def unreadable(
+        conn: Any, registry: Any, orbit: Any, subject: Any, **kw: Any
+    ) -> Any:
+        if subject.assignment_id == "as_quiet":
+            raise LookupError("element set 7 is gone")
+        return gather(conn, registry, orbit, subject, **kw)
+
+    monkeypatch.setattr(diagnosis_run, "gather", unreadable)
+    report = run(world)
+
+    assert report.unreadable == ("as_quiet: element set 7 is gone",)
+    assert (report.diagnosed, report.written) == (6, 6)
+    assert "as_quiet" not in diagnosed(world)
+
+    monkeypatch.setattr(diagnosis_run, "gather", gather)
+    again = run(world)
+
+    assert (again.diagnosed, again.written, again.unreadable) == (1, 1, ())
+    assert diagnosed(world)["as_quiet"][0] == "undetermined"

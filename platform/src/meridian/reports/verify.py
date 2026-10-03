@@ -25,9 +25,10 @@ Reference: docs/DECISIONS.md D-235.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, TypeVar
 
 from meridian.datasets.diagnosis_runs import (
     DIAGNOSES,
@@ -54,6 +55,16 @@ __all__ = [
     "locate_snapshot",
     "verify_run",
 ]
+
+
+class _Sealed(Protocol):
+    """A sealed run of either kind: what a report needs to know it by."""
+
+    @property
+    def directory(self) -> SnapshotDirectory: ...
+
+
+_R = TypeVar("_R", bound=_Sealed)
 
 _SNAPSHOTS = "snapshots"
 _UNCOMPARED = frozenset(
@@ -137,35 +148,9 @@ def locate_fault_runs(
         SnapshotNotFoundError: A recorded fault run is nowhere searched.
         DamagedSnapshotError: A candidate does not match its own manifest.
     """
-    recorded = run.parameters.get("fault_runs", [])
-    hints = run.environment.get("fault_run_paths", {})
-    found = []
-    for wanted in recorded if isinstance(recorded, list) else []:
-        digest = str(wanted)
-        hinted = hints.get(digest) if isinstance(hints, Mapping) else None
-        candidates = [
-            *given,
-            *([Path(str(hinted))] if hinted else []),
-            *sorted((root / FAULTS).glob(f"{digest[:12]}*")),
-        ]
-        match = _fault_run(candidates, digest)
-        if match is None:
-            message = (
-                f"no fault run {digest[:12]} under {root / FAULTS};"
-                " name it with --faults"
-            )
-            raise SnapshotNotFoundError(message)
-        found.append(match)
-    return tuple(found)
-
-
-def _fault_run(candidates: Sequence[Path], digest: str) -> FaultRun | None:
-    for path in candidates:
-        if path.is_dir():
-            run = read_fault_run(path)
-            if content_sha256(run.directory.manifest).hex() == digest:
-                return run
-    return None
+    return _locate_runs(
+        run, ("fault_run", FAULTS, "--faults"), read_fault_run, root, given
+    )
 
 
 def locate_diagnosis_runs(
@@ -180,8 +165,31 @@ def locate_diagnosis_runs(
         SnapshotNotFoundError: A recorded diagnosis run is nowhere searched.
         DamagedSnapshotError: A candidate does not match its own manifest.
     """
-    recorded = run.parameters.get("diagnosis_runs", [])
-    hints = run.environment.get("diagnosis_run_paths", {})
+    return _locate_runs(
+        run,
+        ("diagnosis_run", DIAGNOSES, "--diagnoses"),
+        read_diagnosis_run,
+        root,
+        given,
+    )
+
+
+def _locate_runs(
+    run: Manifest,
+    kind: tuple[str, str, str],
+    read: Callable[[Path], _R],
+    root: Path,
+    given: Sequence[Path],
+) -> tuple[_R, ...]:
+    """Every sealed run of one kind that ``run`` recorded, in recorded order.
+
+    ``kind`` is the manifest kind, the folder under the datasets root, and the
+    flag that names one by hand; the run records each under ``<kind>s`` in its
+    parameters and ``<kind>_paths`` in its environment.
+    """
+    key, folder, flag = kind
+    recorded = run.parameters.get(f"{key}s", [])
+    hints = run.environment.get(f"{key}_paths", {})
     found = []
     for wanted in recorded if isinstance(recorded, list) else []:
         digest = str(wanted)
@@ -189,22 +197,20 @@ def locate_diagnosis_runs(
         candidates = [
             *given,
             *([Path(str(hinted))] if hinted else []),
-            *sorted((root / DIAGNOSES).glob(f"{digest[:12]}*")),
+            *sorted((root / folder).glob(f"{digest[:12]}*")),
         ]
         match = next(
             (
                 one
-                for one in (
-                    read_diagnosis_run(path) for path in candidates if path.is_dir()
-                )
+                for one in (read(path) for path in candidates if path.is_dir())
                 if content_sha256(one.directory.manifest).hex() == digest
             ),
             None,
         )
         if match is None:
             message = (
-                f"no diagnosis run {digest[:12]} under {root / DIAGNOSES};"
-                " name it with --diagnoses"
+                f"no {key.replace('_', ' ')} {digest[:12]} under {root / folder};"
+                f" name it with {flag}"
             )
             raise SnapshotNotFoundError(message)
         found.append(match)

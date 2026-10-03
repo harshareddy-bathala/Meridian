@@ -152,6 +152,7 @@ def run_lines(report: DiagnosisRunReport) -> list[str]:
         f"  causes             {causes or 'none'}",
         f"  partial            {partial}",
     ]
+    lines.extend(f"  unreadable         {one}" for one in report.unreadable)
     if report.deferred:
         lines.append("  more remain; the next run continues")
     return lines

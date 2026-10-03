@@ -73,6 +73,7 @@ def find_clock_traces(
     station_id: str,
     assignment_id: str,
     between: tuple[datetime, datetime],
+    listening_between: tuple[datetime, datetime],
 ) -> ClockTraces:
     """The station's heartbeats near a window, as its clock left them.
 
@@ -82,6 +83,9 @@ def find_clock_traces(
         assignment_id: The assignment whose listening is looked for, at any
             time: a station whose clock is wrong listens outside the window.
         between: The span heartbeats are read over, by the platform's clock.
+        listening_between: The span the assignment's listening is looked for
+            in. Wider than ``between``, since a wrong clock listens elsewhere,
+            and bounded, so the read stays inside a few chunks of heartbeats.
 
     Returns:
         When the platform first and last heard the station listening to the
@@ -91,8 +95,9 @@ def find_clock_traces(
     with conn.cursor(row_factory=class_row(_Span)) as cur:
         cur.execute(
             "select min(received_at) as first, max(received_at) as last"
-            " from heartbeats where station_id = %s and listening_assignment_id = %s",
-            (station_id, assignment_id),
+            " from heartbeats where station_id = %s and listening_assignment_id = %s"
+            " and received_at between %s and %s",
+            (station_id, assignment_id, *listening_between),
         )
         span = cur.fetchone()
     with conn.cursor(row_factory=class_row(_Clock)) as cur:
@@ -146,19 +151,26 @@ def find_noise_baseline(
     between: tuple[datetime, datetime],
     excluding: str,
 ) -> tuple[float | None, int]:
-    """The median floor of the station's other observations at this gain.
+    """The median floor of the station's other receptions at this gain.
+
+    Each reception counts once, by its latest revision.
 
     Returns:
         The median in dBFS, ``None`` with no readings, and how many there were.
     """
     with conn.cursor(row_factory=class_row(_Baseline)) as cur:
         cur.execute(
+            # One reading a reception, its latest revision: a resubmitted
+            # reception writes a row a revision, and is still one reading.
             "select percentile_cont(0.5) within group (order by noise_floor_dbfs)"
-            " as median, count(*) as count from noise_measurements"
-            " where station_id = %s and source = 'observation'"
-            " and receiver_gain_db = %s and measured_at >= %s and measured_at < %s"
-            " and assignment_id <> %s",
-            (station_id, gain_db, *between, excluding),
+            " as median, count(*) as count from ("
+            "  select distinct on (assignment_id) noise_floor_dbfs, receiver_gain_db"
+            "  from noise_measurements"
+            "  where station_id = %s and source = 'observation'"
+            "  and measured_at >= %s and measured_at < %s and assignment_id <> %s"
+            "  order by assignment_id, revision desc) latest"
+            " where receiver_gain_db = %s",
+            (station_id, *between, excluding, gain_db),
         )
         found = cur.fetchone()
     return (None, 0) if found is None else (found.median, found.count)

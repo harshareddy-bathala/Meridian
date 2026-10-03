@@ -14,6 +14,12 @@ margin and its "not listening" is read rather than asked again.
 **Bounded.** ``limit`` diagnoses the losses whose windows closed first and
 leaves the rest for the next run.
 
+**One unreadable loss does not stop the rest.** A loss whose evidence cannot be
+gathered — an element set gone, a sample that is not a number — is left without
+a row, counted and named in the report, and the losses behind it are diagnosed.
+It has no diagnosis because nobody could look, which is what the absence of a
+row means (D-104). A database error is not one of these: it ends the run.
+
 **Nothing here reads the answer.** The simulator's ledger, the evaluation's
 ground truth and any archive are out of reach of every module on this path
 (D-102, D-105), which ``tests/unit/test_diagnosis_boundaries.py`` holds.
@@ -23,6 +29,7 @@ Reference: docs/DECISIONS.md D-102, D-105, D-180, D-272, D-273.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from meridian.orbit.service import OrbitService
@@ -41,6 +48,8 @@ from meridian.store.loss_diagnoses import (
 from meridian.store.stations import Connection
 
 __all__ = ["DiagnosisRunReport", "diagnose_settled"]
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +71,10 @@ class DiagnosisRunReport:
 
     deferred: bool = False
     """Whether ``limit`` left losses for the next run."""
+
+    unreadable: tuple[str, ...] = ()
+    """Assignments whose evidence could not be gathered, each with why. They
+    have no row, and are tried again by the next run."""
 
 
 def diagnose_settled(  # noqa: PLR0913 — a run's collaborators, each by name
@@ -106,11 +119,17 @@ def diagnose_settled(  # noqa: PLR0913 — a run's collaborators, each by name
     history = StationHistory()
     by_cause: dict[str, int] = dict.fromkeys((*CAUSES, "undetermined"), 0)
     written = simulated = 0
+    unreadable: list[str] = []
     for subject in chosen:
-        found = diagnose(
-            gather(conn, registry, orbit, subject, config=thresholds, history=history),
-            thresholds,
-        )
+        try:
+            evidence = gather(
+                conn, registry, orbit, subject, config=thresholds, history=history
+            )
+        except (LookupError, ValueError, ArithmeticError) as exc:
+            _log.warning("loss %s could not be read: %s", subject.assignment_id, exc)
+            unreadable.append(f"{subject.assignment_id}: {exc}")
+            continue
+        found = diagnose(evidence, thresholds)
         by_cause[found.cause] += 1
         simulated += subject.simulated
         written += insert_diagnosis(
@@ -121,11 +140,12 @@ def diagnose_settled(  # noqa: PLR0913 — a run's collaborators, each by name
         method=METHOD,
         config_sha256=config_sha256,
         verdict_method=verdict_method,
-        diagnosed=len(chosen),
+        diagnosed=len(chosen) - len(unreadable),
         written=written,
         by_cause=by_cause,
         simulated=simulated,
         deferred=len(subjects) > len(chosen),
+        unreadable=tuple(unreadable),
     )
 
 

@@ -125,6 +125,7 @@ def test_clock_traces_listening_anywhere_and_skew_near_the_window(
         station_id="st_reads",
         assignment_id="as_day0",
         between=(START - timedelta(minutes=15), END + timedelta(minutes=15)),
+        listening_between=(START - timedelta(days=1), END + timedelta(days=1)),
     )
 
     assert traces.listening_span == (START - STEP, START - STEP + timedelta(minutes=10))
@@ -134,7 +135,11 @@ def test_clock_traces_listening_anywhere_and_skew_near_the_window(
 
 def test_no_listening_heartbeat_is_no_span(world: Any) -> None:
     traces = find_clock_traces(
-        world, station_id="st_reads", assignment_id="as_day0", between=(START, END)
+        world,
+        station_id="st_reads",
+        assignment_id="as_day0",
+        between=(START, END),
+        listening_between=(START - timedelta(days=1), END + timedelta(days=1)),
     )
 
     assert traces.listening_span is None
@@ -152,6 +157,52 @@ def test_the_baseline_is_the_median_of_the_others_at_that_gain(world: Any) -> No
 
     assert count == 5
     assert median == -60.0
+
+
+def test_a_resubmitted_reception_is_still_one_reading(
+    world: Any, schedule_rows: Any
+) -> None:
+    """A revision writes a noise row of its own; the baseline counts receptions."""
+    for revision in range(2, 7):
+        schedule_rows.observation("as_day1", revision=revision)
+        world.execute(
+            "update observations set noise_floor_dbfs = -40.0, receiver_gain_db = 30.0"
+            " where assignment_id = 'as_day1' and revision = %s",
+            (revision,),
+        )
+        record_observation_floor(world, assignment_id="as_day1", revision=revision)
+
+    median, count = find_noise_baseline(
+        world,
+        station_id="st_reads",
+        gain_db=30.0,
+        between=(START - timedelta(days=14), START),
+        excluding="as_day0",
+    )
+
+    # Five receptions still, as_day1 now by its latest revision's floor.
+    assert count == 5
+    assert median == -60.0
+
+
+def test_listening_is_looked_for_within_its_span_only(world: Any) -> None:
+    listening = {
+        "listening_assignment_id": "as_day0",
+        "listening_satellite_id": "norad:99970",
+        "listening_freq_hz": 137_900_000,
+        "listening_mode": "lrpt",
+    }
+    heartbeat(world, START - timedelta(days=3), 0.0, **listening)
+
+    traces = find_clock_traces(
+        world,
+        station_id="st_reads",
+        assignment_id="as_day0",
+        between=(START, END),
+        listening_between=(START - timedelta(days=1), END + timedelta(days=1)),
+    )
+
+    assert traces.listening_span is None
 
 
 def test_no_reading_at_that_gain_is_no_baseline(world: Any) -> None:

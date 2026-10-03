@@ -74,16 +74,15 @@ Rows = list[dict[str, object]]
 
 def diagnosis_rows(runs: Sequence[DiagnosisRun], raw: SnapshotDirectory) -> Rows:
     """Every row of the section, from the sealed runs and the raw snapshot."""
-    judged = {_name(run): judge_run(run) for run in runs}
+    # By name, so a run named twice is judged, listed and counted once.
+    sealed = {_name(run): run for run in runs}
+    judged = {name: judge_run(run) for name, run in sealed.items()}
     pairs = [one for found in judged.values() for one in found]
     rows: Rows = [
         {
             "row": "runs",
             "simulated": True,
-            "runs": [
-                {"run": name, **_described(run)}
-                for name, run in zip(judged, runs, strict=True)
-            ],
+            "runs": [{"run": name, **_described(run)} for name, run in sealed.items()],
             "reviewed": EFFECTS_REVIEWED,
         }
     ]

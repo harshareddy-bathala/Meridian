@@ -791,6 +791,8 @@ compose exec api meridian diagnosis explain <assignment_id>
 
 The `jobs` service runs the same diagnosis every round, last, under the task label `diagnosis`, at most 500 losses a round and oldest first. A loss waits until its pass is classified (§ Reliability), because "not listening" is read from that classification and never asked again. So a loss is diagnosed about a day after its window, the classification's settle margin.
 
+`run` names any loss it could not read, with why, under `unreadable`. Such a loss has no row and is tried again next time, and the others are diagnosed regardless.
+
 `explain` prints each diagnosis with **every cause tested**, whether it fired, its support and what its test found. That is where to look before believing a cause, and where an *undetermined* says what was missing.
 
 - **A partial decode needs a verdict model.** `run` reads decodes against `VERDICT_MODEL`'s model, or the one `--verdict-method` names. With neither it says no decode was diagnosed as partial.

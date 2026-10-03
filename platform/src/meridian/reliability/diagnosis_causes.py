@@ -16,7 +16,8 @@ the station's own report, the catalogue's flag — is 1.
   (D-273).
 * **satellite silent** — the catalogue says the transmitter is off, or no other
   station heard it near the pass and enough others listened and heard nothing
-  (D-276).
+  (D-276). Never for a reception that heard the satellite itself: the
+  catalogue holds only today's flag, and a signal heard is its own proof.
 * **obstruction** — signal lost inside sectors the station's own loss map
   marks, and not explained by a raised floor (D-274).
 * **interference** — a floor raised against the station's own at the same gain
@@ -40,7 +41,7 @@ from meridian.reliability.diagnosis_evidence import (
     LossEvidence,
 )
 from meridian.reliability.obstruction_map import build_map, lost_where_heard
-from meridian.reliability.satellite_silence import judge_satellite
+from meridian.reliability.satellite_silence import SIGNAL, judge_satellite
 
 __all__ = [
     "interference",
@@ -82,33 +83,48 @@ def station_not_listening(
 def satellite_silent(evidence: LossEvidence, config: DiagnosisConfig) -> Candidate:
     """The transmitter was off: the catalogue says so, or the network heard nothing."""
     counts = evidence.satellite
-    listening = evidence.listening
     found: dict[str, object] = {
         "catalogue_active": counts.catalogue_active,
         "signals": counts.signals,
         "silences": counts.silences,
     }
+    if evidence.listening.outcome in SIGNAL:
+        # Whatever the catalogue says today, this reception heard it.
+        found["reason"] = "heard the satellite"
+        return Candidate("satellite_silent", False, 0.0, found)
     if counts.catalogue_active is False:
         found["reason"] = "catalogue"
         return Candidate("satellite_silent", True, 1.0, found)
+    ratio = _network_silence(evidence, config, found)
+    if ratio is None:
+        return Candidate("satellite_silent", False, 0.0, found)
+    return Candidate("satellite_silent", True, support_of(ratio), found)
+
+
+def _network_silence(
+    evidence: LossEvidence, config: DiagnosisConfig, found: dict[str, object]
+) -> float | None:
+    """How many times over other stations' silence names the satellite, if it does.
+
+    Only for a confirmed silence on a pass high enough to say something (D-276).
+    What was read, and why it did not count, goes into ``found``.
+    """
+    counts, listening = evidence.satellite, evidence.listening
     peak = counts.peak_elevation_deg
     found["peak_elevation_deg"] = peak
     if listening.outcome != "no_signal" or not listening.listening_confirmed:
         found["reason"] = "not a confirmed silence"
-    elif peak is None or peak < config.silent_min_elevation_deg:
+        return None
+    if peak is None or peak < config.silent_min_elevation_deg:
         found["reason"] = "too low for its silence to say anything"
-    if "reason" in found:
-        return Candidate("satellite_silent", False, 0.0, found)
+        return None
     state = judge_satellite(
         signals=counts.signals,
         silences=counts.silences,
         min_silent_attempts=config.silent_min_attempts,
     )
     found["state"] = state
-    if state != "silent":
-        return Candidate("satellite_silent", False, 0.0, found)
-    ratio = counts.silences / config.silent_min_attempts
-    return Candidate("satellite_silent", True, support_of(ratio), found)
+    return counts.silences / config.silent_min_attempts if state == "silent" else None
 
 
 def obstruction(evidence: LossEvidence, config: DiagnosisConfig) -> Candidate:

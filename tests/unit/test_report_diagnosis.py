@@ -170,6 +170,13 @@ def test_the_matrix_is_every_truth_by_every_answer(tmp_path: Path) -> None:
     assert cells["none", "obstruction"] == 1
 
 
+def test_a_run_named_twice_is_judged_once(tmp_path: Path) -> None:
+    run = read_diagnosis_run(seal(tmp_path))
+    once = diagnosis_rows([run], Raw())  # type: ignore[arg-type]
+
+    assert diagnosis_rows([run, run], Raw()) == once  # type: ignore[arg-type]
+
+
 def test_recall_counts_its_cases_and_says_when_there_are_none(tmp_path: Path) -> None:
     recall = {one["cause"]: one for one in of(section(tmp_path), "recall")}
 

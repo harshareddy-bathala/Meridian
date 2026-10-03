@@ -5709,7 +5709,9 @@ A diagnosis is written for:
 
 **A loss waits for its pass's classification.** Stage 20's settle margin is how long a report on its way is waited for, and "not listening" is read from the stored class rather than asked again (D-180). So a diagnosis names the classification it read, and is written only once one exists under the deployment's classification method and configuration.
 
-**Once per method and configuration.** A row names the method (`diagnosis-1`) and the sha256 of the `[diagnosis]` table. A run under an unchanged method writes nothing, and a changed threshold writes every diagnosis again beside the old ones, as a classification does (D-182).
+**A loss whose evidence cannot be read gets no row, and stops nothing.** An element set gone, or a sample that is not a number, is named in the run's report and logged. The losses behind it are diagnosed, and the next run tries it again. No row means nobody could look, which is what the absence of a row says (D-104). A run takes the oldest losses first, so one that failed the whole batch would head every later one.
+
+**Once per method and configuration.** A row names the method (`diagnosis-1`) and the sha256 of the `[diagnosis]` table. A real threshold is hashed as a real however the file spells it, so `2` and `2.0` are one configuration. A run under an unchanged method writes nothing, and a changed threshold writes every diagnosis again beside the old ones, as a classification does (D-182).
 
 ---
 
@@ -5759,7 +5761,7 @@ The roadmap's test is signal lost or absent while the pass crossed a sector `hor
 
 **2026-10-02 · accepted, review owed (D-270)** · *`meridian/reliability/diagnosis_causes.py`; Stage 27. Widens the roadmap's test.*
 
-The roadmap compares the reception's floor with the station's `interference_profiles` cell for that azimuth and hour. **A persistent source is absorbed into its cell:** the cell learns the raised floor as normal, so a reception in it reads as not raised, and the comparison fails exactly where the interference is. **The baseline is instead the median floor of the station's own observations at the same gain**, over the lookback, from at least five readings. A floor 2 dB or more above it is raised.
+The roadmap compares the reception's floor with the station's `interference_profiles` cell for that azimuth and hour. **A persistent source is absorbed into its cell:** the cell learns the raised floor as normal, so a reception in it reads as not raised, and the comparison fails exactly where the interference is. **The baseline is instead the median floor of the station's own receptions at the same gain**, over the lookback, from at least five. Each reception counts once, by its latest revision: a resubmission writes a noise row of its own and is still one reading. A floor 2 dB or more above it is raised.
 
 **The cell is cited**, with its lift, its count and whether its gains contain the reception's, so the profile's view stands beside the diagnosis.
 
@@ -5771,7 +5773,9 @@ The roadmap compares the reception's floor with the station's `interference_prof
 
 **2026-10-02 · accepted, review owed (D-270)** · *`meridian/reliability/{diagnosis_causes,satellite_evidence}.py`; Stage 27. Uses D-147's rule on a narrower window.*
 
-The test is D-147's, `judge_satellite`, over other stations' attempts at the same satellite, in the same population, of provenance `station`, each physical pass counted once. **Over ±45 minutes, not D-147's ±12 hours.** A silence of tens of minutes is invisible over half a day, in which some station somewhere always heard the satellite. **One other station that listened and heard nothing, with none hearing it, names it**: the roadmap's "every other station … also missed it". **A silence counts only from a pass that climbed 40° or more**, the loss's own included. A low pass that hears nothing is the usual case, satellite or not, and the first fleet run named natural losses silent until the floor was set; a high one hearing nothing is not. The catalogue's flag saying the transmitter is off also names it, and since the catalogue holds only the current state, the value read is recorded.
+The test is D-147's, `judge_satellite`, over other stations' attempts at the same satellite, in the same population, of provenance `station`, each physical pass counted once. **Over ±45 minutes, not D-147's ±12 hours.** A silence of tens of minutes is invisible over half a day, in which some station somewhere always heard the satellite. **One other station that listened and heard nothing, with none hearing it, names it**: the roadmap's "every other station … also missed it". **A silence counts only from a pass that climbed 40° or more**, the loss's own included. A low pass that hears nothing is the usual case, satellite or not, and the first fleet run named natural losses silent until the floor was set; a high one hearing nothing is not. The catalogue's flag saying the transmitter is off also names it, and since the catalogue holds only the current state, the value read is recorded. **Never for a reception that heard the satellite**: a transmitter retired since would otherwise turn every earlier `signal_no_decode` into a silent satellite when history is diagnosed again.
+
+**The station's own other assignments of the pass are no witness.** Stage 20 pools every assignment a station held of one physical pass. A second one that also heard nothing is the same loss reported twice, not another station's silence. One that heard the satellite still counts, because it was heard.
 
 **So a pass can be a confirmed miss for SC-4 and diagnosed `satellite_silent`.** The two answer different questions on different windows. Whether D-147's window should narrow is the team's to decide, and nothing here changes it.
 

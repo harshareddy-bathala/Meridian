@@ -5,6 +5,7 @@ Reference: docs/DECISIONS.md D-110, D-272.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from prometheus_client import REGISTRY
@@ -70,6 +71,12 @@ def test_a_run_says_what_it_did_and_that_no_decode_was_partial() -> None:
         "  causes             interference 1 · undetermined 3",
         "  partial            no verdict model: no decode is diagnosed as partial",
     ]
+
+
+def test_a_run_names_what_it_could_not_read() -> None:
+    lines = run_lines(replace(REPORT, unreadable=("as_x: element set 7 is gone",)))
+
+    assert "  unreadable         as_x: element set 7 is gone" in lines
 
 
 def test_explain_prints_every_cause_tested() -> None:

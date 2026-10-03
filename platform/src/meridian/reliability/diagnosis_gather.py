@@ -42,6 +42,7 @@ from meridian.reliability.diagnosis_evidence import (
 )
 from meridian.reliability.satellite_evidence import satellite_evidence
 from meridian.store.diagnosis_reads import (
+    HistoryRow,
     find_clock_traces,
     find_declared_floors,
     find_interference_cell,
@@ -56,6 +57,11 @@ from meridian.store.stations import Connection
 
 __all__ = ["StationHistory", "gather", "place"]
 
+LISTENING_SPAN = timedelta(days=1)
+"""How far either side of its window an assignment's listening is looked for:
+far past any clock error a station could still hold work under, and near enough
+that the read touches a few chunks of heartbeats, not all of them."""
+
 TRACK_STEP_S = 5.0
 """How finely a pass is propagated before each sample takes the nearest point."""
 
@@ -67,6 +73,33 @@ class StationHistory:
     sites: dict[str, GroundSite | None] = field(default_factory=dict)
     element_sets: dict[int, ElementSet] = field(default_factory=dict)
     placed: dict[str, tuple[SkySample, ...]] = field(default_factory=dict)
+    rows: dict[str, list[HistoryRow]] = field(default_factory=dict)
+    """Each station's earlier receptions read so far, in time order."""
+
+    spans: dict[str, tuple[datetime, datetime]] = field(default_factory=dict)
+    """The span each station's :attr:`rows` cover."""
+
+    def receptions(
+        self, conn: Connection, station_id: str, lookback: tuple[datetime, datetime]
+    ) -> list[HistoryRow]:
+        """The station's earlier receptions in ``lookback``, read once a run.
+
+        A run takes losses oldest window first, so each later loss of a station
+        asks for a little more than the last: only the new stretch is read.
+        """
+        since, until = lookback
+        span = self.spans.get(station_id)
+        if span is None or since < span[0]:
+            self.rows[station_id] = find_station_history(
+                conn, station_id=station_id, between=lookback
+            )
+            self.spans[station_id] = lookback
+        elif until > span[1]:
+            self.rows[station_id] += find_station_history(
+                conn, station_id=station_id, between=(span[1], until)
+            )
+            self.spans[station_id] = (span[0], until)
+        return [one for one in self.rows[station_id] if since <= one.started_at < until]
 
 
 def gather(  # noqa: PLR0913 — the evidence's sources, each by name
@@ -196,6 +229,11 @@ def _satellite(
         station_reported=True,
         silent_min_elevation_deg=config.silent_min_elevation_deg,
     )
+    # The station's own other assignments of this pass are not another
+    # station's attempt: their silence is this loss again, not a witness to it
+    # (D-276). One that heard the satellite still counts, since it was heard.
+    own = _pooled(subject)
+    silences = [one for one in silences if one not in own]
     return SatelliteCounts(
         catalogue_active=find_transmitter_active(
             conn,
@@ -206,6 +244,16 @@ def _satellite(
         signals=len(signals),
         silences=len(silences),
         peak_elevation_deg=subject.max_elevation_deg,
+    )
+
+
+def _pooled(subject: DiagnosisSubject) -> frozenset[str]:
+    """Every assignment Stage 20 pooled into this loss's physical pass."""
+    held = subject.classification_evidence.get("assignments")
+    return frozenset(
+        str(one["assignment_id"])
+        for one in (held if isinstance(held, list) else [])
+        if isinstance(one, dict) and "assignment_id" in one
     )
 
 
@@ -264,6 +312,10 @@ def _timing(
         station_id=subject.station_id,
         assignment_id=subject.assignment_id,
         between=(subject.start_at - margin, subject.end_at + margin),
+        listening_between=(
+            subject.start_at - LISTENING_SPAN,
+            subject.end_at + LISTENING_SPAN,
+        ),
     )
     recording = (
         (subject.observation_started_at, subject.observation_ended_at)
@@ -293,9 +345,7 @@ def _history(  # noqa: PLR0913 — one station's past, placed once per run
     if site is None:
         return ()
     passes = []
-    for row in find_station_history(
-        conn, station_id=subject.station_id, between=lookback
-    ):
+    for row in history.receptions(conn, subject.station_id, lookback):
         if row.assignment_id not in history.placed:
             history.placed[row.assignment_id] = place(
                 orbit,

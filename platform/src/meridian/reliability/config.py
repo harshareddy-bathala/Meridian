@@ -250,8 +250,17 @@ class DiagnosisConfig:
         _share("conflict_margin", self.conflict_margin)
 
     def parameters(self) -> dict[str, float]:
-        """The thresholds as recorded with every diagnosis."""
-        return asdict(self)
+        """The thresholds as recorded with every diagnosis.
+
+        A real threshold is written as a real however the file spelled it, so
+        ``interference_lift_db = 2`` and ``2.0`` are one configuration with one
+        hash, and not every loss diagnosed again for a missing ``.0``.
+        """
+        held = asdict(self)
+        return {
+            one.name: float(held[one.name]) if one.type == "float" else held[one.name]
+            for one in fields(self)
+        }
 
     def sha256(self) -> bytes:
         """The hash stored beside every diagnosis made under these."""
