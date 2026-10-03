@@ -65,7 +65,7 @@ x-platform: &platform
 services:
   db:
     <<: *hardening
-    image: timescale/timescaledb:2.29.0-pg16@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
+    image: timescale/timescaledb:2.30.2-pg16@sha256:6f139d56042989bd35f50ba5986e492cd32e35cc6778c50be2659add298dc09f
     # The image's own postgres user (Alpine's 70), from the start. Running the
     # entrypoint as root needs CHOWN, SETUID and SETGID to hand the data
     # directory over and step down; starting as the owner needs none, and a
@@ -239,7 +239,7 @@ services:
   prometheus:
     <<: *hardening
     profiles: ["metrics"]
-    image: prom/prometheus:v3.13.2@sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69
+    image: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
     restart: unless-stopped
     logging: *logging
     volumes:
@@ -277,7 +277,7 @@ services:
     # read in Grafana, and the UI is one `docker compose exec` away.
     <<: *hardening
     profiles: ["metrics"]
-    image: prom/alertmanager:v0.34.0@sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d
+    image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
     restart: unless-stopped
     logging: *logging
     command:
@@ -300,7 +300,7 @@ services:
   grafana:
     <<: *hardening
     profiles: ["metrics"]
-    image: grafana/grafana:13.1.1@sha256:7cb8c64c4d57a57e734073f3cc94620adb24a0acb929bd80ba9f14017e3a975b
+    image: grafana/grafana:13.2.3@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
     restart: unless-stopped
     logging: *logging
     # Grafana's scratch space, and the log directory it creates at start even
