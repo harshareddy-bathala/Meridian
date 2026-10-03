@@ -630,11 +630,21 @@ jobs:
           # observations, reliability, store and api — and seven of them were
           # here. A scope list that omits a real module rejects correct commits,
           # which is how a convention check trains people to work around it.
-          pattern='^(feat|fix|docs|test|refactor|perf|chore|ci|spec)\((orbit|prediction|scheduler|registry|observations|reliability|store|api|datasets|regions|reports|client|simulator|dashboard|site|firmware|ingest|deploy|docs|msp|repo)\): [a-z].{0,60}$'
+          accepted='^(feat|fix|docs|test|refactor|perf|chore|ci|spec)\((orbit|prediction|scheduler|registry|observations|reliability|store|api|datasets|regions|reports|client|simulator|dashboard|site|firmware|ingest|deploy|docs|msp|repo)\): [a-z]'
+          pattern="${accepted}.{0,60}\$"
+          # Dependabot's subjects are held to the same types and scopes, by the
+          # prefixes `.github/dependabot.yml` gives it, but not to the length:
+          # "bump <image> from <tag> to <tag> in /deploy" names what moved and
+          # cannot be shortened by anyone. Only the length is waived, and only
+          # for its author name, so the worst a forged name buys is a long
+          # subject.
+          bot_pattern="${accepted}.*\$"
           failed=0
-          while read -r subject; do
+          while IFS=$'\t' read -r author subject; do
             [ -z "$subject" ] && continue
-            if ! printf '%s' "$subject" | grep -Eq "$pattern"; then
+            wanted="$pattern"
+            if [ "$author" = "dependabot[bot]" ]; then wanted="$bot_pattern"; fi
+            if ! printf '%s' "$subject" | grep -Eq "$wanted"; then
               echo "::error::bad commit subject: $subject"
               failed=1
             fi
@@ -644,7 +654,7 @@ jobs:
           # which no Conventional Commits pattern matches, and which is not a
           # commit anybody wrote. Without this the check fails on every pull
           # request regardless of what its commits say.
-          done < <(git log --no-merges --format=%s "origin/${{ github.base_ref }}..HEAD")
+          done < <(git log --no-merges --format='%an%x09%s' "origin/${{ github.base_ref }}..HEAD")
           exit $failed
 
       - name: A Co-Authored-By line git cannot read is not a trailer

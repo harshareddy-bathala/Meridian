@@ -13,7 +13,10 @@ files that say what runs:
 * **packages** — Python and the dashboard install from their lockfiles, and the
   uv that reads the lockfile is one version everywhere;
 * **updates** — Dependabot watches every one of those ecosystems, so a pin is
-  moved on purpose, through CI, rather than left to rot.
+  moved on purpose, through CI, rather than left to rot. Its pull requests have
+  to be able to pass that CI: each ecosystem's commit prefix is one the
+  ``conventions`` job accepts, and the version jumps a bot should not propose
+  are ignored.
 
 Each check has a positive control on a small text written here.
 
@@ -140,6 +143,73 @@ def test_dependabot_watches_every_pinned_ecosystem() -> None:
     watched = set(re.findall(r"package-ecosystem:\s*([\w-]+)", text))
 
     assert watched == {"github-actions", "docker", "docker-compose", "uv", "npm"}
+
+
+def ecosystems(text: str) -> dict[str, str]:
+    """Each ecosystem's block of the Dependabot file, by its name."""
+    blocks = re.split(r"^  - package-ecosystem:\s*", text, flags=re.M)[1:]
+    return {block.split("\n", 1)[0].strip(): block for block in blocks}
+
+
+def accepted_subject() -> re.Pattern[str]:
+    """What the ``conventions`` job accepts of a Dependabot commit's subject."""
+    ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    (accepted,) = re.findall(r"^\s*accepted='(.+)'$", ci, re.M)
+    return re.compile(accepted + ".*$")
+
+
+def ignored(block: str, name: str) -> set[str]:
+    """The update types one ecosystem ignores for one dependency."""
+    found = re.search(
+        rf'dependency-name: "{name}"\n\s*update-types:\n((?:\s*- "[\w:-]+"\n)+)', block
+    )
+    return (
+        set(re.findall(r'"version-update:([\w-]+)"', found.group(1)))
+        if found
+        else set()
+    )
+
+
+def test_every_dependabot_subject_is_one_ci_accepts() -> None:
+    """Left to itself it writes ``chore(deps)``, which is not a scope, and every
+    pull request it opened failed ``conventions``."""
+    accepted = accepted_subject()
+    blocks = ecosystems(DEPENDABOT.read_text(encoding="utf-8"))
+
+    assert len(blocks) == 5
+    for name, block in blocks.items():
+        prefixes = re.findall(r'^\s*prefix(?:-development)?: "([^"]+)"$', block, re.M)
+        assert prefixes, f"{name} names no commit prefix"
+        for prefix in prefixes:
+            subject = f"{prefix}: bump the {name} group in /deploy with 5 updates"
+            assert accepted.match(subject), subject
+    assert not accepted.match("chore(deps): bump the python group with 6 updates")
+
+
+def test_development_dependencies_take_the_same_prefix() -> None:
+    """npm's dev dependencies would otherwise be ``chore(deps-dev)``."""
+    npm = ecosystems(DEPENDABOT.read_text(encoding="utf-8"))["npm"]
+
+    assert 'prefix-development: "chore(dashboard)"' in npm
+
+
+def test_the_length_alone_is_waived_and_only_for_dependabot() -> None:
+    ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert 'pattern="${accepted}.{0,60}\\$"' in ci
+    assert 'bot_pattern="${accepted}.*\\$"' in ci
+    assert 'if [ "$author" = "dependabot[bot]" ]; then wanted="$bot_pattern"; fi' in ci
+
+
+def test_a_bot_does_not_propose_a_new_python_or_a_new_toolchain() -> None:
+    """Python 3.12 or later, and a new major of Node or TypeScript, are
+    migrations somebody decides: each failed the build when proposed."""
+    blocks = ecosystems(DEPENDABOT.read_text(encoding="utf-8"))
+
+    assert ignored(blocks["docker"], "python") == {"semver-major", "semver-minor"}
+    assert ignored(blocks["docker"], "node") == {"semver-major"}
+    assert ignored(blocks["npm"], "typescript") == {"semver-major"}
+    assert ignored(blocks["uv"], "python") == set()
 
 
 # --- positive controls ---------------------------------------------------------
