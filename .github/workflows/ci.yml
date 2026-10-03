@@ -522,6 +522,20 @@ jobs:
           echo "::error::no simulated station counted online in /metrics"
           exit 1
 
+      - name: The dashboard serves its last snapshot with the api stopped
+        # EVALUATION.md §12.2, run and not only described (Stage 33, D-282 to
+        # D-284). The operator's tool warms the front, stops the api, and asks
+        # the front again from inside the compose network: every view must come
+        # back 200, marked STALE, dated before the stop and promptly; a view
+        # nobody warmed must fail promptly and an MSP route must never be
+        # answered from a copy. It starts the api again and checks nothing is
+        # still a copy. Before the fault step, so the stations it leaves with
+        # queued heartbeats are part of what that step then recovers.
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          python3 deploy/tools/front_drill.py
+
       - name: The platform survives its own faults
         # Stage 21's platform faults, injected by the operator's tool against
         # the real stack (D-194): the API and the database restarted, the API
@@ -596,10 +610,25 @@ jobs:
           SQL
           test "$(counts)" != "$before"
 
-          python3 deploy/tools/restore.py "$RUNNER_TEMP/backup/meridian.dump" --yes
+          python3 deploy/tools/restore.py "$RUNNER_TEMP/backup/meridian.dump" --yes \
+            | tee "$RUNNER_TEMP/restore.txt"
           after=$(counts)
           diff <(echo "$before") <(echo "$after")
+          # D-286: restore.py checked every table against the manifest's counts,
+          # taken in the dump's own snapshot, not only the six tables above.
+          grep -q 'as backed up' "$RUNNER_TEMP/restore.txt"
           $compose exec -T api meridian db status
+
+      - name: Keep the backup for the restore on another machine
+        # The dump and its manifest, for the restore-elsewhere job. It holds
+        # only this run's throwaway stack: the example secrets and a simulated
+        # station. Kept a day, which is longer than the job that reads it needs.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backup
+          path: ${{ runner.temp }}/backup/
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Stack logs on failure
         if: failure()
@@ -612,6 +641,78 @@ jobs:
         run: |
           docker compose -f deploy/docker-compose.yml --profile metrics --profile sim \
             down -v || true
+
+  restore-elsewhere:
+    # A backup restored on a machine other than the one it was taken on
+    # (Stage 33's gate, D-286). The image job backed up its stack on one runner;
+    # this is another, which has never seen that database. All it is given is
+    # the dump and its manifest, which is all an operator restoring after the
+    # loss of the Pi would have. restore.py checks every table's rows against
+    # the counts the manifest took in the dump's own snapshot, so "the same
+    # rows" is checked here without the source to compare with.
+    #
+    # No cloud host is involved (D-130): a second runner stands in for a second
+    # machine, and the stack is the single-machine compose file.
+    runs-on: ubuntu-latest
+    needs: image
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: backup
+          path: backup
+
+      - name: A database with nothing in it, and the image to migrate it
+        run: |
+          set -euo pipefail
+          cp deploy/.env.example deploy/.env
+          # restore.py runs `migrate` after the restore, which needs the image;
+          # built here from this commit, as the image job built its own.
+          docker compose -f deploy/docker-compose.yml build migrate
+          docker compose -f deploy/docker-compose.yml up -d --wait db
+
+      - name: A dump that changed on the way is refused, and nothing is touched
+        run: |
+          set -euo pipefail
+          mkdir changed
+          cp backup/meridian.dump backup/meridian.dump.manifest.json changed/
+          printf 'x' >> changed/meridian.dump
+          if python3 deploy/tools/restore.py changed/meridian.dump --yes 2> refused.txt; then
+            echo "::error::restore.py restored a dump whose sha256 is not its manifest's"
+            exit 1
+          fi
+          grep -q 'is not the one that was backed up' refused.txt
+
+      - name: The dump restores here, to the rows its manifest counted
+        run: |
+          set -euo pipefail
+          python3 deploy/tools/restore.py backup/meridian.dump --yes | tee restore.txt
+          # The check ran, rather than being skipped for a manifest without counts.
+          grep -q 'as backed up' restore.txt
+
+      - name: The platform starts on the restored database, with the station in it
+        run: |
+          set -euo pipefail
+          compose="docker compose -f deploy/docker-compose.yml"
+          $compose up -d --wait api
+          curl -fsS http://localhost:8000/healthz | tee health.json
+          grep -q '"database":"ok"' health.json
+          $compose exec -T api meridian db status
+          expected=$(python3 -c 'import json; print(json.load(open("backup/meridian.dump.manifest.json"))["row_counts"]["stations"])')
+          served=$(curl -fsS "http://localhost:8000/api/v1/stations?limit=200" \
+            | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["items"]))')
+          echo "stations: $served served, $expected backed up"
+          test "$expected" -ge 1
+          test "$served" = "$expected"
+
+      - name: Stack logs on failure
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --no-color || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f deploy/docker-compose.yml down -v || true
 
   conventions:
     # GIT-WORKFLOW.md rules 3 and 7, automated. A rule enforced only by a human

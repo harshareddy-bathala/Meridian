@@ -6018,6 +6018,39 @@ The station loop is one thread (D-121), so while a heartbeat waits, no capture s
 
 ---
 
+## D-286 — A backup counts its rows in the dump's own snapshot, and both drills are tools a deployment can run
+
+**2026-10-03 · accepted** · *`deploy/tools/{backup,restore,restore_drill,compose_db,front_drill,front_warm}.py`; `.github/workflows/ci.yml` (the image job's §12.2 step, `restore-elsewhere`); `tests/unit/{test_backup_tools,test_front_drill,test_front_warm}.py`; `OPERATIONS.md` § Backup and restore, § Independence drills; Stage 33. Amends D-115.*
+
+Stage 33's gate asks that "a restore is proven on another machine". D-115's manifest could not prove it. It held the dump's sha256, the TimescaleDB version and the migration, which say the file is intact and may be restored here. **Nothing in it said what the database held.** CI's round trip compared six tables before and after on the machine that had both, which is exactly what another machine does not have.
+
+**The manifest now holds every table's row count, taken in the snapshot the dump is taken from.**
+- `backup.py` opens a session first, in a `repeatable read` transaction that exports its snapshot and counts every table in `public`, hypertables through their parents.
+- `pg_dump --snapshot=<that one>` then dumps exactly the rows that were counted, and the session is closed when the dump is done.
+- The API keeps running throughout, as before. Measured on a live stack with three simulated stations heartbeating: the manifest counted 76 rows in 28 tables, 45 of them heartbeats, and the dump restored into a second, empty project matched every table. Tried by hand first: a snapshot exported at 9 heartbeats was still dumpable 35 seconds later, when the table held 12.
+- The snapshot's name comes from the database and goes into a shell command, so it is matched against the form `pg_export_snapshot()` returns before it is used, and refused otherwise.
+
+**`restore.py` checks the counts**, straight after `pg_restore` and before `migrate`, with `api` and `jobs` stopped, so what it counts is what the dump held. A table with other rows is named, with both figures, and the restore stops there with `api` and `jobs` still stopped, as after any failed step. The weekly restore drill checks them too.
+
+**An older manifest still restores.** `row_counts` is absent from a manifest written before this, which reads as "not counted". The restore goes ahead and says the rows were not checked. Refusing every dump taken before the upgrade would turn an improvement into an outage on the day it mattered.
+
+**CI restores on a second runner** (`restore-elsewhere`). The image job uploads its dump and manifest; a job on another runner, given only those, brings up an empty database from the compose file and runs `restore.py`. It checks that a dump altered on the way is refused before anything is touched, that the real one restores to the rows its manifest counted, and that the platform starts on it and serves the station that was backed up. No cloud host is involved (D-130): a second runner is the second machine.
+
+**§12.2 is a tool, `front_drill.py`, and CI runs it.** It warms the front, stops the api, asks again, starts the api and asks once more, and judges each answer:
+- with the api stopped, every view is `200`, `STALE`, dated before the stop, within five seconds;
+- a view nobody warmed fails within five seconds, and an MSP route is never answered from a copy;
+- with the api back, nothing is `STALE`.
+
+It asks from inside the compose network, through the warmer's new `--json` mode, because the public deployment gives the front no host port (D-206). So the same command runs on a laptop, in CI and on the Pi. Each judgement is a pure function with a unit test, one for each way §12.2 says the drill fails. Run against a front with `proxy_cache_use_stale` removed, it fails on the first view, as it should.
+
+*Rejected: counting rows after the dump.* With the API running, the count and the dump would be of two different moments, and a restore would fail its check on a healthy backup.
+
+*Rejected: hashing each table's contents.* It proves more, and costs a full read of every hypertable on a Pi on every nightly backup. The dump's own sha256 already says the file is the one that was written; the counts say what was in it.
+
+*Rejected: stopping the api for the backup.* A station's heartbeat would fail for the length of a dump, every night, to save one transaction.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

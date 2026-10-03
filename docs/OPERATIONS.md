@@ -1351,7 +1351,7 @@ Host tools, standard library only (D-115). They reach the database through `comp
 python deploy/tools/backup.py --out backups/meridian-$(date -u +%F).dump
 ```
 
-- **What it writes:** the dump, and beside it `<dump>.manifest.json` with the sha256, TimescaleDB version, migration revision and time.
+- **What it writes:** the dump, and beside it `<dump>.manifest.json` with the sha256, TimescaleDB version, migration revision, time, and every table's row count. The rows are counted in the same snapshot the dump is taken from, so they are exact however much is written meanwhile (D-286).
 - **While it runs:** the API keeps running.
 - **Existing files:** it never replaces one.
 - **If interrupted:** it leaves only `<dump>.partial`.
@@ -1378,8 +1378,9 @@ It then:
 1. stops `api` and `jobs`;
 2. recreates the database;
 3. runs TimescaleDB's pre-restore step, `pg_restore`, then the post-restore step;
-4. runs `migrate`, so a dump from an older release reaches this code's head and the roles' grants, which `pg_restore --no-acl` left out, are applied again (D-207);
-5. starts whichever of `api` and `jobs` was running, and waits for `/healthz`.
+4. counts every table and compares with the manifest (D-286). A table holding other rows is named and the restore stops. A manifest from before row counts restores, and says its rows were not checked;
+5. runs `migrate`, so a dump from an older release reaches this code's head and the roles' grants, which `pg_restore --no-acl` left out, are applied again (D-207);
+6. starts whichever of `api` and `jobs` was running, and waits for `/healthz`.
 
 If a step after the database is dropped fails, `api` and `jobs` stay stopped on purpose. Fix the cause and run the restore again.
 
@@ -1420,6 +1421,61 @@ python deploy/tools/restore_drill.py --latest backups       # or a named dump
 It restores into `meridian_restore_drill` beside the live database, never into it, checks the migration and reads every table, prints each table's row count, and drops the scratch database whatever happened. It needs free disk for one more copy of the database while it runs. Exit 0 means the dump would restore. **When it fails:** `journalctl -u meridian-restore-drill` says which step; a checksum failure means the file changed after it was written, so take a fresh backup now and check the disk.
 
 CI also performs the full round trip, back up, restore and compare row counts, on every pull request, and `tests/integration/test_restore_drill.py` runs the drill against the test database.
+
+### Restoring on another machine
+
+The dump and its manifest are all it takes; the machine need never have seen the database (D-286). CI's `restore-elsewhere` job does exactly this on a second runner, on every pull request.
+
+```bash
+cp deploy/.env.example deploy/.env          # then set the secrets, § Rotating secrets
+docker compose -f deploy/docker-compose.yml pull        # or build
+docker compose -f deploy/docker-compose.yml up -d --wait db
+python deploy/tools/restore.py backups/meridian-2026-10-03T0247Z.dump
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+Look for `N rows in M tables, as backed up` in the restore's output. Then read § After a restore: stations registered or rotated since the dump need a fresh invite, and the token pepper must be the one the dump's hashes were made with, or every station's token is refused.
+
+---
+
+## Independence drills
+
+`EVALUATION.md` §12's two drills, each run as a test on every pull request and runnable against a deployment. **Run both before the demonstration, and after any change to how the tiers are deployed.** Neither needs a cloud host (D-130).
+
+### The station receives with the platform unreachable (§12.1)
+
+**As a test:** `tests/msp_conformance/test_independence_drill.py` blackholes the route across a whole pass, at ten alignments, and checks both capture edges are met within a second and the platform ends with exactly one observation (D-285).
+
+**On station 001**, with a pass scheduled and held (`held.json` names it):
+
+1. Five minutes before the pass, break the route: `compose stop tunnel` on the platform's host, or pull the station's network.
+2. Leave it broken until after the pass ends. The station's log shows `heartbeat could not reach the platform` and the capture starting and stopping on its window.
+3. Restore the route. The next heartbeat is followed by the report.
+
+**It passed if** the capture folder's manifest shows the recording covering the whole window, `outbox/` held the report during the outage and is empty afterwards, and the platform holds one observation for the assignment, at revision 1:
+
+```bash
+compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "select revision, observation_id from observations where assignment_id = '"'"'as_…'"'"'"'
+```
+
+### The dashboard serves its last snapshot (§12.2)
+
+```bash
+python deploy/tools/front_drill.py          # add the compose options the stack was started with
+```
+
+It stops the api for about a minute, and starts it again whatever happens. Stations keep receiving and queue their reports meanwhile. It prints `passed`, or each view that failed and why:
+
+| It says | It means |
+|---|---|
+| `the page errors: no copy was served` | the front kept no copy of a view it should have: is `front-warm` running, and is the tunnel's origin the front? |
+| `a copy served without saying it is one` | a stale figure would be shown as current: `deploy/front/snapshot.conf` no longer labels what it serves |
+| `took over 5s: the page hangs` | the front waited on the dead api: its timeouts in `deploy/front/nginx.conf` |
+| `still a copy after the api came back` | the front has not found the api again: `compose logs front` |
+| `the drill could not start` | the api was not answering before the drill began; fix that first |
+
+Then load the dashboard in a browser with the api stopped (`compose stop api`), once, by eye: each view carries a "Not live" line with the snapshot's time and age (D-284). `compose start api` afterwards.
 
 ---
 
