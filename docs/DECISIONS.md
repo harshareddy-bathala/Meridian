@@ -5887,7 +5887,7 @@ D-135 asks how long a station retains an unacknowledged reception. **The code al
 
 **So the figure is thirty days, and it is the platform's, not the station's.** A station that kept trying for longer would hold reports no platform accepts. A station figure shorter than the window would throw away reports the platform still wants. Either way the two would disagree, which is why it is not a station setting. An outage longer than thirty days loses the reports from its start, which stay on the station in `outbox/failed/` for a person to read.
 
-**The station is the only holder of its products.** MSP has no transfer (D-029), so the platform's row is a hash and a size. A product evicted from the cap, or lost with the station's disk, is gone. That is a stated limit, not a defect this stage fixes; `deploy/tools/station_archive.py` is how an operator keeps a copy.
+**The station is the only holder of its products.** MSP has no transfer (D-029), so the platform's row is a hash and a size. A product evicted from the cap, or lost with the station's disk, is gone. That is a stated limit, not a defect this stage fixes; `deploy/tools/station_archive.py` is how an operator keeps a copy (D-287).
 
 **The custody table** in `OPERATIONS.md` names, for every kind of record on either tier: who is authoritative for it, where it lives, how long it is kept, and what loses it. It is written from the code's constants and the backup tools' defaults, not from intent.
 
@@ -6048,6 +6048,38 @@ It asks from inside the compose network, through the warmer's new `--json` mode,
 *Rejected: hashing each table's contents.* It proves more, and costs a full read of every hypertable on a Pi on every nightly backup. The dump's own sha256 already says the file is the one that was written; the counts say what was in it.
 
 *Rejected: stopping the api for the backup.* A station's heartbeat would fail for the length of a dump, every night, to save one transaction.
+
+---
+
+## D-287 — The station tier has its own backup, which never holds the station's identity and never replaces what a station holds
+
+**2026-10-03 · accepted** · *`deploy/tools/station_archive.py`; `tests/unit/test_station_archive.py`; `OPERATIONS.md` § Custody and retention, *Archiving a station*; Stage 33*
+
+D-281's table says what a station alone holds: a report the platform has not acknowledged, and every decoded product, of which the platform has a hash and a size. `backup.py` dumps the platform's database and takes none of it. Stage 33 asks that backup and restore reach "whichever tiers exist", and until now the station tier's answer was "copy the directory yourself".
+
+**`station_archive.py create` writes one tar file and a manifest beside it**: the archive's sha256, and each file's path, size and sha256.
+- **In:** `held.json`, `outbox/` with `outbox/failed/`, each capture folder's manifest, decoder output and logs, and `products/`.
+- **Never in: `credentials.json` and `registration_key`.** An archive is made to be copied to other disks, and those two are the station's identity.
+- **Out unless asked for: recordings.** A pass is about a gigabyte, and the station deletes it once its result is handed over (D-123). The capture's manifest names its recording, and that is the file left out; `--recordings` takes it.
+- **Everything left out is listed** when the archive is made, in the output and in the manifest, as `backup.py` names the raw store it did not take (D-141).
+
+**So an archive restores a station's record, not the station.** What that means is said in the runbook, because it decides what an operator must keep besides:
+- a station that kept its `registration_key` gets a new token on the same `station_id` through a bound invite (D-034), and then delivers the reports the archive put back;
+- a station that lost both is a new station to the platform. Its restored reports name assignments issued to the old one, are refused as `not_owner`, and are set aside in `outbox/failed/`. The products and the capture records are still its to keep.
+
+Whoever wants a lost disk not to cost the queued reports keeps the `registration_key` somewhere an archive is not. That is a secret kept deliberately, by a person, which is the opposite of one carried along in every archive.
+
+**`verify` checks the bytes, not only the file.** The archive's sha256, then every member's size and sha256 against its entry; a member the manifest does not name, or an entry with no member, is refused. A manifest path that is absolute, climbs with `..`, falls outside the four things a state holds, or names the identity files is refused before anything is written.
+
+**`restore` verifies first, and never replaces a file.** A station is authoritative for its own receptions (D-129), and an archive is older than the station by definition. A file that already exists is left alone and listed; only what is missing is written, each file under a temporary name and renamed.
+
+**The station may be running.** Its files are written whole and renamed into place (D-068), so nothing read here is half a file. A report delivered and removed while the archive is made is listed as gone, not treated as an error.
+
+**The tool names the state's layout itself**, because a host script cannot import the client. `test_the_tool_knows_every_path_a_station_keeps` compares it with `StationPaths.under`, so a path added to a station's state is archived, or refused, on purpose.
+
+*Rejected: `tar` and a note in the runbook.* It takes the credentials, takes a gigabyte recording per pass, and a restore with it overwrites a newer outbox with an older one.
+
+*Rejected: sending products to the platform.* That is product transfer, which MSP does not define (D-029), and it would make reception depend on an upload.
 
 ---
 

@@ -182,6 +182,8 @@ convention = "google"
 "deploy/tools/front_warm.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # The §12.2 drill, a host script like chaos.py, importing compose_db the same way.
 "deploy/tools/front_drill.py" = ["T201", "D", "ANN", "PLR", "C90"]
+# The station tier's backup, a host script like backup.py (D-287).
+"deploy/tools/station_archive.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
 # The ban below is global; this is the one module exempt from it, so the boundary
 # is checked by CI rather than remembered by a reviewer.

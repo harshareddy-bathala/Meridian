@@ -1319,9 +1319,35 @@ Who holds each record, for how long, and what loses it (D-129, D-281). Every fig
 | `outbox/failed/` — a report the platform refused, or one too old to send | the station | until a person deletes it | the station's disk is lost |
 | `captures/<folder>/` recording | the station | until its result is handed to the outbox; for ever with `keep_recordings = true` (D-123) | the result is handed over, by design |
 | `captures/<folder>/` manifest, decoder report, logs | the station | thirty days after hand-over (D-123) | pruned, by design |
-| `products/<sha256>` — decoded products | **the station, and only the station**: the platform holds the hash and size (D-029, D-176) | under `products_max_bytes`, 2 GiB by default; oldest evicted first | evicted, or the station's disk is lost |
+| `products/<sha256>` — decoded products | **the station, and only the station**: the platform holds the hash and size (D-029, D-176) | under `products_max_bytes`, 2 GiB by default; oldest evicted first | evicted, or the station's disk is lost, unless archived (§ Archiving a station) |
 | `held.json` — the assignments the station holds | the platform, for the assignment; the station, for what it holds | until the work is handed over | a damaged file stops the client rather than being read as empty (§ Failure recovery) |
 | `credentials.json`, `registration_key` | the station | for the station's life; never copied by any tool here | § Failure recovery says what to do |
+
+### Archiving a station
+
+The database backup takes nothing from a station. `station_archive.py` is the station tier's own (D-287), run on the station's host:
+
+```bash
+python deploy/tools/station_archive.py create --state state --out archives/station-$(date -u +%F).tar
+python deploy/tools/station_archive.py verify archives/station-2026-10-03.tar
+python deploy/tools/station_archive.py restore archives/station-2026-10-03.tar --state state
+```
+
+- **`create`** takes `held.json`, `outbox/`, each capture's manifest, decoder output and logs, and `products/`. It prints what it left out: always `credentials.json` and `registration_key`, and each recording unless `--recordings` is given. `--no-products` leaves the products out. The station may be running.
+- **`verify`** checks the archive and every file in it against the manifest beside it.
+- **`restore`** verifies first, then writes only the files the state does not have. **It never replaces a file a station already holds**, and lists each one it left alone.
+
+**Copy the archive and its manifest off the station**, as with a database dump: one on the disk it describes does not survive that disk. An archive holds no credential, but it does hold every queued report.
+
+**An archive restores a station's record, not the station.** It holds no identity, on purpose, so what happens to the restored reports depends on what else was kept:
+
+| The station still has | Then |
+|---|---|
+| `credentials.json` | Nothing more to do: it sends the restored reports on its next heartbeat. |
+| only `registration_key` | Give it a bound invite (§ Failure recovery, *A station lost `credentials.json`*). Same `station_id`, new token, and the restored reports are delivered. |
+| neither | It is a new station. Its restored reports name assignments issued to the old one, are refused as `not_owner`, and are moved to `outbox/failed/`. The products and capture records are still worth having. |
+
+**To make a lost disk cost nothing, keep `registration_key` yourself**, somewhere an archive is not: it is a secret, and the one file that lets an operator prove a station is the same station.
 
 ### The platform tier
 
