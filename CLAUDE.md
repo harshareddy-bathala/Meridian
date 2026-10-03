@@ -128,7 +128,7 @@ meridian/
 │   └── src/meridian_sim/        virtual stations speaking MSP
 ├── tests/                unit, integration, msp_conformance, e2e
 ├── site/                 the static public website
-├── deploy/               compose, migrations, Prometheus rules, Grafana, backup tools
+├── deploy/               compose, migrations, the front, Prometheus rules, Grafana, backup and drill tools
 ├── firmware/             (planned) Arduino rotator controller
 ├── dashboard/            web front end, served by the platform
 ├── ingest/               distribution: meridian-ingest

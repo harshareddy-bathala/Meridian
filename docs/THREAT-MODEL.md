@@ -29,7 +29,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | A4 | **The observation store's integrity** | The system of record. Every reliability figure is computed from it, and `simulated` must never be lost or forged on the way in (`CLAUDE.md` rule 5). |
 | A5 | **Station locations** | Stored at full precision; published no more precisely than the station declared (D-082, D-093). |
 | A6 | **Availability during a pass** | A pass is 8–15 minutes and never repeats. Downtime during one is permanent loss, not delay. |
-| A7 | **Backups, snapshots and models** | A dump holds every token hash and invite hash (§ Backup and restore in `OPERATIONS.md`). Snapshots and models are regenerable from a raw snapshot. |
+| A7 | **Backups, snapshots, models and station archives** | A dump holds every token hash and invite hash (§ Backup and restore in `OPERATIONS.md`). Snapshots and models are regenerable from a raw snapshot. A station archive holds a station's queued reports and its products, and by construction neither its token nor its registration key (D-287). |
 | A8 | **Operator data** | Station name and operator label. No contact address is held (D-107). |
 
 ## 3. Actors
@@ -49,16 +49,16 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 ## 4. Trust boundaries
 
 ```
- internet ──TLS──▶ Cloudflare edge ──tunnel──▶ cloudflared ──HTTP──▶ api:8000 ──▶ db:5432
-   │                  (B3)                        (B3)            (B1, B2)       (B5)
-   └── station client ─────────── MSP over the same path ───────────┘
+ internet ──TLS──▶ Cloudflare edge ──tunnel──▶ cloudflared ──▶ front:8080 ──▶ api:8000 ──▶ db:5432
+   │                  (B3)                        (B3)          (B3)        (B1, B2)       (B5)
+   └── station client ──────────────── MSP over the same path ────────────────┘
  operator ──▶ host ──▶ docker compose exec ──▶ meridian CLI ──────────────────▶ db   (B4)
  publishers ──▶ uv.lock / npm / base images ──▶ image ──▶ GHCR ──▶ the Pi           (B6)
 ```
 
 - **B1 — station ↔ MSP.** Untrusted input from the internet, authenticated by bearer token after registration. `meridian.api.msp`.
 - **B2 — public API and dashboard.** Unauthenticated reads. `meridian.api.public`, `meridian.api.dashboard`.
-- **B3 — the tunnel.** Cloudflare terminates TLS; `cloudflared` carries requests to `api:8000` inside the compose network. The platform sees the tunnel container as the peer of every public request.
+- **B3 — the tunnel and the front.** Cloudflare terminates TLS; `cloudflared` carries requests to `front:8080` inside the compose network, and the front, which is nginx, forwards every one to `api:8000` (D-282). The platform sees the front container as the peer of every public request. The front keeps the last good copy of the dashboard and the public read API and nothing else.
 - **B4 — operator CLI.** Trusted, and reached only through the host. `meridian …` inside the image.
 - **B5 — database.** Reachable only inside the compose network (`expose`, never `ports`, in `deploy/docker-compose.yml`).
 - **B6 — supply chain.** Everything that becomes code in the image without being written here.
@@ -98,6 +98,9 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | P-9 | Another origin reading the API with a visitor's browser | No CORS middleware and no `Access-Control-Allow-*` header, pinned by a preflight and a plain request from another origin | D-091, D-208; `tests/msp_conformance/test_security_headers.py` | mitigated |
 | P-10 | Process internals exposed through `/metrics` | A bearer token, and a 404 indistinguishable from an unrouted path without it | D-087; `meridian.metrics.access` | mitigated |
 | P-11 | The public API publishes more than a visitor needs | Reviewed as a whole, field by field, with every field pinned by a test; one open finding, altitude | D-210; §7 below; `tests/unit/test_public_privacy.py` | partial — altitude to the metre, §7 |
+| P-12 | One visitor served a response the front kept from another's request | Only `/`, `/assets/` and `/api/v1/` are kept, each public and the same for every caller; a `200` there carries no per-client header, and a `429`, which does, is never kept. MSP, `/metrics` and `/healthz` are forwarded and never kept. The drill asks an MSP route with the api stopped and fails if it is answered | D-282; `deploy/front/nginx.conf`, `snapshot.conf`; `tests/unit/test_front_config.py`; `deploy/tools/front_drill.py` in `ci.yml › image` | mitigated |
+| P-13 | A kept copy presented as current while the platform is down | A copy is served only when the api fails, marked `Meridian-Cache: STALE` with the api's own `Date`; every view drawn from one says "Not live", with the time and its age; a copy is stale a second after it is stored, so a live api always answers for itself | D-282, D-284; `deploy/front/snapshot.conf`; `dashboard/src/snapshot.ts`; `dashboard/src/snapshot.test.ts`; `ci.yml › image › The dashboard serves its last snapshot with the api stopped` | mitigated |
+| P-14 | Filling the front's cache with requests nobody needs, to push out the copies an outage would serve | The cache is capped at 256 MiB and drops what was least recently asked for; the views the dashboard shows are asked for again every five minutes by `front-warm`, so they are the last to go; the edge rule and the process limits of P-5 bound how fast it can be filled. A view outside the warmed list can still be pushed out | D-282, D-283; `deploy/front/nginx.conf`; `deploy/front/snapshot-routes.txt` | accepted — the dashboard's own views return within one warm round |
 
 ### B3 — the tunnel
 
@@ -107,6 +110,8 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | T-2 | Bypassing the edge by reaching the API port on the host | The public deployment publishes no API port, so every outside request crosses Cloudflare, which overwrites `CF-Connecting-IP`; only that file trusts the header | D-051, D-206; `deploy/docker-compose.public.yml`; `tests/unit/test_compose_hardening.py` | mitigated |
 | T-3 | Public exposure with development secrets | The platform refuses to start in public mode while any secret is `change-me` | `meridian.config._refuse_placeholder_secrets` | mitigated |
 | T-4 | Cloudflare reads traffic in the clear | Accepted: TLS terminates at the edge by design, and MSP carries no secret but the bearer token, which a revocation withdraws | MSP §3 | accepted |
+| T-5 | Bypassing the edge by reaching the front's port on the host | The front forwards `CF-Connecting-IP` as it receives it, so the public file removes its host port as it removes the api's; the tunnel is then the only way to either | D-282; `deploy/docker-compose.public.yml`; `tests/unit/test_compose_hardening.py::test_the_public_file_removes_the_front_port_and_points_the_tunnel_at_it` | mitigated |
+| T-6 | The front fails, and takes the public path and every station's MSP with it | It is one more process between the tunnel and the api. It is hardened like every service, restarts unless stopped, has its own healthcheck, and starts without the api. A station that cannot reach the platform keeps receiving on schedule and queues its reports, which the §12.1 drill checks | D-282, D-285; `deploy/docker-compose.yml`; `tests/msp_conformance/test_independence_drill.py` | accepted — delay, never loss: a report is deliverable for thirty days (D-281) |
 
 ### B4 — operator CLI and host
 
@@ -118,6 +123,8 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | O-4 | A compromised process escalating inside its container | Every service drops all capabilities, runs with `no-new-privileges` and a read-only root filesystem; the platform runs as uid 10001 and the database as uid 70 | D-206; `deploy/docker-compose.yml`; `tests/unit/test_compose_hardening.py` | mitigated |
 | O-5 | A backup file read by someone who should not | Written `0600` by the nightly unit (`UMask=0077`); `backups/` and `*.dump` are gitignored and excluded from the image build | D-201, D-209; `deploy/systemd/meridian-backup.service` | mitigated |
 | O-6 | Secrets baked into an image layer by a local build | `.dockerignore` excludes every secret path at any depth, checked by a test against each path the repository uses | D-201; `.dockerignore`; `tests/unit/test_layout.py` | mitigated |
+| O-7 | A station archive copied to another disk carrying the station's identity with it | `credentials.json` and `registration_key` are never archived, under any option; a manifest that names either is refused on restore; a restore never replaces a file a station already holds | D-287; `deploy/tools/station_archive.py`; `tests/unit/test_station_archive.py` | mitigated |
+| O-8 | A database dump published by CI | The `restore-elsewhere` job needs the image job's dump, so it is uploaded as a workflow artifact. It is the dump of that run's throwaway stack: the example secrets from `.env.example` and one simulated station. It is kept one day. No deployment's dump is ever uploaded by anything in this repository | D-286; `.github/workflows/ci.yml` | accepted |
 
 ### B5 — database
 
@@ -126,7 +133,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | D-1 | The database reachable from outside | `expose`, never `ports` | `deploy/docker-compose.yml` | mitigated |
 | D-2 | A compromised API process rewriting the schema or dropping tables | The API, the jobs process and the CLI connect as `meridian_api`, which may change rows and nothing else; only `migrate` holds the owner's password | D-207; `meridian.store.database_roles`; `tests/integration/test_database_roles.py` | partial — the owner is a superuser, which TimescaleDB requires |
 | D-3 | SQL injection | Every statement is parameterised through psycopg; no SQL is built from request text | `meridian.store` | mitigated |
-| D-4 | Losing the database | Nightly checksummed backups kept by a daily, weekly and monthly policy; a weekly drill restores the newest into a scratch database and checks it; an off-host copy is the operator's step | D-115, D-209; `deploy/tools/scheduled_backup.py`, `restore_drill.py`; `tests/integration/test_restore_drill.py` | partial — the off-host copy is not automated |
+| D-4 | Losing the database | Nightly checksummed backups kept by a daily, weekly and monthly policy, each with every table's row count taken in the dump's own snapshot; a weekly drill restores the newest into a scratch database and checks it against those counts; CI restores a dump on a second runner; an off-host copy is the operator's step | D-115, D-209, D-286; `deploy/tools/scheduled_backup.py`, `restore_drill.py`, `restore.py`; `tests/integration/test_restore_drill.py`; `ci.yml › restore-elsewhere` | partial — the off-host copy is not automated |
 | D-5 | A migration failing half-way | An upgrade runs in one transaction, so a failure leaves the revision it started from; the API does not start until `migrate` succeeds; the recovery is in the runbook | D-019, D-211; `deploy/migrations/env.py`; `tests/integration/test_failure_recovery.py` | mitigated |
 
 ### B6 — supply chain

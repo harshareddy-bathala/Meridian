@@ -6420,6 +6420,22 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the Pi's run, prepared | `deploy/tools/long_run_preflight.py` (`--preflight`); `OPERATIONS.md` § The 72-hour acceptance run on the Pi; `SCALE-AND-FAULTS.md` § The long run, the Stage 24 rehearsal; `docs/ACCEPTANCE.md`; `SOFTWARE-IMPLEMENTATION-ROADMAP.md` "Where the build has got to" |
 | — D-253 kept, found by CI | `meridian_sim/executor.py`: a silence is never named against a pass that aborts on its own, since the abort, not the silence, decided it. It was named at the pass's start whatever followed, and showed only when a randomly minted assignment id drew an abort. `tests/unit/test_simulator_sky_ground_truth.py` |
 
+**Landed 2026-10-03**, building Stage 33's deployment and data custody.
+
+| Decision | Applied to |
+|---|---|
+| D-280 Stage 33 ahead of Stage 30 | `SOFTWARE-IMPLEMENTATION-ROADMAP.md` "Where the build has got to" |
+| D-281 custody and the station's thirty days | `OPERATIONS.md` § Custody and retention; `ARCHITECTURE.md` Deployment; the D-135 row under Open |
+| D-282 the front | `deploy/front/{nginx,snapshot}.conf`; `deploy/{docker-compose.yml,docker-compose.public.yml,.env.example}`; `OPERATIONS.md` § The front; `ARCHITECTURE.md` Deployment; `tests/unit/{test_front_config,test_compose_hardening}.py` |
+| D-283 warming every view | `deploy/front/snapshot-routes.txt`; `deploy/tools/front_warm.py`; `deploy/docker-compose.yml` (`front-warm`); `dashboard/src/snapshotRoutes.test.ts`; `tests/unit/test_front_warm.py` |
+| D-284 the dashboard says when it is not live | `dashboard/src/{snapshot,api,health,useStations,useStationDetail,useStationCapture,SnapshotNote,App,StationDetail}.ts(x)`, `app.css`; `dashboard/src/snapshot.test.ts` |
+| D-285 a tick's requests done by its next edge | `client/src/meridian_client/{time_limit,transport,station_loop,capture_schedule,capture_sequence}.py`; `tests/unit/{test_transport_retries,test_transport_time_limit_socket,test_station_loop,test_capture_schedule}.py` |
+| D-286 rows counted in the dump's snapshot; the drills as tools | `deploy/tools/{backup,restore,restore_drill,compose_db,front_drill,front_warm}.py`; `.github/workflows/ci.yml` (the image job's §12.2 step and artifact, `restore-elsewhere`); `OPERATIONS.md` § Backup and restore, § Independence drills; `tests/unit/{test_backup_tools,test_front_drill}.py` |
+| D-287 the station tier's backup | `deploy/tools/station_archive.py`; `OPERATIONS.md` § Custody and retention, *Archiving a station*; `tests/unit/test_station_archive.py` |
+| — the completion gate | `tests/msp_conformance/test_independence_drill.py` (§12.1); `ci.yml › image › The dashboard serves its last snapshot with the api stopped` (§12.2); `ci.yml › restore-elsewhere` (the restore on another machine) |
+| — the amended entries | D-115, whose manifest now counts rows and whose restore checks them; D-135, whose station half D-281 answers |
+| — the documents | `THREAT-MODEL.md` (B3, P-12 to P-14, T-5, T-6, O-7, O-8, D-4); `EVALUATION.md` §12; `GLOSSARY.md`; `README.md`; `CLAUDE.md` (the layout's `deploy/` line) |
+
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
