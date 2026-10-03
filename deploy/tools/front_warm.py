@@ -22,6 +22,10 @@ query.
 **It is paced under the public API's limit** of five requests a second per
 caller (D-202), and waits out a ``429`` once, as its ``Retry-After`` says.
 
+``--json`` prints every answer, with its ``Date`` and how long it took, for
+``front_drill.py`` to judge: the drill of EVALUATION.md §12.2 asks the front
+from inside the compose network, where this tool already runs.
+
 ``--every`` runs it in a loop, which is how the ``front-warm`` compose service
 runs it. A round that fails is reported and the loop carries on. With
 ``--status-file``, each finished round writes its counts there, and the
@@ -69,6 +73,20 @@ class Answer:
     cache: str
     """``Meridian-Cache``: ``MISS``, ``EXPIRED``, ``HIT``, ``STALE``, or empty."""
     body: bytes = b""
+    date: str = ""
+    """The ``Date`` header: for a ``STALE`` copy, when the api made it (D-282)."""
+    seconds: float = 0.0
+    """How long the front took to answer."""
+
+    def report(self) -> dict[str, object]:
+        """Everything but the body, for the drill to judge (front_drill.py)."""
+        return {
+            "path": self.path,
+            "status": self.status,
+            "cache": self.cache,
+            "date": self.date,
+            "seconds": round(self.seconds, 3),
+        }
 
 
 @dataclass(slots=True)
@@ -210,19 +228,29 @@ def http_fetch(base: str, timeout_s: float, pace_s: float = PACE_S) -> Fetch:
 
     def once(path: str) -> tuple[Answer, float | None]:
         request = urllib.request.Request(base.rstrip("/") + path)
+        started = time.monotonic()
         try:
             with urllib.request.urlopen(request, timeout=timeout_s) as response:
-                cache = response.headers.get("Meridian-Cache", "")
-                return Answer(path, response.status, cache, response.read()), None
+                body = response.read()
+                headers, status = response.headers, response.status
+            wait = None
         except urllib.error.HTTPError as error:
-            retry = error.headers.get("Retry-After")
-            wait = float(retry) if error.code == 429 and retry else None
-            cache = error.headers.get("Meridian-Cache", "")
-            return Answer(path, error.code, cache), wait
+            body, headers, status = b"", error.headers, error.code
+            retry = headers.get("Retry-After")
+            wait = float(retry) if status == 429 and retry else None
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             reason = getattr(error, "reason", error)
             print(f"  {path}: {reason}", file=sys.stderr)
-            return Answer(path, 0, ""), None
+            return Answer(path, 0, "", seconds=time.monotonic() - started), None
+        answer = Answer(
+            path,
+            status,
+            headers.get("Meridian-Cache", ""),
+            body,
+            date=headers.get("Date", ""),
+            seconds=time.monotonic() - started,
+        )
+        return answer, wait
 
     def fetch(path: str) -> Answer:
         time.sleep(pace_s)
@@ -250,10 +278,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--status-file", type=Path, default=None, help="write each round's counts here"
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print every answer as JSON instead of the summary, for front_drill.py",
+    )
+    parser.add_argument(
+        "--also",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="with --json: a path outside the routes to ask for as well",
+    )
     args = parser.parse_args(argv)
 
     routes = read_routes(args.routes)
     fetch = http_fetch(args.base, args.timeout)
+    if args.json:
+        result = warm(fetch, routes)
+        report = {
+            "stations": result.stations,
+            "views": [answer.report() for answer in result.answers],
+            "also": [fetch(path).report() for path in args.also],
+        }
+        print(json.dumps(report))
+        return 0
     if args.every is None:
         result = warm(fetch, routes)
         print(result.summary())

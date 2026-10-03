@@ -203,3 +203,25 @@ def test_a_rate_limited_request_is_waited_out_once(warm: ModuleType) -> None:
 def test_an_unreachable_front_is_a_failed_view_not_a_crash(warm: ModuleType) -> None:
     answer = warm.http_fetch("http://127.0.0.1:1", timeout_s=2, pace_s=0)("/")
     assert answer.status == 0
+
+
+def test_an_answer_is_reported_without_its_body_for_the_drill(
+    warm: ModuleType,
+) -> None:
+    """``--json`` is what ``front_drill.py`` reads: the label, the Date, the time."""
+    answer = warm.Answer(
+        "/",
+        200,
+        "STALE",
+        b"<html>",
+        date="Fri, 02 Oct 2026 15:08:12 GMT",
+        seconds=2.0041,
+    )
+
+    assert answer.report() == {
+        "path": "/",
+        "status": 200,
+        "cache": "STALE",
+        "date": "Fri, 02 Oct 2026 15:08:12 GMT",
+        "seconds": 2.004,
+    }
