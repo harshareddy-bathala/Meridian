@@ -141,3 +141,37 @@ def test_the_warmers_report_is_read_as_it_is_written(drill: ModuleType) -> None:
     assert asked.views[0].made_at() == datetime(2026, 10, 2, 15, 8, 12, tzinfo=UTC)
     with pytest.raises(sys.modules["compose_db"].ToolError):
         drill.parse_report("warmed 21 views")
+
+
+def test_the_front_is_given_time_to_find_a_recreated_api(drill: ModuleType) -> None:
+    """A recreated api has a new address, and the front looks it up again."""
+    copy = drill.Asked(views=(view(drill),))
+    live = drill.Asked(views=(view(drill, cache="MISS"),))
+    rounds = iter([copy, copy, live])
+    now = [0.0]
+
+    asked, verdict = drill.ask_until_live(
+        lambda: next(rounds),
+        drill.judge_warm,
+        clock=lambda: now[0],
+        sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+    )
+
+    assert asked is live
+    assert not verdict.failures
+
+
+def test_an_api_the_front_never_finds_still_fails(drill: ModuleType) -> None:
+    copy = drill.Asked(views=(view(drill),))
+    now = [0.0]
+
+    _, verdict = drill.ask_until_live(
+        lambda: copy,
+        drill.judge_recovery,
+        clock=lambda: now[0],
+        sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+    )
+
+    assert now[0] >= drill.FRONT_FINDS_API_S
+    (failure,) = verdict.failures
+    assert "still a copy after the api came back" in failure

@@ -11,14 +11,16 @@ dashboard (D-284). This is the deployment's half, run for real:
 
 1. **Warm.** Ask the front for every view (D-283). Each must be answered by the
    api, or there is no outage to compare with and the drill refuses to start.
+   The front is given half a minute to find an api it lost track of.
 2. **Stop the api**, as an operator would, with `docker compose stop api`.
 3. **Ask again.** Every view must come back `200`, marked `STALE`, carrying a
    `Date` from before the stop, promptly. A view nobody warmed must fail
    promptly, not hang, and an MSP route must not be answered from a copy at
    all: the front keeps none (D-282).
 4. **Start the api**, always, whatever happened above.
-5. **Ask once more.** Nothing may be `STALE` now: a copy served after the
-   platform is back is a stale figure presented as current.
+5. **Ask once more.** Nothing may be `STALE` now, once the front has had the
+   same half minute: a copy served after the platform is back is a stale
+   figure presented as current.
 
 The questions are asked from inside the compose network, by the warmer in the
 `front-warm` container, because the public deployment gives the front no host
@@ -37,6 +39,7 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -60,6 +63,15 @@ NEVER_KEPT = "/msp/v0/time"
 """An MSP route. Forwarded, never kept, whatever was asked before."""
 
 API_BACK_S = 120.0
+
+FRONT_FINDS_API_S = 30.0
+"""How long the front may take to find an api that came back at a new address.
+
+It asks Docker's resolver every ten seconds and holds a failed answer as long
+(`nginx.conf`), so a recreated api can go unseen for twenty. `compose up`
+recreates the api whenever its configuration changes, as CI's sim step does,
+and until the front finds it every view is honestly a copy.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,11 +212,28 @@ def wait_for_api(compose: Compose) -> None:
     raise ToolError(f"the api was not healthy again within {API_BACK_S:.0f}s")
 
 
+def ask_until_live(
+    asking: Callable[[], Asked],
+    judge: Callable[[Asked], Verdict],
+    *,
+    within: float = FRONT_FINDS_API_S,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[Asked, Verdict]:
+    """Ask until *judge* passes, or *within* seconds, then return the last round."""
+    deadline = clock() + within
+    while True:
+        asked = asking()
+        verdict = judge(asked)
+        if not verdict.failures or clock() >= deadline:
+            return asked, verdict
+        sleep(2.0)
+
+
 def drill(compose: Compose) -> list[str]:
     """Run the five steps. Returns what failed; empty means the drill passed."""
     print("-> warm: ask the front for every view", flush=True)
-    warmed = ask(compose)
-    before = judge_warm(warmed)
+    warmed, before = ask_until_live(lambda: ask(compose), judge_warm)
     if before.failures:
         return ["the drill could not start:", *before.failures]
     print(f"   {len(warmed.views)} views for {warmed.stations} stations", flush=True)
@@ -220,7 +249,7 @@ def drill(compose: Compose) -> list[str]:
         run(compose, "start", "api")
         wait_for_api(compose)
     print("-> ask once more, with the api back", flush=True)
-    recovery = judge_recovery(ask(compose))
+    _, recovery = ask_until_live(lambda: ask(compose), judge_recovery)
     return [*outage.failures, *recovery.failures]
 
 

@@ -89,6 +89,7 @@ compose exec api python -c "import urllib.request; print(urllib.request.urlopen(
 `front` is nginx before the api (D-282). It forwards every request, and keeps the last good copy of the dashboard and the public read API. **A visitor gets the api's answer whenever the api gives one**; a kept copy is served only when the api does not answer, marked `Meridian-Cache: STALE` and carrying the time the api made it. MSP, `/metrics` and `/healthz` are never kept.
 
 - **On a laptop or in CI** the dashboard is on `http://localhost:8080` through the front, and on `:8000` straight from the api. Set `FRONT_PORT` in `deploy/.env` to move it.
+- **A recreated api is unseen for up to twenty seconds.** `compose up` recreates the api when its configuration changes, and secret rotation does it on purpose; the new container has a new address, and the front looks the name up every ten seconds and holds a failed lookup as long. Until it finds the api, views are served as copies, marked `STALE`, and MSP requests fail and are retried by the stations. `front_drill.py` gives the front half a minute before it judges.
 - **On the public deployment** the front has no host port, like the api. **Set the tunnel's origin to `http://front:8080`** in Cloudflare's dashboard, under the tunnel's public hostname; the token carries it, not this repository. An origin left at `http://api:8000` still works, but bypasses the front, so the dashboard goes down with the api.
 
 See what it would serve with the api down:
