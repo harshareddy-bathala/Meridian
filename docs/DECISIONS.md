@@ -6153,6 +6153,37 @@ SC-9's detection delay and false-alarm rate are computed from `receive_chain_war
 
 ---
 
+## D-293 — A baseline: one vote per reception per bin, trained daily over two weeks, and never again while a warning is open
+
+**2026-10-27 · accepted** · *`meridian/reliability/{watch_baseline,watch_build}.py`; `meridian/store/watch_reads.py`; `meridian/cli_watch.py`; `[baseline]` in `deploy/reliability.toml.example`; Stage 28. Applies D-184, D-290 and D-291.*
+
+**Bins.** Elevation is cut into 10° bins, and signal below 5° is left out because it is mostly the horizon's. A bin enters a baseline with at least five receptions. A baseline is written with at least two bins, because a shortfall is judged across elevations and never in one bin.
+
+**One vote per reception per bin.**
+- A reception's samples in a bin are first reduced to their median.
+- The bin's median and tenth percentile are then taken across receptions, by nearest rank, as every figure here is (D-184).
+- Samples from one pass are not independent of each other. A pass that dwelt four minutes at 20° would otherwise outvote four that crossed it quickly, and a few long passes would stand for a chain's whole history.
+
+**The interval ends at the start of today, UTC, and reaches back fourteen days.** Every run in one day asks for the same interval, so the jobs service can train each round and the store writes once a day at most (D-291).
+
+**A chain is trained:**
+- when it has no baseline under this method and configuration;
+- or when its latest baseline's interval ended thirty days or more before this one ends **and no warning is open on it**.
+
+A warning open on a chain stops it being trained again, so a shortfall the watch has seen is never learned as the chain's normal signal.
+
+**What it cannot catch, stated.** A chain that degrades before its first baseline, or slowly enough that thirty days of loss pass unwarned, has the loss trained into its next baseline. SC-9's simulated runs train on a clean stretch first, which is the case they test (D-294). A real chain's first baseline is only as good as the weeks it was trained on.
+
+**The hash names the diagnosis it read.** A baseline leaves out the receptions Stage 27 put down to an obstruction, interference or a silent satellite. So `config_sha256` hashes the `[baseline]` table together with the diagnosis method and the `[diagnosis]` table's hash. Changing either trains every chain again, beside the old baselines.
+
+**Every setting is configuration**, in `[baseline]`, refused by name when out of range like every other table there.
+
+*Rejected: retraining every day on a rolling window.* It is simpler, and a gradual degradation would then move the baseline with it. A slow loss would never show as a shortfall, which is the one thing the watch exists to show.
+
+*Rejected: every sample as a vote.* As above: it lets long passes dominate.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

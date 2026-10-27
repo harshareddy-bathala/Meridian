@@ -11,6 +11,8 @@ Three tables, read from ``deploy/reliability.toml`` or taken as defaults:
   is not in the hash.
 * ``[diagnosis]`` — the thresholds a loss's cause is judged by (D-273). Every
   stored diagnosis records the sha256 of these, as a classification does.
+* ``[baseline]`` — how a receive chain's baseline is trained (D-293). Every
+  stored baseline records the sha256 of these, with the diagnosis it read.
 
 **Strict**, as the labelling configuration is: an unknown key, a wrong type or
 a value out of range is refused by name, because a misspelled target that
@@ -18,7 +20,8 @@ silently kept its default is a target somebody believes they set.
 
 Standard library only: the snapshot command reads it beside the labeller.
 
-Reference: docs/DECISIONS.md D-146, D-147, D-182, D-184, D-273 to D-277.
+Reference: docs/DECISIONS.md D-146, D-147, D-182, D-184, D-273 to D-277,
+D-293.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from typing import TypeVar
 
 __all__ = [
     "RELIABILITY_CONFIG_ENV",
+    "BaselineConfig",
     "ClassificationConfig",
     "DiagnosisConfig",
     "ReliabilityConfig",
@@ -268,17 +272,67 @@ class DiagnosisConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class BaselineConfig:
+    """How a receive chain's baseline is trained (D-293).
+
+    Changing one writes a new baseline for every chain beside the old.
+    """
+
+    bin_width_deg: float = 10.0
+    """The width of an elevation bin."""
+
+    min_elevation_deg: float = 5.0
+    """Signal below this elevation is left out: it is mostly the horizon's."""
+
+    train_s: int = 14 * _DAY_S
+    """How far back from its end a baseline's training interval reaches."""
+
+    retrain_s: int = 30 * _DAY_S
+    """How old a baseline's interval may grow before a chain with no open
+    warning is trained again. A chain with an open warning never is, so its
+    shortfall is not learned as normal."""
+
+    min_receptions: int = 5
+    """Receptions a bin needs to be part of a baseline."""
+
+    min_bins: int = 2
+    """Bins a baseline needs: a shortfall is judged across elevations."""
+
+    def __post_init__(self) -> None:
+        """Refuse a value outside the range the tests were written for."""
+        _number("bin_width_deg", self.bin_width_deg, 1.0, 45.0)
+        _number("min_elevation_deg", self.min_elevation_deg, 0.0, 80.0)
+        _whole("train_s", self.train_s, _DAY_S, 365 * _DAY_S)
+        _whole("retrain_s", self.retrain_s, _DAY_S, 365 * _DAY_S)
+        _whole("min_receptions", self.min_receptions, 1, 1000)
+        _whole("min_bins", self.min_bins, 1, 18)
+
+    def parameters(self) -> dict[str, float]:
+        """The settings as recorded with every baseline, reals as reals."""
+        held = asdict(self)
+        return {
+            one.name: float(held[one.name]) if one.type == "float" else held[one.name]
+            for one in fields(self)
+        }
+
+    def sha256(self) -> bytes:
+        """The hash of these settings alone; a baseline adds the diagnosis."""
+        return _canonical_sha256(dict(self.parameters()))
+
+
+@dataclass(frozen=True, slots=True)
 class ReliabilityConfig:
     """Every table, resolved."""
 
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     slo: SloConfig = field(default_factory=SloConfig)
     diagnosis: DiagnosisConfig = field(default_factory=DiagnosisConfig)
+    baseline: BaselineConfig = field(default_factory=BaselineConfig)
 
 
-_TABLES = ("classification", "slo", "diagnosis")
+_TABLES = ("classification", "slo", "diagnosis", "baseline")
 
-_T = TypeVar("_T", ClassificationConfig, SloConfig, DiagnosisConfig)
+_T = TypeVar("_T", ClassificationConfig, SloConfig, DiagnosisConfig, BaselineConfig)
 
 
 def parse_reliability_config(text: str) -> ReliabilityConfig:
@@ -307,6 +361,7 @@ def parse_reliability_config(text: str) -> ReliabilityConfig:
         classification=_table(stored, "classification", ClassificationConfig),
         slo=_table(stored, "slo", SloConfig),
         diagnosis=_table(stored, "diagnosis", DiagnosisConfig),
+        baseline=_table(stored, "baseline", BaselineConfig),
     )
 
 

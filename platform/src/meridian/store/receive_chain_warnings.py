@@ -33,6 +33,7 @@ __all__ = [
     "clear_warning",
     "find_open_warnings",
     "find_warnings",
+    "has_open_warning",
     "raise_warning",
 ]
 
@@ -171,3 +172,19 @@ def find_warnings(conn: Connection, station_id: str) -> list[StoredWarning]:
             (station_id,),
         )
         return cur.fetchall()
+
+
+def has_open_warning(conn: Connection, *, station_id: str, capability_id: int) -> bool:
+    """Whether the chain has a warning open under any method or configuration.
+
+    A baseline is not trained again while one is, so a shortfall the watch has
+    already seen is not learned as the chain's normal signal (D-293).
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "select exists (select 1 from receive_chain_warnings"
+            " where station_id = %s and capability_id = %s and cleared_at is null)",
+            (station_id, capability_id),
+        )
+        found = cur.fetchone()
+    return bool(found and found[0])

@@ -14,7 +14,8 @@ evaluates and shows Stage 17's models (``cli_model``); ``profiles`` writes the
 horizon and interference profiles (``cli_profiles``); ``report`` builds
 and verifies Stage 22's evaluation reports (``cli_report``); ``verdict``
 rates receptions for the reception verdict (``cli_verdict``); ``diagnosis``
-says why each lost reception was lost (``cli_diagnosis``). Every command the
+says why each lost reception was lost (``cli_diagnosis``); ``watch`` watches
+each receive chain's signal against its own past (``cli_watch``). Every command the
 operations runbook documents is now built, so the table of commands whose
 stage had not arrived went with the last of them.
 
@@ -53,6 +54,7 @@ from meridian.cli_snapshot import (
 )
 from meridian.cli_verdict import add_verdict_parser, run_verdict
 from meridian.cli_views import add_timing_arguments
+from meridian.cli_watch import add_watch_parser, run_watch
 from meridian.config import load_settings
 from meridian.store import station_tokens, stations
 from meridian.store.pool import DatabaseUnreachableError, connect_once
@@ -279,6 +281,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_report_parser(subcommands)
     add_verdict_parser(subcommands)
     add_diagnosis_parser(subcommands)
+    add_watch_parser(subcommands)
 
     return parser
 
@@ -299,6 +302,7 @@ NEEDS_ACTION = frozenset(
         "snapshot",
         "station",
         "verdict",
+        "watch",
     }
 )
 """Commands that are a noun and mean nothing without a verb after them.
@@ -326,6 +330,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "snapshot": run_snapshot,
     "station": _run_station,
     "verdict": run_verdict,
+    "watch": run_watch,
 }
 """Every subcommand that does real work, and the handler that does it.
 
