@@ -4,7 +4,7 @@ PostgreSQL with TimescaleDB. Observations and heartbeats are hypertables.
 
 > **Phase 1 scope.** D-018 builds eight of the tables below plus `invite_tokens` (D-020) and `satellite_transmitters` (D-021). `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles` were deferred — see D-018 for why each one waited — and Stage 19 built them once each had a producer and a consumer (migration `0023`, D-173 to D-176). Two derived views and an hourly heartbeat aggregate followed (migration `0024`, D-177, D-178).
 >
-> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below. Stage 26 built the first two, `reception_ratings` and `reception_verdicts` (migrations `0027` and `0028`, D-260, D-263), and Stage 27 the third, `loss_diagnoses` (migration `0029`, D-272); the rest are **planned, not built**. The rules they share are D-104.
+> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below. Stage 26 built the first two, `reception_ratings` and `reception_verdicts` (migrations `0027` and `0028`, D-260, D-263), Stage 27 the third, `loss_diagnoses` (migration `0029`, D-272), and Stage 28 the watch's two, `signal_baselines` and `receive_chain_warnings` (migration `0030`, D-291, D-292); the rest are **planned, not built**. The rules they share are D-104.
 
 ---
 
@@ -309,15 +309,29 @@ Written for every **failed or partial reception**: a current observation whose o
 
 A plain table: its volume is the loss count.
 
-### `signal_baselines` *(planned)*
-`(id, station_id, capability_id, elevation_bin_deg, snr_db_median, snr_db_p10, sample_count, trained_from, trained_to, method, computed_at, simulated)`
+### `signal_baselines`
+`(id, station_id, capability_id, evidence, bin_width_deg, bins_json, receptions, trained_from, trained_until, method, config_sha256, computed_at, simulated)`, unique on `(station_id, capability_id, evidence, method, config_sha256, trained_from, trained_until)`.
 
-A station's own signal strength by elevation, per receive chain — two antennas on one station degrade separately. Versioned exactly as `horizon_profiles` is, so a warning can be traced to the baseline it was raised against. Built from `peak_snr_db` against maximum elevation under MSP 0.2, and from per-sample SNR once stations send MSP 0.3's `snr_samples` (D-103).
+A receive chain's own signal strength by elevation, over a stated training interval. **A chain is a capability**: the one whose frequency range holds the assignment's frequency, so two antennas on one station degrade separately, and a reception two capabilities could have made belongs to neither (D-290).
 
-### `receive_chain_warnings` *(planned)*
-`(id, station_id, capability_id, baseline_id, raised_at, cleared_at, shortfall_db, affected_bins_json, method, simulated)`
+**One row is a whole baseline, not one bin** (D-291). `bins_json` holds every bin trained together, lowest elevation first: each bin's elevation, the median and tenth-percentile SNR in decibels, and the receptions and samples behind them. A warning then names exactly the bins it was judged against. `evidence` is `samples`, MSP 0.3's `snr_samples` placed at their elevations by the pass's own element set, or `peak`, MSP 0.2's `peak_snr_db` at the pass's maximum elevation. The two are never mixed in one baseline.
 
-A warning that a receive chain is degrading, raised before reception fails. `cleared_at` is written once, when the shortfall recovers. **Warnings are never deleted**: SC-9's detection delay and false-alarm rate are computed from exactly these rows, and a deleted false alarm is a false-alarm rate that improves itself.
+- **Producer:** the health watch's baseline build, by command and by the jobs service (Stage 28).
+- **Consumers:** the watch's detection, and `receive_chain_warnings`, whose key names a baseline.
+- **`simulated`** is copied from the station by the insert, never from the caller.
+- **Written once.** Building again over the same interval under the same configuration writes nothing; a later interval is a new row beside it. `(id, station_id, capability_id, simulated)` is unique so that a warning can reference all four (D-291).
+- **Retention:** never dropped.
+
+### `receive_chain_warnings`
+`(id, station_id, capability_id, baseline_id, raised_at, shortfall_db, affected_bins_json, evidence_json, cleared_at, cleared_shortfall_db, method, config_sha256, simulated)`, with at most one open (`cleared_at` null) per `(station_id, capability_id, method, config_sha256)`.
+
+A warning that a receive chain is degrading, raised before reception fails. `raised_at` is when the watch concluded, which is when the warning could be seen, and SC-9's lead is measured from it (D-292). `affected_bins_json` names the bins that fell short. `evidence_json` names the receptions read and the thresholds they were read under.
+
+- **Key:** `(baseline_id, station_id, capability_id, simulated)` references the baseline. A warning on a measured station can only name that station's own measured baseline, and the database refuses anything else (D-291).
+- **Cleared once.** `cleared_at` and `cleared_shortfall_db` are written once, together, when the shortfall recovers; a check holds the pair whole.
+- **Warnings are never deleted.** SC-9's detection delay and false-alarm rate are computed from exactly these rows, and a deleted false alarm is a false-alarm rate that improves itself.
+- **`simulated`** is the baseline's, which is the station's.
+- **Retention:** never dropped.
 
 ### `report_deliveries` *(planned)*
 `(id, station_id, kind, assignment_id, period_start, channel, template_version, content_sha256, queued_at, sent_at, failed_at, attempts, error, simulated)`
@@ -522,6 +536,7 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `station_capabilities.polarisation` | `rhcp`, `lhcp`, `linear_v`, `linear_h`, `linear`, `none` |
 | `station_capabilities.modes` | free-text lowercase array in Phase 1 — decoder naming varies too much to freeze |
 | `loss_diagnoses.cause` | `satellite_silent`, `station_not_listening`, `obstruction`, `interference`, `timing_fault`, `undetermined` — D-104 |
+| `signal_baselines.evidence` | `samples`, `peak` — D-291 |
 | `report_deliveries.kind` *(planned)* | `pass`, `weekly` — D-098 |
 | `report_deliveries.channel` *(planned)* | `email`, `telegram` — D-098 |
 | `ingest_sources.access_constraint` | `none`, `key_counted`, `registration` — D-132 |

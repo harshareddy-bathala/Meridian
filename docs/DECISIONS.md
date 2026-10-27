@@ -6083,6 +6083,76 @@ Whoever wants a lost disk not to cost the queued reports keeps the `registration
 
 ---
 
+## D-290 — The health watch is a receive chain's signal against its own past, and a chain is the capability whose range holds the frequency
+
+**2026-10-27 · accepted** · *`meridian/reliability/watch_*.py`; `meridian/store/{signal_baselines,receive_chain_warnings}.py`; Stage 28. Applies D-013, D-102 and D-104.*
+
+Stage 28 warns that a station's receive chain (antenna, cable, LNA) is losing signal before a reception fails. It is `platform/reliability`'s, beside loss diagnosis (D-102). It reads signal from observations through the store, and elevation from the orbit service through the same `place` loss diagnosis uses. It writes two tables, and none of its names says "health" (D-013, D-104): the watch, a baseline, a receive-chain warning.
+
+**A receive chain is a capability.** `station_capabilities` already separates a station's VHF fixed antenna from its UHF tracker, and `DATA-MODEL.md` asks that two antennas on one station degrade separately. MSP says which frequency a station was given, not which antenna it used. So a reception belongs to the capability whose frequency range holds the assignment's `centre_freq_hz` and which was not deleted when the window opened.
+
+**A reception two capabilities could have made belongs to neither.** Choosing one, by id or by band, would put another antenna's signal into a chain's history. The watch leaves such a reception out and counts it in its run report. A virtual station registers one VHF capability, so none of the simulator's receptions is left out this way.
+
+**What the watch reads, and what it does not.**
+- **It reads only receptions that heard the satellite:** a `decoded` or `signal_no_decode` report with signal. A pass that heard nothing carries no signal strength to compare.
+- **A loss Stage 27 put down to an obstruction, interference or a silent satellite is not the chain's** and is left out. The diagnosis is read under the deployment's own method and configuration (D-272); a loss not yet diagnosed is read as it is.
+- **It reads no other station.** A baseline is the station's own past, so a simulated station's history can never become a measured station's baseline (D-291).
+- **Never the simulator's ledger.** `tests/unit/test_watch_boundaries.py` holds this, as `test_diagnosis_boundaries.py` does for diagnosis (D-105).
+
+*Rejected: one chain per station.* That is simpler, and it is wrong for the one case the data model names. A station with two antennas would mix two chains' signal into one baseline. A failing UHF cable would then read as half a shortfall on a station that still hears VHF perfectly.
+
+*Rejected: the registry.* The registry's word for a station's state is liveness, from heartbeats alone (D-013). A trend computed from observations and geometry would be a fourth meaning of "health" (D-102).
+
+---
+
+## D-291 — A baseline is one row per chain, per evidence and per training interval, and it never moves once written
+
+**2026-10-27 · accepted** · *`deploy/migrations/sql/0030_receive_chain_watch.sql`; `meridian/store/signal_baselines.py`; Stage 28. Departs from `DATA-MODEL.md`'s planned columns.*
+
+`DATA-MODEL.md` planned `signal_baselines` as one row per elevation bin, and `receive_chain_warnings.baseline_id` as a reference to "the baseline". One row per bin leaves that reference with nothing whole to point at. A baseline is the set of bins trained together, and a warning was raised against all of them.
+
+**So a row is a whole baseline.** It holds:
+- its station, its capability and its evidence;
+- its bins, as `bins_json`, each with its elevation, the median and tenth-percentile SNR in decibels, and how many receptions and samples made it;
+- its training interval;
+- its method and the hash of its configuration;
+- `simulated`, copied from the station.
+
+A warning's foreign key then names one row, and the bins it was judged against are exactly that row's.
+
+**Two kinds of evidence, never mixed in one baseline.**
+- **`samples`:** MSP 0.3's `snr_samples`, each placed at its elevation by the pass's own element set.
+- **`peak`:** MSP 0.2's `peak_snr_db` at the pass's maximum elevation.
+
+A station that moves from 0.2 to 0.3 gets a second baseline rather than one that compares a pass's peak with another pass's samples.
+
+**Written once.** A baseline is never updated. Building again over the same interval under the same configuration writes nothing; a later interval writes a new row beside the old. A warning raised against an old baseline still names it.
+
+**A simulated baseline cannot reach a measured station, by key rather than by care.** A warning's key is `(baseline_id, station_id, capability_id, simulated)`, referencing those four columns of the baseline. A baseline's `simulated` is the station's, so a warning on a measured station can only name a measured station's baseline, the same station's. The roadmap's test, "a simulated station's baseline is never applied to a measured one", is then a check the database makes on every insert.
+
+*Rejected: a `signal_baseline_bins` table.* It would be relational, and its rows would only ever be read whole, by the one module that wrote them. `loss_diagnoses.candidates_json` keeps what was tested the same way.
+
+---
+
+## D-292 — A warning is raised once, cleared once, and never deleted; one is open per chain at a time
+
+**2026-10-27 · accepted** · *`deploy/migrations/sql/0030_receive_chain_watch.sql`; `meridian/store/receive_chain_warnings.py`; Stage 28. Applies D-104.*
+
+SC-9's detection delay and false-alarm rate are computed from `receive_chain_warnings` rows. A row deleted, or a `raised_at` moved, would be a false-alarm rate that improves itself (`DATA-MODEL.md`).
+
+**What the store allows:**
+- **One insert per warning.** At most one warning is open per chain, method and configuration, which a partial unique index holds. A second watch run that finds the same shortfall writes nothing, because the open warning already says it.
+- **One update, writing `cleared_at` and the shortfall at that moment together.** The update applies only while `cleared_at` is null, so a warning is cleared once. A table check holds the two columns null or set together.
+- **No delete.** The store has no function that deletes a warning. Like every table here (D-104), the rule is kept by the store's interface rather than a trigger.
+
+**`raised_at` is when the watch concluded, not when the signal fell.** A warning reaches the dashboard and Prometheus when the row is written. That instant is what SC-9's lead is measured from: the time between a person being able to see the warning and the first reception the degradation fails. `evidence_json` also records the latest reception the watch had read, so the delay from that reception to the warning can be read too.
+
+**`simulated` is the chain's**, by the key D-291 gives.
+
+*Rejected: deleting a warning that turned out false.* A false alarm is exactly the row SC-9 counts.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
