@@ -5,8 +5,8 @@ generates passes over the next ``SCHEDULE_HORIZON_S`` and schedules them under
 the ``schedule.toml`` named by ``SCHEDULE_CONFIG`` — configuration A on the
 elevation proxy when none is (D-168, D-170) — then expires work nobody took and
 classifies every pass that has settled (D-182, D-183), applies the verdict
-model if one is configured (D-263) and diagnoses every classified loss (D-272),
-then waits
+model if one is configured (D-263), diagnoses every classified loss (D-272)
+and watches every receive chain (D-294), then waits
 ``SCHEDULE_INTERVAL_S``; SIGTERM or SIGINT ends the wait and the process exits
 after the task in hand. Its metrics are served on ``JOBS_METRICS_PORT`` behind
 the same token as the API's (D-109).
@@ -24,7 +24,7 @@ metrics directory then published ``meridian_passes_computed 0`` once per worker
 ``tests/unit/test_cli_jobs.py`` pins that importing the command tree loads none
 of them.
 
-Reference: docs/DECISIONS.md D-066, D-109, D-110, D-182, D-183.
+Reference: docs/DECISIONS.md D-066, D-109, D-110, D-182, D-183, D-294.
 """
 
 from __future__ import annotations
@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from meridian.jobs.reliability_round import DatabaseReliabilityWork
     from meridian.jobs.rounds import DatabaseRoundWork
     from meridian.jobs.verdict_round import DatabaseVerdictWork
+    from meridian.jobs.watch_round import DatabaseWatchWork
 
 __all__ = ["JOBS_SECRETS", "add_jobs_parser", "run_jobs"]
 
@@ -225,6 +226,26 @@ def _diagnosis(
     )
 
 
+def _watch(settings: Settings) -> DatabaseWatchWork:
+    """The receive-chain watch task.
+
+    Raises:
+        ReliabilityConfigError: The deployment's reliability file is refused.
+    """
+    # Inside the function: see the module docstring.
+    from meridian.jobs.watch_round import DatabaseWatchWork  # noqa: PLC0415
+    from meridian.reliability.config import (  # noqa: PLC0415
+        load_deployed_reliability_config,
+    )
+
+    url = settings.psycopg_url
+    return DatabaseWatchWork(
+        lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
+        SkyfieldOrbitService(),
+        config=load_deployed_reliability_config(),
+    )
+
+
 def _configured(
     settings: Settings,
 ) -> tuple[
@@ -233,6 +254,7 @@ def _configured(
     DatabaseReliabilityWork,
     DatabaseVerdictWork | None,
     DatabaseDiagnosisWork,
+    DatabaseWatchWork,
 ]:
     """Every task a round runs, as configured, each refused before any round."""
     config, scorers = _schedule(settings)
@@ -243,23 +265,51 @@ def _configured(
         _reliability(settings),
         verdicts,
         _diagnosis(settings, verdicts),
+        _watch(settings),
     )
+
+
+def _after_scheduling(
+    reliability: DatabaseReliabilityWork,
+    verdicts: DatabaseVerdictWork | None,
+    diagnosis: DatabaseDiagnosisWork,
+    watch: DatabaseWatchWork,
+    now: datetime,
+) -> bool:
+    """The rest of a round, in order; True if every task in it completed.
+
+    Stage 20's sweep and classification, then the verdicts, the diagnosis and
+    the watch, each reading what the one before it wrote.
+    """
+    # Inside the function: see the module docstring.
+    from meridian.jobs.diagnosis_round import run_diagnosis_round  # noqa: PLC0415
+    from meridian.jobs.reliability_round import (  # noqa: PLC0415
+        run_reliability_round,
+    )
+    from meridian.jobs.verdict_round import run_verdict_round  # noqa: PLC0415
+    from meridian.jobs.watch_round import run_watch_round  # noqa: PLC0415
+
+    checked = run_reliability_round(reliability, now)
+    applied = run_verdict_round(verdicts, now)
+    diagnosed = run_diagnosis_round(diagnosis, now)
+    watched = run_watch_round(watch, now)
+    return None not in (
+        checked.expired,
+        checked.classified,
+        diagnosed,
+        watched,
+    ) and (verdicts is None or applied is not None)
 
 
 def run_jobs(args: argparse.Namespace) -> int:
     """Handle ``meridian jobs run``."""
     # Inside the function: see the module docstring.
-    from meridian.jobs.diagnosis_round import run_diagnosis_round  # noqa: PLC0415
     from meridian.jobs.metrics_listener import start_metrics_listener  # noqa: PLC0415
-    from meridian.jobs.reliability_round import (  # noqa: PLC0415
-        run_reliability_round,
-    )
     from meridian.jobs.rounds import (  # noqa: PLC0415
         RoundPlan,
         run_round,
         run_until_stopped,
     )
-    from meridian.jobs.verdict_round import run_verdict_round  # noqa: PLC0415
     from meridian.reliability.config import ReliabilityConfigError  # noqa: PLC0415
 
     # The jobs process is given the database and the metrics token and nothing
@@ -271,7 +321,7 @@ def run_jobs(args: argparse.Namespace) -> int:
         return _EXIT_FAILED
 
     try:
-        config, scorers, reliability, verdicts, diagnosis = _configured(settings)
+        config, scorers, reliability, verdicts, diagnosis, watch = _configured(settings)
     except (
         ScheduleConfigError,
         LiveScoringError,
@@ -296,17 +346,12 @@ def run_jobs(args: argparse.Namespace) -> int:
         """One whole round; True if every task in it completed."""
         now = datetime.now(UTC)
         outcome = run_round(work, plan, now)
-        checked = run_reliability_round(reliability, now)
-        applied = run_verdict_round(verdicts, now)
-        diagnosed = run_diagnosis_round(diagnosis, now)
-        return None not in (
+        after = _after_scheduling(reliability, verdicts, diagnosis, watch, now)
+        return after and None not in (
             outcome.generated,
             outcome.scheduled,
             outcome.profiled,
-            checked.expired,
-            checked.classified,
-            diagnosed,
-        ) and (verdicts is None or applied is not None)
+        )
 
     if args.once:
         return 0 if round_once() else _EXIT_FAILED

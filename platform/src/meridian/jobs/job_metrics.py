@@ -33,6 +33,7 @@ __all__ = [
     "TASK_DURATION",
     "TASK_FAILURES",
     "VERDICTS",
+    "WATCH",
 ]
 
 PASS_GENERATION = "pass_generation"
@@ -42,6 +43,7 @@ EXPIRY_SWEEP = "expiry_sweep"
 RELIABILITY = "reliability"
 VERDICTS = "verdicts"
 DIAGNOSIS = "diagnosis"
+WATCH = "watch"
 TASKS = (
     PASS_GENERATION,
     SCHEDULE,
@@ -50,12 +52,14 @@ TASKS = (
     RELIABILITY,
     VERDICTS,
     DIAGNOSIS,
+    WATCH,
 )
-"""The seven tasks a round runs, in order, and the only values ``task`` takes.
+"""The eight tasks a round runs, in order, and the only values ``task`` takes.
 The profile build follows scheduling (D-174). Then Stage 20's two: expiring
 work nobody took (D-183), then classifying every pass that has settled
-(D-182). Then Stage 26's verdicts, when a model is configured (D-263). Last,
-Stage 27's diagnosis, which reads both (D-272)."""
+(D-182). Then Stage 26's verdicts, when a model is configured (D-263). Then
+Stage 27's diagnosis, which reads both (D-272). Last, Stage 28's watch, whose
+baselines leave out the losses the diagnosis explained (D-293)."""
 
 TASK_DURATION = Histogram(
     "meridian_job_duration_seconds",

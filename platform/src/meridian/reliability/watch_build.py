@@ -64,8 +64,12 @@ from meridian.store.watch_reads import ChainReception, find_chain_receptions
 
 __all__ = [
     "BaselineRunReport",
+    "Chain",
+    "Places",
     "baseline_sha256",
     "build_baselines",
+    "group_chains",
+    "readings_of",
     "training_interval",
 ]
 
@@ -130,8 +134,8 @@ def training_interval(
 
 
 @dataclass
-class _Places:
-    """What one run has read once: sites and element sets."""
+class Places:
+    """What one run has read once: sites and element sets. The watch shares it."""
 
     sites: dict[str, GroundSite | None] = field(default_factory=dict)
     element_sets: dict[int, ElementSet] = field(default_factory=dict)
@@ -168,8 +172,8 @@ def build_baselines(
         excluded_causes=EXCLUDED_CAUSES,
         station_id=station_id,
     )
-    chains, ambiguous = _group(rows)
-    places = _Places()
+    chains, ambiguous = group_chains(rows)
+    places = Places()
     written = kept = held = simulated = 0
     too_little: list[str] = []
     unreadable: list[str] = []
@@ -220,15 +224,15 @@ def build_baselines(
     )
 
 
-_Chain = tuple[str, int, str]
+Chain = tuple[str, int, str]
 """A station, a capability and a kind of evidence."""
 
 
-def _group(
+def group_chains(
     rows: list[ChainReception],
-) -> tuple[dict[_Chain, list[ChainReception]], int]:
+) -> tuple[dict[Chain, list[ChainReception]], int]:
     """Receptions by chain, and how many belonged to no single chain."""
-    chains: dict[_Chain, list[ChainReception]] = defaultdict(list)
+    chains: dict[Chain, list[ChainReception]] = defaultdict(list)
     ambiguous = 0
     for row in rows:
         evidence = _evidence(row)
@@ -248,14 +252,14 @@ def _votes(  # noqa: PLR0913 — one chain's receptions and what places them
     *,
     evidence: str,
     config: ReliabilityConfig,
-    places: _Places,
+    places: Places,
 ) -> tuple[list[dict[float, tuple[float, int]]], list[str]]:
     """Each reception's bins, and the receptions that could not be placed."""
     votes = []
     failed = []
     for one in receptions:
         try:
-            readings = _readings(conn, orbit, one, evidence, places)
+            readings = readings_of(conn, orbit, one, evidence, places)
         except LookupError as exc:
             failed.append(f"{one.assignment_id}: {exc}")
             continue
@@ -274,7 +278,7 @@ def _evidence(row: ChainReception) -> str | None:
 
 def _decide(
     conn: Connection,
-    chain: _Chain,
+    chain: Chain,
     config: ReliabilityConfig,
     config_sha256: bytes,
     until: datetime,
@@ -299,14 +303,18 @@ def _decide(
     return "train"
 
 
-def _readings(
+def readings_of(
     conn: Connection,
     orbit: OrbitService,
     row: ChainReception,
     evidence: str,
-    places: _Places,
+    places: Places,
 ) -> list[Reading]:
-    """One reception's signal, each reading at its elevation."""
+    """One reception's signal, each reading at its elevation.
+
+    Raises:
+        LookupError: Its station has no site, or its element set is gone.
+    """
     if evidence == "peak":
         peak = row.peak_snr_db
         return [] if peak is None else [Reading(row.max_elevation_deg, peak)]
@@ -322,7 +330,7 @@ def _readings(
     return [Reading(one.elevation_deg, one.snr_db) for one in placed]
 
 
-def _site(conn: Connection, station_id: str, places: _Places) -> GroundSite | None:
+def _site(conn: Connection, station_id: str, places: Places) -> GroundSite | None:
     if station_id not in places.sites:
         found = find_site(conn, station_id)
         places.sites[station_id] = (
@@ -333,7 +341,7 @@ def _site(conn: Connection, station_id: str, places: _Places) -> GroundSite | No
     return places.sites[station_id]
 
 
-def _element_set(conn: Connection, element_set_id: int, places: _Places) -> ElementSet:
+def _element_set(conn: Connection, element_set_id: int, places: Places) -> ElementSet:
     if element_set_id not in places.element_sets:
         stored = find_element_set_by_id(conn, element_set_id)
         if stored is None:

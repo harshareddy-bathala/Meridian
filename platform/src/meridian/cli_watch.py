@@ -1,10 +1,13 @@
 """``meridian watch`` — each receive chain's signal against its own past.
 
 ``baseline`` trains every chain that needs a baseline from its own heard
-receptions over the training interval (D-293), the same work the jobs service
-does each round. A chain with an open warning is not trained again.
+receptions over the training interval (D-293). A chain with an open warning is
+not trained again. ``run`` does that and then judges every chain on its latest
+receptions, raising or clearing its warning (D-294): the same work the jobs
+service does each round. ``warnings`` prints a station's warnings, open and
+cleared.
 
-Reference: docs/DECISIONS.md D-290, D-291, D-293.
+Reference: docs/DECISIONS.md D-290 to D-294.
 """
 
 from __future__ import annotations
@@ -26,10 +29,18 @@ from meridian.reliability.config import (
     load_reliability_config,
 )
 from meridian.reliability.watch_build import BaselineRunReport, build_baselines
+from meridian.reliability.watch_run import WatchRunReport, watch_chains
 from meridian.store.pool import DatabaseUnreachableError, connect_once
+from meridian.store.receive_chain_warnings import StoredWarning, find_warnings
 from meridian.store.stations import Connection
 
-__all__ = ["add_watch_parser", "baseline_lines", "run_watch"]
+__all__ = [
+    "add_watch_parser",
+    "baseline_lines",
+    "run_lines",
+    "run_watch",
+    "warning_lines",
+]
 
 EXIT_FAILED = 1
 
@@ -68,11 +79,21 @@ def add_watch_parser(
     baseline.add_argument(
         "--station", default=None, help="one station's chains (default: every one)"
     )
+    run = actions.add_parser(
+        "run", help="train what is due, judge every chain, raise or clear warnings"
+    )
+    run.add_argument(
+        "--station", default=None, help="one station's chains (default: every one)"
+    )
+    warnings = actions.add_parser(
+        "warnings", help="print a station's receive-chain warnings, open and cleared"
+    )
+    warnings.add_argument("station")
 
 
 def run_watch(args: argparse.Namespace) -> int:
     """Handle every ``meridian watch`` action."""
-    action = {"baseline": _baseline}[args.action]
+    action = {"baseline": _baseline, "run": _run, "warnings": _warnings}[args.action]
     try:
         config = (
             load_reliability_config(args.config)
@@ -120,6 +141,70 @@ def baseline_lines(report: BaselineRunReport) -> list[str]:
         )
     lines.extend(f"  too little history {one}" for one in report.too_little)
     lines.extend(f"  unreadable         {one}" for one in report.unreadable)
+    return lines
+
+
+def _run(
+    conn: Connection, args: argparse.Namespace, config: ReliabilityConfig
+) -> list[str]:
+    report = watch_chains(
+        conn,
+        SkyfieldOrbitService(),
+        config=config,
+        now=datetime.now(UTC),
+        station_id=args.station,
+    )
+    conn.commit()
+    return run_lines(report)
+
+
+def run_lines(report: WatchRunReport) -> list[str]:
+    """One run's outcome, as printed: the baselines, then the judgements."""
+    lines = baseline_lines(report.baselines)
+    lines.extend(
+        [
+            f"watch by {report.method}, settings {report.config_sha256.hex()[:12]}",
+            f"  judged             {report.judged}",
+            f"  no baseline yet    {report.no_baseline}",
+            f"  too few receptions {report.too_few}",
+            f"  open after the run {report.open}",
+        ]
+    )
+    lines.extend(f"  raised             {one}" for one in report.raised)
+    lines.extend(f"  cleared            {one}" for one in report.cleared)
+    lines.extend(f"  unreadable         {one}" for one in report.unreadable)
+    return lines
+
+
+def _warnings(
+    conn: Connection, args: argparse.Namespace, _config: ReliabilityConfig
+) -> list[str]:
+    return warning_lines(args.station, find_warnings(conn, args.station))
+
+
+def warning_lines(station_id: str, rows: list[StoredWarning]) -> list[str]:
+    """Every warning a station has had, each with what it was judged against."""
+    if not rows:
+        return [f"{station_id}: no receive-chain warning"]
+    lines = []
+    for row in rows:
+        label = " (simulated)" if row.simulated else ""
+        state = (
+            "open"
+            if row.cleared_at is None
+            else f"cleared {row.cleared_at:%Y-%m-%d %H:%M} UTC at"
+            f" {row.cleared_shortfall_db} dB"
+        )
+        lines.append(
+            f"capability {row.capability_id}{label}: raised"
+            f" {row.raised_at:%Y-%m-%d %H:%M} UTC, {row.shortfall_db} dB short,"
+            f" {state}  [{row.method}, baseline {row.baseline_id}]"
+        )
+        lines.extend(
+            f"    {one.get('elevation_deg')!s:>5}°  {one.get('shortfall_db')} dB short"
+            f" over {one.get('receptions')} receptions"
+            for one in row.affected_bins_json
+        )
     return lines
 
 

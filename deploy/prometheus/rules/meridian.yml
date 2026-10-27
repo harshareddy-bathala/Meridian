@@ -148,18 +148,19 @@ groups:
       - alert: ScheduledTaskStalled
         # 900 s is three rounds at the default SCHEDULE_INTERVAL_S=300: one
         # failed round is logged and retried, three in a row is a problem.
-        expr: time() - meridian_job_last_success_timestamp_seconds{task!~"profiles|diagnosis"} > 900
+        expr: time() - meridian_job_last_success_timestamp_seconds{task!~"profiles|diagnosis|watch"} > 900
         labels:
           severity: critical
         annotations:
           summary: "The {{ $labels.task }} task has not completed in over 15 minutes."
           runbook: docs/OPERATIONS.md#scheduledtaskstalled
 
-      # The profiles and diagnosis tasks at warning: one builds what is shown and
-      # cited, the other explains losses afterwards, and a round that cannot do
-      # either still receives and schedules (D-174, D-272).
+      # The profiles, diagnosis and watch tasks at warning: one builds what is
+      # shown and cited, one explains losses afterwards, one warns of a chain's
+      # trend over days, and a round that cannot do any of them still receives
+      # and schedules (D-174, D-272, D-294).
       - alert: ScheduledTaskStalled
-        expr: time() - meridian_job_last_success_timestamp_seconds{task=~"profiles|diagnosis"} > 900
+        expr: time() - meridian_job_last_success_timestamp_seconds{task=~"profiles|diagnosis|watch"} > 900
         labels:
           severity: warning
         annotations:
@@ -230,6 +231,20 @@ groups:
           task: diagnosis
         annotations:
           summary: The diagnosis task has not completed once since the jobs process started.
+          runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+      # Warning, not critical: the watch judges a trend over days, and a round
+      # that cannot watch still receives and schedules (D-294).
+      - alert: ScheduledTaskNeverSucceeded
+        expr: >-
+          time() - process_start_time_seconds{job="meridian-jobs"} > 900
+          unless on(job, instance)
+          meridian_job_last_success_timestamp_seconds{task="watch"}
+        labels:
+          severity: warning
+          task: watch
+        annotations:
+          summary: The watch task has not completed once since the jobs process started.
           runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
 
       # Warning, not critical: profiles are for showing and for diagnosis, and a

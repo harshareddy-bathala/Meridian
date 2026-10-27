@@ -6172,7 +6172,7 @@ SC-9's detection delay and false-alarm rate are computed from `receive_chain_war
 
 A warning open on a chain stops it being trained again, so a shortfall the watch has seen is never learned as the chain's normal signal.
 
-**What it cannot catch, stated.** A chain that degrades before its first baseline, or slowly enough that thirty days of loss pass unwarned, has the loss trained into its next baseline. SC-9's simulated runs train on a clean stretch first, which is the case they test (D-294). A real chain's first baseline is only as good as the weeks it was trained on.
+**What it cannot catch, stated.** A chain that degrades before its first baseline, or slowly enough that thirty days of loss pass unwarned, has the loss trained into its next baseline. SC-9's simulated runs train on a clean stretch first, which is the case they test (D-295). A real chain's first baseline is only as good as the weeks it was trained on.
 
 **The hash names the diagnosis it read.** A baseline leaves out the receptions Stage 27 put down to an obstruction, interference or a silent satellite. So `config_sha256` hashes the `[baseline]` table together with the diagnosis method and the `[diagnosis]` table's hash. Changing either trains every chain again, beside the old baselines.
 
@@ -6181,6 +6181,37 @@ A warning open on a chain stops it being trained again, so a shortfall the watch
 *Rejected: retraining every day on a rolling window.* It is simpler, and a gradual degradation would then move the baseline with it. A slow loss would never show as a shortfall, which is the one thing the watch exists to show.
 
 *Rejected: every sample as a vote.* As above: it lets long passes dominate.
+
+---
+
+## D-294 — A warning is the median shortfall of a chain's last three receptions, across at least two elevations
+
+**2026-10-27 · accepted, thresholds proposed** · *`meridian/reliability/{watch_detect,watch_run}.py`; `meridian/jobs/watch_round.py`; `meridian watch run`; `[watch]` in `deploy/reliability.toml.example`; the `watch` task's rules in `deploy/prometheus/rules/meridian.yml`; Stage 28. Applies D-110, D-292 and D-293.*
+
+The roadmap asks for "a persistent shortfall against the baseline across elevation bins, not a single bad pass". Each half of that sentence is one rule here.
+
+**A reception's shortfall** is the baseline's median less the reception's own median, in each bin it crossed, reduced to the median across those bins. A reception that crossed fewer than two of the baseline's bins is not judged. A low pass seen at one elevation says too little about a chain.
+
+**Persistent: the median of the latest three.** A chain's shortfall is the median of its last three judged receptions within the past seven days.
+- One bad pass cannot move a median of three, which is the roadmap's first test.
+- Two can, so a step loss warns on its second reception after the step, which is its second test.
+- A gradual loss warns once two of the last three are 3 dB short.
+
+**Across elevations: two bins at once.** Each bin's shortfall is the median over the recent receptions that crossed it. A warning needs the chain's shortfall at or past 3 dB, **and** at least two bins there. A loss confined to one elevation in one sector of sky is an obstruction's shape, which Stage 27 names. A chain's loss lowers every elevation.
+
+**Cleared at 1.5 dB, below the 3 dB that raised it.** A chain hovering at the threshold would otherwise raise and clear by turns, and each raise would count as a new warning in SC-9's false-alarm rate. That is alert fatigue the roadmap asks this stage to learn about.
+
+**What writes a row.** A run raises a warning only for a chain with none open, and clears only an open one. A judgement that changes nothing writes nothing. So the table's rows are exactly the warnings, which SC-9 counts (D-292).
+
+**It runs in the jobs service, last in every round**, after the diagnosis whose causes a baseline leaves out. It is the eighth `task`, `watch`. Its stall and never-succeeded alerts are warnings, not critical, beside the diagnosis's: the watch judges a trend over days, and a round that cannot watch still receives and schedules. `raised_at` is the round's instant, when the warning could first be seen (D-292).
+
+**The hash** stored with every warning covers `[watch]` together with the baseline's hash, so a warning names everything it was judged under.
+
+**The thresholds are proposed.** The 3 dB, the 1.5 dB, three receptions and two bins are what the roadmap's two tests need and nothing more. SC-9's simulated runs measure what they cost in delay and false alarms (D-295). If those runs move any of them, the change is recorded where it is made, with the runs that moved it, as D-270 asked of Stage 27's thresholds.
+
+*Rejected: CUSUM on each reception's shortfall.* It is the textbook detector for a slow drift, and it trades delay against false alarms through one parameter. It is also harder to explain to an owner reading a warning: "the last three passes were 4 dB weaker than this antenna usually hears at those elevations" can be checked by hand from the rows; a cumulative sum's crossing cannot. If SC-9's runs show the median of three is too slow on the slowest degradations, CUSUM is the next thing to try.
+
+*Rejected: counting a pass that heard nothing as a total shortfall.* A chain that has degraded far enough hears nothing, and that would be strong evidence. But most passes that hear nothing are low ones in the outcome model, and in the world. The watch would then warn on geometry, and the warning has to come before reception fails anyway.
 
 ---
 

@@ -24,6 +24,9 @@ PLATFORM = Path(__file__).resolve().parents[2] / "platform" / "src" / "meridian"
 WATCH_PATH = (
     "reliability/watch_baseline.py",
     "reliability/watch_build.py",
+    "reliability/watch_detect.py",
+    "reliability/watch_run.py",
+    "jobs/watch_round.py",
     "store/watch_reads.py",
     "store/signal_baselines.py",
     "store/receive_chain_warnings.py",

@@ -13,6 +13,8 @@ Three tables, read from ``deploy/reliability.toml`` or taken as defaults:
   stored diagnosis records the sha256 of these, as a classification does.
 * ``[baseline]`` — how a receive chain's baseline is trained (D-293). Every
   stored baseline records the sha256 of these, with the diagnosis it read.
+* ``[watch]`` — when a chain's shortfall raises a warning and when it clears
+  (D-294). Every warning records the sha256 of these, with the baseline's.
 
 **Strict**, as the labelling configuration is: an unknown key, a wrong type or
 a value out of range is refused by name, because a misspelled target that
@@ -21,7 +23,7 @@ silently kept its default is a target somebody believes they set.
 Standard library only: the snapshot command reads it beside the labeller.
 
 Reference: docs/DECISIONS.md D-146, D-147, D-182, D-184, D-273 to D-277,
-D-293.
+D-293, D-294.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ __all__ = [
     "ReliabilityConfig",
     "ReliabilityConfigError",
     "SloConfig",
+    "WatchConfig",
     "load_deployed_reliability_config",
     "load_reliability_config",
     "parse_reliability_config",
@@ -321,6 +324,52 @@ class BaselineConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class WatchConfig:
+    """When a chain's shortfall raises a warning, and when it clears (D-294).
+
+    Changing one starts every chain's warnings afresh, beside the old rows.
+    """
+
+    recent_receptions: int = 3
+    """How many of the chain's latest receptions a shortfall is judged over.
+    The median of three is unmoved by one bad pass, and moved by two."""
+
+    lookback_s: int = 7 * _DAY_S
+    """How far back those receptions may lie: older signal is not recent."""
+
+    min_bins: int = 2
+    """Baseline bins a reception must cross to be judged, and bins that must
+    fall short together to raise a warning."""
+
+    raise_db: float = 3.0
+    """The median shortfall, in decibels, that raises a warning."""
+
+    clear_db: float = 1.5
+    """The median shortfall at or below which an open warning clears. Below
+    ``raise_db``, so a chain at the threshold does not raise and clear by turns."""
+
+    def __post_init__(self) -> None:
+        """Refuse a value outside the range the tests were written for."""
+        _whole("recent_receptions", self.recent_receptions, 1, 50)
+        _whole("lookback_s", self.lookback_s, 3_600, 90 * _DAY_S)
+        _whole("min_bins", self.min_bins, 1, 18)
+        _number("raise_db", self.raise_db, 0.1, 40.0)
+        _number("clear_db", self.clear_db, 0.0, 40.0)
+        if self.clear_db >= self.raise_db:
+            raise ReliabilityConfigError(
+                f"clear_db ({self.clear_db}) must be below raise_db ({self.raise_db})"
+            )
+
+    def parameters(self) -> dict[str, float]:
+        """The settings as recorded with every warning, reals as reals."""
+        held = asdict(self)
+        return {
+            one.name: float(held[one.name]) if one.type == "float" else held[one.name]
+            for one in fields(self)
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ReliabilityConfig:
     """Every table, resolved."""
 
@@ -328,11 +377,19 @@ class ReliabilityConfig:
     slo: SloConfig = field(default_factory=SloConfig)
     diagnosis: DiagnosisConfig = field(default_factory=DiagnosisConfig)
     baseline: BaselineConfig = field(default_factory=BaselineConfig)
+    watch: WatchConfig = field(default_factory=WatchConfig)
 
 
-_TABLES = ("classification", "slo", "diagnosis", "baseline")
+_TABLES = ("classification", "slo", "diagnosis", "baseline", "watch")
 
-_T = TypeVar("_T", ClassificationConfig, SloConfig, DiagnosisConfig, BaselineConfig)
+_T = TypeVar(
+    "_T",
+    ClassificationConfig,
+    SloConfig,
+    DiagnosisConfig,
+    BaselineConfig,
+    WatchConfig,
+)
 
 
 def parse_reliability_config(text: str) -> ReliabilityConfig:
@@ -362,6 +419,7 @@ def parse_reliability_config(text: str) -> ReliabilityConfig:
         slo=_table(stored, "slo", SloConfig),
         diagnosis=_table(stored, "diagnosis", DiagnosisConfig),
         baseline=_table(stored, "baseline", BaselineConfig),
+        watch=_table(stored, "watch", WatchConfig),
     )
 
 

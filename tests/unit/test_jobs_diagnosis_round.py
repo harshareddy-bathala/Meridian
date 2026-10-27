@@ -59,8 +59,8 @@ def test_a_failure_is_counted_and_survived() -> None:
     assert sample("meridian_job_failures_total") == before + 1
 
 
-def test_the_diagnosis_runs_last_after_the_verdicts_it_reads() -> None:
-    assert TASKS[-2:] == (VERDICTS, DIAGNOSIS)
+def test_the_diagnosis_runs_after_the_verdicts_it_reads() -> None:
+    assert TASKS.index(DIAGNOSIS) == TASKS.index(VERDICTS) + 1
 
 
 def test_a_run_says_what_it_did_and_that_no_decode_was_partial() -> None:

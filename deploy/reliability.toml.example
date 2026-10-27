@@ -152,3 +152,27 @@ min_receptions = 5
 
 # Bins a baseline needs: a shortfall is judged across elevations. 1 .. 18.
 min_bins = 2
+
+[watch]
+
+# When a receive chain's shortfall against its baseline raises a warning, and
+# when an open one clears (D-294). Every warning records the sha256 of these
+# together with its baseline's, so changing one starts every chain afresh.
+
+# How many of the chain's latest heard receptions a shortfall is judged over;
+# their median is unmoved by one bad pass. 1 .. 50.
+recent_receptions = 3
+
+# How far back those receptions may lie, in seconds. 3600 .. 90 days.
+lookback_s = 604800
+
+# Baseline bins a reception must cross to be judged, and bins that must fall
+# short together to raise a warning. 1 .. 18.
+min_bins = 2
+
+# The median shortfall that raises a warning, in decibels. 0.1 .. 40.
+raise_db = 3.0
+
+# The median shortfall at or below which an open warning clears, in decibels;
+# below raise_db, so a chain at the threshold does not flap. 0 .. 40.
+clear_db = 1.5

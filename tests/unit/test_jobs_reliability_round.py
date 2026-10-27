@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 from prometheus_client import REGISTRY
 
-from meridian.jobs.job_metrics import EXPIRY_SWEEP, RELIABILITY, TASKS
+from meridian.jobs.job_metrics import EXPIRY_SWEEP, RELIABILITY, TASKS, VERDICTS
 from meridian.jobs.reliability_round import run_reliability_round
 from meridian.reliability.accounting import AccountingReport
 
@@ -70,4 +70,5 @@ def test_each_success_is_recorded_under_its_own_task() -> None:
         assert REGISTRY.get_sample_value(
             "meridian_job_last_success_timestamp_seconds", {"task": task}
         )
-    assert TASKS[-4:-2] == (EXPIRY_SWEEP, RELIABILITY)
+    assert TASKS[TASKS.index(EXPIRY_SWEEP) + 1] == RELIABILITY
+    assert TASKS.index(RELIABILITY) < TASKS.index(VERDICTS)
