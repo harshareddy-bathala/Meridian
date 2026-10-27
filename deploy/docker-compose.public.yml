@@ -21,7 +21,7 @@ x-logging: &logging
 
 services:
   api:
-    # Reachable inside the compose network only: from the tunnel, the
+    # Reachable inside the compose network only: from the front, the
     # healthcheck, Prometheus and the simulator. An operator on the host uses
     # `compose exec api …`.
     ports: !reset []
@@ -31,6 +31,12 @@ services:
       # the caller sent, and with no port published nothing else can reach the
       # API to send one.
       CLIENT_ADDRESS_HEADER: CF-Connecting-IP
+
+  front:
+    # The tunnel's origin (D-282). No port on the host, for the api's reason:
+    # the front forwards CF-Connecting-IP as it receives it, so a request that
+    # reached it without crossing Cloudflare could name any address.
+    ports: !reset []
 
   jobs:
     environment:
@@ -46,7 +52,7 @@ services:
     # exception to request from college IT — which is the actual constraint SC-6
     # runs into. TLS terminates at the edge, so the origin stays plain HTTP
     # inside this network, which MSP §3 already anticipates.
-    image: cloudflare/cloudflared:2026.7.3@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf
+    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
     restart: unless-stopped
     logging: *logging
     cap_drop: [ALL]
@@ -54,8 +60,11 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # Its origin, set in Cloudflare with the token, is http://front:8080, so a
+    # visitor reaches the last good copy when the api is down (OPERATIONS.md
+    # § The front). Healthy here means nginx serving, not the api answering.
     depends_on:
-      api:
+      front:
         condition: service_healthy
     environment:
       # From a file, not the environment, where `docker inspect` shows it, and

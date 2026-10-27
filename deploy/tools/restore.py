@@ -41,12 +41,15 @@ from pathlib import Path
 
 from compose_db import (
     AVAILABLE_TIMESCALEDB_SQL,
+    COUNTS_SQL,
     Compose,
     Manifest,
     ToolError,
     add_compose_arguments,
     compose_from,
+    judge_counts,
     manifest_path,
+    parse_counts,
     read_manifest,
     run_sql,
     sha256_of,
@@ -156,6 +159,33 @@ def confirm(dump: Path, manifest: Manifest, *, assume_yes: bool) -> None:
         raise ToolError("not confirmed; nothing was changed")
 
 
+def check_rows(compose: Compose, manifest: Manifest) -> None:
+    """Compare every table's rows with the manifest's, before anything writes.
+
+    Run straight after `pg_restore`, with `api` and `jobs` stopped and `migrate`
+    not yet run, so what is counted is what the dump held (D-286).
+
+    Raises:
+        ToolError: A table holds other rows than were backed up. `api` and
+            `jobs` stay stopped, as after any failed step.
+    """
+    if manifest.row_counts is None:
+        print(
+            "-> rows not checked: this manifest predates row counts (D-286)",
+            flush=True,
+        )
+        return
+    print("-> check every table's rows against the manifest", flush=True)
+    restored = parse_counts(run_sql(compose, COUNTS_SQL))
+    mismatch = judge_counts(manifest, restored)
+    if mismatch is not None:
+        raise ToolError(mismatch)
+    print(
+        f"   {sum(restored.values())} rows in {len(restored)} tables, as backed up",
+        flush=True,
+    )
+
+
 def restore(compose: Compose, dump: Path, *, assume_yes: bool, base_url: str) -> None:
     """Check `dump`, then replace the deployment's database with it."""
     manifest = read_manifest(manifest_path(dump))
@@ -172,6 +202,7 @@ def restore(compose: Compose, dump: Path, *, assume_yes: bool, base_url: str) ->
     run_sql(compose, PRE_RESTORE_SQL)
     run_step("pg_restore", restore_command(compose), stdin=dump)
     run_sql(compose, POST_RESTORE_SQL)
+    check_rows(compose, manifest)
     run_step("migrate to this code's head", compose.command("run", "--rm", "migrate"))
     if restart:
         run_step(

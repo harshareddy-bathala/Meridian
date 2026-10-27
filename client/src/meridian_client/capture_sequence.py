@@ -52,9 +52,9 @@ class CaptureSequence:
         """The executor's account of itself, for this tick's heartbeat."""
         return self._executor.status(self._executing)
 
-    def next_edge(self, now: datetime) -> datetime | None:
+    def next_edge(self, now: datetime, *, inclusive: bool = False) -> datetime | None:
         """The next instant a capture opens or closes, for the loop to wake at."""
-        return next_edge(self._windows(), now)
+        return next_edge(self._windows(), now, inclusive=inclusive)
 
     def stop_finished(self, now: datetime) -> tuple[str | None, tuple[str, ...]]:
         """End the capture whose window closed, and any held work never begun.

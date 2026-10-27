@@ -14,6 +14,8 @@ D-069, D-073, D-121.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -35,6 +37,7 @@ from meridian_client.held_assignments import AssignmentRecord
 from meridian_client.observation_message import ObservationResult, Signal
 from meridian_client.observation_queue import ObservationQueue
 from meridian_client.station_loop import (
+    EDGE_MARGIN_S,
     StationLoop,
     retry_policy_attempts_for,
 )
@@ -85,6 +88,13 @@ class ScriptedTransport:
         self.sent: list[dict[str, Any]] = []
         self.submitted: list[dict[str, Any]] = []
         self.observation_answers: dict[str, Any] = {}
+        self.time_limits: list[float | None] = []
+
+    @contextmanager
+    def time_limit(self, seconds: float | None) -> Iterator[None]:
+        """Record the bound a tick put on its requests (D-285)."""
+        self.time_limits.append(seconds)
+        yield
 
     def heartbeat(self, body: dict[str, Any]) -> dict[str, Any]:
         """Record the body, then return or raise whatever was queued next."""
@@ -957,3 +967,51 @@ def test_a_station_with_no_radio_submits_nothing(tmp_path: Path) -> None:
 
     assert outcome.submitted == ()
     assert transport.submitted == []
+
+
+# --- the network is done by the next edge (D-285) -------------------------------
+
+
+def test_a_ticks_requests_are_bounded_by_the_next_capture_edge(tmp_path: Path) -> None:
+    """A heartbeat waiting out a dead route must not hold a capture off its edge.
+
+    Bounded until just past the edge, where the loop aims its own wake, so the
+    tick that follows lands on the far side and acts on it. With nothing held
+    there is no edge, and the retry budget's fit inside the interval is bound
+    enough.
+    """
+    loop, transport, _ = build_loop(
+        tmp_path,
+        [
+            {"assignments": [assignment_message("as_a", starts_in_minutes=20)]},
+            {"assignments": []},
+        ],
+    )
+
+    loop.tick(NOW)
+    loop.tick(NOW + timedelta(seconds=30))
+
+    assert transport.time_limits[0] is None
+    assert transport.time_limits[1] == pytest.approx(20 * 60 - 30 + EDGE_MARGIN_S)
+
+
+def test_an_edge_at_the_ticks_own_instant_still_bounds_it(tmp_path: Path) -> None:
+    """A tick stamped on a closing edge does not end the capture: it must be free
+    half a second later, when the tick that does is due."""
+    loop, transport, executor = build_loop(
+        tmp_path,
+        [
+            {"assignments": [assignment_message("as_a", starts_in_minutes=1)]},
+            {"assignments": []},
+            {"assignments": []},
+        ],
+    )
+    loop.tick(NOW)
+    loop.tick(NOW + timedelta(minutes=2))
+    (held,) = loop._record.held()
+    closes_at = executor.capture_window(held).closes_at
+
+    loop.tick(closes_at)
+
+    assert executor.ended == []
+    assert transport.time_limits[-1] == pytest.approx(EDGE_MARGIN_S)

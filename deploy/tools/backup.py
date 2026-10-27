@@ -8,6 +8,13 @@ restore.py checks the first two before it touches anything (D-115).
 The API keeps running. `pg_dump` reads one consistent snapshot, so a heartbeat
 arriving mid-dump is simply in the next backup.
 
+**The manifest also says how many rows every table held, in that same snapshot**
+(D-286). A session is opened first, in a transaction that exports its snapshot
+and counts every table; `pg_dump --snapshot` then dumps exactly what was
+counted, however much is written meanwhile. restore.py compares what it restored
+with those counts, so a restore can be checked on a machine that has never seen
+the database the dump came from.
+
 **It does not take the ingest raw store**, and it says so on every run. That tree
 holds external artefacts exactly as they were retrieved, it is not in Postgres,
 and it is the one thing here that cannot be recreated without going back to a
@@ -31,13 +38,17 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
 from compose_db import (
     CHUNK_BYTES,
+    COUNTS_SQL,
     FACTS_SQL,
     Compose,
     Manifest,
@@ -45,12 +56,26 @@ from compose_db import (
     add_compose_arguments,
     compose_from,
     manifest_path,
+    parse_counts,
     parse_facts,
     run_sql,
     write_manifest,
 )
 
 DUMP_SCRIPT = 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom'
+
+COUNTED = "counted"
+SNAPSHOT_SQL = (
+    "begin isolation level repeatable read;\n"
+    "select pg_export_snapshot();\n" + COUNTS_SQL + f"select '{COUNTED}';\n"
+)
+"""Open a transaction, name its snapshot, count every table in it, and say when
+that is done. The session is then left open: the snapshot lives only as long as
+the transaction that exported it."""
+
+SNAPSHOT_ID = re.compile(r"[0-9A-Fa-f]+-[0-9A-Fa-f]+-[0-9]+")
+"""What `pg_export_snapshot()` returns. Checked before it is put into a shell
+command: it comes from the database, and is about to become part of a script."""
 
 RAW_STORE = Path("data/ingest/raw")
 """The ingest raw store's default root, which this tool never touches.
@@ -96,9 +121,63 @@ def datasets_note(root: Path = DATASETS_ROOT) -> str:
     return f"not in this dump   {root}{state} — dataset snapshots (D-144)"
 
 
-def dump_command(compose: Compose) -> list[str]:
-    """The command whose stdout is the custom-format dump."""
-    return compose.in_db(DUMP_SCRIPT)
+def dump_command(compose: Compose, snapshot: str = "") -> list[str]:
+    """The command whose stdout is the custom-format dump.
+
+    Args:
+        compose: The deployment.
+        snapshot: An exported snapshot to dump from, so the dump holds exactly
+            the rows counted in it. Empty for `pg_dump`'s own.
+    """
+    if not snapshot:
+        return compose.in_db(DUMP_SCRIPT)
+    if not SNAPSHOT_ID.fullmatch(snapshot):
+        raise ToolError(f"the database named its snapshot {snapshot!r}")
+    return compose.in_db(f"{DUMP_SCRIPT} --snapshot={snapshot}")
+
+
+def read_snapshot(lines: list[str]) -> tuple[str, dict[str, int]]:
+    """`SNAPSHOT_SQL`'s output, up to its last line: the id, then the counts.
+
+    Raises:
+        ToolError: Nothing came back, or no table was counted.
+    """
+    answered = [line.strip() for line in lines if line.strip()]
+    if not answered:
+        raise ToolError("the database exported no snapshot")
+    snapshot, *counted = answered
+    row_counts = parse_counts("\n".join(counted))
+    if not row_counts:
+        raise ToolError("the database counted no table; there is nothing to back up")
+    return snapshot, row_counts
+
+
+@contextmanager
+def held_snapshot(compose: Compose) -> Iterator[tuple[str, dict[str, int]]]:
+    """A snapshot held open on the database, and every table's rows in it.
+
+    Raises:
+        ToolError: The session ended before it had counted. psql's own message
+            has already gone to stderr.
+    """
+    with subprocess.Popen(
+        compose.psql(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+    ) as session:
+        assert session.stdin is not None and session.stdout is not None
+        session.stdin.write(SNAPSHOT_SQL)
+        session.stdin.flush()
+        lines = []
+        for line in session.stdout:
+            if line.strip() == COUNTED:
+                break
+            lines.append(line)
+        else:
+            raise ToolError("the database closed the session before counting its rows")
+        try:
+            yield read_snapshot(lines)
+        finally:
+            # End of input ends psql, and with it the transaction and snapshot.
+            session.stdin.close()
 
 
 def refuse_overwrite(out: Path) -> None:
@@ -114,7 +193,7 @@ def refuse_overwrite(out: Path) -> None:
             raise ToolError(f"{path} already exists; choose another --out")
 
 
-def stream_dump(compose: Compose, out: Path) -> tuple[str, int]:
+def stream_dump(compose: Compose, out: Path, snapshot: str = "") -> tuple[str, int]:
     """Write the dump to `out`, returning its sha256 and size.
 
     Raises:
@@ -126,7 +205,9 @@ def stream_dump(compose: Compose, out: Path) -> tuple[str, int]:
     size = 0
     with (
         partial.open("wb") as handle,
-        subprocess.Popen(dump_command(compose), stdout=subprocess.PIPE) as dump,
+        subprocess.Popen(
+            dump_command(compose, snapshot), stdout=subprocess.PIPE
+        ) as dump,
     ):
         assert dump.stdout is not None
         while chunk := dump.stdout.read(CHUNK_BYTES):
@@ -145,7 +226,8 @@ def backup(compose: Compose, out: Path) -> Manifest:
     timescaledb, revision, server = parse_facts(run_sql(compose, FACTS_SQL))
     out.parent.mkdir(parents=True, exist_ok=True)
     created_at = datetime.now(UTC).isoformat(timespec="seconds")
-    sha256, size = stream_dump(compose, out)
+    with held_snapshot(compose) as (snapshot, row_counts):
+        sha256, size = stream_dump(compose, out, snapshot)
     manifest = Manifest(
         sha256=sha256,
         size_bytes=size,
@@ -153,6 +235,7 @@ def backup(compose: Compose, out: Path) -> Manifest:
         alembic_revision=revision,
         postgres_version=server,
         created_at=created_at,
+        row_counts=row_counts,
     )
     write_manifest(manifest, manifest_path(out))
     return manifest
@@ -174,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  sha256               {manifest.sha256}")
     print(f"  alembic revision     {manifest.alembic_revision}")
     print(f"  timescaledb version  {manifest.timescaledb_version}")
+    counts = manifest.row_counts or {}
+    print(f"  rows counted         {sum(counts.values())} in {len(counts)} tables")
     print(f"  manifest             {manifest_path(args.out)}")
     print(f"  {raw_store_note()}")
     print("  copy that tree yourself — docs/OPERATIONS.md § External archive ingest")

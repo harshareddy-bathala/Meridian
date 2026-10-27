@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { type Snapshot, watchSnapshots } from "./snapshot";
 import { fetchAllStations, type Station } from "./stations";
 
 /**
@@ -11,8 +12,13 @@ export const REFRESH_MS = 30_000;
 export interface StationsState {
   /** The last directory that loaded, kept on screen through a failed refresh. */
   stations: Station[] | null;
-  /** When `stations` was fetched: liveness was derived at about this instant. */
+  /**
+   * When `stations` was made: liveness was derived at about this instant. For
+   * a snapshot, the instant the platform made it, not the instant it arrived.
+   */
   fetchedAt: Date | null;
+  /** Set when the list is the front's kept copy rather than the platform's answer. */
+  snapshot: Snapshot | null;
   /** Why the most recent refresh failed, or null if it succeeded. */
   error: string | null;
 }
@@ -21,15 +27,19 @@ export function useStations(): StationsState {
   const [state, setState] = useState<StationsState>({
     stations: null,
     fetchedAt: null,
+    snapshot: null,
     error: null,
   });
 
   useEffect(() => {
     const controller = new AbortController();
     const refresh = () => {
-      fetchAllStations((url, init) => fetch(url, init), controller.signal)
+      const watch = watchSnapshots();
+      fetchAllStations(watch.fetcher, controller.signal)
         .then((stations) => {
-          setState({ stations, fetchedAt: new Date(), error: null });
+          const snapshot = watch.snapshot();
+          const fetchedAt = snapshot?.takenAt ?? new Date();
+          setState({ stations, fetchedAt, snapshot, error: null });
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted) {

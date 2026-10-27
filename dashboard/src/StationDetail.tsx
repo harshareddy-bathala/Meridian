@@ -6,6 +6,8 @@ import { describeCapture, type StationCapture } from "./reliability";
 import type { StationUptime } from "./uptime";
 import { UptimeStrip } from "./UptimeStrip";
 import { describeValue, type Assignment, type LatestHeartbeat } from "./schedule";
+import { SnapshotNote } from "./SnapshotNote";
+import { oldest, snapshotClass } from "./snapshot";
 import type { Station } from "./stations";
 import { useStationCapture } from "./useStationCapture";
 import { useStationDetail } from "./useStationDetail";
@@ -206,10 +208,13 @@ interface DetailProps {
 
 export function StationDetail({ station, onClear }: DetailProps) {
   const stationId = station?.stationId ?? null;
-  const { heartbeat, assignments, profiles, uptime, receptions, error } = useStationDetail(stationId);
-  const capture = useStationCapture(stationId);
+  const detail = useStationDetail(stationId);
+  const { heartbeat, assignments, profiles, uptime, receptions, error } = detail;
+  const { capture, snapshot: captureSnapshot } = useStationCapture(stationId);
+  // The panel is as old as the oldest thing on it.
+  const snapshot = oldest(detail.snapshot, captureSnapshot);
   return (
-    <section aria-labelledby="detail-heading" className="station-detail">
+    <section aria-labelledby="detail-heading" className={snapshotClass("station-detail", snapshot)}>
       <h2 id="detail-heading">
         {station === null ? "Upcoming assignments, whole network" : station.name}
       </h2>
@@ -221,6 +226,7 @@ export function StationDetail({ station, onClear }: DetailProps) {
           <ListeningState heartbeat={heartbeat} />
         </>
       )}
+      <SnapshotNote snapshot={snapshot} what="This panel shows" />
       {error !== null && <p role="alert">Could not refresh: {error}</p>}
       <UpcomingAssignments assignments={assignments} error={error} showStation={station === null} />
       {station !== null && <Results receptions={receptions} capture={capture} />}

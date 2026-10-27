@@ -13,6 +13,9 @@
   --stale: #8a5a00;
   --offline: #6b6f76;
   --simulated: #5b3fa0;
+  /* A view showing the front's kept copy, not the platform's answer (D-284).
+     Its own token: "stale" already means a station's liveness. */
+  --snapshot: #9a3412;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -26,6 +29,7 @@
     --stale: #d9a441;
     --offline: #9aa0a8;
     --simulated: #b9a3ec;
+    --snapshot: #f0915c;
   }
 }
 
@@ -258,4 +262,15 @@ tr.selected {
 
 .uptime-bar {
   fill: var(--online);
+}
+
+/* A view drawn from the front's kept copy (D-284): a ruled margin beside it,
+   and the note above it says so in words. */
+.snapshot {
+  border-inline-start: 0.25rem solid var(--snapshot);
+  padding-inline-start: 0.75rem;
+}
+
+.snapshot-note {
+  color: var(--snapshot);
 }

@@ -16,8 +16,16 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from meridian_client import time_limit as time_limit_module
 from meridian_client import transport as transport_module
-from meridian_client.transport import MspTransport, ProtocolError, RetryPolicy
+from meridian_client.transport import (
+    CONNECT_TIMEOUT_S,
+    READ_TIMEOUT_S,
+    DeadlineReached,
+    MspTransport,
+    ProtocolError,
+    RetryPolicy,
+)
 
 
 class _ScriptedClient:
@@ -27,9 +35,15 @@ class _ScriptedClient:
         self._responses = list(responses)
         self.calls = 0
         self.methods: list[str] = []
+        self.timeouts: list[httpx.Timeout | None] = []
 
     def request(
-        self, method: str, _path: str, *, json: object = None
+        self,
+        method: str,
+        _path: str,
+        *,
+        json: object = None,
+        timeout: httpx.Timeout | None = None,
     ) -> httpx.Response:
         """Return the next scripted response, whatever was asked for.
 
@@ -40,6 +54,7 @@ class _ScriptedClient:
         self.calls += 1
         self.methods.append(method)
         self.sent = json
+        self.timeouts.append(timeout)
         return self._responses.pop(0)
 
 
@@ -149,3 +164,105 @@ def test_a_revoked_token_is_not_retried(no_waiting: list[float]) -> None:
     assert excinfo.value.code == "unauthorized"
     assert client.calls == 1
     assert no_waiting == []
+
+
+# --- a time limit on everything inside a block (D-285) ---------------------------
+
+
+class _Clock:
+    """The transport's monotonic clock, moved by hand and by its own sleeps."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    fake = _Clock()
+    monkeypatch.setattr(time_limit_module, "_monotonic", lambda: fake.now)
+    monkeypatch.setattr(transport_module, "_sleep", fake.sleep)
+    return fake
+
+
+class _TimingClient(_ScriptedClient):
+    """Fails every request, and spends the timeout it was given doing it."""
+
+    def __init__(self, clock: _Clock) -> None:
+        super().__init__([])
+        self.clock = clock
+
+    def request(
+        self,
+        _method: str,
+        _path: str,
+        *,
+        timeout: httpx.Timeout | None = None,
+        **_body: object,
+    ) -> httpx.Response:
+        self.calls += 1
+        self.timeouts.append(timeout)
+        assert timeout is not None and timeout.connect is not None
+        self.clock.now += timeout.connect
+        raise httpx.ConnectTimeout("blackholed")
+
+
+def _timing(clock: _Clock) -> tuple[MspTransport, _TimingClient]:
+    client = _TimingClient(clock)
+    transport = MspTransport("http://platform.test", retry=RetryPolicy(attempts=3))
+    transport._client = client  # type: ignore[assignment]
+    return transport, client
+
+
+def test_without_a_limit_each_attempt_has_the_clients_own_timeouts(
+    clock: _Clock,
+) -> None:
+    transport, client = _timing(clock)
+
+    with pytest.raises(httpx.ConnectTimeout):
+        transport.heartbeat({})
+
+    assert client.calls == 3
+    assert all(
+        (t.read, t.connect) == (READ_TIMEOUT_S, CONNECT_TIMEOUT_S)
+        for t in client.timeouts
+        if t is not None
+    )
+
+
+def test_a_limit_is_never_overrun_by_attempts_or_backoff(clock: _Clock) -> None:
+    """Three five-second connects would be fifteen seconds; the limit is seven."""
+    transport, client = _timing(clock)
+    started = clock.now
+
+    with transport.time_limit(7.0), pytest.raises(httpx.TimeoutException):
+        transport.heartbeat({})
+
+    assert clock.now - started <= 7.0
+    assert client.timeouts[0] is not None and client.timeouts[0].connect == 5.0
+    last = client.timeouts[-1]
+    assert last is not None and last.connect is not None and last.connect < 5.0
+
+
+def test_no_time_left_sends_nothing(clock: _Clock) -> None:
+    transport, client = _timing(clock)
+
+    with transport.time_limit(0.0), pytest.raises(DeadlineReached):
+        transport.heartbeat({})
+
+    assert client.calls == 0
+
+
+def test_a_nested_limit_takes_the_earlier_and_gives_it_back(clock: _Clock) -> None:
+    transport, _ = _timing(clock)
+
+    with transport.time_limit(30.0):
+        outer = transport._limit.deadline
+        with transport.time_limit(60.0):
+            assert transport._limit.deadline == outer
+        with transport.time_limit(2.0):
+            assert transport._limit.deadline == clock.now + 2.0
+        assert transport._limit.deadline == outer
+    assert transport._limit.deadline is None

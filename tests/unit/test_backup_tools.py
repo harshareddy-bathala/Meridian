@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import subprocess
 import sys
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -268,3 +270,113 @@ def test_the_backup_names_the_dataset_snapshots_it_did_not_take(
     assert str(present) in backup.datasets_note(present)
     assert "nothing there" not in backup.datasets_note(present)
     assert "nothing there" in backup.datasets_note(tmp_path / "absent")
+
+
+# --- rows counted in the dump's own snapshot (D-286) ----------------------------
+
+
+def test_the_dump_is_taken_from_the_snapshot_that_was_counted(
+    backup: ModuleType, compose_db: ModuleType
+) -> None:
+    command = backup.dump_command(compose_db.Compose("c.yml"), "0000000A-00000049-1")
+
+    assert command[-1].endswith("--snapshot=0000000A-00000049-1")
+
+
+@pytest.mark.parametrize("snapshot", ["1; rm -rf /", "$(id)", "0A-49-1 --clean", "x"])
+def test_a_snapshot_name_that_is_not_one_never_reaches_a_shell(
+    backup: ModuleType, compose_db: ModuleType, snapshot: str
+) -> None:
+    """It comes from the database and is about to be part of a script."""
+    with pytest.raises(compose_db.ToolError):
+        backup.dump_command(compose_db.Compose("c.yml"), snapshot)
+
+
+def test_the_session_answers_with_the_snapshot_then_every_tables_rows(
+    backup: ModuleType,
+) -> None:
+    lines = ["0000000A-00000049-1\n", "\n", "heartbeats|45\n", "stations|3\n"]
+
+    assert backup.read_snapshot(lines) == (
+        "0000000A-00000049-1",
+        {"heartbeats": 45, "stations": 3},
+    )
+
+
+@pytest.mark.parametrize("lines", [[], ["\n"], ["0000000A-00000049-1\n"]])
+def test_a_session_that_counted_nothing_refuses_the_backup(
+    backup: ModuleType, compose_db: ModuleType, lines: list[str]
+) -> None:
+    with pytest.raises(compose_db.ToolError):
+        backup.read_snapshot(lines)
+
+
+def test_the_same_rows_restored_are_accepted(compose_db: ModuleType) -> None:
+    manifest = replace(_counted(compose_db), row_counts={"heartbeats": 45, "passes": 7})
+
+    assert compose_db.judge_counts(manifest, {"passes": 7, "heartbeats": 45}) is None
+
+
+@pytest.mark.parametrize(
+    ("restored", "named"),
+    [
+        ({"heartbeats": 44, "passes": 7}, "heartbeats: 44 restored, 45 backed up"),
+        ({"heartbeats": 45}, "passes: missing restored, 7 backed up"),
+        (
+            {"heartbeats": 45, "passes": 7, "extra": 1},
+            "extra: 1 restored, not backed up",
+        ),
+    ],
+)
+def test_other_rows_restored_are_refused_and_the_table_is_named(
+    compose_db: ModuleType, restored: dict[str, int], named: str
+) -> None:
+    manifest = replace(_counted(compose_db), row_counts={"heartbeats": 45, "passes": 7})
+
+    refusal = compose_db.judge_counts(manifest, restored)
+
+    assert refusal is not None and named in refusal
+
+
+def test_a_manifest_from_before_row_counts_still_reads_and_restores(
+    compose_db: ModuleType, tmp_path: Path
+) -> None:
+    """An old dump is still a dump. Its rows cannot be checked, and that is said."""
+    path = tmp_path / "old.dump.manifest.json"
+    document = {
+        "sha256": "0" * 64,
+        "size_bytes": 1,
+        "timescaledb_version": "2.29.0",
+        "alembic_revision": "0012",
+        "postgres_version": "16.9",
+        "created_at": "2026-09-14T06:00:00+00:00",
+        "format": "meridian-backup/1",
+    }
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    manifest = compose_db.read_manifest(path)
+
+    assert manifest.row_counts is None
+    assert compose_db.judge_counts(manifest, {"heartbeats": 45}) is None
+
+
+def test_row_counts_survive_the_manifest_file(
+    compose_db: ModuleType, tmp_path: Path
+) -> None:
+    manifest = replace(_counted(compose_db), row_counts={"heartbeats": 45})
+    path = tmp_path / "m.dump.manifest.json"
+
+    compose_db.write_manifest(manifest, path)
+
+    assert compose_db.read_manifest(path).row_counts == {"heartbeats": 45}
+
+
+def _counted(compose_db: ModuleType) -> Any:
+    return compose_db.Manifest(
+        sha256="0" * 64,
+        size_bytes=1,
+        timescaledb_version="2.29.0",
+        alembic_revision="0012",
+        postgres_version="16.9",
+        created_at="2026-09-14T06:00:00+00:00",
+    )

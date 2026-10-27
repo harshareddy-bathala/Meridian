@@ -356,6 +356,8 @@ How modules 13–17 are proven (D-095). Everything above applies to them — tem
 
 `CLAUDE.md`'s independence test says that if every external service went offline permanently tomorrow, Meridian would still schedule, receive, decode, monitor and report. A two-tier deployment (D-129) makes that a claim someone can check, so it is checked: two drills, each a procedure with a pass condition, run before the demonstration and after any change to how the tiers are deployed. Both are gates of Stage 33.
 
+**Both are run as tests on every pull request, and both can be run against a deployment** (Stage 33, D-282 to D-286). `OPERATIONS.md` § Independence drills is the procedure for each.
+
 **Neither drill may be run against a cloud tier only.** The point is what survives without one.
 
 ### 12.1 The station receives with the platform unreachable
@@ -368,6 +370,8 @@ How modules 13–17 are proven (D-095). Everything above applies to them — tem
 
 **Fails if** the client blocks on the network at any point during the pass, if any part of the reception is lost rather than queued, or if reconciliation produces a second revision whose content is identical to the first.
 
+**As a test:** `tests/msp_conformance/test_independence_drill.py`. The route is blackholed, not refused, across a whole pass, at ten alignments of the pass against the heartbeat. It was this drill that found a capture edge could be met 17 to 56 seconds late while a heartbeat waited on a dead route, and D-285 is the fix: both edges are now met within a second.
+
 ### 12.2 The dashboard serves its last snapshot with the network down
 
 **Method.** With the platform tier unreachable from the dashboard's own host, load the dashboard as a visitor would.
@@ -376,4 +380,9 @@ How modules 13–17 are proven (D-095). Everything above applies to them — tem
 
 **Fails if** the page errors, hangs waiting on an upstream, or shows figures that look live when they are not — the last of these is the serious one, because a stale number presented as current is worse than a page that admits it is offline.
 
-**This drill is owed work, not only a run.** Serving a last snapshot and labelling its age is a capability the dashboard does not have today; Stage 33 is where it is built, and recording the drill here is what makes it a requirement rather than an aspiration.
+**How it is met** (Stage 33). The dashboard was served by the platform it reports on, and went down with it. Now:
+- a front, nginx before the api, keeps the last good copy of each public view and serves it, marked and dated, only when the api does not answer (D-282);
+- every view is asked for every five minutes, so a visitor who arrives during the outage finds a copy of each (D-283);
+- each view drawn from a copy says "Not live", with the time the platform made it and its age (D-284).
+
+**As a test:** `deploy/tools/front_drill.py` stops the api of a running stack and judges every answer against the three ways above that the drill fails. CI's image job runs it on every pull request, an operator runs it on the Pi, and `dashboard/src/snapshot.test.ts` covers what the page then says.

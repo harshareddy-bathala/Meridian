@@ -32,7 +32,8 @@ Built so far:
   - scheduling that runs by itself every five minutes;
   - Prometheus metrics and ten tested alert rules, Alertmanager and a provisioned Grafana dashboard;
   - capped logs and healthchecks on every service;
-  - host backup and restore tools;
+  - host backup and restore tools, with a restore proven on a second machine in CI;
+  - a dashboard that still renders, labelled with its age, with the platform down, and a station that receives on schedule with the platform unreachable: `EVALUATION.md` §12's two drills, run as tests;
   - amd64 and arm64 images on GHCR.
 
   `docs/OPERATIONS.md` is the runbook.
@@ -81,7 +82,7 @@ curl http://localhost:8000/healthz
 
 The env file goes in `deploy/`, beside the compose file: compose reads it from there whatever directory the command runs in (D-114). On a Pi, `docker compose -f deploy/docker-compose.yml pull` fetches the prebuilt image instead of building.
 
-The default profile runs the database, migrations, the API on `:8000` and the jobs process that generates passes and schedules them every five minutes. The database is deliberately not published — nothing outside the compose network needs it.
+The default profile runs the database, migrations, the API on `:8000`, the jobs process that generates passes and schedules them every five minutes, and the front on `:8080`, which serves the dashboard's last good copy when the API is down (D-282). The database is deliberately not published — nothing outside the compose network needs it.
 
 Optional profiles: `--profile metrics` for Prometheus, Alertmanager and Grafana on `:3001` (copy `deploy/prometheus/metrics_token.example` to `metrics_token` first) and `--profile sim` for a simulated station. The tunnel is an override file, `-f deploy/docker-compose.public.yml`, which also takes the API's port off the host; `docs/OPERATIONS.md` § Going public is the runbook.
 

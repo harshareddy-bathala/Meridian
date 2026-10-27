@@ -8,7 +8,7 @@ Every command runs from the repository root. `compose` below is shorthand for:
 docker compose -f deploy/docker-compose.yml
 ```
 
-Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, D-143 to D-154 for dataset snapshots, D-155 to D-164 for models, D-165 to D-172 for scheduling, and D-200 onwards for Stage 23's hardening. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
+Decisions this page puts into practice: D-109 to D-115, D-120 to D-128 for station reception, D-138 to D-142 for external archive ingest, D-143 to D-154 for dataset snapshots, D-155 to D-164 for models, D-165 to D-172 for scheduling, D-200 to D-211 for Stage 23's hardening, and D-280 to D-287 for Stage 33's custody, front and drills. The staged build order is in `SOFTWARE-IMPLEMENTATION-ROADMAP.md`.
 
 ---
 
@@ -65,7 +65,7 @@ curl http://localhost:8000/healthz
 
 ### Going public
 
-The public deployment is an override file, `deploy/docker-compose.public.yml`, not a profile (D-206). It adds the Cloudflare tunnel, tells the API to trust the edge's `CF-Connecting-IP` for rate limits, and **removes the API's port from the host**, because a profile can add a service but cannot take a port away. It needs Docker Compose 2.24.4 or later.
+The public deployment is an override file, `deploy/docker-compose.public.yml`, not a profile (D-206). It adds the Cloudflare tunnel, removes the front's host port, tells the API to trust the edge's `CF-Connecting-IP` for rate limits, and **removes the API's port from the host**, because a profile can add a service but cannot take a port away. It needs Docker Compose 2.24.4 or later.
 
 ```bash
 python deploy/tools/rotate_secret.py init                    # once, § Rotating secrets
@@ -83,6 +83,37 @@ compose exec api python -c "import urllib.request; print(urllib.request.urlopen(
 `compose` in the commands elsewhere on this page then means all three files.
 
 **Keep Cloudflare's Rocket Loader, e-mail obfuscation and Web Analytics off for the tunnel hostname.** Each injects a script, and the dashboard's content-security policy refuses anything not served by the platform itself (D-208), so the page would load without them and log a violation in the browser's console.
+
+### The front
+
+`front` is nginx before the api (D-282). It forwards every request, and keeps the last good copy of the dashboard and the public read API. **A visitor gets the api's answer whenever the api gives one**; a kept copy is served only when the api does not answer, marked `Meridian-Cache: STALE` and carrying the time the api made it. MSP, `/metrics` and `/healthz` are never kept.
+
+- **On a laptop or in CI** the dashboard is on `http://localhost:8080` through the front, and on `:8000` straight from the api. Set `FRONT_PORT` in `deploy/.env` to move it.
+- **A recreated api is unseen for up to twenty seconds.** `compose up` recreates the api when its configuration changes, and secret rotation does it on purpose; the new container has a new address, and the front looks the name up every ten seconds and holds a failed lookup as long. Until it finds the api, views are served as copies, marked `STALE`, and MSP requests fail and are retried by the stations. `front_drill.py` gives the front half a minute before it judges.
+- **On the public deployment** the front has no host port, like the api. **Set the tunnel's origin to `http://front:8080`** in Cloudflare's dashboard, under the tunnel's public hostname; the token carries it, not this repository. An origin left at `http://api:8000` still works, but bypasses the front, so the dashboard goes down with the api.
+
+See what it would serve with the api down:
+
+```bash
+curl -sI http://localhost:8080/api/v1/reliability | grep -i -e meridian-cache -e '^date'
+compose stop api        # then the same curl: STALE, and the Date the api gave it
+compose start api
+```
+
+**The dashboard says when it is showing a copy** (D-284): each view drawn from one carries a "Not live" line with the time the platform made it and its age, and clears it on the first refresh after the platform answers. A view nobody warmed says the platform did not answer and no copy was kept.
+
+**`front-warm` keeps a copy of every view**, not only of the views someone opened (D-283). Every `FRONT_WARM_INTERVAL_S`, five minutes by default, it asks the front for the page, its assets and each route in `deploy/front/snapshot-routes.txt` for every station, and prints one line:
+
+```bash
+compose logs --tail 3 front-warm
+# warmed 21 views for 3 stations: 0 failed, 0 stale
+```
+
+`N stale` means the api did not answer during that round and the front served its copies; nothing was refreshed. A failed view is named with its status. To warm once by hand on a laptop, `python deploy/tools/front_warm.py`, against `:8080`.
+
+**A new view in the dashboard needs a route in that file.** `npm test` fails until the file and the dashboard's requests agree.
+
+The copies are on the `front-cache` volume and survive a restart. To drop them, `compose stop front && docker volume rm meridian_front-cache && compose up -d front`.
 
 ### Database roles
 
@@ -1275,6 +1306,66 @@ curl -s localhost:8000/api/v1/stations/<id>/uptime | python -m json.tool
 
 ---
 
+## Custody and retention
+
+Who holds each record, for how long, and what loses it (D-129, D-281). Every figure here is a constant in the code or a default of a tool; change the code, and this table with it.
+
+**Two rules decide the rest.** The station is authoritative for what it received, and the platform for what it assigned; neither overwrites the other. Reconciling after an outage is resend, not merge: the station sends again what was never acknowledged, and the platform stores it once (D-027, D-015).
+
+### The station tier: its state directory
+
+| Record | Authoritative | Kept | Lost when |
+|---|---|---|---|
+| `outbox/` — a report not yet acknowledged | the station | until acknowledged; moved to `outbox/failed/` once its `started_at` is older than thirty days, the platform's acceptance window (D-013, D-074) | the station's disk is lost before the platform acknowledged it |
+| `outbox/failed/` — a report the platform refused, or one too old to send | the station | until a person deletes it | the station's disk is lost |
+| `captures/<folder>/` recording | the station | until its result is handed to the outbox; for ever with `keep_recordings = true` (D-123) | the result is handed over, by design |
+| `captures/<folder>/` manifest, decoder report, logs | the station | thirty days after hand-over (D-123) | pruned, by design |
+| `products/<sha256>` — decoded products | **the station, and only the station**: the platform holds the hash and size (D-029, D-176) | under `products_max_bytes`, 2 GiB by default; oldest evicted first | evicted, or the station's disk is lost, unless archived (§ Archiving a station) |
+| `held.json` — the assignments the station holds | the platform, for the assignment; the station, for what it holds | until the work is handed over | a damaged file stops the client rather than being read as empty (§ Failure recovery) |
+| `credentials.json`, `registration_key` | the station | for the station's life; never copied by any tool here | § Failure recovery says what to do |
+
+### Archiving a station
+
+The database backup takes nothing from a station. `station_archive.py` is the station tier's own (D-287), run on the station's host:
+
+```bash
+python deploy/tools/station_archive.py create --state state --out archives/station-$(date -u +%F).tar
+python deploy/tools/station_archive.py verify archives/station-2026-10-03.tar
+python deploy/tools/station_archive.py restore archives/station-2026-10-03.tar --state state
+```
+
+- **`create`** takes `held.json`, `outbox/`, each capture's manifest, decoder output and logs, and `products/`. It prints what it left out: always `credentials.json` and `registration_key`, and each recording unless `--recordings` is given. `--no-products` leaves the products out. The station may be running.
+- **`verify`** checks the archive and every file in it against the manifest beside it.
+- **`restore`** verifies first, then writes only the files the state does not have. **It never replaces a file a station already holds**, and lists each one it left alone.
+
+**Copy the archive and its manifest off the station**, as with a database dump: one on the disk it describes does not survive that disk. An archive holds no credential, but it does hold every queued report.
+
+**An archive restores a station's record, not the station.** It holds no identity, on purpose, so what happens to the restored reports depends on what else was kept:
+
+| The station still has | Then |
+|---|---|
+| `credentials.json` | Nothing more to do: it sends the restored reports on its next heartbeat. |
+| only `registration_key` | Give it a bound invite (§ Failure recovery, *A station lost `credentials.json`*). Same `station_id`, new token, and the restored reports are delivered. |
+| neither | It is a new station. Its restored reports name assignments issued to the old one, are refused as `not_owner`, and are moved to `outbox/failed/`. The products and capture records are still worth having. |
+
+**To make a lost disk cost nothing, keep `registration_key` yourself**, somewhere an archive is not: it is a secret, and the one file that lets an operator prove a station is the same station.
+
+### The platform tier
+
+| Record | Authoritative | Kept | Lost when |
+|---|---|---|---|
+| The database: assignments, passes, schedules | the platform | indefinitely | the database is lost: restore a dump (§ Backup and restore) |
+| The database: observations | the station; this is a copy of what it reported | indefinitely | the database is lost; a station resends only what it still holds unacknowledged |
+| Database dumps, `backups/` | — | the last 7 days, the newest of each of 4 weeks and of 6 months; the newest always | the host's disk is lost, unless copied off it |
+| Ingest raw store, `data/ingest/raw` | the source, as retrieved (D-141) | until a person deletes it; not in a dump | the host's disk is lost, unless copied; it cannot be fetched again if the source withdrew it |
+| Raw dataset snapshots, `data/datasets/snapshots` | — | until a person deletes them; not in a dump (D-144) | the host's disk is lost; **cannot be recreated** |
+| Evaluation datasets, models, report runs, under the datasets root | — | until a person deletes them | regenerable from a raw snapshot, a configuration and a seed |
+| The evidence dataset package | — | Stage 30 has not been built; it adds its row (D-280) | — |
+| Prometheus series | — | Prometheus's default, fifteen days | by design |
+| The front's kept copies, `front-cache` | the api; a copy of its last answers (D-282) | thirty days unread, 256 MiB at most | dropped by design; refilled by the next visitor or warm |
+
+---
+
 ## Backup and restore
 
 Host tools, standard library only (D-115). They reach the database through `compose exec db`, so no password appears on the host's command line.
@@ -1287,7 +1378,7 @@ Host tools, standard library only (D-115). They reach the database through `comp
 python deploy/tools/backup.py --out backups/meridian-$(date -u +%F).dump
 ```
 
-- **What it writes:** the dump, and beside it `<dump>.manifest.json` with the sha256, TimescaleDB version, migration revision and time.
+- **What it writes:** the dump, and beside it `<dump>.manifest.json` with the sha256, TimescaleDB version, migration revision, time, and every table's row count. The rows are counted in the same snapshot the dump is taken from, so they are exact however much is written meanwhile (D-286).
 - **While it runs:** the API keeps running.
 - **Existing files:** it never replaces one.
 - **If interrupted:** it leaves only `<dump>.partial`.
@@ -1314,8 +1405,9 @@ It then:
 1. stops `api` and `jobs`;
 2. recreates the database;
 3. runs TimescaleDB's pre-restore step, `pg_restore`, then the post-restore step;
-4. runs `migrate`, so a dump from an older release reaches this code's head and the roles' grants, which `pg_restore --no-acl` left out, are applied again (D-207);
-5. starts whichever of `api` and `jobs` was running, and waits for `/healthz`.
+4. counts every table and compares with the manifest (D-286). A table holding other rows is named and the restore stops. A manifest from before row counts restores, and says its rows were not checked;
+5. runs `migrate`, so a dump from an older release reaches this code's head and the roles' grants, which `pg_restore --no-acl` left out, are applied again (D-207);
+6. starts whichever of `api` and `jobs` was running, and waits for `/healthz`.
 
 If a step after the database is dropped fails, `api` and `jobs` stay stopped on purpose. Fix the cause and run the restore again.
 
@@ -1357,6 +1449,61 @@ It restores into `meridian_restore_drill` beside the live database, never into i
 
 CI also performs the full round trip, back up, restore and compare row counts, on every pull request, and `tests/integration/test_restore_drill.py` runs the drill against the test database.
 
+### Restoring on another machine
+
+The dump and its manifest are all it takes; the machine need never have seen the database (D-286). CI's `restore-elsewhere` job does exactly this on a second runner, on every pull request.
+
+```bash
+cp deploy/.env.example deploy/.env          # then set the secrets, § Rotating secrets
+docker compose -f deploy/docker-compose.yml pull        # or build
+docker compose -f deploy/docker-compose.yml up -d --wait db
+python deploy/tools/restore.py backups/meridian-2026-10-03T0247Z.dump
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+Look for `N rows in M tables, as backed up` in the restore's output. Then read § After a restore: stations registered or rotated since the dump need a fresh invite, and the token pepper must be the one the dump's hashes were made with, or every station's token is refused.
+
+---
+
+## Independence drills
+
+`EVALUATION.md` §12's two drills, each run as a test on every pull request and runnable against a deployment. **Run both before the demonstration, and after any change to how the tiers are deployed.** Neither needs a cloud host (D-130).
+
+### The station receives with the platform unreachable (§12.1)
+
+**As a test:** `tests/msp_conformance/test_independence_drill.py` blackholes the route across a whole pass, at ten alignments, and checks both capture edges are met within a second and the platform ends with exactly one observation (D-285).
+
+**On station 001**, with a pass scheduled and held (`held.json` names it):
+
+1. Five minutes before the pass, break the route: `compose stop tunnel` on the platform's host, or pull the station's network.
+2. Leave it broken until after the pass ends. The station's log shows `heartbeat could not reach the platform` and the capture starting and stopping on its window.
+3. Restore the route. The next heartbeat is followed by the report.
+
+**It passed if** the capture folder's manifest shows the recording covering the whole window, `outbox/` held the report during the outage and is empty afterwards, and the platform holds one observation for the assignment, at revision 1:
+
+```bash
+compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "select revision, observation_id from observations where assignment_id = '"'"'as_…'"'"'"'
+```
+
+### The dashboard serves its last snapshot (§12.2)
+
+```bash
+python deploy/tools/front_drill.py          # add the compose options the stack was started with
+```
+
+It stops the api for about a minute, and starts it again whatever happens. Stations keep receiving and queue their reports meanwhile. It prints `passed`, or each view that failed and why:
+
+| It says | It means |
+|---|---|
+| `the page errors: no copy was served` | the front kept no copy of a view it should have: is `front-warm` running, and is the tunnel's origin the front? |
+| `a copy served without saying it is one` | a stale figure would be shown as current: `deploy/front/snapshot.conf` no longer labels what it serves |
+| `took over 5s: the page hangs` | the front waited on the dead api: its timeouts in `deploy/front/nginx.conf` |
+| `still a copy after the api came back` | the front has not found the api again: `compose logs front` |
+| `the drill could not start` | the api was not answering before the drill began; fix that first |
+
+Then load the dashboard in a browser with the api stopped (`compose stop api`), once, by eye: each view carries a "Not live" line with the snapshot's time and age (D-284). `compose start api` afterwards.
+
 ---
 
 ## Failure recovery
@@ -1372,7 +1519,7 @@ What happens by itself when each part fails, what to do, and the test that prove
 | **An observation upload interrupted** | The report stays queued until acknowledged and is sent again. The platform keys it on the assignment, so a second copy of the same report is answered as the first was and stored once (D-015, D-071). | Nothing. | `test_a_lost_acknowledgement_does_not_produce_a_second_observation`; `test_an_identical_resubmission_returns_the_identical_acknowledgement` |
 | **A migration fails** | The upgrade is one transaction, so the database stays at the revision it had; `migrate` exits non-zero and `api` and `jobs` do not start. | `compose logs migrate`. Run the previous image (`MERIDIAN_IMAGE=…:sha-<previous>`) while the migration is fixed, then `compose up -d`. | `test_failure_recovery.py`, with a revision that fails half way |
 | **The jobs process dies mid-round** | Compose restarts it. Each task commits only when it finishes, so nothing half-written survives, and the next round schedules what the lost one would have. Assignments already delivered stand. | Nothing, unless `ScheduledTaskStalled` fires; then § Alerts. | `test_failure_recovery.py`, dying after the scheduler wrote; `test_jobs_rounds.py` |
-| **The platform restarts during a pass** | The station keeps executing what it holds, records, queues the result, and sends it when the platform is back. Its heartbeats fail meanwhile, so it may read `stale` for a minute; a missing heartbeat is not a miss (rule 7). | Nothing. | `test_reception_continues_while_the_platform_is_unreachable`; `test_a_station_receives_holds_executes_and_survives_an_outage`; `test_a_station_restarted_before_delivery_still_delivers` |
+| **The platform restarts during a pass, or the route to it goes dead** | The station keeps executing what it holds, on time: a request waiting on a dead route is cut off by the next capture edge (D-285). It records, queues the result, and sends it when the platform is back. Its heartbeats fail meanwhile, so it may read `stale` for a minute; a missing heartbeat is not a miss (rule 7). | Nothing. | `test_reception_continues_while_the_platform_is_unreachable`; `test_a_station_receives_holds_executes_and_survives_an_outage`; `test_a_station_restarted_before_delivery_still_delivers`; `test_a_pass_is_received_on_time_through_an_outage_and_stored_once` |
 
 ### After a restore
 

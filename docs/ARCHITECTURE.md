@@ -196,6 +196,8 @@ Everything in Docker Compose. Postgres + TimescaleDB on the Pi's NVMe. Public ac
 
 **The single machine is the deployment of record** (D-130). A cloud tier may be added for archive processing, model training and public service, funded by student credit that may lapse before submission — so no success criterion, demonstration step or roadmap completion gate may depend on it, and the one-machine path stays supported and measured by CI. What a lapse costs is throughput, never a claim. Which host, on whose account, is open (D-135).
 
+**Custody.** Who holds each record on either tier, for how long, and what loses it is one table, `OPERATIONS.md` § Custody and retention (D-281). A station's unacknowledged report is deliverable for thirty days, the platform's acceptance window, and its decoded products exist only on the station.
+
 `docker compose up` on a clean machine must produce a working platform in under ten minutes. CI measures it on every pull request. `docs/OPERATIONS.md` is the runbook.
 
 ```mermaid
@@ -203,17 +205,20 @@ flowchart LR
     DB[(TimescaleDB)] --> M[migrate]
     M --> API[api: MSP, public API, dashboard]
     M --> J[jobs: pass generation + scheduling]
-    API --> T[tunnel]
+    API --> F[front: last good copy]
+    F --> T[tunnel]
     P[Prometheus] -- scrape --> API
     P -- scrape --> J
     P --> AM[Alertmanager]
     P --> G[Grafana]
 ```
 
-**Processes.** One image runs as four services with different commands.
+**Processes.** One image runs as four services with different commands, the stock nginx image runs a fifth, and the same image runs the front's warmer.
 - **`migrate`** applies the schema once and exits.
 - **`api`** is `meridian serve`: MSP, the public read API and the dashboard, in several worker processes (D-109).
 - **`jobs`** is `meridian jobs run`: it generates passes and schedules them every five minutes, so a deployment schedules with no simulator and no operator (D-110).
+- **`front`** is nginx before the api. It forwards everything, and keeps the last good copy of the dashboard and the public read API, served marked `STALE` only when the api does not answer (D-282).
+- **`front-warm`** asks the front for every view, every five minutes, so a station page nobody opened before an outage still has a copy during it (D-283).
 - **The `sim` profile** adds the simulated fleet on the same image.
 
 **Metrics** (D-109, D-111).

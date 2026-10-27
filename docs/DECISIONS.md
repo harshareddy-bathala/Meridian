@@ -5862,6 +5862,227 @@ It does not measure SC-8.
 
 ---
 
+## D-280 — Stage 33 is built ahead of Stage 30
+
+**2026-10-02 · accepted** · *`SOFTWARE-IMPLEMENTATION-ROADMAP.md` Stage 33*
+
+The roadmap has Stage 33 depend on Stages 12, 13 and 30. Twelve and thirteen are built. **What Stage 33 takes from Stage 30 is one row:** how long an exported evidence package is kept, in the custody table D-281 starts. The drills, the resend, the last snapshot and the restore on another machine need nothing Stage 30 makes.
+
+Stages 28 to 30 all wait on Stage 27, which is being built beside this one. Stage 33 touches deployment, the station client, the dashboard and CI, and none of Stage 27's modules, so building it now costs a keep-both merge in three documents and nothing else.
+
+**Stage 30 adds its row when it lands.** Until then the table says the package does not exist yet, rather than leaving the line out.
+
+*Rejected: waiting for Stage 30.* It would serialise four stages behind one, for a dependency that is a sentence in a table.
+
+---
+
+## D-281 — A station's unacknowledged reception is deliverable for thirty days, and who holds what is one table
+
+**2026-10-02 · proposed, for the team to confirm** · *`OPERATIONS.md` § Custody and retention; `ARCHITECTURE.md` Deployment; Stage 33. Answers the station half of D-135.*
+
+D-135 asks how long a station retains an unacknowledged reception. **The code already answers it, in three places that were never put side by side:**
+- the outbox keeps a report until the platform acknowledges it, and moves it to `outbox/failed/` once its `started_at` is older than the platform's thirty-day acceptance window, because the platform would refuse it from then on (D-013, D-074). It is kept there, not deleted;
+- a capture folder loses its recording when its result is handed to the outbox, unless `keep_recordings` is set, and the folder goes thirty days after that (D-123);
+- products are kept by hash in the station's product store, under `products_max_bytes`, two gibibytes by default, and evicted oldest first (D-176).
+
+**So the figure is thirty days, and it is the platform's, not the station's.** A station that kept trying for longer would hold reports no platform accepts. A station figure shorter than the window would throw away reports the platform still wants. Either way the two would disagree, which is why it is not a station setting. An outage longer than thirty days loses the reports from its start, which stay on the station in `outbox/failed/` for a person to read.
+
+**The station is the only holder of its products.** MSP has no transfer (D-029), so the platform's row is a hash and a size. A product evicted from the cap, or lost with the station's disk, is gone. That is a stated limit, not a defect this stage fixes; `deploy/tools/station_archive.py` is how an operator keeps a copy (D-287).
+
+**The custody table** in `OPERATIONS.md` names, for every kind of record on either tier: who is authoritative for it, where it lives, how long it is kept, and what loses it. It is written from the code's constants and the backup tools' defaults, not from intent.
+
+**Proposed rather than accepted** because D-135 was opened for the team. The thirty days follow from D-013 and D-074 and need no new code; what the team confirms is that no longer station figure is wanted. The other half of D-135 — which cloud host, on whose account, and what happens when the credit lapses — stays open, and blocks nothing: no gate may depend on a cloud host (D-130).
+
+*Rejected: never expiring an unacknowledged report.* It would retry, forever, a body the platform refuses as `malformed`, which is the stuck queue D-074 removed.
+
+*Rejected: stopping reception when the product store is full instead of evicting.* A pass never repeats. A station that stops receiving to protect old waterfalls gives up a new reception for an old picture of one, and reports nothing while it does (D-176).
+
+---
+
+## D-282 — The front: nginx before the api, keeping the last good copy of the public views
+
+**2026-10-02 · accepted** · *`deploy/front/{nginx,snapshot}.conf`; `deploy/docker-compose.yml` (`front`); `deploy/docker-compose.public.yml`; `tests/unit/{test_front_config,test_compose_hardening}.py`; Stage 33; `EVALUATION.md` §12.2*
+
+§12.2 asks that the dashboard render its last snapshot, saying how old it is, with the platform unreachable. The api serves the dashboard on its own origin (D-081), so the page went down with the process it reports on. **Something that is not the api has to answer, and has to have kept something to answer with.**
+
+**The front is nginx, in front of everything.** The tunnel's origin is `front:8080`, and the front forwards every request to the api unchanged. For three paths — `/`, `/assets/` and `/api/v1/` — it also keeps the api's last `200`:
+- every copy is stale a second after it is stored, so the next request goes to the api, and **a visitor gets the api's answer whenever the api gives one**;
+- a copy is served only on a failure to connect, a timeout, or a `502`, `503` or `504` from the api;
+- every kept path carries `Meridian-Cache` — `HIT`, `MISS`, `EXPIRED` or `STALE` — and keeps the api's own `Date`, so a stale copy says when the api made it. The dashboard reads both (D-284);
+- **nothing else is kept.** MSP, `/metrics` and `/healthz` fall to a location with no cache: forwarded, forgotten.
+
+**A copy is shared between visitors, and that is safe only because of what is kept.** Every kept path is public and the same for every caller, and a `200` from the api carries no per-client header; only a `429` does, and a `429` is never kept. The api's security headers are kept with the body, so a stale page has the same content-security policy as a live one.
+
+**A dead api is a failure in two seconds**, not a hang: a two-second connect timeout and a fifteen-second read timeout. A view nobody fetched before the outage answers `504`, which the dashboard says plainly. Warming every view is D-283's.
+
+**It starts without the api and survives its own restart.** `server api:8000 resolve`, with Docker's resolver, lets nginx start while the name does not resolve and find the api when it appears, at whatever address. The copies are on a volume, so a Pi rebooted mid-outage still has something to show. Measured on a scratch network before commit: a stopped api gave `STALE` with the original `Date` in two seconds, a front restarted with no api served its copies at once, and an api restarted on a new address was found within the resolver's ten seconds.
+
+**The same rule as the api's port.** The front forwards `CF-Connecting-IP` as it receives it, so the public file removes its host port too, and the tunnel is the only way in (D-206). On a laptop it is published on `:8080`, where the api trusts no such header, and every browser behind the front shares the front's address in the api's rate limits. That is the local deployment only; the public one keys on Cloudflare's header as before.
+
+**nginx, not ours.** CLAUDE.md's test: writing a caching reverse proxy teaches nothing this project is about, and its failures — request smuggling, header handling, timeouts — are exactly what a mature proxy has already met. The image is `nginxinc/nginx-unprivileged`, which runs as uid 101 on port 8080, pinned by digest (D-256). It runs hardened like every other service, with its entrypoint scripts bypassed because they edit files under the read-only `/etc/nginx`.
+
+*Rejected: a service worker in the dashboard.* A visitor who had never loaded the page before the outage would get nothing, and §12.2 is about a visitor.
+
+*Rejected: publishing a snapshot beside the public site on Cloudflare Pages.* It survives the Pi being off, but the drill would then pass only with a cloud host reachable, which D-130 forbids for a gate.
+
+*Rejected: a snapshot file the jobs process writes each round.* It needs a serving process anyway, and a second copy of every public response shaped differently from the api's, which the dashboard would have to read two ways.
+
+---
+
+## D-283 — Every view is warmed through the front, from one list the dashboard is checked against
+
+**2026-10-02 · accepted** · *`deploy/front/snapshot-routes.txt`; `deploy/tools/front_warm.py`; `deploy/docker-compose.yml` (`front-warm`); `dashboard/src/snapshotRoutes.test.ts`; `tests/unit/test_front_warm.py`; Stage 33*
+
+The front keeps a copy only of what passed through it (D-282). Left to visitors, the copies would be of the views somebody happened to open, and a station page nobody opened before the outage would be empty during it. §12.2 is about a visitor who arrives during the outage, so **every view is asked for on a schedule**.
+
+**One list, read on both sides.** `deploy/front/snapshot-routes.txt` holds each route the dashboard requests, with `{station}` where a station id goes. `front_warm.py` reads it. `dashboard/src/snapshotRoutes.test.ts` runs the dashboard's own fetch functions and fails unless their requests are exactly the list. The front keys a copy on the exact path and query, so a route that drifted — `hours=24` for `hours=48` — would be warmed under a key no browser asks for, and nothing else would notice. The test was seen to fail on exactly that.
+
+**The warmer asks as the browser asks.**
+- **The page and its assets:** `/`, every `/assets/` file the page names, and every asset a stylesheet names.
+- **The directory:** walked through `next_cursor`, as the dashboard walks it.
+- **Each route for each station.** An id is encoded as `encodeURIComponent` does in a path, and as `URLSearchParams` does in a query. The two differ, on a space and on `~` among others, and the test pins both against what Node gives.
+- **Pacing:** four requests a second, under the public API's five per caller (D-202), and a `429` is waited out once.
+
+**It runs as a compose service, `front-warm`, not a host timer.** The public file gives the front no host port, so only something inside the compose network can reach it. A service also runs the same on a laptop, in CI and on the Pi. It uses the platform image, which is already present, with the tool and the list mounted read-only, and reaches nothing but the front. A round every `FRONT_WARM_INTERVAL_S`, five minutes by default; each round prints one line, and writes its counts to a status file the healthcheck reads. **It is healthy while rounds keep finishing**, whatever they found: whether the api answers is the api's healthcheck's question.
+
+**A round answered from copies says so.** `STALE` answers mean the api did not answer and nothing was refreshed, and the line says that rather than "warmed". Measured on a local stack with three simulated stations: twenty-one views a round. With the api stopped, a station's uptime, receptions and profiles, which no browser had opened, came back `STALE` with the time they were warmed. The next round reported twenty-one stale.
+
+*Rejected: a systemd timer on the host.* The host cannot reach a front with no port, and a laptop and CI have no systemd.
+
+*Rejected: warming from the jobs process.* It is the platform's scheduler, and has no business making HTTP requests to its own front. It would also put this stage in the files Stage 27 is changing.
+
+*Rejected: discovering routes by crawling the page.* The dashboard builds its requests in code, not in links, so there is nothing to crawl.
+
+---
+
+## D-284 — The dashboard says, in words, when a view is a snapshot and how old it is
+
+**2026-10-02 · accepted** · *`dashboard/src/{snapshot,api,health,useStations,useStationDetail,useStationCapture,SnapshotNote,App,StationDetail}.ts(x)`, `app.css`; `dashboard/src/snapshot.test.ts`; Stage 33; `EVALUATION.md` §12.2*
+
+§12.2 fails a dashboard that "shows figures that look live when they are not", and calls that the serious failure. The front now serves kept copies (D-282) and keeps one of every view (D-283). The dashboard has to tell them apart from the platform's answers, and say so on the page.
+
+**Each view says it for itself.** Every refresh runs its requests through a watch, which reads `Meridian-Cache` and `Date` from each answer. A view built from any `STALE` answer is a snapshot, as old as the oldest copy it used. The station list and map, and the station panel, each show a line when they are one:
+
+> **Not live.** The platform is not answering. This panel shows a snapshot taken 15:08 UTC, 53 s ago.
+
+- **The line is in words,** with a ruled margin beside the view, not a colour alone. It has to survive a screenshot, a screen reader and a greyscale print, as the simulated badge does (rule 5). It has its own colour token, `--snapshot`, because "stale" already means a station's liveness.
+- **The panel takes the older of its two sources:** the detail refresh, every thirty seconds, and the capture rate, every five minutes.
+- **The station list's liveness is computed as of the snapshot,** not as of now, and the line says so: "Liveness and heartbeat ages are as of then." A station that was online in the copy is not called offline by the clock of a reader who cannot see the platform.
+- **A watch lives for one refresh.** The first refresh after the platform answers again clears the line, and a copy from the outage is never reported after it.
+
+**Nothing waits on a dead upstream.** Every request has a twenty-second timeout, joined to the view's own abort signal. The front gives up on the api in two seconds (D-282), so this is the bound for the case where the front itself has gone.
+
+**A view the front kept no copy of says that, plainly.** The front answers it with its own `504` page, which is not JSON. `getJson` now reports it as "the platform did not answer (HTTP 504), and no copy of it was kept", not as a JSON syntax error. `/healthz` is never kept, so the header reads "the platform did not answer". A platform refusal in D-084's envelope is still reported in the platform's words.
+
+**Seen in a browser,** on a local stack through the front, with three simulated stations:
+- with the api stopped, both views carried the line and the margin, and the header said the platform did not answer;
+- with the api started again, the next refresh cleared both, and the stations read `Stale`, which they then were, having missed heartbeats during the outage.
+
+*Rejected: one banner for the whole page.* Views refresh on their own timers. A single banner would be either cleared by the first live answer while another view still showed a copy, or kept up by a copy no longer on screen.
+
+*Rejected: computing ages in a snapshot from now.* A station's liveness is the platform's judgement at the moment it answered. Recomputing it on the reader's clock would invent a judgement the platform never made.
+
+---
+
+## D-285 — A tick's requests are done by the next capture edge, and an edge the loop reached is met at once
+
+**2026-10-02 · accepted** · *`client/src/meridian_client/{time_limit,transport,station_loop,capture_schedule,capture_sequence}.py`; `tests/msp_conformance/test_independence_drill.py`; `tests/unit/{test_transport_retries,test_transport_time_limit_socket,test_station_loop,test_capture_schedule}.py`; Stage 33; `EVALUATION.md` §12.1*
+
+§12.1 fails a station if "the client blocks on the network at any point during the pass". The outage tests built so far point the transport at a closed port, which refuses at once, and those passed. **A dropped tunnel or a dead route refuses nothing.** Every request waits out its whole timeout:
+- five seconds to connect, or ten to read;
+- three attempts at a thirty-second interval (D-030), with backoff between them.
+
+The station loop is one thread (D-121), so while a heartbeat waits, no capture starts or stops.
+
+**Measured, by the drill this stage adds.** The drill runs the real loop, the real transport with the retry policy `station_wiring` gives it, the application and the database. A blackhole stands in for the route, and costs each request exactly its timeout on a virtual clock. The pass's window was swept across one heartbeat interval at five offsets, for a dropped route and for a half-open one, with backoff at its longest. **Seven of the ten met an edge late, by 17 to 56 seconds.** Two faults compounded:
+
+1. **A heartbeat in the hole held the loop past the edge.** Nothing bounded a tick's requests except the retry budget's fit inside one interval, and that fit is thirty seconds wide.
+2. **An edge the loop ran past was then slept over.** `next_edge` looks strictly forward, so after the hang the loop found no edge to wake for, and waited for the next heartbeat. A tick stamped exactly on a closing edge did the same: the capture ends only once its window has closed, so that tick did not end it, and the edge was neither passed nor to come. That second case was found by the drill's exact clock. On a real clock it needs a heartbeat to land on the closing instant, which is rare but not impossible.
+
+**The fix:**
+- **Each tick's requests are bounded to just past the next capture edge** (`StationLoop._network_time_limit`). The bound is the edge plus `EDGE_MARGIN_S`, where the loop aims its own wake, and includes an edge at the tick's own instant. With nothing held, there is no bound beyond the retry budget.
+- **The transport keeps to the bound** (`MspTransport.time_limit`, in `time_limit.py`). Each attempt's connect and read timeouts are cut to the time left, a backoff is cut short, and an attempt with nothing left is not made. It then raises `DeadlineReached`, an `httpx` timeout, so the loop treats it as an unreachable platform, as it should. **A healthy platform answers in milliseconds,** so the bound cuts only a request that was going to be late.
+- **The limit is a duration, turned into an instant on the transport's own clock.** The first version passed an instant from the loop's clock to the transport's. The drill, which substitutes the loop's clock, then saw every request abandoned before it was sent, and passed for the wrong reason. It now asserts that the station kept sending throughout the outage.
+- **An edge reached during a tick is met at once.** Before each tick the loop notes the next edge, at or after the tick's instant. If the tick ends at or past it, the loop waits out the margin and ticks again, rather than sleeping to the heartbeat grid.
+
+**After the fix, all ten alignments meet both edges within a second**, and the same drill against the code before it fails seven. A real loopback socket that accepts and never answers holds a three-attempt heartbeat under a one-second limit for under two seconds.
+
+**What the drill then checks, as §12.1 asks:**
+- the result was queued during the outage and nothing reached the platform;
+- on reconnection, one tick resent it, and the platform holds one observation at revision 1;
+- replaying the same body returns the same `observation_id` and writes nothing (D-027, D-015).
+
+*Rejected: a thread for the network.* It would make the loop's one-thread property false (D-121), and with it the reasoning every earlier decision about ordering — queue before heartbeat, execution before the body — rests on.
+
+*Rejected: shorter timeouts everywhere.* A slow but working platform would then fail on every tick, not only near an edge.
+
+---
+
+## D-286 — A backup counts its rows in the dump's own snapshot, and both drills are tools a deployment can run
+
+**2026-10-03 · accepted** · *`deploy/tools/{backup,restore,restore_drill,compose_db,front_drill,front_warm}.py`; `.github/workflows/ci.yml` (the image job's §12.2 step, `restore-elsewhere`); `tests/unit/{test_backup_tools,test_front_drill,test_front_warm}.py`; `OPERATIONS.md` § Backup and restore, § Independence drills; Stage 33. Amends D-115.*
+
+Stage 33's gate asks that "a restore is proven on another machine". D-115's manifest could not prove it. It held the dump's sha256, the TimescaleDB version and the migration, which say the file is intact and may be restored here. **Nothing in it said what the database held.** CI's round trip compared six tables before and after on the machine that had both, which is exactly what another machine does not have.
+
+**The manifest now holds every table's row count, taken in the snapshot the dump is taken from.**
+- `backup.py` opens a session first, in a `repeatable read` transaction that exports its snapshot and counts every table in `public`, hypertables through their parents.
+- `pg_dump --snapshot=<that one>` then dumps exactly the rows that were counted, and the session is closed when the dump is done.
+- The API keeps running throughout, as before. Measured on a live stack with three simulated stations heartbeating: the manifest counted 76 rows in 28 tables, 45 of them heartbeats, and the dump restored into a second, empty project matched every table. Tried by hand first: a snapshot exported at 9 heartbeats was still dumpable 35 seconds later, when the table held 12.
+- The snapshot's name comes from the database and goes into a shell command, so it is matched against the form `pg_export_snapshot()` returns before it is used, and refused otherwise.
+
+**`restore.py` checks the counts**, straight after `pg_restore` and before `migrate`, with `api` and `jobs` stopped, so what it counts is what the dump held. A table with other rows is named, with both figures, and the restore stops there with `api` and `jobs` still stopped, as after any failed step. The weekly restore drill checks them too.
+
+**An older manifest still restores.** `row_counts` is absent from a manifest written before this, which reads as "not counted". The restore goes ahead and says the rows were not checked. Refusing every dump taken before the upgrade would turn an improvement into an outage on the day it mattered.
+
+**CI restores on a second runner** (`restore-elsewhere`). The image job uploads its dump and manifest; a job on another runner, given only those, brings up an empty database from the compose file and runs `restore.py`. It checks that a dump altered on the way is refused before anything is touched, that the real one restores to the rows its manifest counted, and that the platform starts on it and serves the station that was backed up. No cloud host is involved (D-130): a second runner is the second machine.
+
+**§12.2 is a tool, `front_drill.py`, and CI runs it.** It warms the front, stops the api, asks again, starts the api and asks once more, and judges each answer:
+- with the api stopped, every view is `200`, `STALE`, dated before the stop, within five seconds;
+- a view nobody warmed fails within five seconds, and an MSP route is never answered from a copy;
+- with the api back, nothing is `STALE`.
+
+It asks from inside the compose network, through the warmer's new `--json` mode, because the public deployment gives the front no host port (D-206). So the same command runs on a laptop, in CI and on the Pi. Each judgement is a pure function with a unit test, one for each way §12.2 says the drill fails. Run against a front with `proxy_cache_use_stale` removed, it fails on the first view, as it should.
+
+*Rejected: counting rows after the dump.* With the API running, the count and the dump would be of two different moments, and a restore would fail its check on a healthy backup.
+
+*Rejected: hashing each table's contents.* It proves more, and costs a full read of every hypertable on a Pi on every nightly backup. The dump's own sha256 already says the file is the one that was written; the counts say what was in it.
+
+*Rejected: stopping the api for the backup.* A station's heartbeat would fail for the length of a dump, every night, to save one transaction.
+
+---
+
+## D-287 — The station tier has its own backup, which never holds the station's identity and never replaces what a station holds
+
+**2026-10-03 · accepted** · *`deploy/tools/station_archive.py`; `tests/unit/test_station_archive.py`; `OPERATIONS.md` § Custody and retention, *Archiving a station*; Stage 33*
+
+D-281's table says what a station alone holds: a report the platform has not acknowledged, and every decoded product, of which the platform has a hash and a size. `backup.py` dumps the platform's database and takes none of it. Stage 33 asks that backup and restore reach "whichever tiers exist", and until now the station tier's answer was "copy the directory yourself".
+
+**`station_archive.py create` writes one tar file and a manifest beside it**: the archive's sha256, and each file's path, size and sha256.
+- **In:** `held.json`, `outbox/` with `outbox/failed/`, each capture folder's manifest, decoder output and logs, and `products/`.
+- **Never in: `credentials.json` and `registration_key`.** An archive is made to be copied to other disks, and those two are the station's identity.
+- **Out unless asked for: recordings.** A pass is about a gigabyte, and the station deletes it once its result is handed over (D-123). The capture's manifest names its recording, and that is the file left out; `--recordings` takes it.
+- **Everything left out is listed** when the archive is made, in the output and in the manifest, as `backup.py` names the raw store it did not take (D-141).
+
+**So an archive restores a station's record, not the station.** What that means is said in the runbook, because it decides what an operator must keep besides:
+- a station that kept its `registration_key` gets a new token on the same `station_id` through a bound invite (D-034), and then delivers the reports the archive put back;
+- a station that lost both is a new station to the platform. Its restored reports name assignments issued to the old one, are refused as `not_owner`, and are set aside in `outbox/failed/`. The products and the capture records are still its to keep.
+
+Whoever wants a lost disk not to cost the queued reports keeps the `registration_key` somewhere an archive is not. That is a secret kept deliberately, by a person, which is the opposite of one carried along in every archive.
+
+**`verify` checks the bytes, not only the file.** The archive's sha256, then every member's size and sha256 against its entry; a member the manifest does not name, or an entry with no member, is refused. A manifest path that is absolute, climbs with `..`, falls outside the four things a state holds, or names the identity files is refused before anything is written.
+
+**`restore` verifies first, and never replaces a file.** A station is authoritative for its own receptions (D-129), and an archive is older than the station by definition. A file that already exists is left alone and listed; only what is missing is written, each file under a temporary name and renamed.
+
+**The station may be running.** Its files are written whole and renamed into place (D-068), so nothing read here is half a file. A report delivered and removed while the archive is made is listed as gone, not treated as an error.
+
+**The tool names the state's layout itself**, because a host script cannot import the client. `test_the_tool_knows_every_path_a_station_keeps` compares it with `StationPaths.under`, so a path added to a station's state is archived, or refused, on purpose.
+
+*Rejected: `tar` and a note in the runbook.* It takes the credentials, takes a gigabyte recording per pass, and a restore with it overwrites a newer outbox with an older one.
+
+*Rejected: sending products to the platform.* That is product transfer, which MSP does not define (D-029), and it would make reception depend on an upload.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -5888,7 +6109,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 
 | | Question | Blocks |
 |---|---|---|
-| **D-135** | Which cloud host and tier, on whose account, what happens when the credit lapses, and how long a station retains an unacknowledged reception | Stage 33 |
+| **D-135** | Which cloud host and tier, on whose account, and what happens when the credit lapses. *How long a station retains an unacknowledged reception is proposed by D-281: thirty days, the platform's acceptance window* | Nothing — no gate may need a cloud host (D-130) |
 | **D-136** | Whether any ingested source's terms permit its records to be republished inside the evidence dataset, which decides that dataset's own licence | Stage 30's licence entry |
 | **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Publishing anything about an area. D-227 holds its place in the meantime: operator-only, unpublished |
 
@@ -6198,6 +6419,22 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the amended entries | D-198, whose run now seals itself and judges its resources; D-240, whose long-run row now needs a sealed, passed record |
 | — the Pi's run, prepared | `deploy/tools/long_run_preflight.py` (`--preflight`); `OPERATIONS.md` § The 72-hour acceptance run on the Pi; `SCALE-AND-FAULTS.md` § The long run, the Stage 24 rehearsal; `docs/ACCEPTANCE.md`; `SOFTWARE-IMPLEMENTATION-ROADMAP.md` "Where the build has got to" |
 | — D-253 kept, found by CI | `meridian_sim/executor.py`: a silence is never named against a pass that aborts on its own, since the abort, not the silence, decided it. It was named at the pass's start whatever followed, and showed only when a randomly minted assignment id drew an abort. `tests/unit/test_simulator_sky_ground_truth.py` |
+
+**Landed 2026-10-03**, building Stage 33's deployment and data custody.
+
+| Decision | Applied to |
+|---|---|
+| D-280 Stage 33 ahead of Stage 30 | `SOFTWARE-IMPLEMENTATION-ROADMAP.md` "Where the build has got to" |
+| D-281 custody and the station's thirty days | `OPERATIONS.md` § Custody and retention; `ARCHITECTURE.md` Deployment; the D-135 row under Open |
+| D-282 the front | `deploy/front/{nginx,snapshot}.conf`; `deploy/{docker-compose.yml,docker-compose.public.yml,.env.example}`; `OPERATIONS.md` § The front; `ARCHITECTURE.md` Deployment; `tests/unit/{test_front_config,test_compose_hardening}.py` |
+| D-283 warming every view | `deploy/front/snapshot-routes.txt`; `deploy/tools/front_warm.py`; `deploy/docker-compose.yml` (`front-warm`); `dashboard/src/snapshotRoutes.test.ts`; `tests/unit/test_front_warm.py` |
+| D-284 the dashboard says when it is not live | `dashboard/src/{snapshot,api,health,useStations,useStationDetail,useStationCapture,SnapshotNote,App,StationDetail}.ts(x)`, `app.css`; `dashboard/src/snapshot.test.ts` |
+| D-285 a tick's requests done by its next edge | `client/src/meridian_client/{time_limit,transport,station_loop,capture_schedule,capture_sequence}.py`; `tests/unit/{test_transport_retries,test_transport_time_limit_socket,test_station_loop,test_capture_schedule}.py` |
+| D-286 rows counted in the dump's snapshot; the drills as tools | `deploy/tools/{backup,restore,restore_drill,compose_db,front_drill,front_warm}.py`; `.github/workflows/ci.yml` (the image job's §12.2 step and artifact, `restore-elsewhere`); `OPERATIONS.md` § Backup and restore, § Independence drills; `tests/unit/{test_backup_tools,test_front_drill}.py` |
+| D-287 the station tier's backup | `deploy/tools/station_archive.py`; `OPERATIONS.md` § Custody and retention, *Archiving a station*; `tests/unit/test_station_archive.py` |
+| — the completion gate | `tests/msp_conformance/test_independence_drill.py` (§12.1); `ci.yml › image › The dashboard serves its last snapshot with the api stopped` (§12.2); `ci.yml › restore-elsewhere` (the restore on another machine) |
+| — the amended entries | D-115, whose manifest now counts rows and whose restore checks them; D-135, whose station half D-281 answers |
+| — the documents | `THREAT-MODEL.md` (B3, P-12 to P-14, T-5, T-6, O-7, O-8, D-4); `EVALUATION.md` §12; `GLOSSARY.md`; `README.md`; `CLAUDE.md` (the layout's `deploy/` line) |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

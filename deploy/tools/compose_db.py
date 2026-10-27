@@ -44,6 +44,21 @@ FACTS_SQL = (
 Reading `alembic_version` fails on a database no migration has touched, which is
 the right answer: there is nothing there worth backing up."""
 
+COUNTS_SQL = """
+select table_name,
+       (xpath('/row/c/text()', query_to_xml(
+           format('select count(*) as c from public.%I', table_name),
+           false, true, '')))[1]::text
+from information_schema.tables
+where table_schema = 'public' and table_type = 'BASE TABLE'
+order by table_name;
+"""
+"""One line per table, `name|rows`, counted exactly, in one query.
+
+A hypertable is counted through its parent, chunks and all. backup.py runs it
+inside the snapshot the dump is taken from (D-286), and restore.py and the
+restore drill run it on what they restored."""
+
 AVAILABLE_TIMESCALEDB_SQL = (
     "select default_version from pg_available_extensions where name = 'timescaledb';"
 )
@@ -153,6 +168,11 @@ class Manifest:
     postgres_version: str
     created_at: str
     format: str = MANIFEST_FORMAT
+    row_counts: dict[str, int] | None = None
+    """Rows in every table, in the snapshot the dump was taken from (D-286).
+
+    ``None`` for a manifest written before this field existed. Such a dump still
+    restores; its rows cannot be checked against anything."""
 
 
 def parse_facts(output: str) -> tuple[str, str, str]:
@@ -170,6 +190,40 @@ def parse_facts(output: str) -> tuple[str, str, str]:
         )
     timescaledb, revision, server = values
     return timescaledb, revision, server
+
+
+def parse_counts(output: str) -> dict[str, int]:
+    """`COUNTS_SQL`'s lines as a mapping from table to rows."""
+    counts = {}
+    for line in output.splitlines():
+        name, _, rows = line.partition("|")
+        if name:
+            counts[name] = int(rows)
+    return counts
+
+
+def judge_counts(manifest: Manifest, restored: dict[str, int]) -> str | None:
+    """Why the restored rows are not the ones backed up, or ``None`` if they are.
+
+    Args:
+        manifest: The dump's manifest.
+        restored: `COUNTS_SQL` on the restored database, before anything else
+            has written to it.
+
+    Returns:
+        ``None`` as well for a manifest with no counts: there is nothing to
+        compare with, and the caller says so.
+    """
+    expected = manifest.row_counts
+    if expected is None or restored == expected:
+        return None
+    differing = [
+        f"{table}: {restored.get(table, 'missing')} restored, "
+        f"{expected.get(table, 'not')} backed up"
+        for table in sorted(expected.keys() | restored.keys())
+        if restored.get(table) != expected.get(table)
+    ]
+    return "the restored rows are not the rows backed up — " + "; ".join(differing)
 
 
 def manifest_path(dump: Path) -> Path:
@@ -202,10 +256,13 @@ def read_manifest(path: Path) -> Manifest:
     if not isinstance(document, dict) or document.get("format") != MANIFEST_FORMAT:
         raise ToolError(f"manifest {path} is not a {MANIFEST_FORMAT} manifest")
     names = [field.name for field in fields(Manifest)]
-    missing_names = [name for name in names if name not in document]
+    # A manifest from before D-286 has no row counts, and is still a manifest.
+    missing_names = [
+        name for name in names if name not in document and name != "row_counts"
+    ]
     if missing_names:
         raise ToolError(f"manifest {path} lacks {', '.join(missing_names)}")
-    return Manifest(**{name: document[name] for name in names})
+    return Manifest(**{name: document[name] for name in names if name in document})
 
 
 def sha256_of(path: Path) -> str:

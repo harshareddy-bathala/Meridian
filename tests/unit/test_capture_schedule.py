@@ -196,6 +196,14 @@ def test_an_edge_at_now_has_already_happened() -> None:
     assert next_edge(windows, NOW) == at(10)
 
 
+def test_an_edge_at_now_is_still_owed_when_asked_inclusively() -> None:
+    """For the loop, which must know a tick stamped on an edge did not act on it."""
+    windows = {"as_a": CaptureWindow(at(-10), NOW)}
+
+    assert next_edge(windows, NOW) is None
+    assert next_edge(windows, NOW, inclusive=True) == NOW
+
+
 def test_there_is_no_next_edge_when_every_capture_has_closed() -> None:
     windows = {"as_a": CaptureWindow(at(-20), at(-9))}
 

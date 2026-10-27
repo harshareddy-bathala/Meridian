@@ -35,12 +35,15 @@ from pathlib import Path
 
 from compose_db import (
     AVAILABLE_TIMESCALEDB_SQL,
+    COUNTS_SQL,
     Compose,
     Manifest,
     ToolError,
     add_compose_arguments,
     compose_from,
+    judge_counts,
     manifest_path,
+    parse_counts,
     read_manifest,
     run_sql,
     sha256_of,
@@ -59,17 +62,6 @@ RESTORE_SCRIPT = (
     f'pg_restore -U "$POSTGRES_USER" -d {DRILL_DATABASE} --exit-on-error --no-acl'
 )
 REVISION_SQL = "select version_num from alembic_version;"
-COUNTS_SQL = """
-select table_name,
-       (xpath('/row/c/text()', query_to_xml(
-           format('select count(*) as c from public.%I', table_name),
-           false, true, '')))[1]::text
-from information_schema.tables
-where table_schema = 'public' and table_type = 'BASE TABLE'
-order by table_name;
-"""
-"""One line per table, `name|rows`, counted exactly, in one query."""
-
 DUMP_NAME = re.compile(r"^meridian-.*\.dump$")
 
 
@@ -81,16 +73,6 @@ class DrillReport:
     row_counts: dict[str, int]
 
 
-def parse_counts(output: str) -> dict[str, int]:
-    """`COUNTS_SQL`'s lines as a mapping from table to rows."""
-    counts = {}
-    for line in output.splitlines():
-        name, _, rows = line.partition("|")
-        if name:
-            counts[name] = int(rows)
-    return counts
-
-
 def judge_drill(manifest: Manifest, report: DrillReport) -> str | None:
     """Why the restored copy is not the backup it claims to be, or ``None``."""
     if report.revision != manifest.alembic_revision:
@@ -100,7 +82,7 @@ def judge_drill(manifest: Manifest, report: DrillReport) -> str | None:
         )
     if "alembic_version" not in report.row_counts or len(report.row_counts) < 2:
         return f"the restored copy holds only {sorted(report.row_counts)}"
-    return None
+    return judge_counts(manifest, report.row_counts)
 
 
 def latest_dump(directory: Path) -> Path:

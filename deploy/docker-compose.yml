@@ -16,7 +16,7 @@
 #   --profile metrics   Prometheus, Alertmanager and Grafana
 #   --profile sim       a simulated station
 #
-# The default profile is db, migrate, api and jobs. Two override files add to it:
+# The default profile is db, migrate, api, front, front-warm and jobs. Two override files add to it:
 #
 #   -f docker-compose.secrets.yml   secrets read from files (D-201)
 #   -f docker-compose.public.yml    the Cloudflare tunnel, and no API port on the
@@ -65,7 +65,7 @@ x-platform: &platform
 services:
   db:
     <<: *hardening
-    image: timescale/timescaledb:2.29.0-pg16@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
+    image: timescale/timescaledb:2.30.2-pg16@sha256:6f139d56042989bd35f50ba5986e492cd32e35cc6778c50be2659add298dc09f
     # The image's own postgres user (Alpine's 70), from the start. Running the
     # entrypoint as root needs CHOWN, SETUID and SETGID to hand the data
     # directory over and step down; starting as the owner needs none, and a
@@ -187,6 +187,81 @@ services:
       retries: 6
       start_period: 20s
 
+  front:
+    # What a visitor, a station and the tunnel reach first (D-282). It forwards
+    # everything to the api, and keeps the last good copy of the dashboard and
+    # the public read API, which it serves, marked STALE, only when the api does
+    # not answer (EVALUATION.md §12.2). MSP, /metrics and /healthz are forwarded
+    # and never kept. deploy/front/nginx.conf says the rest.
+    <<: *hardening
+    image: nginxinc/nginx-unprivileged:1.30.5-alpine@sha256:ed04ec1ff34502c339ee5c3ae3f855442398edc1d05591e2b98981dcbbd20b1e
+    restart: unless-stopped
+    logging: *logging
+    # Straight to nginx: the image's entrypoint scripts rewrite files under
+    # /etc/nginx, which is read-only here, and this configuration needs none.
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    # Started, not healthy: the front must come up when the api cannot, or it
+    # could not serve the copy it exists to keep. It finds the api by name at
+    # run time (`resolve`), whenever the api appears.
+    depends_on:
+      api:
+        condition: service_started
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./front/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./front/snapshot.conf:/etc/nginx/meridian/snapshot.conf:ro
+      # The last good copies, which a restart of the front, or of the host, must
+      # not lose: a Pi rebooted during an outage still has something to show.
+      - front-cache:/var/cache/nginx
+    # The dashboard's address on a laptop and in CI. docker-compose.public.yml
+    # removes it, as it removes the api's (D-206).
+    ports:
+      - "${FRONT_PORT:-8080}:8080"
+    healthcheck:
+      # nginx serving, not the api answering: a front that is up while the api
+      # is down is the case it is for.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/front-ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
+  front-warm:
+    # Asks the front, every FRONT_WARM_INTERVAL_S, for every view the dashboard
+    # can show, so a visitor arriving during an outage finds a copy of each, not
+    # only of the views someone opened before it (D-283). Inside this network,
+    # because the public deployment gives the front no host port. The tool is
+    # standard library only; the platform image is used because it is already
+    # here, and the tool reaches nothing but the front.
+    <<: *platform
+    restart: unless-stopped
+    depends_on:
+      front:
+        condition: service_healthy
+    volumes:
+      - ./tools/front_warm.py:/warm/tools/front_warm.py:ro
+      - ./front/snapshot-routes.txt:/warm/front/snapshot-routes.txt:ro
+    command:
+      - python
+      - /warm/tools/front_warm.py
+      - --base
+      - http://front:8080
+      - --every
+      - ${FRONT_WARM_INTERVAL_S:-300}
+      - --status-file
+      - /tmp/front-warm.json
+    # Healthy while rounds keep finishing, stale copies or not: whether the api
+    # answered is the api's healthcheck's question, not this one's.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/front-warm.json') < 3 * float(os.environ.get('FRONT_WARM_INTERVAL_S', '300')) else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 120s
+    environment:
+      FRONT_WARM_INTERVAL_S: ${FRONT_WARM_INTERVAL_S:-300}
+
   jobs:
     # Pass generation, then scheduling, every SCHEDULE_INTERVAL_S over the next
     # SCHEDULE_HORIZON_S (D-110). In the default profile because a deployment
@@ -239,7 +314,7 @@ services:
   prometheus:
     <<: *hardening
     profiles: ["metrics"]
-    image: prom/prometheus:v3.13.2@sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69
+    image: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
     restart: unless-stopped
     logging: *logging
     volumes:
@@ -277,7 +352,7 @@ services:
     # read in Grafana, and the UI is one `docker compose exec` away.
     <<: *hardening
     profiles: ["metrics"]
-    image: prom/alertmanager:v0.34.0@sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d
+    image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
     restart: unless-stopped
     logging: *logging
     command:
@@ -300,7 +375,7 @@ services:
   grafana:
     <<: *hardening
     profiles: ["metrics"]
-    image: grafana/grafana:13.1.1@sha256:7cb8c64c4d57a57e734073f3cc94620adb24a0acb929bd80ba9f14017e3a975b
+    image: grafana/grafana:13.2.3@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
     restart: unless-stopped
     logging: *logging
     # Grafana's scratch space, and the log directory it creates at start even
@@ -407,6 +482,7 @@ services:
 
 volumes:
   db-data:
+  front-cache:
   prometheus-data:
   alertmanager-data:
   grafana-data:

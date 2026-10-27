@@ -1,0 +1,21 @@
+# Every request the dashboard makes that the front keeps (D-282, D-283).
+#
+# deploy/tools/front_warm.py requests each of these through the front, so a
+# visitor who arrives during an outage finds a copy of every view, not only the
+# ones someone happened to open beforehand. dashboard/src/snapshotRoutes.test.ts
+# checks that the dashboard's own fetch functions build exactly these, because
+# the front keys a copy on the exact path and query: a route that drifts here
+# would be warmed under a key no visitor ever asks for.
+#
+# One route a line. `{station}` is every station the directory lists. The
+# directory itself is followed through `next_cursor`, as the dashboard does.
+# The page and the assets it names are warmed too, and are not listed here.
+
+/api/v1/stations?limit=200
+/api/v1/reliability
+/api/v1/assignments?limit=10
+/api/v1/stations/{station}/heartbeats?limit=1
+/api/v1/assignments?limit=10&station_id={station}
+/api/v1/stations/{station}/profiles
+/api/v1/stations/{station}/uptime?hours=48
+/api/v1/observations?limit=10&station_id={station}

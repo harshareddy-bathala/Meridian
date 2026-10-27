@@ -20,6 +20,7 @@ from __future__ import annotations
 import random
 import time
 from collections.abc import Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -30,9 +31,11 @@ from meridian_client.clock import (
     estimate_clock_offset,
     parse_server_time,
 )
+from meridian_client.time_limit import DeadlineReached, TimeLimit
 
 __all__ = [
     "MSP_VERSION",
+    "DeadlineReached",
     "MspTransport",
     "ProtocolError",
     "RetryPolicy",
@@ -161,6 +164,7 @@ class MspTransport:
     ) -> None:
         """Open a client against ``base_url``."""
         self._retry = retry or RetryPolicy()
+        self._limit = TimeLimit()
         headers = {"MSP-Version": MSP_VERSION}
         if bearer_token is not None:
             # MSP §3 fixes the form: one space, and the scheme spelled `Bearer`.
@@ -171,6 +175,16 @@ class MspTransport:
             timeout=httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
             transport=http_transport,
         )
+
+    def time_limit(self, seconds: float | None) -> AbstractContextManager[None]:
+        """Finish every request made inside the block within ``seconds``, or give up.
+
+        Each attempt's timeouts are cut to the time left, a backoff is cut
+        short, and an attempt with nothing left is not made. The station loop
+        uses it to be free by its next capture edge (D-285). ``None`` adds no
+        bound.
+        """
+        return self._limit.within(seconds)
 
     def close(self) -> None:
         """Release the underlying connection pool."""
@@ -291,8 +305,13 @@ class MspTransport:
         """One request, retried under the policy, returning the first success."""
         last_error: Exception | None = None
         for attempt in range(1, self._retry.attempts + 1):
+            timeout = self._limit.attempt_timeout(
+                READ_TIMEOUT_S, CONNECT_TIMEOUT_S, last_error
+            )
             try:
-                response = self._client.request(method, path, json=body)
+                response = self._client.request(
+                    method, path, json=body, timeout=timeout
+                )
             except httpx.HTTPError as exc:
                 last_error = exc
             else:
@@ -306,7 +325,7 @@ class MspTransport:
                 # platform fault, which are different things to do next.
                 last_error = _msp_error(response)
             if attempt < self._retry.attempts:
-                _sleep(self._retry.delay_before(attempt))
+                _sleep(min(self._retry.delay_before(attempt), self._limit.remaining()))
         raise last_error if last_error else RuntimeError("unreachable")
 
 

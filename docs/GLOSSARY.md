@@ -174,6 +174,16 @@ What the platform reads from outside, and where each record lives — modules 18
 
 **Independence drill** — a run, not an assertion, of the claim that Meridian works with the outside world removed. Two of them: the station receives and decodes with the platform unreachable, and the dashboard serves its last snapshot — labelled with its age — with the network down.
 
+**Front** — nginx, before the api, on the public path. It forwards every request, and keeps the last good copy of the dashboard and the public read API, which it serves only when the api does not answer. Not Cloudflare's edge, which is in front of it, and not a cache in the usual sense: a copy is never served while the platform can answer for itself.
+
+**Snapshot** — in the dashboard, a view drawn from the front's kept copy rather than the platform's answer. Always labelled "Not live" with the time the platform made it and its age. Not a **dataset snapshot**, which is an export of the database for evaluation.
+
+**Warming** — asking the front for every view the dashboard can show, on a timer, so that a copy of each exists before an outage and not only of the views somebody opened.
+
+**Custody** — who holds each record, for how long, and what loses it. One table in `OPERATIONS.md`. A station's decoded products are in its custody alone: the platform holds their hashes.
+
+**Station archive** — the station tier's backup: its queued reports, capture records and products in one file with a manifest. It never holds the station's identity, so it restores a station's record, not the station.
+
 ---
 
 ## Conventional short names in code

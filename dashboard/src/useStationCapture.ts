@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { fetchStationCapture, type StationCapture } from "./reliability";
+import { type Snapshot, watchSnapshots } from "./snapshot";
 
 export const CAPTURE_REFRESH_MS = 300_000;
 /**
@@ -10,11 +11,20 @@ export const CAPTURE_REFRESH_MS = 300_000;
  * (D-182). Asking every thirty seconds would recount it for nothing.
  */
 
-/** One station's capture rate: undefined until read, null if nothing is counted. */
-export function useStationCapture(stationId: string | null): StationCapture | null | undefined {
-  const [state, setState] = useState<{ key: string | null; value: StationCapture | null | undefined }>({
+export interface CaptureState {
+  /** Undefined until read, null if nothing is counted. */
+  capture: StationCapture | null | undefined;
+  /** Set when the figure is the front's kept copy rather than the platform's answer. */
+  snapshot: Snapshot | null;
+}
+
+const UNREAD: CaptureState = { capture: undefined, snapshot: null };
+
+/** One station's capture rate, and whether it is live. */
+export function useStationCapture(stationId: string | null): CaptureState {
+  const [state, setState] = useState<{ key: string | null; value: CaptureState }>({
     key: stationId,
-    value: undefined,
+    value: UNREAD,
   });
 
   useEffect(() => {
@@ -22,13 +32,13 @@ export function useStationCapture(stationId: string | null): StationCapture | nu
       return undefined;
     }
     const controller = new AbortController();
-    const fetcher = (url: string, init: { signal: AbortSignal }) => fetch(url, init);
     const refresh = () => {
+      const watch = watchSnapshots();
       // A deployment with no reliability settings answers 503; the figure is
       // then left out, and nothing else on the panel waits for it.
-      fetchStationCapture(fetcher, stationId, controller.signal)
+      fetchStationCapture(watch.fetcher, stationId, controller.signal)
         .then((capture) => {
-          setState({ key: stationId, value: capture });
+          setState({ key: stationId, value: { capture, snapshot: watch.snapshot() } });
         })
         .catch(() => undefined);
     };
@@ -41,5 +51,5 @@ export function useStationCapture(stationId: string | null): StationCapture | nu
   }, [stationId]);
 
   // A panel must never show one station's capture under another's name.
-  return state.key === stationId ? state.value : undefined;
+  return state.key === stationId ? state.value : UNREAD;
 }

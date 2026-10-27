@@ -76,6 +76,29 @@ flowchart TD
   - the CI gate's fleet is too small to show those three, and measures no figure;
   - every threshold was set with the simulated fault effects in view, as D-270 lists.
 
+**Stage 33's software is built** (2026-10-03), ahead of Stage 30 (D-280) and beside Stage 27, whose modules it does not touch. Its decisions are D-280 through D-287, `docs/OPERATIONS.md` § Custody and retention, § The front and § Independence drills are its runbook, and it added no migration.
+- **The completion gate passes, as three checks.** *Both independence drills pass, a station's reception survives a full outage and reconciles to exactly one stored observation, and a restore is proven on another machine — all of it without a cloud host being reachable.*
+  - **§12.1:** `tests/msp_conformance/test_independence_drill.py` blackholes the station's route across a whole pass, at ten alignments. Both capture edges are met within a second, the result is queued, and after reconnection the platform holds one observation at revision 1; a replay writes nothing.
+  - **§12.2:** `deploy/tools/front_drill.py`, which CI's image job runs, stops the api of a real stack. Every view comes back from its copy, marked `STALE` and dated before the stop, within five seconds; nothing is a copy once the api is back.
+  - **The restore:** CI's `restore-elsewhere` job restores the image job's dump on a second runner, given only the dump and its manifest, and checks every table's rows against the manifest's counts.
+- **The front** (D-282): nginx before the api. It forwards everything and keeps the last good copy of the dashboard and the public read API, served only when the api does not answer. `front-warm` asks for every view every five minutes, from one list the dashboard's own requests are tested against (D-283).
+- **The dashboard says when it is not live** (D-284): each view drawn from a copy carries the time the platform made it and its age, and clears it on the first refresh after the platform answers.
+- **Custody is one table** (D-281), and the station tier has a backup of its own, `station_archive.py`, which never holds the station's identity (D-287).
+- **A backup counts its rows in the dump's own snapshot** (D-286), so a restore can be checked on a machine that never saw the source.
+- **Found on the way, each fixed** (D-285):
+  - a heartbeat waiting on a dead route held the single-threaded loop off a capture edge, by 17 to 56 seconds in the drill. A tick's requests are now done by its next edge;
+  - an edge the loop reached, or that fell on a tick's own instant, was slept over until the next heartbeat.
+- **Owed, not done:**
+  - the team's confirmation of D-281, that thirty days is the station's figure; the cloud-host half of D-135 stays open and blocks nothing (D-130);
+  - **the tunnel's origin set to `http://front:8080`** in Cloudflare, on the public deployment. Until then the dashboard bypasses the front;
+  - §12.1 run on station 001 itself, by the procedure in `OPERATIONS.md`, once the station exists;
+  - Stage 30's row in the custody table.
+- **Known limits:**
+  - a view outside the warmed list has a copy only if somebody opened it;
+  - an archive restores a station's record, not the station: without its `registration_key`, the restored reports are refused;
+  - on a laptop, every browser behind the front shares one address in the api's rate limits. The public deployment keys on Cloudflare's header as before;
+  - `station_archive.py` is tested against the client's layout, and has not yet been run on a real station's state.
+
 **Stage 24's software is built** (2026-10-01): everything but the run it ends with. **The seventy-two hour run is next, on the Pi**, by an operator, from `docs/OPERATIONS.md` § The 72-hour acceptance run on the Pi. Stage 26 merged first; Stages 27 to 30 are the rest of the post-reception path, and Stage 27 waits on the review of the fault specification that D-105 requires. Its decisions are D-254 through D-257, and it added no migration.
 - **Software-complete is a register.** `docs/ACCEPTANCE.md` quotes all forty clauses with each one's status and evidence. `tests/unit/test_acceptance_gate.py` fails on a clause missing, reworded or repeated, on a cited test, CI step or section that does not exist, and on a status its evidence does not support (D-254). It is the first thing to read for "is it done":
   - 35 clauses are proven, Stage 26's verdict among them, though SC-7 is *not measured* until receptions are rated;
