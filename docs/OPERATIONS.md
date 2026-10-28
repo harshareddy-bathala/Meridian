@@ -906,6 +906,76 @@ uv run python deploy/tools/watch_runs.py \
 The CI gate flies one station of seed 4472 over two clean days and a day and a half degraded (`tests/integration/test_watch_gate.py`). It shows the warning coming before the first lost decode, reaching the dashboard's read and the scrape's gauge, and nothing about the fault reaching the platform. It does not measure SC-9.
 ---
 
+## Owner reports
+
+A plain-language message to a station's owner after each pass, and a summary each week, from versioned templates with no language model (D-098). Reports go only to stations the team operates (D-107 option b), and a simulated station's go only to the sink.
+
+Decisions this section puts into practice: D-300 to D-307.
+
+**Two processes.** The `jobs` service's `reports` task queues every report now due, from the database alone. The `notifications` service sends them, and is the only process that holds an address, the SMTP password or the bot token (D-304). A delivery that fails changes nothing else: scheduling, reception and every stored result go on without it.
+
+### Setting it up
+
+1. **Say which stations get reports.** Copy `deploy/notifications.toml.example` to the datasets directory, as `notifications.toml`, and set `NOTIFICATIONS_CONFIG=/datasets/notifications.toml` in `deploy/.env`. List each team-operated station with its channel (`email`, `telegram` or `sink`) and whether it gets the weekly summary. For email, fill in `[email]`: the SMTP host, port, account name and From address. **This file holds no address and nothing secret.** A simulated station on any channel but `sink` stops the `reports` task with the reason, and so does a station that is not registered.
+2. **Give the sender its secrets**, in `deploy/secrets/`, which is gitignored. Make all three files, leaving a channel's empty to turn it off. Write them in your own terminal, never pasted into a chat or a ticket:
+   ```sh
+   mkdir -p -m 700 deploy/secrets && cd deploy/secrets
+   printf '%s' '<SMTP password or key>' > smtp_password      # or:  : > smtp_password
+   printf '%s' '<bot token>' > telegram_bot_token             # or:  : > telegram_bot_token
+   printf '[recipients]\n<station_id> = "<address or chat id>"\nteam = "<address or chat id>"\n' > recipients.toml
+   chmod 444 smtp_password telegram_bot_token recipients.toml
+   ```
+3. **Start it with its secrets:**
+   ```sh
+   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml \
+     -f deploy/docker-compose.notifications.yml up -d
+   ```
+4. **Check a channel** before any report is due. `test` sends one fixed message, which says it is a test, to a key of the recipients file:
+   ```sh
+   compose run --rm notifications meridian notify test --channel email --to team
+   ```
+
+**An email sender for `hello@meridian.org.in`.** Cloudflare Email Routing only receives. To send, use a free SMTP relay such as Brevo:
+- add and authenticate the domain there;
+- add the DKIM, DMARC and verification records it gives you in Cloudflare DNS, as DNS only. If it asks for SPF, add its `include:` to the existing SPF record rather than making a second one;
+- add `hello@meridian.org.in` as a sender, and generate an SMTP key, which goes in `smtp_password`.
+
+**A Telegram bot** needs no DNS. Make one with @BotFather (`/newbot`), whose token goes in `telegram_bot_token`. Send the bot `/start` from your account. Your chat id is `"chat":{"id":…}` in `https://api.telegram.org/bot<token>/getUpdates`.
+
+### What is sent, and when
+
+- **After a pass**, once its window has closed and it is classified. A decoded pass waits for its verdict, if a verdict model is configured; a lost or partial one for its diagnosis. One that gets neither within `wait_s`, six hours by default, is reported with what there is. An expired or revoked assignment is never reported.
+- **Each week**, Monday 00:00 UTC to Monday, six hours after it ends: hours heard, what the week's passes came to, the spread of verdicts, losses by cause, and any receive-chain warning still open. Only the latest week is queued.
+- **"Undetermined" is said plainly**, with the causes that were tested. A simulated station's report says so in its subject and first line.
+
+### Watching it
+
+```sh
+compose exec api meridian notify list [--station <station_id>]
+compose exec api meridian notify regenerate <id> [--print]
+compose exec api meridian notify queue
+compose run --rm notifications meridian notify send
+```
+
+`list` prints each report's state — queued, retrying, sent or abandoned — its attempts and its last error class. `regenerate` reads the rows the report names again, renders it by its own template version, and says whether both its hashes match what was recorded (D-302); it exits non-zero if not. `queue` and `send` do once what the two services do continuously.
+
+- **A failure is retried**, after a minute, then twice as long each time up to six hours, and abandoned after eight attempts. One no retry can help is abandoned at once: a refused address, a chat that blocked the bot, a report that no longer regenerates (D-305).
+- **An error is a class**, such as `timeout`, `smtp_auth`, `refused` or `http_403`, never the server's words.
+- **Delivery is at least once.** A crash between sending and recording sends the report again on restart, with the same email `Message-ID`.
+- **`meridian_report_deliveries`** counts reports by state and population, and `ReportDeliveryFailing` (§ Alerts) fires when they stop going out.
+
+### Rehearsing it
+
+`tests/integration/test_report_gate.py` is the rehearsal, and Stage 29's gate. It flies a faulted simulated fleet, classifies and diagnoses it, sends every report to the sink, and checks that each delivered file hashes to its recorded content hash and that `meridian notify regenerate` says so. To rehearse on a running deployment, list a simulated station for the sink, wait for a pass, and read the sink:
+
+```sh
+compose exec notifications ls /var/lib/meridian/report-sink
+compose exec notifications cat /var/lib/meridian/report-sink/<id>.txt
+compose exec api meridian notify regenerate <id>
+```
+
+---
+
 ## Scheduling
 
 The `jobs` service decides, every `SCHEDULE_INTERVAL_S`, which of the next `SCHEDULE_HORIZON_S` of passes each station receives. It maximises the summed value of what it takes: **yield × frames × priority**, the last under B and D only (D-168). A mixed-integer programme solved by HiGHS finds that maximum, under one set of constraints, and the result is checked against those constraints before anything is written (D-166, D-167). Every run is a row in `schedule_runs`, and every decision carries an explanation (D-170).

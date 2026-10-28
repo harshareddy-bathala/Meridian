@@ -25,12 +25,12 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 |---|---|---|
 | A1 | **Station credentials:** bearer tokens and registration keys | A token lets its holder report as that station. A registration key lets its holder mint a new token for it (D-023, D-034). The platform stores only peppered hashes (D-017); the plaintext lives on the station, in a `0600` file (`meridian_client.credentials`). |
 | A2 | **Invites** | An unconsumed invite admits one new station (D-006, D-020). Stored as a sha256 hash, unpeppered, because it is short-lived and single-use. |
-| A3 | **Platform secrets:** `TOKEN_HASH_PEPPER`, `METRICS_TOKEN`, the Cloudflare tunnel token, database passwords, `GRAFANA_ADMIN_PASSWORD` | Each one opens a surface. The tunnel token lets its holder serve the public hostname. |
+| A3 | **Platform secrets:** `TOKEN_HASH_PEPPER`, `METRICS_TOKEN`, the Cloudflare tunnel token, database passwords, `GRAFANA_ADMIN_PASSWORD`, the SMTP password and the Telegram bot token | Each one opens a surface. The tunnel token lets its holder serve the public hostname. |
 | A4 | **The observation store's integrity** | The system of record. Every reliability figure is computed from it, and `simulated` must never be lost or forged on the way in (`CLAUDE.md` rule 5). |
 | A5 | **Station locations** | Stored at full precision; published no more precisely than the station declared (D-082, D-093). |
 | A6 | **Availability during a pass** | A pass is 8–15 minutes and never repeats. Downtime during one is permanent loss, not delay. |
 | A7 | **Backups, snapshots, models and station archives** | A dump holds every token hash and invite hash (§ Backup and restore in `OPERATIONS.md`). Snapshots and models are regenerable from a raw snapshot. A station archive holds a station's queued reports and its products, and by construction neither its token nor its registration key (D-287). |
-| A8 | **Operator data** | Station name and operator label. No contact address is held (D-107). |
+| A8 | **Operator data** | Station name and operator label. No contact address is held in the database (D-107). A team-operated station's report address or chat id is in the sender's secret file alone (D-300). |
 
 ## 3. Actors
 
@@ -54,6 +54,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
    └── station client ──────────────── MSP over the same path ────────────────┘
  operator ──▶ host ──▶ docker compose exec ──▶ meridian CLI ──────────────────▶ db   (B4)
  publishers ──▶ uv.lock / npm / base images ──▶ image ──▶ GHCR ──▶ the Pi           (B6)
+ notifications ──STARTTLS / HTTPS──▶ SMTP relay or Telegram Bot API, outbound only  (B7)
 ```
 
 - **B1 — station ↔ MSP.** Untrusted input from the internet, authenticated by bearer token after registration. `meridian.api.msp`.
@@ -62,6 +63,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 - **B4 — operator CLI.** Trusted, and reached only through the host. `meridian …` inside the image.
 - **B5 — database.** Reachable only inside the compose network (`expose`, never `ports`, in `deploy/docker-compose.yml`).
 - **B6 — supply chain.** Everything that becomes code in the image without being written here.
+- **B7 — outbound notifications.** The `notifications` service connects out to an SMTP relay or Telegram's Bot API to send owner reports (D-304). Nothing connects in. It is the only process holding a recipient or a channel's secret.
 
 ## 5. Threats and mitigations
 
@@ -119,7 +121,7 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 |---|---|---|---|---|
 | O-1 | Secrets visible in `ps` or `docker inspect` | The tunnel token is in the environment, not argv; the platform's secrets can be read from files | D-114 | mitigated |
 | O-2 | A leaked platform secret cannot be replaced safely | Each secret is a file written by a tool and read at start; the pepper overlaps with its predecessor, which verifies and re-hashes but never hashes anything new; a runbook per secret | D-201; `meridian.registry.pepper_rotation`; `deploy/tools/rotate_secret.py`; `tests/integration/test_pepper_rotation.py` | mitigated |
-| O-3 | Secrets committed to the repository | `.env`, `metrics_token` and the Alertmanager secret files are gitignored; `.env.example` holds only `change-me` | `.gitignore`; GIT-WORKFLOW rule 4 | mitigated |
+| O-3 | Secrets committed to the repository | `.env`, `metrics_token`, `deploy/secrets/` and the Alertmanager secret files are gitignored; `.env.example` holds only `change-me` | `.gitignore`; GIT-WORKFLOW rule 4 | mitigated |
 | O-4 | A compromised process escalating inside its container | Every service drops all capabilities, runs with `no-new-privileges` and a read-only root filesystem; the platform runs as uid 10001 and the database as uid 70 | D-206; `deploy/docker-compose.yml`; `tests/unit/test_compose_hardening.py` | mitigated |
 | O-5 | A backup file read by someone who should not | Written `0600` by the nightly unit (`UMask=0077`); `backups/` and `*.dump` are gitignored and excluded from the image build | D-201, D-209; `deploy/systemd/meridian-backup.service` | mitigated |
 | O-6 | Secrets baked into an image layer by a local build | `.dockerignore` excludes every secret path at any depth, checked by a test against each path the repository uses | D-201; `.dockerignore`; `tests/unit/test_layout.py` | mitigated |
@@ -146,6 +148,18 @@ Out of scope: RF-level attacks (jamming, spoofing a satellite downlink), physica
 | S-4 | Not knowing what an image contains | CycloneDX SBOMs of the Python lock, the dashboard lock and the image, kept with every run | D-205; `.github/workflows/security.yml` | mitigated |
 | S-5 | Code copied from a GPL project | Read, never copy; attribution in the same commit | `CLAUDE.md` rules 2 and 3; `ATTRIBUTION.md` | mitigated |
 | S-6 | External archives reachable from the deployment | `meridian-ingest` is excluded from the image | D-138; `tests/unit/test_layout.py` | mitigated |
+
+### B7 — outbound notifications
+
+| ID | Threat | Mitigation | Where | Status |
+|---|---|---|---|---|
+| N-1 | An owner's address leaking into the database, a log line, an error or an MSP message | No column could hold one; the recipients file is mounted into the sender alone; its refusals name the key, never the value; a channel's error is a class, never the server's words, and is never chained; the sender logs id, station, channel and class only. Tests plant an address and look for it in every line | D-300, D-305; `meridian.notifications`; `tests/integration/test_report_send.py::test_no_log_line_names_the_recipient`; `tests/unit/test_notification_recipients.py` | mitigated |
+| N-2 | A station's name injecting a line, a header or markup into a report | Plain text only: email as `text/plain`, Telegram with no parse mode. Control and format characters are dropped from station-supplied names, which are capped at 64 characters | D-303; `meridian.notifications.wording.clean`; `tests/unit/test_notification_templates.py` | mitigated |
+| N-3 | A channel's secret reaching the jobs process or a log | Mounted into the `notifications` service only, from `deploy/docker-compose.notifications.yml`; registered with the redacting filter as it is read; the Bot API URL, which holds the token, is never in a chained exception | D-204, D-206, D-304; `meridian.notifications.send.channels_from_environment` | mitigated |
+| N-4 | A simulated station's report reaching a person | The notifications file is refused, the database check refuses the row, and the sender abandons any it is handed | D-301; `tests/integration/test_report_delivery_store.py`; `tests/integration/test_report_compose.py` | mitigated |
+| N-5 | A failing or hanging channel delaying scheduling or changing a result | A process of its own; each attempt times out at 10 s; it writes only its attempts. A test fingerprints five tables across failed deliveries | D-304, D-305; `tests/integration/test_report_send.py::test_a_failed_delivery_leaves_every_stored_result_untouched` | mitigated |
+| N-6 | A report read in transit | STARTTLS with the system's verified certificates, unless an operator turns it off in `[email]`; the Bot API over HTTPS | `meridian.notifications.channels` | mitigated |
+| N-7 | A report sent twice | Delivery is at least once: a crash between sending and recording repeats it. An email's `Message-ID` is the report's, so the copy is recognisably the same | D-305 | accepted |
 
 ## 6. Residual risks
 

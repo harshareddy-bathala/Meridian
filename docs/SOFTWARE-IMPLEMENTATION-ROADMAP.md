@@ -48,7 +48,25 @@ flowchart TD
 
 *Snapshot taken 2026-10-28. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stage 28's software is built** (2026-10-28). Its decisions are D-290 through D-296, `docs/OPERATIONS.md` § The receive-chain watch is its runbook, and its migration is `0030`. Stage 29 is next in order, then Stage 30.
+**Stage 29's software is built** (2026-10-28). Its decisions are D-300 through D-307, `docs/OPERATIONS.md` § Owner reports is its runbook, and its migration is `0031`. Stage 30 is next.
+- **The completion gate passes.** *In a rehearsal of the demonstration, a decoded pass and a diagnosed loss each produce a delivered report whose text regenerates to its recorded content hash.* `tests/integration/test_report_gate.py` flies Stage 27's pinned faulted fleet, classifies and diagnoses it, then queues and sends every report to the sink. It asserts:
+  - a decoded pass and a diagnosed loss each delivered a report;
+  - each delivered file hashes to its recorded content hash, and `meridian notify regenerate` says so from the database alone;
+  - a changed hash is caught, the positive control;
+  - every report is simulated, says so first, and went to the sink only; queuing and sending again do nothing.
+- **Team-operated stations only** (D-300, D-107 option b). `notifications.toml` says which stations and which channel and holds no address; `deploy/secrets/recipients.toml` holds them, read by the sender alone.
+- **Two tables** (D-301): a report written once, its attempts appended. The database refuses a simulated report anywhere but the sink.
+- **A report names its rows** (D-302), and regenerating reads exactly those; two hashes, of the facts and of the text. The sender regenerates before it sends.
+- **Versioned plain-text templates** (D-303), `pass-1` and `weekly-1`, each pinned to its hash; every sentence is in `wording.py`, and "undetermined" is said plainly.
+- **Queued by the jobs service, sent by its own** (D-304): the `reports` task reads and writes the database alone; the `notifications` service holds every recipient and secret. Email, Telegram and the sink, from the standard library.
+- **Backoff, at least once, errors as classes** (D-305), with `meridian_report_deliveries` and `ReportDeliveryFailing`.
+- **Owed, not done:**
+  - one real delivery by email or Telegram, once the team sets up the SMTP sender or the bot (`OPERATIONS.md` § Owner reports);
+  - a real owner report from station 001, once it is registered;
+  - D-107 itself, which decides whether reports ever reach anyone outside the team.
+- **Known limits:** delivery is at least once, so a crash between sending and recording sends a report twice; regional alerts still record only (D-307).
+
+**Stage 28's software is built** (2026-10-28). Its decisions are D-290 through D-296, `docs/OPERATIONS.md` § The receive-chain watch is its runbook, and its migration is `0030`. Stage 29 was next in order, then Stage 30.
 - **The completion gate passes, in two halves.** *SC-9's detection delay, lead and false-alarm rate regenerate from seeded runs, and on an injected degradation a warning reaches the dashboard and the alerting before the degradation fails a reception.*
   - `tests/integration/test_watch_gate.py` flies one station of a pinned seed for two clean days and a day and a half degrading at 7.3 dB a day, through the harness SC-9's runs are made with. It asserts:
     - the warning comes before the first lost decode (here 14.6 h after onset, 19 h before it);

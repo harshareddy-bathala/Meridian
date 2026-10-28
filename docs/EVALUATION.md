@@ -342,6 +342,11 @@ How modules 13–17 are proven (D-095). Everything above applies to them — tem
 
 **Proof.** In the demonstration, a decoded pass and a diagnosed loss each produce a delivered report, and the delivered text regenerates to its recorded content hash from the stored results and template version. There is no numeric success criterion, and none is invented.
 
+**Method.**
+- **A report names the rows it was read from**: the observation revision, the verdict and the diagnosis of a pass, and the same for every pass of a week (D-302). Regenerating reads exactly those, so a row written afterwards cannot change it.
+- **Two hashes are recorded** when it is queued: of the facts read, and of the text. `meridian notify regenerate <id>` renders it again by its own template version and compares both. The sender does the same before every send, and sends nothing that differs.
+- **The rehearsal is a test**: `tests/integration/test_report_gate.py` flies a faulted simulated fleet, and checks that a decoded pass and a diagnosed loss each deliver a report to the sink whose bytes hash to the recorded content hash. Simulated stations deliver to the sink only (D-300, D-301); a team-operated station delivers by email or Telegram once it has an address.
+
 **It does not claim** that owners act on reports, or any measure of their usefulness.
 
 ### 11.5 Evidence dataset — identical hash on regeneration (SC-10)

@@ -53,7 +53,8 @@ The sections below describe each module's responsibility in the finished system.
 | `dashboard`, `ingest` | No directory yet — Stages 11 and 14. Ingest widens to environmental and space-weather sources at Stage 31 (D-132). |
 | `platform/regions` | No directory yet — Stage 32, regional monitoring (module 19). |
 | `platform/reports` | Stage 22's evaluation reports: a sealed run built from a raw snapshot, one configuration and a master seed, and regenerated to verify it. Sections arrive one at a time; data, prediction, scheduling, orbit uncertainty and reliability are built. |
-| `platform/notifications`, `platform/datasets` | No directory yet — Stages 29 and 30, which add the post-reception layer (D-102). |
+| `platform/notifications` | Owner reports, Stage 29: versioned templates, queued by the jobs service and sent by the `notifications` service, to team-operated stations only (D-300 to D-307). |
+| `platform/datasets` | The evidence dataset is Stage 30, which adds the last of the post-reception layer (D-102). |
 | `firmware` | No directory yet, and excluded from the software roadmap: it is built alongside the antenna and rotator rather than in a software stage. |
 
 ### `platform/orbit`
@@ -111,9 +112,9 @@ It is encoded in `reliability/classification.py`, which imports the standard lib
 ### `platform/notifications`
 Owner reports (module 16): a plain-language message to a station's owner after each pass — what was received and its verdict, or the diagnosed cause of the loss — and a weekly station summary.
 
-Reads the verdict, diagnoses and receive-chain warnings through the prediction and reliability interfaces, and renders them through **versioned templates only**. No language model, so the same stored results and template version always produce the same text (D-098). Delivers by email, or through a Telegram bot.
+Reads the verdict, diagnoses and receive-chain warnings as stored rows through `store`, naming exactly the rows each report read so it can be regenerated (D-302), and renders them through **versioned templates only** (D-303). No language model, so the same stored results and template version always produce the same text (D-098). Delivers by email, or through a Telegram bot.
 
-**Outbound and optional.** A failed delivery is recorded and retried, and never delays or changes scheduling, reception or any stored result — the independence test holds with this module switched off. It is a separate module because it aggregates three others and owns the platform's only outbound messaging dependency; inside any one of them it would make that module depend on the rest (D-102). Where an owner's address comes from is open (D-107).
+**Outbound and optional.** A failed delivery is recorded and retried, and never delays or changes scheduling, reception or any stored result — the independence test holds with this module switched off. It is a separate module because it aggregates three others and owns the platform's only outbound messaging dependency; inside any one of them it would make that module depend on the rest (D-102). Where an owner's address comes from is open (D-107); until it is settled, reports go only to stations the team operates, and the address is the sender's secret alone (D-300). The jobs service queues reports from the database; the `notifications` service, which holds every recipient and secret, sends them (D-304).
 
 ### `platform/datasets`
 The evidence dataset (module 17), and the snapshot manifest and content hashing Stage 15 defines, shared rather than written twice.
