@@ -731,7 +731,7 @@ jobs:
           # observations, reliability, store and api — and seven of them were
           # here. A scope list that omits a real module rejects correct commits,
           # which is how a convention check trains people to work around it.
-          accepted='^(feat|fix|docs|test|refactor|perf|chore|ci|spec)\((orbit|prediction|scheduler|registry|observations|reliability|store|api|datasets|regions|reports|client|simulator|dashboard|site|firmware|ingest|deploy|docs|msp|repo)\): [a-z]'
+          accepted='^(feat|fix|docs|test|refactor|perf|chore|ci|spec)\((orbit|prediction|scheduler|registry|observations|reliability|store|api|datasets|regions|reports|notifications|client|simulator|dashboard|site|firmware|ingest|deploy|docs|msp|repo)\): [a-z]'
           pattern="${accepted}.{0,60}\$"
           # Dependabot's subjects are held to the same types and scopes, by the
           # prefixes `.github/dependabot.yml` gives it, but not to the length:
