@@ -150,6 +150,24 @@ groups:
           summary: "{{ $value }} receive chain(s) falling short of their own baseline (simulated={{ $labels.simulated }})."
           runbook: docs/OPERATIONS.md#receivechaindegrading
 
+      - alert: ReportDeliveryFailing
+        # D-305. Owner reports are not reaching anyone: one is being retried, one
+        # was given up on in the last six hours, or one has waited an hour with
+        # no attempt at all, which is the sender not running. For an hour,
+        # because a retry is expected to clear on its own and a report is a
+        # notification, never a stored result. Simulated and measured apart; a
+        # simulated report only ever goes to the sink. `meridian notify list`
+        # says which report and why, as an error class, never an address.
+        expr: >-
+          max by (simulated) (meridian_report_deliveries{state=~"retrying|queued"}) > 0
+          or max by (simulated) (delta(meridian_report_deliveries{state="abandoned"}[6h])) > 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Owner reports are not being delivered (simulated={{ $labels.simulated }})."
+          runbook: docs/OPERATIONS.md#reportdeliveryfailing
+
   - name: meridian-scheduling
     rules:
       - alert: SchedulerUnavailable
@@ -164,19 +182,20 @@ groups:
       - alert: ScheduledTaskStalled
         # 900 s is three rounds at the default SCHEDULE_INTERVAL_S=300: one
         # failed round is logged and retried, three in a row is a problem.
-        expr: time() - meridian_job_last_success_timestamp_seconds{task!~"profiles|diagnosis|watch"} > 900
+        expr: time() - meridian_job_last_success_timestamp_seconds{task!~"profiles|diagnosis|watch|reports"} > 900
         labels:
           severity: critical
         annotations:
           summary: "The {{ $labels.task }} task has not completed in over 15 minutes."
           runbook: docs/OPERATIONS.md#scheduledtaskstalled
 
-      # The profiles, diagnosis and watch tasks at warning: one builds what is
-      # shown and cited, one explains losses afterwards, one warns of a chain's
-      # trend over days, and a round that cannot do any of them still receives
-      # and schedules (D-174, D-272, D-294).
+      # The profiles, diagnosis, watch and reports tasks at warning: one builds
+      # what is shown and cited, one explains losses afterwards, one warns of a
+      # chain's trend over days, one tells an owner what happened, and a round
+      # that cannot do any of them still receives and schedules (D-174, D-272,
+      # D-294, D-304).
       - alert: ScheduledTaskStalled
-        expr: time() - meridian_job_last_success_timestamp_seconds{task=~"profiles|diagnosis|watch"} > 900
+        expr: time() - meridian_job_last_success_timestamp_seconds{task=~"profiles|diagnosis|watch|reports"} > 900
         labels:
           severity: warning
         annotations:
@@ -261,6 +280,20 @@ groups:
           task: watch
         annotations:
           summary: The watch task has not completed once since the jobs process started.
+          runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+      # Warning, not critical: a report tells an owner what already happened,
+      # and a round that cannot queue one still receives and schedules (D-304).
+      - alert: ScheduledTaskNeverSucceeded
+        expr: >-
+          time() - process_start_time_seconds{job="meridian-jobs"} > 900
+          unless on(job, instance)
+          meridian_job_last_success_timestamp_seconds{task="reports"}
+        labels:
+          severity: warning
+          task: reports
+        annotations:
+          summary: The reports task has not completed once since the jobs process started.
           runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
 
       # Warning, not critical: profiles are for showing and for diagnosis, and a

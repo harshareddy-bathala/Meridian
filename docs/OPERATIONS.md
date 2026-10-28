@@ -1948,6 +1948,15 @@ A lost pass is not the same as a miss. Every debit carries its reason, and only 
 3. Check that the station's gain did not change. The baseline compares SNR, and a lower gain setting reads as a weaker chain.
 4. The warning clears on its own once the chain's last three receptions are back within 1.5 dB of its baseline. It is never deleted: a false alarm stays a row, because SC-9's false-alarm rate is counted from them (D-292). The chain is not retrained while a warning is open, so a fault is never learned as normal (D-293).
 
+### ReportDeliveryFailing
+
+**Warning.** Owner reports are not reaching anyone. For an hour, a report has been retried, or has waited with no attempt at all, or one was given up on in the last six hours (D-305). Nothing else is affected: a report is a notification, and scheduling, reception and every stored result go on without it (D-304). The `simulated` label says which population. A simulated report only ever goes to the sink.
+
+1. `meridian notify list` prints recent reports, each with its state, its attempts and its last error class. The error is a short code such as `timeout`, `smtp_auth` or `refused`, never the server's own words.
+2. A report waiting with no attempt means the `notifications` service is not running: `docker compose ps notifications`, then its logs.
+3. `smtp_auth` or `http_4xx`: the channel's secret is wrong or expired. Replace the file in `deploy/secrets/` and restart the service. `timeout` or `refused`: the mail server or Telegram is unreachable from the host.
+4. `meridian notify test --channel <channel> --station <id>` sends one fixed message, which shows whether a channel works before the next real report.
+
 ### Reliability figures
 
 `meridian reliability report` prints each figure as a count over a count, with its 95% interval, for measured and simulated stations apart:

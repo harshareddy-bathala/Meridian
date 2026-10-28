@@ -18,6 +18,8 @@ A third borrow reads the receive-chain watch: per population, the chains with a
 baseline and the warnings open under the deployment's watch settings (Stage 28,
 D-295). A population with no baseline yet publishes nothing, because zero open
 warnings there would read as "watched and well" when nothing is watched.
+A fourth reads owner reports by delivery state (Stage 29,
+:mod:`meridian.api.report_families`).
 
 It also reports the answering process's connection pool, and whether the database
 answered at all.
@@ -36,7 +38,7 @@ worker's pool.
 series**, for the same reason: a column of zeros would read as "no misses" when
 the truth is that nothing has settled yet (D-086, D-186).
 
-Reference: docs/DECISIONS.md D-054, D-086, D-109, D-111, D-186, D-295.
+Reference: docs/DECISIONS.md D-054, D-086, D-109, D-111, D-186, D-295, D-305.
 """
 
 from __future__ import annotations
@@ -53,6 +55,7 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from meridian.api import platform_clock
+from meridian.api.report_families import delivery_families, read_deliveries
 from meridian.registry.liveness_counts import count_by_liveness
 from meridian.reliability.budget import remaining_ratio_of
 from meridian.reliability.classification import METHOD, PASS_CLASSES
@@ -175,6 +178,9 @@ class DomainCollector(Collector):
             watched = _read_watched(pool, reliability)
             if watched is not None:
                 yield from _watch_families(watched)
+        delivered = read_deliveries(pool, SCRAPE_CONNECTION_TIMEOUT_S)
+        if delivered is not None:
+            yield from delivery_families(delivered)
 
     def _reliability_config(self) -> ReliabilityConfig | None:
         """The deployment's reliability configuration, read once."""

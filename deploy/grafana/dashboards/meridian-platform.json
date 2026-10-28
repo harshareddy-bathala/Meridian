@@ -1774,6 +1774,137 @@
     },
     {
       "type": "row",
+      "title": "Owner reports",
+      "collapsed": false,
+      "id": 35,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 73
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Reports waiting or failing",
+      "description": "Owner reports queued, being retried, or given up on, by population (D-305). `meridian notify list` says which and why, as an error class, never an address.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (state, simulated) (meridian_report_deliveries{state=~\"queued|retrying|abandoned\"})",
+          "refId": "A",
+          "legendFormat": "{{state}} simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 36,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 74
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Reports sent",
+      "description": "Owner reports delivered, by population (D-304). A simulated station's reports go only to the sink.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (simulated) (meridian_report_deliveries{state=\"sent\"})",
+          "refId": "A",
+          "legendFormat": "simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 37,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 74
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "row",
       "title": "Alerts",
       "collapsed": false,
       "id": 27,
@@ -1781,7 +1912,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 73
+        "y": 82
       },
       "panels": []
     },
@@ -1835,7 +1966,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 83
       },
       "datasource": {
         "type": "prometheus",

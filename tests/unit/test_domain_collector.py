@@ -22,7 +22,7 @@ import psycopg
 import pytest
 from prometheus_client.metrics_core import Metric
 
-from meridian.api import domain_collector
+from meridian.api import domain_collector, report_families
 from meridian.api.domain_collector import DomainCollector
 from meridian.registry.liveness_counts import count_by_liveness
 from meridian.reliability.classification import PASS_CLASSES
@@ -32,6 +32,7 @@ from meridian.store.monitoring import (
     MonitoringSnapshot,
     StationHeartbeat,
 )
+from meridian.store.report_deliveries import DeliveryCount
 from meridian.store.watch_reads import WatchCount
 
 NOW = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
@@ -88,6 +89,14 @@ def watched(monkeypatch: pytest.MonkeyPatch) -> list[WatchCount]:
     """Chains with a baseline, and warnings open, as the fake database holds."""
     held: list[WatchCount] = []
     monkeypatch.setattr(domain_collector, "count_watched", lambda *_, **__: held)
+    return held
+
+
+@pytest.fixture(autouse=True)
+def delivered(monkeypatch: pytest.MonkeyPatch) -> list[DeliveryCount]:
+    """Owner reports by population and state, as the fake database holds."""
+    held: list[DeliveryCount] = []
+    monkeypatch.setattr(report_families, "count_deliveries", lambda *_, **__: held)
     return held
 
 
@@ -329,3 +338,36 @@ def test_a_failed_watch_read_loses_only_the_watch_series(
     assert "meridian_receive_chain_warnings_open" not in families
     assert "meridian_passes_classified" in families
     assert _value(families["meridian_database_reachable"], {}) == 1.0
+
+
+def test_no_report_publishes_no_delivery_series(reachable: DomainCollector) -> None:
+    """Nothing reported yet is not "nothing failing" (D-086, D-305)."""
+    assert _families(reachable)["meridian_report_deliveries"].samples == []
+
+
+def test_a_population_with_reports_publishes_every_state(
+    reachable: DomainCollector, delivered: list[DeliveryCount]
+) -> None:
+    delivered.append(DeliveryCount(simulated=True, state="sent", reports=3))
+    delivered.append(DeliveryCount(simulated=True, state="retrying", reports=1))
+
+    reports = _families(reachable)["meridian_report_deliveries"]
+
+    assert _value(reports, {"state": "sent", "simulated": "true"}) == 3.0
+    assert _value(reports, {"state": "retrying", "simulated": "true"}) == 1.0
+    assert _value(reports, {"state": "abandoned", "simulated": "true"}) == 0.0
+    assert _value(reports, {"state": "sent", "simulated": "false"}) is None
+
+
+def test_a_failed_report_read_loses_only_the_delivery_series(
+    reachable: DomainCollector, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def missing(*_: object, **__: object) -> list[DeliveryCount]:
+        raise psycopg.errors.UndefinedTable('relation "report_deliveries"')
+
+    monkeypatch.setattr(report_families, "count_deliveries", missing)
+
+    families = _families(reachable)
+
+    assert "meridian_report_deliveries" not in families
+    assert "meridian_stations" in families

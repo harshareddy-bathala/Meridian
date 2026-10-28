@@ -52,6 +52,8 @@ tests:
         values: "0+15x100"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="watch"}'
         values: "0+15x100"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reports"}'
+        values: "0+15x100"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+15x100"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
@@ -249,6 +251,8 @@ tests:
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="watch"}'
         values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reports"}'
+        values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
@@ -283,6 +287,8 @@ tests:
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="watch"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reports"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+60x30"
@@ -358,6 +364,8 @@ tests:
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="watch"}'
         values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reports"}'
+        values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="profiles"}'
@@ -385,6 +393,8 @@ tests:
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="watch"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reports"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+60x30"
@@ -418,6 +428,8 @@ tests:
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="watch"}'
         values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reports"}'
+        values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
@@ -447,6 +459,8 @@ tests:
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="profiles"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="watch"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reports"}'
         values: "0+60x30"
     alert_rule_test:
       - eval_time: 14m
@@ -478,6 +492,8 @@ tests:
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
         values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reports"}'
+        values: "0+60x30"
     alert_rule_test:
       - eval_time: 14m
         alertname: ScheduledTaskNeverSucceeded
@@ -498,6 +514,8 @@ tests:
         values: "0x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="watch"}'
         values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reports"}'
+        values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="schedule"}'
         values: "0+60x30"
       - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
@@ -516,3 +534,87 @@ tests:
             exp_annotations:
               summary: "The diagnosis task has not completed in over 15 minutes."
               runbook: docs/OPERATIONS.md#scheduledtaskstalled
+
+  # --- Owner reports (D-304, D-305) ------------------------------------------
+  - name: the reports task has failed every round, and receiving carries on
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="meridian-jobs", instance="jobs:9464"}'
+        values: "0x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="schedule"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="pass_generation"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="expiry_sweep"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="reliability"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="profiles"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="diagnosis"}'
+        values: "0+60x30"
+      - series: 'meridian_job_last_success_timestamp_seconds{job="meridian-jobs", instance="jobs:9464", task="watch"}'
+        values: "0+60x30"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ScheduledTaskNeverSucceeded
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: ScheduledTaskNeverSucceeded
+        exp_alerts:
+          - exp_labels: {severity: warning, job: meridian-jobs, instance: "jobs:9464", task: reports}
+            exp_annotations:
+              summary: The reports task has not completed once since the jobs process started.
+              runbook: docs/OPERATIONS.md#scheduledtaskneversucceeded
+
+  - name: reports that are sent, and none waiting, fire nothing
+    interval: 1m
+    input_series:
+      - series: 'meridian_report_deliveries{job="meridian", instance="api:8000", state="sent", simulated="false"}'
+        values: "0+1x200"
+      - series: 'meridian_report_deliveries{job="meridian", instance="api:8000", state="queued", simulated="false"}'
+        values: "0x200"
+      - series: 'meridian_report_deliveries{job="meridian", instance="api:8000", state="retrying", simulated="false"}'
+        values: "0x200"
+      - series: 'meridian_report_deliveries{job="meridian", instance="api:8000", state="abandoned", simulated="false"}'
+        values: "2x200"
+    alert_rule_test:
+      - {eval_time: 3h, alertname: ReportDeliveryFailing, exp_alerts: []}
+
+  - name: a report retried for an hour fires, labelled by population
+    interval: 1m
+    input_series:
+      - series: 'meridian_report_deliveries{job="meridian", instance="api:8000", state="retrying", simulated="false"}'
+        values: "1x90"
+      - series: 'meridian_report_deliveries{job="meridian", instance="api:8000", state="queued", simulated="false"}'
+        values: "0x90"
+      - series: 'meridian_report_deliveries{job="meridian", instance="api:8000", state="abandoned", simulated="false"}'
+        values: "0x90"
+    alert_rule_test:
+      - {eval_time: 50m, alertname: ReportDeliveryFailing, exp_alerts: []}
+      - eval_time: 65m
+        alertname: ReportDeliveryFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, simulated: "false"}
+            exp_annotations:
+              summary: "Owner reports are not being delivered (simulated=false)."
+              runbook: docs/OPERATIONS.md#reportdeliveryfailing
+
+  - name: a report given up on fires even with nothing left retrying
+    interval: 1m
+    input_series:
+      - series: 'meridian_report_deliveries{job="meridian", instance="api:8000", state="abandoned", simulated="true"}'
+        values: "0x10 1x120"
+      - series: 'meridian_report_deliveries{job="meridian", instance="api:8000", state="retrying", simulated="true"}'
+        values: "0x130"
+      - series: 'meridian_report_deliveries{job="meridian", instance="api:8000", state="queued", simulated="true"}'
+        values: "0x130"
+    alert_rule_test:
+      - {eval_time: 1h, alertname: ReportDeliveryFailing, exp_alerts: []}
+      - eval_time: 75m
+        alertname: ReportDeliveryFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, simulated: "true"}
+            exp_annotations:
+              summary: "Owner reports are not being delivered (simulated=true)."
+              runbook: docs/OPERATIONS.md#reportdeliveryfailing
