@@ -21,6 +21,7 @@ from meridian.reports.render_prediction import render_prediction
 from meridian.reports.render_reliability import render_reliability
 from meridian.reports.render_scheduling import render_scheduling
 from meridian.reports.render_verdict import render_verdict
+from meridian.reports.render_watch import render_watch
 
 __all__ = ["SECTIONS", "render_report"]
 
@@ -35,6 +36,7 @@ SECTIONS: tuple[tuple[str, Callable[[Sequence[Row]], list[str]]], ...] = (
     ("reliability", render_reliability),
     ("verdict", render_verdict),
     ("diagnosis", render_diagnosis),
+    ("watch", render_watch),
 )
 """Each section in the order the report prints it, by its results file's name."""
 

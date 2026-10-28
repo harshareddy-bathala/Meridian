@@ -117,7 +117,7 @@ class Plan:
 
 
 @contextmanager
-def _in_process(conn: Any, clock: list[datetime]) -> Iterator[TestClient]:
+def in_process(conn: Any, clock: list[datetime]) -> Iterator[TestClient]:
     """The platform over ``conn``, on a stated clock, nothing waiting for real."""
     saved = (
         platform_clock.utc_now,
@@ -173,7 +173,7 @@ def fly(conn: Any, plan: Plan, *, state_dir: Path) -> tuple[str, tuple[str, ...]
         silent_satellite=plan.silent_satellite,
     )
     with (
-        _in_process(conn, clock) as client,
+        in_process(conn, clock) as client,
         Supervisor(
             config,
             tokens,
@@ -318,6 +318,9 @@ def scratch(server_url: str, seed: int) -> Iterator[str]:
         # configuration, which disables every logger that already exists.
         alembic = Config()
         alembic.set_main_option("script_location", str(REPO / "deploy" / "migrations"))
+        # What alembic.ini's prepend_sys_path does: the revisions import their
+        # shared `_sql` from beside them, which only a test had put on the path.
+        alembic.set_main_option("prepend_sys_path", str(REPO / "deploy" / "migrations"))
         alembic.set_main_option("sqlalchemy.url", url)
         os.environ["DATABASE_URL"] = url  # what env.py reads
         command.upgrade(alembic, "head")

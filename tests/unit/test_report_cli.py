@@ -99,6 +99,7 @@ def test_a_run_is_built_from_a_snapshot_alone_and_verifies(
         "run.jsonl",
         "scheduling.jsonl",
         "verdict.jsonl",
+        "watch.jsonl",
     }
 
 

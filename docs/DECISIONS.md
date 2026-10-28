@@ -6254,6 +6254,45 @@ An open warning carries a badge with the words "receive-chain warning", and the 
 
 ---
 
+## D-296 — SC-9 is measured on sealed simulated fleets flown clean first, and a failure is a lost decode
+
+**2026-10-28 · accepted, targets proposed** · *`deploy/tools/watch_runs.py`; `meridian/datasets/watch_runs.py`; `meridian/reports/{watch,render_watch}.py`; `analysis/configs/watch.toml.example`; `meridian report build --watches`; Stage 28. Applies D-105, D-189, D-253 and D-278.*
+
+SC-9 asks whether the watch warns before a degradation fails a reception, and how often it warns when nothing is wrong. A degradation's onset and rate are in the simulator's ledger, which never reaches the platform (D-105). So, as for SC-8 (D-278), the figure is made in two places that meet only in files.
+
+**A fleet is flown and sealed by a tool.** `deploy/tools/watch_runs.py` flies a simulated fleet against the real platform in one process, in a database of its own. Every half hour of simulated time it runs the same `watch_chains` the jobs service runs. That is a coarser cadence than the jobs service's five minutes, so a warning here is never earlier than it would be live. The tool seals the run under `<datasets root>/watches/` with:
+- the ledger;
+- every scheduled pass with its clean outcome, recomputed from the seed;
+- every warning the platform raised.
+
+**Clean first, then the fault.** A degradation is a change from a chain's own history (`EVALUATION.md` §11.3), but Stage 25's onsets fall within the first hour of a run (D-253). So the tool holds the fault schedule at its first tick through `clean_days`, before any onset. The watch trains every chain's baseline on clean signal, and only then do the ticks run on. This changes no fault effect and touches no pinned module (D-270). Two scenarios:
+- **`degradation`** gives every station a loss of 1 to 8 dB a day;
+- **`clean`** injects nothing, so every warning its stations raise after the clean stretch is a false alarm.
+
+**A failure is a lost decode.** It is a pass begun after the onset that the outcome model decodes with nothing wrong, and that did not decode. A pass that only heard signal and then heard none never was a capture, and is not the reception SC-9 asks the warning to come before. That is SC-4's sense of captured.
+
+**The section, method `report-9`**, reports from the sealed runs alone:
+- per degradation, the delay from onset to warning, the loss in decibels by then from the ledger's rate, the lead from warning to first failure, and which came first;
+- a run that ended before either is reported as *neither*, and left out of SC-9's share, because it says nothing about their order;
+- false alarms per station per 30 days watched, with an exact Poisson interval.
+
+**The commit the harness lacked.** Stage 27's harness flew a fleet inside one transaction that never committed. Over days of heartbeats every station's row then held thousands of versions, and each update ran slower than the one before. A six-day fleet crawled. The SC-9 tool commits after every watch round, as the jobs service does; its scratch database is dropped afterwards either way. The same harness also built its Alembic configuration without the migrations' `prepend_sys_path`, so run as `OPERATIONS.md` says it would not migrate, which only the gate test, adding the path itself, had hidden. That is fixed in the shared harness.
+
+**A trial, not the figure.** One trial fleet, seed 4471, 4 stations, 3 clean days and then 3 days degraded at 2.3 to 6.5 dB a day:
+- every station was warned first, after 20.7 to 48.5 hours and 4.6 to 8.2 dB of loss;
+- the two stations that lost a decode lost it 16.5 and 24.9 hours after their warnings;
+- no warning in the two clean days watched.
+
+Decodes began to fail only after about 11 dB, well past the 3 dB the watch warns at. That margin is the simulator's (D-251), and the report says so beside the number. SC-9's figure is the configuration's fleets, about two hours each and twelve for all six. They are run by hand, overnight or in batches with `--run`, and not by CI.
+
+**The CI gate is one small fleet**, one station of seed 4472 over two clean days and a day and a half degraded, about two and a half minutes. Its warning came 14.6 hours after onset at about 4.5 dB, 19 hours before the first lost decode. It shows a warning reaching the dashboard's read and Prometheus's gauge before the degradation costs a decode, and nothing about the fault reaching any table. It does not measure SC-9.
+
+*Rejected: changing the simulator's onset range for these runs.* It is the pinned specification D-270 holds still for its review, and moving it would move every SC-8 fleet too.
+
+*Rejected: a failure as any pass worse than its clean outcome, as D-278 judges a cause.* For SC-8 a pass made worse is what a cause has to explain. For SC-9 it would make a pass that never decoded, and only went quieter, the reception the warning has to beat.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

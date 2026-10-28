@@ -37,6 +37,7 @@ from meridian.datasets.publish import (
     read_directory,
 )
 from meridian.datasets.seeds import derive
+from meridian.datasets.watch_runs import WatchRun
 from meridian.reports.config import ConfigFile, report_config_sha256
 from meridian.reports.data import DATA_FILE, data_rows
 from meridian.reports.detections import detections
@@ -64,6 +65,7 @@ from meridian.reports.scheduling import (
     scheduling_section,
 )
 from meridian.reports.verdict import VERDICT_FILE, verdict_section
+from meridian.reports.watch import WATCH_FILE, watch_rows
 
 __all__ = [
     "BOOTSTRAP_ORBIT",
@@ -85,10 +87,10 @@ __all__ = [
     "with_environment",
 ]
 
-METHOD_VERSION = "report-8"
+METHOD_VERSION = "report-9"
 """Bumped whenever a section's method changes, so two runs made under different
 methods can never share a hash. ``report-8`` added Stage 27's loss diagnosis
-(D-278)."""
+(D-278), and ``report-9`` Stage 28's receive-chain watch (D-296)."""
 
 REPORTS = "reports"
 """Runs published without ``--output`` live under ``<datasets root>/reports/``."""
@@ -137,6 +139,9 @@ class RunInputs:
 
     diagnoses: tuple[DiagnosisRun, ...] = ()
     """Sealed simulated fleets the loss-diagnosis section judges (D-278)."""
+
+    watches: tuple[WatchRun, ...] = ()
+    """Sealed simulated fleets the receive-chain watch section judges (D-296)."""
 
 
 def build_run(
@@ -198,6 +203,9 @@ def build_run(
             ],
             "diagnosis_runs": [
                 content_sha256(one.directory.manifest) for one in inputs.diagnoses
+            ],
+            "watch_runs": [
+                content_sha256(one.directory.manifest) for one in inputs.watches
             ],
         },
         environment=computed.measured,
@@ -266,6 +274,7 @@ def _sections(
         ],
         VERDICT_FILE: verdict.rows,
         DIAGNOSIS_FILE: diagnosis_rows(inputs.diagnoses, raw),
+        WATCH_FILE: watch_rows(inputs.watches),
     }
     models = {
         one.variant.name: one.sha256 for one in outcomes if isinstance(one, Fitted)
@@ -287,6 +296,10 @@ def _sections(
             "diagnosis_run_paths": {
                 content_sha256(one.directory.manifest).hex(): str(one.directory.path)
                 for one in inputs.diagnoses
+            },
+            "watch_run_paths": {
+                content_sha256(one.directory.manifest).hex(): str(one.directory.path)
+                for one in inputs.watches
             },
         },
     )
