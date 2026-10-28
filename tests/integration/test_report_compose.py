@@ -36,31 +36,24 @@ from meridian.notifications.config import (  # noqa: E402
 from meridian.notifications.facts import inputs_sha256  # noqa: E402
 from meridian.notifications.reading import facts_for  # noqa: E402
 from meridian.notifications.templates import content_sha256, render  # noqa: E402
-from meridian.store.loss_diagnoses import NewDiagnosis, insert_diagnosis  # noqa: E402
-from meridian.store.pass_classifications import (  # noqa: E402
-    NewClassification,
-    insert_classification,
-)
 from meridian.store.report_deliveries import (  # noqa: E402
     StoredDelivery,
     find_deliveries,
 )
-from meridian.store.verdicts import NewVerdict, insert_verdict  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
-AOS = datetime(2026, 10, 14, 9, 30, tzinfo=UTC)
-NOW = AOS + timedelta(hours=2)
-CLASSIFIED = bytes([5]) * 32
-DIAGNOSED = bytes([6]) * 32
-VERDICT = "verdict-1:abcdefabcdef"
+NOW = datetime(2026, 10, 14, 11, 30, tzinfo=UTC)
+"""Two hours after the report world's passes rise."""
+
 DEPLOYMENT = Deployment(
     classification_method="classification-1",
-    classification_sha256=CLASSIFIED,
+    classification_sha256=bytes([5]) * 32,
     diagnosis_method="diagnosis-1",
-    diagnosis_sha256=DIAGNOSED,
-    verdict_method=VERDICT,
+    diagnosis_sha256=bytes([6]) * 32,
+    verdict_method="verdict-1:abcdefabcdef",
 )
+"""What the report world in ``conftest.py`` classified, diagnosed and scored by."""
 WAIT_S = 6 * 3_600
 
 
@@ -68,112 +61,6 @@ WAIT_S = 6 * 3_600
 def rollback(conn: Any) -> Iterator[Any]:
     with conn.transaction(force_rollback=True):
         yield conn
-
-
-class World:
-    """Stations, passes and what was concluded about them."""
-
-    def __init__(self, rows: Any) -> None:
-        self.rows = rows
-        self.conn = rows.conn
-        held = self.conn.execute(
-            "select id from element_sets where satellite_id = 'norad:99970' limit 1"
-        ).fetchone()
-        self.element_set = held[0] if held else rows.satellite()
-
-    def station(self, station_id: str, *, simulated: bool = False) -> str:
-        return str(self.rows.station(station_id, simulated=simulated))
-
-    def assignment(
-        self, station_id: str, name: str, *, aos: datetime = AOS, state: str = "held"
-    ) -> str:
-        pass_id = self.rows.pass_(station_id, aos, element_set_id=self.element_set)
-        return str(self.rows.assignment(name, pass_id, state=state))
-
-    def classified(self, assignment_id: str, verdict: str) -> int:
-        row = self.conn.execute(
-            "select pass_id, station_id, start_at, end_at, simulated"
-            " from assignments where assignment_id = %s",
-            (assignment_id,),
-        ).fetchone()
-        insert_classification(
-            self.conn,
-            NewClassification(
-                assignment_ids=[assignment_id],
-                pass_id=row[0],
-                station_id=row[1],
-                satellite_id="norad:99970",
-                window_start=row[2],
-                window_end=row[3],
-                classification=verdict,
-                evidence={},
-                method="classification-1",
-                config_sha256=CLASSIFIED,
-                simulated=row[4],
-            ),
-        )
-        return int(
-            self.conn.execute(
-                "select classification_id from pass_classifications"
-                " where assignment_id = %s",
-                (assignment_id,),
-            ).fetchone()[0]
-        )
-
-    def verdict(self, assignment_id: str, probability: float) -> None:
-        row = self.conn.execute(
-            "select started_at, station_id, simulated from observations"
-            " where assignment_id = %s and revision = 1",
-            (assignment_id,),
-        ).fetchone()
-        insert_verdict(
-            self.conn,
-            NewVerdict(
-                assignment_id=assignment_id,
-                revision=1,
-                observation_started_at=row[0],
-                station_id=row[1],
-                probability_usable=probability,
-                method=VERDICT,
-                route="snr",
-                inputs_sha256=bytes([7]) * 32,
-                partial_below=0.4,
-                simulated=row[2],
-            ),
-        )
-
-    def diagnosis(self, assignment_id: str, classification_id: int, cause: str) -> None:
-        row = self.conn.execute(
-            "select a.station_id, a.simulated, o.revision, o.started_at"
-            " from assignments a left join observations o"
-            " on o.assignment_id = a.assignment_id where a.assignment_id = %s",
-            (assignment_id,),
-        ).fetchone()
-        insert_diagnosis(
-            self.conn,
-            NewDiagnosis(
-                assignment_id=assignment_id,
-                revision=row[2],
-                observation_started_at=row[3],
-                station_id=row[0],
-                classification_id=classification_id,
-                cause=cause,
-                candidates=[
-                    {"cause": "obstruction", "fired": cause == "obstruction"},
-                    {"cause": "interference", "fired": False},
-                ],
-                evidence={},
-                method="diagnosis-1",
-                config_sha256=DIAGNOSED,
-                verdict_method=None,
-                simulated=row[1],
-            ),
-        )
-
-
-@pytest.fixture
-def world(schedule_rows: Any) -> World:
-    return World(schedule_rows)
 
 
 def listing(*stations: tuple[str, str]) -> NotificationsConfig:
@@ -185,11 +72,11 @@ def listing(*stations: tuple[str, str]) -> NotificationsConfig:
     )
 
 
-def reports(world: World, station_id: str) -> list[StoredDelivery]:
+def reports(world: Any, station_id: str) -> list[StoredDelivery]:
     return find_deliveries(world.conn, station_id=station_id)
 
 
-def regenerates(world: World, report: StoredDelivery) -> bool:
+def regenerates(world: Any, report: StoredDelivery) -> bool:
     facts = facts_for(
         world.conn,
         kind=report.kind,
@@ -204,7 +91,7 @@ def regenerates(world: World, report: StoredDelivery) -> bool:
     )
 
 
-def test_a_decoded_pass_is_queued_once_its_verdict_is_in(world: World) -> None:
+def test_a_decoded_pass_is_queued_once_its_verdict_is_in(world: Any) -> None:
     station = world.station("st-decoded")
     subject = world.assignment(station, "a-decoded", state="reported")
     world.rows.observation(subject)
@@ -226,7 +113,7 @@ def test_a_decoded_pass_is_queued_once_its_verdict_is_in(world: World) -> None:
     assert regenerates(world, report)
 
 
-def test_a_partial_decode_waits_for_its_diagnosis(world: World) -> None:
+def test_a_partial_decode_waits_for_its_diagnosis(world: Any) -> None:
     station = world.station("st-partial")
     subject = world.assignment(station, "a-partial", state="reported")
     world.rows.observation(subject)
@@ -239,7 +126,7 @@ def test_a_partial_decode_waits_for_its_diagnosis(world: World) -> None:
     assert queue_due(world.conn, config, DEPLOYMENT, NOW).passes == 1
 
 
-def test_a_lost_pass_is_queued_with_its_diagnosed_cause(world: World) -> None:
+def test_a_lost_pass_is_queued_with_its_diagnosed_cause(world: Any) -> None:
     station = world.station("st-lost")
     subject = world.assignment(station, "a-lost", state="reported")
     world.rows.observation(subject, outcome="signal_no_decode")
@@ -264,7 +151,7 @@ def test_a_lost_pass_is_queued_with_its_diagnosed_cause(world: World) -> None:
 
 
 def test_a_pass_with_nothing_more_coming_is_reported_after_the_wait(
-    world: World,
+    world: Any,
 ) -> None:
     station = world.station("st-silent")
     subject = world.assignment(station, "a-silent")
@@ -285,7 +172,7 @@ def test_a_pass_with_nothing_more_coming_is_reported_after_the_wait(
     assert regenerates(world, report)
 
 
-def test_a_report_reads_only_the_rows_it_named(world: World) -> None:
+def test_a_report_reads_only_the_rows_it_named(world: Any) -> None:
     station = world.station("st-named")
     subject = world.assignment(station, "a-named", state="reported")
     world.rows.observation(subject)
@@ -302,7 +189,7 @@ def test_a_report_reads_only_the_rows_it_named(world: World) -> None:
     assert regenerates(world, report)
 
 
-def test_a_named_row_that_is_gone_fails_regeneration_loudly(world: World) -> None:
+def test_a_named_row_that_is_gone_fails_regeneration_loudly(world: Any) -> None:
     station = world.station("st-gone")
     subject = world.assignment(station, "a-gone", state="reported")
     world.rows.observation(subject)
@@ -324,7 +211,7 @@ def test_a_named_row_that_is_gone_fails_regeneration_loudly(world: World) -> Non
 
 
 def test_an_expired_assignment_or_an_unlisted_station_gets_nothing(
-    world: World,
+    world: Any,
 ) -> None:
     listed = world.station("st-listed")
     unlisted = world.station("st-unlisted")
@@ -343,7 +230,7 @@ def test_an_expired_assignment_or_an_unlisted_station_gets_nothing(
 
 @pytest.mark.parametrize("channel", ["email", "telegram"])
 def test_a_simulated_station_is_refused_on_any_channel_but_the_sink(
-    world: World, channel: str
+    world: Any, channel: str
 ) -> None:
     station = world.station(f"st-sim-{channel}", simulated=True)
 
@@ -352,12 +239,12 @@ def test_a_simulated_station_is_refused_on_any_channel_but_the_sink(
     check_stations(world.conn, listing((station, "sink")))
 
 
-def test_an_unregistered_station_is_refused(world: World) -> None:
+def test_an_unregistered_station_is_refused(world: Any) -> None:
     with pytest.raises(NotificationsConfigError, match="registered"):
         queue_due(world.conn, listing(("st-nobody", "sink")), DEPLOYMENT, NOW)
 
 
-def test_a_week_is_queued_once_from_the_passes_held_in_it(world: World) -> None:
+def test_a_week_is_queued_once_from_the_passes_held_in_it(world: Any) -> None:
     station = world.station("st-week")
     monday = datetime(2026, 10, 12, tzinfo=UTC)
     decoded = world.assignment(station, "a-week-1", aos=monday + timedelta(days=1))

@@ -170,6 +170,9 @@ class StoredDelivery:
     state: str
     """``queued``, ``retrying``, ``sent`` or ``abandoned``."""
 
+    last_error: str | None
+    """The latest attempt's error class, or ``None``."""
+
 
 _DELIVERIES = """
     select d.id, d.station_id, d.kind, d.assignment_id, d.period_start,
@@ -178,10 +181,11 @@ _DELIVERIES = """
            coalesce(t.attempts, 0)::integer as attempts,
            case when l.outcome is null then 'queued'
                 when l.outcome = 'failed' then 'retrying'
-                else l.outcome end as state
+                else l.outcome end as state,
+           l.error_class as last_error
     from report_deliveries d
     left join lateral (
-        select outcome, next_attempt_at from report_delivery_attempts
+        select outcome, error_class, next_attempt_at from report_delivery_attempts
         where delivery_id = d.id
         order by attempted_at desc, id desc limit 1
     ) l on true
@@ -210,7 +214,7 @@ def count_deliveries(conn: Connection) -> list[DeliveryCount]:
         cur.execute(
             f"""
             select simulated, state, count(*)::integer as reports
-            from ({_DELIVERIES}) d
+            from ({_DELIVERIES}) counted
             group by simulated, state
             order by simulated, state
             """

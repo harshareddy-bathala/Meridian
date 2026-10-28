@@ -15,7 +15,8 @@ horizon and interference profiles (``cli_profiles``); ``report`` builds
 and verifies Stage 22's evaluation reports (``cli_report``); ``verdict``
 rates receptions for the reception verdict (``cli_verdict``); ``diagnosis``
 says why each lost reception was lost (``cli_diagnosis``); ``watch`` watches
-each receive chain's signal against its own past (``cli_watch``). Every command the
+each receive chain's signal against its own past (``cli_watch``); ``notify``
+queues, sends and regenerates owner reports (``cli_notify``). Every command the
 operations runbook documents is now built, so the table of commands whose
 stage had not arrived went with the last of them.
 
@@ -41,6 +42,7 @@ from meridian.cli_diagnosis import add_diagnosis_parser, run_diagnosis
 from meridian.cli_invite import run_invite
 from meridian.cli_jobs import add_jobs_parser, run_jobs
 from meridian.cli_model import add_model_parser, run_model
+from meridian.cli_notify import add_notify_parser, run_notify
 from meridian.cli_passes import run_passes
 from meridian.cli_profiles import add_profiles_parser, run_profiles
 from meridian.cli_regions import add_regions_parser, run_regions
@@ -282,6 +284,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_verdict_parser(subcommands)
     add_diagnosis_parser(subcommands)
     add_watch_parser(subcommands)
+    add_notify_parser(subcommands)
 
     return parser
 
@@ -294,6 +297,7 @@ NEEDS_ACTION = frozenset(
         "invite",
         "jobs",
         "model",
+        "notify",
         "passes",
         "regions",
         "reliability",
@@ -320,6 +324,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "invite": run_invite,
     "jobs": run_jobs,
     "model": run_model,
+    "notify": run_notify,
     "passes": run_passes,
     "regions": run_regions,
     "reliability": run_reliability,
