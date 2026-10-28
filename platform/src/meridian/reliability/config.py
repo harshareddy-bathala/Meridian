@@ -16,6 +16,10 @@ Three tables, read from ``deploy/reliability.toml`` or taken as defaults:
 * ``[watch]`` — when a chain's shortfall raises a warning and when it clears
   (D-294). Every warning records the sha256 of these, with the baseline's.
 
+The last two are defined in :mod:`meridian.reliability.watch_config`, and every
+table is checked by :mod:`meridian.reliability.config_values`; both are
+re-exported here, so this module is still where a caller imports them from.
+
 **Strict**, as the labelling configuration is: an unknown key, a wrong type or
 a value out of range is refused by name, because a misspelled target that
 silently kept its default is a target somebody believes they set.
@@ -28,13 +32,21 @@ D-293, D-294.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import tomllib
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import TypeVar
+
+from meridian.reliability.config_values import (
+    DAY_S,
+    ReliabilityConfigError,
+    canonical_sha256,
+    number,
+    share,
+    whole,
+)
+from meridian.reliability.watch_config import BaselineConfig, WatchConfig
 
 __all__ = [
     "RELIABILITY_CONFIG_ENV",
@@ -50,43 +62,13 @@ __all__ = [
     "parse_reliability_config",
 ]
 
-_DAY_S = 86_400
+_DAY_S = DAY_S
 
 RELIABILITY_CONFIG_ENV = "MERIDIAN_RELIABILITY_CONFIG"
 """The deployment's reliability file, read by the jobs service, the API and
 its metrics. Unset means the defaults, which ``deploy/reliability.toml.example``
 spells out. Every process of one deployment must read the same file: the
 classification's hash is how the API finds the rows the jobs service wrote."""
-
-
-class ReliabilityConfigError(ValueError):
-    """The reliability configuration cannot be read, or holds a bad value."""
-
-
-def _whole(name: str, value: object, low: int, high: int) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ReliabilityConfigError(f"{name} must be a whole number, not {value!r}")
-    if not low <= value <= high:
-        raise ReliabilityConfigError(f"{name} must be in {low}..{high}, not {value}")
-
-
-def _share(name: str, value: object) -> None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ReliabilityConfigError(f"{name} must be a number, not {value!r}")
-    if not 0.0 < value < 1.0:
-        raise ReliabilityConfigError(f"{name} must be between 0 and 1, not {value}")
-
-
-def _number(name: str, value: object, low: float, high: float) -> None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ReliabilityConfigError(f"{name} must be a number, not {value!r}")
-    if not low <= value <= high:
-        raise ReliabilityConfigError(f"{name} must be in {low}..{high}, not {value}")
-
-
-def _canonical_sha256(parameters: dict[str, object]) -> bytes:
-    text = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode("utf-8")).digest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,9 +89,9 @@ class ClassificationConfig:
 
     def __post_init__(self) -> None:
         """Refuse a value outside the labeller's own bounds."""
-        _whole("settle_margin_s", self.settle_margin_s, 0, 30 * _DAY_S)
-        _whole("silent_window_s", self.silent_window_s, 1, 7 * _DAY_S)
-        _whole("silent_min_attempts", self.silent_min_attempts, 1, 100)
+        whole("settle_margin_s", self.settle_margin_s, 0, 30 * _DAY_S)
+        whole("silent_window_s", self.silent_window_s, 1, 7 * _DAY_S)
+        whole("silent_min_attempts", self.silent_min_attempts, 1, 100)
 
     def parameters(self) -> dict[str, int]:
         """The parameters as recorded with every classification."""
@@ -117,7 +99,7 @@ class ClassificationConfig:
 
     def sha256(self) -> bytes:
         """The hash stored beside every classification made under these."""
-        return _canonical_sha256(dict(self.parameters()))
+        return canonical_sha256(dict(self.parameters()))
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,7 +128,7 @@ class SloConfig:
 
     def __post_init__(self) -> None:
         """Refuse a target that cannot be met or cannot be missed."""
-        _whole("window_days", self.window_days, 1, 366)
+        whole("window_days", self.window_days, 1, 366)
         for name in (
             "capture_rate_min",
             "confirmed_miss_rate_max",
@@ -154,9 +136,9 @@ class SloConfig:
             "assignment_completion_rate_min",
             "schedule_execution_rate_min",
         ):
-            _share(name, getattr(self, name))
-        _whole("submission_delay_p95_max_s", self.submission_delay_p95_max_s, 1, _DAY_S)
-        _whole("failure_detection_max_s", self.failure_detection_max_s, 1, 3_600)
+            share(name, getattr(self, name))
+        whole("submission_delay_p95_max_s", self.submission_delay_p95_max_s, 1, _DAY_S)
+        whole("failure_detection_max_s", self.failure_detection_max_s, 1, 3_600)
 
     def parameters(self) -> dict[str, float]:
         """The targets, as every report prints them."""
@@ -237,24 +219,24 @@ class DiagnosisConfig:
 
     def __post_init__(self) -> None:
         """Refuse a threshold outside the range the tests were written for."""
-        _number("heard_snr_db", self.heard_snr_db, 0.0, 30.0)
-        _whole("lookback_s", self.lookback_s, 0, 90 * _DAY_S)
-        _number("obstruction_sector_deg", self.obstruction_sector_deg, 1.0, 90.0)
-        _number("obstruction_ceiling_deg", self.obstruction_ceiling_deg, 0.0, 90.0)
-        _number("elevation_match_deg", self.elevation_match_deg, 0.1, 30.0)
-        _whole("obstruction_min_passes", self.obstruction_min_passes, 1, 100)
-        _share("obstruction_min_lost_share", self.obstruction_min_lost_share)
-        _whole("obstruction_min_samples", self.obstruction_min_samples, 1, 100)
-        _share("obstruction_absent_share", self.obstruction_absent_share)
-        _number("audible_min_elevation_deg", self.audible_min_elevation_deg, 0.0, 90.0)
-        _number("interference_lift_db", self.interference_lift_db, 0.1, 40.0)
-        _whole("interference_min_baseline", self.interference_min_baseline, 1, 1000)
-        _whole("silent_window_s", self.silent_window_s, 1, 7 * _DAY_S)
-        _whole("silent_min_attempts", self.silent_min_attempts, 1, 100)
-        _number("silent_min_elevation_deg", self.silent_min_elevation_deg, 0.0, 90.0)
-        _number("timing_tolerance_s", self.timing_tolerance_s, 0.0, 3_600.0)
-        _whole("clock_margin_s", self.clock_margin_s, 0, _DAY_S)
-        _share("conflict_margin", self.conflict_margin)
+        number("heard_snr_db", self.heard_snr_db, 0.0, 30.0)
+        whole("lookback_s", self.lookback_s, 0, 90 * _DAY_S)
+        number("obstruction_sector_deg", self.obstruction_sector_deg, 1.0, 90.0)
+        number("obstruction_ceiling_deg", self.obstruction_ceiling_deg, 0.0, 90.0)
+        number("elevation_match_deg", self.elevation_match_deg, 0.1, 30.0)
+        whole("obstruction_min_passes", self.obstruction_min_passes, 1, 100)
+        share("obstruction_min_lost_share", self.obstruction_min_lost_share)
+        whole("obstruction_min_samples", self.obstruction_min_samples, 1, 100)
+        share("obstruction_absent_share", self.obstruction_absent_share)
+        number("audible_min_elevation_deg", self.audible_min_elevation_deg, 0.0, 90.0)
+        number("interference_lift_db", self.interference_lift_db, 0.1, 40.0)
+        whole("interference_min_baseline", self.interference_min_baseline, 1, 1000)
+        whole("silent_window_s", self.silent_window_s, 1, 7 * _DAY_S)
+        whole("silent_min_attempts", self.silent_min_attempts, 1, 100)
+        number("silent_min_elevation_deg", self.silent_min_elevation_deg, 0.0, 90.0)
+        number("timing_tolerance_s", self.timing_tolerance_s, 0.0, 3_600.0)
+        whole("clock_margin_s", self.clock_margin_s, 0, _DAY_S)
+        share("conflict_margin", self.conflict_margin)
 
     def parameters(self) -> dict[str, float]:
         """The thresholds as recorded with every diagnosis.
@@ -271,102 +253,7 @@ class DiagnosisConfig:
 
     def sha256(self) -> bytes:
         """The hash stored beside every diagnosis made under these."""
-        return _canonical_sha256(dict(self.parameters()))
-
-
-@dataclass(frozen=True, slots=True)
-class BaselineConfig:
-    """How a receive chain's baseline is trained (D-293).
-
-    Changing one writes a new baseline for every chain beside the old.
-    """
-
-    bin_width_deg: float = 10.0
-    """The width of an elevation bin."""
-
-    min_elevation_deg: float = 5.0
-    """Signal below this elevation is left out: it is mostly the horizon's."""
-
-    train_s: int = 14 * _DAY_S
-    """How far back from its end a baseline's training interval reaches."""
-
-    retrain_s: int = 30 * _DAY_S
-    """How old a baseline's interval may grow before a chain with no open
-    warning is trained again. A chain with an open warning never is, so its
-    shortfall is not learned as normal."""
-
-    min_receptions: int = 5
-    """Receptions a bin needs to be part of a baseline."""
-
-    min_bins: int = 2
-    """Bins a baseline needs: a shortfall is judged across elevations."""
-
-    def __post_init__(self) -> None:
-        """Refuse a value outside the range the tests were written for."""
-        _number("bin_width_deg", self.bin_width_deg, 1.0, 45.0)
-        _number("min_elevation_deg", self.min_elevation_deg, 0.0, 80.0)
-        _whole("train_s", self.train_s, _DAY_S, 365 * _DAY_S)
-        _whole("retrain_s", self.retrain_s, _DAY_S, 365 * _DAY_S)
-        _whole("min_receptions", self.min_receptions, 1, 1000)
-        _whole("min_bins", self.min_bins, 1, 18)
-
-    def parameters(self) -> dict[str, float]:
-        """The settings as recorded with every baseline, reals as reals."""
-        held = asdict(self)
-        return {
-            one.name: float(held[one.name]) if one.type == "float" else held[one.name]
-            for one in fields(self)
-        }
-
-    def sha256(self) -> bytes:
-        """The hash of these settings alone; a baseline adds the diagnosis."""
-        return _canonical_sha256(dict(self.parameters()))
-
-
-@dataclass(frozen=True, slots=True)
-class WatchConfig:
-    """When a chain's shortfall raises a warning, and when it clears (D-294).
-
-    Changing one starts every chain's warnings afresh, beside the old rows.
-    """
-
-    recent_receptions: int = 3
-    """How many of the chain's latest receptions a shortfall is judged over.
-    The median of three is unmoved by one bad pass, and moved by two."""
-
-    lookback_s: int = 7 * _DAY_S
-    """How far back those receptions may lie: older signal is not recent."""
-
-    min_bins: int = 2
-    """Baseline bins a reception must cross to be judged, and bins that must
-    fall short together to raise a warning."""
-
-    raise_db: float = 3.0
-    """The median shortfall, in decibels, that raises a warning."""
-
-    clear_db: float = 1.5
-    """The median shortfall at or below which an open warning clears. Below
-    ``raise_db``, so a chain at the threshold does not raise and clear by turns."""
-
-    def __post_init__(self) -> None:
-        """Refuse a value outside the range the tests were written for."""
-        _whole("recent_receptions", self.recent_receptions, 1, 50)
-        _whole("lookback_s", self.lookback_s, 3_600, 90 * _DAY_S)
-        _whole("min_bins", self.min_bins, 1, 18)
-        _number("raise_db", self.raise_db, 0.1, 40.0)
-        _number("clear_db", self.clear_db, 0.0, 40.0)
-        if self.clear_db >= self.raise_db:
-            raise ReliabilityConfigError(
-                f"clear_db ({self.clear_db}) must be below raise_db ({self.raise_db})"
-            )
-
-    def parameters(self) -> dict[str, float]:
-        """The settings as recorded with every warning, reals as reals."""
-        held = asdict(self)
-        return {
-            one.name: float(held[one.name]) if one.type == "float" else held[one.name]
-            for one in fields(self)
-        }
+        return canonical_sha256(dict(self.parameters()))
 
 
 @dataclass(frozen=True, slots=True)
