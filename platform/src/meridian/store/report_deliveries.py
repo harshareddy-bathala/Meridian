@@ -33,10 +33,13 @@ from psycopg.types.json import Jsonb
 from meridian.store.stations import Connection
 
 __all__ = [
+    "DELIVERY_STATES",
+    "DeliveryCount",
     "NewPassReport",
     "NewWeeklyReport",
     "StoredAttempt",
     "StoredDelivery",
+    "count_deliveries",
     "due_deliveries",
     "find_attempts",
     "find_deliveries",
@@ -187,6 +190,32 @@ _DELIVERIES = """
         where delivery_id = d.id
     ) t on true
 """
+
+
+DELIVERY_STATES = ("queued", "retrying", "sent", "abandoned")
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryCount:
+    """How many reports of one population are in one state."""
+
+    simulated: bool
+    state: str
+    reports: int
+
+
+def count_deliveries(conn: Connection) -> list[DeliveryCount]:
+    """Reports by population and state; a population with none is absent."""
+    with conn.cursor(row_factory=class_row(DeliveryCount)) as cur:
+        cur.execute(
+            f"""
+            select simulated, state, count(*)::integer as reports
+            from ({_DELIVERIES}) d
+            group by simulated, state
+            order by simulated, state
+            """
+        )
+        return cur.fetchall()
 
 
 def find_delivery(conn: Connection, delivery_id: int) -> StoredDelivery | None:
