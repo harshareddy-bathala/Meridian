@@ -6172,7 +6172,7 @@ SC-9's detection delay and false-alarm rate are computed from `receive_chain_war
 
 A warning open on a chain stops it being trained again, so a shortfall the watch has seen is never learned as the chain's normal signal.
 
-**What it cannot catch, stated.** A chain that degrades before its first baseline, or slowly enough that thirty days of loss pass unwarned, has the loss trained into its next baseline. SC-9's simulated runs train on a clean stretch first, which is the case they test (D-295). A real chain's first baseline is only as good as the weeks it was trained on.
+**What it cannot catch, stated.** A chain that degrades before its first baseline, or slowly enough that thirty days of loss pass unwarned, has the loss trained into its next baseline. SC-9's simulated runs train on a clean stretch first, which is the case they test (D-296). A real chain's first baseline is only as good as the weeks it was trained on.
 
 **The hash names the diagnosis it read.** A baseline leaves out the receptions Stage 27 put down to an obstruction, interference or a silent satellite. So `config_sha256` hashes the `[baseline]` table together with the diagnosis method and the `[diagnosis]` table's hash. Changing either trains every chain again, beside the old baselines.
 
@@ -6207,11 +6207,50 @@ The roadmap asks for "a persistent shortfall against the baseline across elevati
 
 **The hash** stored with every warning covers `[watch]` together with the baseline's hash, so a warning names everything it was judged under.
 
-**The thresholds are proposed.** The 3 dB, the 1.5 dB, three receptions and two bins are what the roadmap's two tests need and nothing more. SC-9's simulated runs measure what they cost in delay and false alarms (D-295). If those runs move any of them, the change is recorded where it is made, with the runs that moved it, as D-270 asked of Stage 27's thresholds.
+**The thresholds are proposed.** The 3 dB, the 1.5 dB, three receptions and two bins are what the roadmap's two tests need and nothing more. SC-9's simulated runs measure what they cost in delay and false alarms (D-296). If those runs move any of them, the change is recorded where it is made, with the runs that moved it, as D-270 asked of Stage 27's thresholds.
 
 *Rejected: CUSUM on each reception's shortfall.* It is the textbook detector for a slow drift, and it trades delay against false alarms through one parameter. It is also harder to explain to an owner reading a warning: "the last three passes were 4 dB weaker than this antenna usually hears at those elevations" can be checked by hand from the rows; a cumulative sum's crossing cannot. If SC-9's runs show the median of three is too slow on the slowest degradations, CUSUM is the next thing to try.
 
 *Rejected: counting a pass that heard nothing as a total shortfall.* A chain that has degraded far enough hears nothing, and that would be strong evidence. But most passes that hear nothing are low ones in the outcome model, and in the world. The watch would then warn on geometry, and the warning has to come before reception fails anyway.
+
+---
+
+## D-295 — A warning reaches people four ways: a gauge and an alert, a Grafana panel, and the station's page
+
+**2026-10-28 · accepted** · *`meridian/api/domain_collector.py`; `meridian/store/watch_reads.py`; `/api/v1/stations/{id}/receive-chain` and `meridian/api/public/models/receive_chain.py`; `dashboard/src/receiveChain.ts`; `deploy/prometheus/rules/meridian.yml`; `deploy/grafana/dashboards/meridian-platform.json`; `deploy/front/snapshot-routes.txt`; `docs/THREAT-MODEL.md` §7; Stage 28. Applies D-086, D-109, D-111, D-112, D-210 and D-283.*
+
+The roadmap's gate asks that a warning reach "the dashboard and the alerting before the degradation fails a reception".
+
+**Two gauges, read at scrape time from the tables** (D-109), in a borrow of their own:
+- `meridian_receive_chains_watched{simulated}` counts chains with a baseline under the deployment's settings;
+- `meridian_receive_chain_warnings_open{simulated}` counts the warnings open.
+
+A failed read loses only these two, as D-186's reliability read does. **A population with no baseline publishes neither.** Zero open warnings there would read as "watched and well" when nothing is watched (D-086). No station or chain is a label (D-111).
+
+**`ReceiveChainDegrading` fires with no `for`.** The watch has already waited for a persistent shortfall over several receptions before raising the warning (D-294). A `for` on top would only delay an alert whose whole value is arriving before a pass is lost. It is a warning, not critical: nothing is lost yet. Simulated and measured fire apart, each labelled, so a simulated fleet's degradation is never read as ours. It has a firing test and a silent test, as D-112 requires; the firing test has a healthy measured chain beside the failing simulated one.
+
+**Grafana** gets a "Receive chains" row: warnings open and chains watched, each by population.
+
+**The station's page.** One public read, `/api/v1/stations/{id}/receive-chain`, returns each live capability of the station with:
+- its band and range;
+- its current baseline (bins to a tenth of a decibel);
+- its latest five warnings, newest first.
+
+The dashboard says, per chain, in a sentence an owner can check against those rows, one of:
+- not watched yet;
+- hearing as usual, against which days;
+- a warning since a day, how many decibels short, and at which elevations.
+
+An open warning carries a badge with the words "receive-chain warning", and the simulated badge on a simulated station. The colour has a token of its own, because "stale" and "snapshot" already mean other things.
+
+**The route is warmed by the front** (D-283), listed in `snapshot-routes.txt` and checked against the dashboard's own fetch by `snapshotRoutes.test.ts`. An owner opening the page in an outage still sees the last warning.
+
+**Reviewed for privacy** (D-210): every field is pinned in `test_public_privacy.py` and has a row in `THREAT-MODEL.md` §7.
+- No azimuth is published, so a warning gives no bearing to anything.
+- The capability's database id is not published, as it never has been; a chain is named by band and range.
+- SNR by elevation summarises what each observation's peak already publishes.
+
+*Rejected: a field on the station directory.* Every directory page would then join two more tables for every station, to serve a figure most visitors never open. Liveness, which every visitor needs, is already on the directory; this is not.
 
 ---
 

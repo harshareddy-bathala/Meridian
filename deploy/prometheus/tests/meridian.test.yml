@@ -60,6 +60,8 @@ tests:
         values: "0+15x100"
       - series: 'meridian_loss_budget_remaining_ratio{job="meridian", instance="api:8000", simulated="false"}'
         values: "0.8x100"
+      - series: 'meridian_receive_chain_warnings_open{job="meridian", instance="api:8000", simulated="false"}'
+        values: "0x100"
     alert_rule_test:
       - {eval_time: 20m, alertname: ApiUnavailable, exp_alerts: []}
       - {eval_time: 20m, alertname: DatabaseUnavailable, exp_alerts: []}
@@ -72,6 +74,7 @@ tests:
       - {eval_time: 20m, alertname: ScheduledTaskStalled, exp_alerts: []}
       - {eval_time: 20m, alertname: ScheduledTaskNeverSucceeded, exp_alerts: []}
       - {eval_time: 20m, alertname: LossBudgetThresholdReached, exp_alerts: []}
+      - {eval_time: 20m, alertname: ReceiveChainDegrading, exp_alerts: []}
 
   # --- Platform ------------------------------------------------------------
   - name: the api stops answering
@@ -320,6 +323,27 @@ tests:
             exp_annotations:
               summary: "10% of the loss budget is left (simulated=false)."
               runbook: docs/OPERATIONS.md#lossbudgetthresholdreached
+
+  - name: a simulated chain falls short while the measured one is well
+    interval: 15s
+    input_series:
+      # A warning raised at the fourth scrape, on the simulated fleet only.
+      - series: 'meridian_receive_chain_warnings_open{job="meridian", instance="api:8000", simulated="true"}'
+        values: "0 0 0 1x20"
+      - series: 'meridian_receive_chain_warnings_open{job="meridian", instance="api:8000", simulated="false"}'
+        values: "0x23"
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: ReceiveChainDegrading
+        exp_alerts: []
+      # Within one scrape of the warning being written: no `for` holds it back.
+      - eval_time: 45s
+        alertname: ReceiveChainDegrading
+        exp_alerts:
+          - exp_labels: {severity: warning, simulated: "true"}
+            exp_annotations:
+              summary: "1 receive chain(s) falling short of their own baseline (simulated=true)."
+              runbook: docs/OPERATIONS.md#receivechaindegrading
 
   - name: the reliability task has failed every round since the process started
     interval: 1m

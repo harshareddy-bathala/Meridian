@@ -1,8 +1,9 @@
 """``/api/v1/stations`` — the directory, and what is known about one station.
 
-Seven read endpoints: the paged list, one station, the hardware it declared,
+Eight read endpoints: the paged list, one station, the hardware it declared,
 its liveness on its own, the heartbeats it has sent, its hourly uptime (D-178),
-and its horizon and interference profiles (D-174). Every one of them is thin by
+its horizon and interference profiles (D-174), and its receive chains' baselines
+and warnings (D-295). Every one of them is thin by
 rule — it reads through ``meridian.store``, hands the rows to a model in
 ``meridian.api.public.models``, and returns. No decision about what a station
 *is* is made here.
@@ -12,7 +13,7 @@ classified against the same instant (D-054). Paging is keyset: the route asks fo
 one row more than the page needs and trims, which is how "is there another page"
 is answered by evidence rather than by guessing from a full page (D-085).
 
-Reference: docs/DECISIONS.md D-082, D-083, D-084, D-085, D-174, D-178;
+Reference: docs/DECISIONS.md D-082, D-083, D-084, D-085, D-174, D-178, D-295;
 docs/PROJECT.md §13.
 """
 
@@ -33,6 +34,7 @@ from meridian.api.public.models import (
     PublicStation,
 )
 from meridian.api.public.models.profiles import PublicStationProfiles
+from meridian.api.public.models.receive_chain import PublicStationReceiveChains
 from meridian.api.public.models.stations import StationLiveness
 from meridian.api.public.models.uptime import PublicHourlyUptime, PublicStationUptime
 from meridian.api.public.pagination import (
@@ -41,7 +43,10 @@ from meridian.api.public.pagination import (
     page_request,
     trim_overfetch,
 )
+from meridian.api.public.reliability import deployed_reliability_config
 from meridian.config import Settings
+from meridian.reliability.config import ReliabilityConfig
+from meridian.reliability.watch_run import watched_under
 from meridian.store.heartbeat_coverage import find_hourly_coverage
 from meridian.store.heartbeats import find_heartbeats_before
 from meridian.store.profile_reads import find_station_profiles
@@ -52,6 +57,7 @@ from meridian.store.station_directory import (
     find_stations_after,
 )
 from meridian.store.stations import Connection
+from meridian.store.watch_reads import find_station_watch
 
 __all__ = ["router"]
 
@@ -187,6 +193,35 @@ def get_station_profiles(
     station = _station_or_404(conn, station_id)
     return PublicStationProfiles.from_row(
         station.station_id, station.simulated, find_station_profiles(conn, station_id)
+    )
+
+
+@router.get("/stations/{station_id}/receive-chain")
+def get_station_receive_chain(
+    station_id: str,
+    conn: Connection = Depends(get_connection, scope="function"),
+    config: ReliabilityConfig = Depends(deployed_reliability_config),
+) -> PublicStationReceiveChains:
+    """Each receive chain's baseline, and its latest warnings (D-295).
+
+    Args:
+        station_id: The station to look up.
+        conn: A pooled connection, injected.
+        config: The deployment's reliability configuration, whose baseline and
+            watch settings name the rows read.
+
+    Returns:
+        Every live capability of the station, with null for a chain not yet
+        watched and an empty list for one that has never been warned about.
+
+    Raises:
+        PublicError: ``not_found`` when there is no such station.
+    """
+    station = _station_or_404(conn, station_id)
+    return PublicStationReceiveChains.from_rows(
+        station.station_id,
+        station.simulated,
+        find_station_watch(conn, station_id, under=watched_under(config)),
     )
 
 

@@ -16,6 +16,9 @@
   /* A view showing the front's kept copy, not the platform's answer (D-284).
      Its own token: "stale" already means a station's liveness. */
   --snapshot: #9a3412;
+  /* A receive-chain warning (D-294). Its own token, and always the words
+     beside it: "stale" and "snapshot" already mean other things. */
+  --warning: #b42318;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -30,6 +33,7 @@
     --offline: #9aa0a8;
     --simulated: #b9a3ec;
     --snapshot: #f0915c;
+    --warning: #f97066;
   }
 }
 
@@ -208,6 +212,24 @@ tr.selected {
 }
 
 .badge-outcome + .badge-simulated {
+  margin-left: 0.4em;
+}
+
+/* Each receive chain, in a sentence an owner can check (D-295). */
+.chains {
+  padding: 0;
+  list-style: none;
+}
+
+.chains li + li {
+  margin-top: 0.5rem;
+}
+
+.badge-warning {
+  color: var(--warning);
+}
+
+.badge-warning + .badge-simulated {
   margin-left: 0.4em;
 }
 

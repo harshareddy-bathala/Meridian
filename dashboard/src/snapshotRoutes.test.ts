@@ -14,6 +14,7 @@ import routesFile from "../../deploy/front/snapshot-routes.txt?raw";
 import type { Fetcher } from "./api";
 import { fetchProfiles } from "./profiles";
 import { fetchRecentReceptions } from "./receptions";
+import { fetchReceiveChains } from "./receiveChain";
 import { fetchStationCapture } from "./reliability";
 import { fetchLatestHeartbeat, fetchUpcomingAssignments } from "./schedule";
 import { fetchAllStations } from "./stations";
@@ -47,6 +48,7 @@ async function requests(): Promise<string[]> {
     fetchProfiles(fetcher, STATION_ID, signal),
     fetchUptime(fetcher, STATION_ID, signal),
     fetchRecentReceptions(fetcher, STATION_ID, signal),
+    fetchReceiveChains(fetcher, STATION_ID, signal),
   ];
   await Promise.allSettled(calls);
   return urls;

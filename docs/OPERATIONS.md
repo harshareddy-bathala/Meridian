@@ -1891,6 +1891,15 @@ A lost pass is not the same as a miss. Every debit carries its reason, and only 
 2. `meridian reliability explain <assignment id>` prints one debit's evidence: the assignment's state, the report, the heartbeats and the registry's listening answer.
 3. Nothing is retried. A lost pass stays lost, and the budget recovers only as the window moves past it.
 
+### ReceiveChainDegrading
+
+**Warning.** A station's receive chain (antenna, cable, LNA) is hearing less than it usually does, across elevations, over its last few passes: at least 3 dB short across two of its last three judged receptions, in at least two elevation bins (D-294). Nothing has been lost yet; the warning exists to come before that. The `simulated` label says which population; a simulated fleet's warning is the simulator's injected degradation, never a fault of ours.
+
+1. `meridian watch warnings <station id>` prints the station's warnings: when each was raised, how far short, at which elevations, and the baseline it was judged against. The dashboard's station page says the same in a sentence.
+2. Look at the chain, in this order: the LNA's power (a bias-tee switched off, a supply gone), the cable and its connectors (water, a loose N-type), then the antenna itself. A loss at every elevation is the chain; a loss at one elevation in one direction is an obstruction, which loss diagnosis names instead.
+3. Check that the station's gain did not change. The baseline compares SNR, and a lower gain setting reads as a weaker chain.
+4. The warning clears on its own once the chain's last three receptions are back within 1.5 dB of its baseline. It is never deleted: a false alarm stays a row, because SC-9's false-alarm rate is counted from them (D-292). The chain is not retrained while a warning is open, so a fault is never learned as normal (D-293).
+
 ### Reliability figures
 
 `meridian reliability report` prints each figure as a count over a count, with its 95% interval, for measured and simulated stations apart:

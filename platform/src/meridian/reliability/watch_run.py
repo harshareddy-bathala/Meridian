@@ -56,9 +56,13 @@ from meridian.store.receive_chain_warnings import (
 )
 from meridian.store.signal_baselines import StoredBaseline, find_current_baseline
 from meridian.store.stations import Connection
-from meridian.store.watch_reads import ChainReception, find_chain_receptions
+from meridian.store.watch_reads import (
+    ChainReception,
+    WatchUnder,
+    find_chain_receptions,
+)
 
-__all__ = ["WatchRunReport", "watch_chains", "watch_sha256"]
+__all__ = ["WatchRunReport", "watch_chains", "watch_sha256", "watched_under"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +98,16 @@ def watch_sha256(config: ReliabilityConfig) -> bytes:
         separators=(",", ":"),
     )
     return hashlib.sha256(text.encode("utf-8")).digest()
+
+
+def watched_under(config: ReliabilityConfig) -> WatchUnder:
+    """The methods and hashes a deployment's baselines and warnings carry."""
+    return WatchUnder(
+        baseline_method=baselines.METHOD,
+        baseline_sha256=baseline_sha256(config),
+        watch_method=METHOD,
+        watch_sha256=watch_sha256(config),
+    )
 
 
 def watch_chains(

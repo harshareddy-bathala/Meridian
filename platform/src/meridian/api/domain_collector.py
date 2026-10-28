@@ -14,6 +14,11 @@ D-186). That read is apart so that its failure — a table a pending migration h
 not created yet, say — loses the reliability series and nothing else: the
 schema series above is what says the migration is pending.
 
+A third borrow reads the receive-chain watch: per population, the chains with a
+baseline and the warnings open under the deployment's watch settings (Stage 28,
+D-295). A population with no baseline yet publishes nothing, because zero open
+warnings there would read as "watched and well" when nothing is watched.
+
 It also reports the answering process's connection pool, and whether the database
 answered at all.
 
@@ -31,7 +36,7 @@ worker's pool.
 series**, for the same reason: a column of zeros would read as "no misses" when
 the truth is that nothing has settled yet (D-086, D-186).
 
-Reference: docs/DECISIONS.md D-054, D-086, D-109, D-111, D-186.
+Reference: docs/DECISIONS.md D-054, D-086, D-109, D-111, D-186, D-295.
 """
 
 from __future__ import annotations
@@ -56,9 +61,11 @@ from meridian.reliability.config import (
     ReliabilityConfigError,
     load_deployed_reliability_config,
 )
+from meridian.reliability.watch_run import watched_under
 from meridian.store.monitoring import MonitoringSnapshot, read_monitoring_snapshot
 from meridian.store.reliability_reads import count_classified_between
 from meridian.store.schema_revision import find_current_revision, find_head_revision
+from meridian.store.watch_reads import WatchCount, count_watched
 
 __all__ = ["OVERDUE_AFTER_S", "SCRAPE_CONNECTION_TIMEOUT_S", "DomainCollector"]
 
@@ -165,6 +172,9 @@ class DomainCollector(Collector):
             classified = _read_classified(pool, now, reliability)
             if classified is not None:
                 yield from _reliability_families(classified, reliability)
+            watched = _read_watched(pool, reliability)
+            if watched is not None:
+                yield from _watch_families(watched)
 
     def _reliability_config(self) -> ReliabilityConfig | None:
         """The deployment's reliability configuration, read once."""
@@ -231,6 +241,44 @@ def _read_classified(
     except (psycopg.Error, OSError):
         _log.warning("scrape-time reliability read failed", exc_info=True)
         return None
+
+
+def _read_watched(
+    pool: Pool, reliability: ReliabilityConfig
+) -> list[WatchCount] | None:
+    """Chains watched and warnings open, per population, or ``None`` on failure.
+
+    Apart from the other reads for their reason: a table a pending migration has
+    not created loses these series and nothing else.
+    """
+    try:
+        with pool.connection(timeout=SCRAPE_CONNECTION_TIMEOUT_S) as conn:
+            return count_watched(conn, under=watched_under(reliability))
+    except (psycopg.Error, OSError):
+        _log.warning("scrape-time watch read failed", exc_info=True)
+        return None
+
+
+def _watch_families(watched: list[WatchCount]) -> Iterator[Metric]:
+    """Chains with a baseline and warnings open, for each population that has any."""
+    chains = GaugeMetricFamily(
+        "meridian_receive_chains_watched",
+        "Receive chains with a baseline under the deployment's settings, by "
+        "whether simulated.",
+        labels=["simulated"],
+    )
+    warnings = GaugeMetricFamily(
+        "meridian_receive_chain_warnings_open",
+        "Receive-chain warnings open under the deployment's settings: a chain "
+        "falling short of its own baseline. By whether simulated.",
+        labels=["simulated"],
+    )
+    for one in watched:
+        label = _simulated_label(one.simulated)
+        chains.add_metric([label], float(one.chains))
+        warnings.add_metric([label], float(one.open))
+    yield chains
+    yield warnings
 
 
 def _reachable_family(*, reachable: bool) -> Metric:

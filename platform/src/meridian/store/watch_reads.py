@@ -1,4 +1,6 @@
-"""What the receive-chain watch reads: each heard reception, and its chain.
+"""What the receive-chain watch reads, and what is read of it.
+
+**For the watch:** each heard reception, and its chain.
 
 A receive chain is a capability: the one whose frequency range holds the
 assignment's frequency, and which was not deleted when the window opened
@@ -16,7 +18,11 @@ diagnosis method and configuration, is left out. One not yet diagnosed is read.
 Every read is the station's own: a baseline is a station's past, never another
 station's (D-291).
 
-Reference: docs/DECISIONS.md D-272, D-290, D-291, D-293.
+**Of the watch:** each chain of a station with its current baseline and its
+latest warnings, for the public API; and, for Prometheus, how many chains each
+population has a baseline for and how many warnings are open (D-295).
+
+Reference: docs/DECISIONS.md D-272, D-290, D-291, D-293, D-295.
 """
 
 from __future__ import annotations
@@ -26,9 +32,23 @@ from datetime import datetime
 
 from psycopg.rows import class_row
 
+from meridian.store.receive_chain_warnings import StoredWarning
+from meridian.store.signal_baselines import StoredBaseline, find_current_baseline
 from meridian.store.stations import Connection
 
-__all__ = ["ChainReception", "find_chain_receptions"]
+__all__ = [
+    "ChainReception",
+    "ChainWatch",
+    "WatchCount",
+    "WatchUnder",
+    "count_watched",
+    "find_chain_receptions",
+    "find_station_watch",
+]
+
+EVIDENCE_PREFERRED = ("samples", "peak")
+"""Which baseline a chain shows when it has both: MSP 0.3's, placed sample by
+sample, before MSP 0.2's peaks."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +138,148 @@ def find_chain_receptions(  # noqa: PLR0913 — one query's parameters, each by 
                 "diagnosis_method": diagnosis_method,
                 "diagnosis_sha256": diagnosis_sha256,
                 "excluded": list(excluded_causes),
+            },
+        )
+        return cur.fetchall()
+
+
+@dataclass(frozen=True, slots=True)
+class WatchUnder:
+    """The baseline and watch methods and configurations one deployment reads."""
+
+    baseline_method: str
+    baseline_sha256: bytes
+    watch_method: str
+    watch_sha256: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class ChainWatch:
+    """One receive chain of a station: its baseline, and its latest warnings."""
+
+    capability_id: int
+    band: str
+    freq_min_hz: int
+    freq_max_hz: int
+    baseline: StoredBaseline | None
+    warnings: list[StoredWarning]
+    """Newest first, open or cleared."""
+
+
+@dataclass(frozen=True, slots=True)
+class _Capability:
+    id: int
+    band: str
+    freq_min_hz: int
+    freq_max_hz: int
+
+
+def find_station_watch(
+    conn: Connection, station_id: str, *, under: WatchUnder, latest: int = 5
+) -> list[ChainWatch]:
+    """Each live capability of the station, with its baseline and warnings.
+
+    Args:
+        conn: An open connection.
+        station_id: The station.
+        under: The methods and configurations the deployment watches under.
+        latest: The most warnings to return per chain, newest first.
+    """
+    with conn.cursor(row_factory=class_row(_Capability)) as cur:
+        cur.execute(
+            "select id, band, freq_min_hz, freq_max_hz from station_capabilities"
+            " where station_id = %s and deleted_at is null order by id",
+            (station_id,),
+        )
+        capabilities = cur.fetchall()
+    found = []
+    for one in capabilities:
+        baseline = next(
+            (
+                held
+                for evidence in EVIDENCE_PREFERRED
+                if (
+                    held := find_current_baseline(
+                        conn,
+                        station_id=station_id,
+                        capability_id=one.id,
+                        evidence=evidence,
+                        method=under.baseline_method,
+                        config_sha256=under.baseline_sha256,
+                    )
+                )
+                is not None
+            ),
+            None,
+        )
+        found.append(
+            ChainWatch(
+                capability_id=one.id,
+                band=one.band,
+                freq_min_hz=one.freq_min_hz,
+                freq_max_hz=one.freq_max_hz,
+                baseline=baseline,
+                warnings=_latest_warnings(conn, station_id, one.id, under, latest),
+            )
+        )
+    return found
+
+
+def _latest_warnings(
+    conn: Connection,
+    station_id: str,
+    capability_id: int,
+    under: WatchUnder,
+    latest: int,
+) -> list[StoredWarning]:
+    with conn.cursor(row_factory=class_row(StoredWarning)) as cur:
+        cur.execute(
+            "select id, station_id, capability_id, baseline_id, raised_at,"
+            " shortfall_db, affected_bins_json, evidence_json, cleared_at,"
+            " cleared_shortfall_db, method, config_sha256, simulated"
+            " from receive_chain_warnings"
+            " where station_id = %s and capability_id = %s"
+            " and method = %s and config_sha256 = %s"
+            " order by raised_at desc, id desc limit %s",
+            (station_id, capability_id, under.watch_method, under.watch_sha256, latest),
+        )
+        return cur.fetchall()
+
+
+@dataclass(frozen=True, slots=True)
+class WatchCount:
+    """One population's chains with a baseline, and its warnings open."""
+
+    simulated: bool
+    chains: int
+    open: int
+
+
+def count_watched(conn: Connection, *, under: WatchUnder) -> list[WatchCount]:
+    """Per population, chains with a baseline and warnings open, under ``under``.
+
+    A population with no baseline is absent: its chains are not watched yet,
+    which is not the same as watched and well (D-086).
+    """
+    with conn.cursor(row_factory=class_row(WatchCount)) as cur:
+        cur.execute(
+            """
+            select b.simulated,
+                   count(distinct (b.station_id, b.capability_id))::int as chains,
+                   (select count(*)::int from receive_chain_warnings w
+                    where w.cleared_at is null and w.simulated = b.simulated
+                      and w.method = %(watch)s
+                      and w.config_sha256 = %(watch_sha)s) as open
+            from signal_baselines b
+            where b.method = %(baseline)s and b.config_sha256 = %(baseline_sha)s
+            group by b.simulated
+            order by b.simulated
+            """,
+            {
+                "watch": under.watch_method,
+                "watch_sha": under.watch_sha256,
+                "baseline": under.baseline_method,
+                "baseline_sha": under.baseline_sha256,
             },
         )
         return cur.fetchall()

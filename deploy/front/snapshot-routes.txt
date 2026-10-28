@@ -19,3 +19,4 @@
 /api/v1/stations/{station}/profiles
 /api/v1/stations/{station}/uptime?hours=48
 /api/v1/observations?limit=10&station_id={station}
+/api/v1/stations/{station}/receive-chain

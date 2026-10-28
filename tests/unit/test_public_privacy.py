@@ -156,6 +156,33 @@ REVIEWED = {
         "noise_lift_db",
         "sample_count",
     },
+    # Stage 28 (D-295), reviewed in THREAT-MODEL.md §7.
+    "PublicStationReceiveChains": {"chains", "simulated", "station_id"},
+    "PublicReceiveChain": {
+        "band",
+        "baseline",
+        "freq_max_hz",
+        "freq_min_hz",
+        "warnings",
+    },
+    "PublicChainBaseline": {
+        "bin_width_deg",
+        "bins",
+        "evidence",
+        "method",
+        "trained_from",
+        "trained_until",
+    },
+    "PublicBaselineBin": {"elevation_deg", "median_db", "p10_db", "receptions"},
+    "PublicChainWarning": {
+        "affected_bins",
+        "cleared_at",
+        "cleared_shortfall_db",
+        "method",
+        "raised_at",
+        "shortfall_db",
+    },
+    "PublicAffectedBin": {"elevation_deg", "receptions", "shortfall_db"},
     "PublicStationUptime": {"heartbeat_interval_s", "hours", "simulated", "station_id"},
     "PublicHourlyUptime": {"coverage", "heartbeats", "hour", "listening"},
     "PublicPass": {

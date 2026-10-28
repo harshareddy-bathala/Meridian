@@ -134,6 +134,22 @@ groups:
           summary: "{{ $value | humanizePercentage }} of the loss budget is left (simulated={{ $labels.simulated }})."
           runbook: docs/OPERATIONS.md#lossbudgetthresholdreached
 
+      - alert: ReceiveChainDegrading
+        # D-295. A receive chain is falling short of its own baseline across
+        # elevations, before reception fails (D-294). No `for`: the watch has
+        # already waited for a persistent shortfall over several receptions
+        # before it raised the warning, and the warning's whole value is that
+        # it arrives before a pass is lost. Simulated and measured fire apart,
+        # each labelled. The series is absent until a population has a
+        # baseline, so an unwatched deployment is silent rather than "well".
+        # `meridian watch warnings <station>` says which chain and by how much.
+        expr: max by (simulated) (meridian_receive_chain_warnings_open) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} receive chain(s) falling short of their own baseline (simulated={{ $labels.simulated }})."
+          runbook: docs/OPERATIONS.md#receivechaindegrading
+
   - name: meridian-scheduling
     rules:
       - alert: SchedulerUnavailable
