@@ -84,10 +84,10 @@ DEFERRED = {
     ),
 }
 
-PLANNED = "signal_baselines"
-"""A table the roadmap plans for Stage 28 and nothing builds yet: the control.
-Stage 27 built `loss_diagnoses`, and Stage 26 `reception_verdicts`, which were
-the control before it."""
+PLANNED = "report_deliveries"
+"""A table the roadmap plans for Stage 29 and nothing builds yet: the control.
+Stage 28 built `signal_baselines`, Stage 27 `loss_diagnoses` and Stage 26
+`reception_verdicts`, which were the control before it."""
 
 
 def _module_name(relative: str) -> str:

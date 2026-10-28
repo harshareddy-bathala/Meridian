@@ -6083,6 +6083,216 @@ Whoever wants a lost disk not to cost the queued reports keeps the `registration
 
 ---
 
+## D-290 — The health watch is a receive chain's signal against its own past, and a chain is the capability whose range holds the frequency
+
+**2026-10-27 · accepted** · *`meridian/reliability/watch_*.py`; `meridian/store/{signal_baselines,receive_chain_warnings}.py`; Stage 28. Applies D-013, D-102 and D-104.*
+
+Stage 28 warns that a station's receive chain (antenna, cable, LNA) is losing signal before a reception fails. It is `platform/reliability`'s, beside loss diagnosis (D-102). It reads signal from observations through the store, and elevation from the orbit service through the same `place` loss diagnosis uses. It writes two tables, and none of its names says "health" (D-013, D-104): the watch, a baseline, a receive-chain warning.
+
+**A receive chain is a capability.** `station_capabilities` already separates a station's VHF fixed antenna from its UHF tracker, and `DATA-MODEL.md` asks that two antennas on one station degrade separately. MSP says which frequency a station was given, not which antenna it used. So a reception belongs to the capability whose frequency range holds the assignment's `centre_freq_hz` and which was not deleted when the window opened.
+
+**A reception two capabilities could have made belongs to neither.** Choosing one, by id or by band, would put another antenna's signal into a chain's history. The watch leaves such a reception out and counts it in its run report. A virtual station registers one VHF capability, so none of the simulator's receptions is left out this way.
+
+**What the watch reads, and what it does not.**
+- **It reads only receptions that heard the satellite:** a `decoded` or `signal_no_decode` report with signal. A pass that heard nothing carries no signal strength to compare.
+- **A loss Stage 27 put down to an obstruction, interference or a silent satellite is not the chain's** and is left out. The diagnosis is read under the deployment's own method and configuration (D-272); a loss not yet diagnosed is read as it is.
+- **It reads no other station.** A baseline is the station's own past, so a simulated station's history can never become a measured station's baseline (D-291).
+- **Never the simulator's ledger.** `tests/unit/test_watch_boundaries.py` holds this, as `test_diagnosis_boundaries.py` does for diagnosis (D-105).
+
+*Rejected: one chain per station.* That is simpler, and it is wrong for the one case the data model names. A station with two antennas would mix two chains' signal into one baseline. A failing UHF cable would then read as half a shortfall on a station that still hears VHF perfectly.
+
+*Rejected: the registry.* The registry's word for a station's state is liveness, from heartbeats alone (D-013). A trend computed from observations and geometry would be a fourth meaning of "health" (D-102).
+
+---
+
+## D-291 — A baseline is one row per chain, per evidence and per training interval, and it never moves once written
+
+**2026-10-27 · accepted** · *`deploy/migrations/sql/0030_receive_chain_watch.sql`; `meridian/store/signal_baselines.py`; Stage 28. Departs from `DATA-MODEL.md`'s planned columns.*
+
+`DATA-MODEL.md` planned `signal_baselines` as one row per elevation bin, and `receive_chain_warnings.baseline_id` as a reference to "the baseline". One row per bin leaves that reference with nothing whole to point at. A baseline is the set of bins trained together, and a warning was raised against all of them.
+
+**So a row is a whole baseline.** It holds:
+- its station, its capability and its evidence;
+- its bins, as `bins_json`, each with its elevation, the median and tenth-percentile SNR in decibels, and how many receptions and samples made it;
+- its training interval;
+- its method and the hash of its configuration;
+- `simulated`, copied from the station.
+
+A warning's foreign key then names one row, and the bins it was judged against are exactly that row's.
+
+**Two kinds of evidence, never mixed in one baseline.**
+- **`samples`:** MSP 0.3's `snr_samples`, each placed at its elevation by the pass's own element set.
+- **`peak`:** MSP 0.2's `peak_snr_db` at the pass's maximum elevation.
+
+A station that moves from 0.2 to 0.3 gets a second baseline rather than one that compares a pass's peak with another pass's samples.
+
+**Written once.** A baseline is never updated. Building again over the same interval under the same configuration writes nothing; a later interval writes a new row beside the old. A warning raised against an old baseline still names it.
+
+**A simulated baseline cannot reach a measured station, by key rather than by care.** A warning's key is `(baseline_id, station_id, capability_id, simulated)`, referencing those four columns of the baseline. A baseline's `simulated` is the station's, so a warning on a measured station can only name a measured station's baseline, the same station's. The roadmap's test, "a simulated station's baseline is never applied to a measured one", is then a check the database makes on every insert.
+
+*Rejected: a `signal_baseline_bins` table.* It would be relational, and its rows would only ever be read whole, by the one module that wrote them. `loss_diagnoses.candidates_json` keeps what was tested the same way.
+
+---
+
+## D-292 — A warning is raised once, cleared once, and never deleted; one is open per chain at a time
+
+**2026-10-27 · accepted** · *`deploy/migrations/sql/0030_receive_chain_watch.sql`; `meridian/store/receive_chain_warnings.py`; Stage 28. Applies D-104.*
+
+SC-9's detection delay and false-alarm rate are computed from `receive_chain_warnings` rows. A row deleted, or a `raised_at` moved, would be a false-alarm rate that improves itself (`DATA-MODEL.md`).
+
+**What the store allows:**
+- **One insert per warning.** At most one warning is open per chain, method and configuration, which a partial unique index holds. A second watch run that finds the same shortfall writes nothing, because the open warning already says it.
+- **One update, writing `cleared_at` and the shortfall at that moment together.** The update applies only while `cleared_at` is null, so a warning is cleared once. A table check holds the two columns null or set together.
+- **No delete.** The store has no function that deletes a warning. Like every table here (D-104), the rule is kept by the store's interface rather than a trigger.
+
+**`raised_at` is when the watch concluded, not when the signal fell.** A warning reaches the dashboard and Prometheus when the row is written. That instant is what SC-9's lead is measured from: the time between a person being able to see the warning and the first reception the degradation fails. `evidence_json` also records the latest reception the watch had read, so the delay from that reception to the warning can be read too.
+
+**`simulated` is the chain's**, by the key D-291 gives.
+
+*Rejected: deleting a warning that turned out false.* A false alarm is exactly the row SC-9 counts.
+
+---
+
+## D-293 — A baseline: one vote per reception per bin, trained daily over two weeks, and never again while a warning is open
+
+**2026-10-27 · accepted** · *`meridian/reliability/{watch_baseline,watch_build}.py`; `meridian/store/watch_reads.py`; `meridian/cli_watch.py`; `[baseline]` in `deploy/reliability.toml.example`; Stage 28. Applies D-184, D-290 and D-291.*
+
+**Bins.** Elevation is cut into 10° bins, and signal below 5° is left out because it is mostly the horizon's. A bin enters a baseline with at least five receptions. A baseline is written with at least two bins, because a shortfall is judged across elevations and never in one bin.
+
+**One vote per reception per bin.**
+- A reception's samples in a bin are first reduced to their median.
+- The bin's median and tenth percentile are then taken across receptions, by nearest rank, as every figure here is (D-184).
+- Samples from one pass are not independent of each other. A pass that dwelt four minutes at 20° would otherwise outvote four that crossed it quickly, and a few long passes would stand for a chain's whole history.
+
+**The interval ends at the start of today, UTC, and reaches back fourteen days.** Every run in one day asks for the same interval, so the jobs service can train each round and the store writes once a day at most (D-291).
+
+**A chain is trained:**
+- when it has no baseline under this method and configuration;
+- or when its latest baseline's interval ended thirty days or more before this one ends **and no warning is open on it**.
+
+A warning open on a chain stops it being trained again, so a shortfall the watch has seen is never learned as the chain's normal signal.
+
+**What it cannot catch, stated.** A chain that degrades before its first baseline, or slowly enough that thirty days of loss pass unwarned, has the loss trained into its next baseline. SC-9's simulated runs train on a clean stretch first, which is the case they test (D-296). A real chain's first baseline is only as good as the weeks it was trained on.
+
+**The hash names the diagnosis it read.** A baseline leaves out the receptions Stage 27 put down to an obstruction, interference or a silent satellite. So `config_sha256` hashes the `[baseline]` table together with the diagnosis method and the `[diagnosis]` table's hash. Changing either trains every chain again, beside the old baselines.
+
+**Every setting is configuration**, in `[baseline]`, refused by name when out of range like every other table there.
+
+*Rejected: retraining every day on a rolling window.* It is simpler, and a gradual degradation would then move the baseline with it. A slow loss would never show as a shortfall, which is the one thing the watch exists to show.
+
+*Rejected: every sample as a vote.* As above: it lets long passes dominate.
+
+---
+
+## D-294 — A warning is the median shortfall of a chain's last three receptions, across at least two elevations
+
+**2026-10-27 · accepted, thresholds proposed** · *`meridian/reliability/{watch_detect,watch_run}.py`; `meridian/jobs/watch_round.py`; `meridian watch run`; `[watch]` in `deploy/reliability.toml.example`; the `watch` task's rules in `deploy/prometheus/rules/meridian.yml`; Stage 28. Applies D-110, D-292 and D-293.*
+
+The roadmap asks for "a persistent shortfall against the baseline across elevation bins, not a single bad pass". Each half of that sentence is one rule here.
+
+**A reception's shortfall** is the baseline's median less the reception's own median, in each bin it crossed, reduced to the median across those bins. A reception that crossed fewer than two of the baseline's bins is not judged. A low pass seen at one elevation says too little about a chain.
+
+**Persistent: the median of the latest three.** A chain's shortfall is the median of its last three judged receptions within the past seven days.
+- One bad pass cannot move a median of three, which is the roadmap's first test.
+- Two can, so a step loss warns on its second reception after the step, which is its second test.
+- A gradual loss warns once two of the last three are 3 dB short.
+
+**Across elevations: two bins at once.** Each bin's shortfall is the median over the recent receptions that crossed it. A warning needs the chain's shortfall at or past 3 dB, **and** at least two bins there. A loss confined to one elevation in one sector of sky is an obstruction's shape, which Stage 27 names. A chain's loss lowers every elevation.
+
+**Cleared at 1.5 dB, below the 3 dB that raised it.** A chain hovering at the threshold would otherwise raise and clear by turns, and each raise would count as a new warning in SC-9's false-alarm rate. That is alert fatigue the roadmap asks this stage to learn about.
+
+**What writes a row.** A run raises a warning only for a chain with none open, and clears only an open one. A judgement that changes nothing writes nothing. So the table's rows are exactly the warnings, which SC-9 counts (D-292).
+
+**It runs in the jobs service, last in every round**, after the diagnosis whose causes a baseline leaves out. It is the eighth `task`, `watch`. Its stall and never-succeeded alerts are warnings, not critical, beside the diagnosis's: the watch judges a trend over days, and a round that cannot watch still receives and schedules. `raised_at` is the round's instant, when the warning could first be seen (D-292).
+
+**The hash** stored with every warning covers `[watch]` together with the baseline's hash, so a warning names everything it was judged under.
+
+**The thresholds are proposed.** The 3 dB, the 1.5 dB, three receptions and two bins are what the roadmap's two tests need and nothing more. SC-9's simulated runs measure what they cost in delay and false alarms (D-296). If those runs move any of them, the change is recorded where it is made, with the runs that moved it, as D-270 asked of Stage 27's thresholds.
+
+*Rejected: CUSUM on each reception's shortfall.* It is the textbook detector for a slow drift, and it trades delay against false alarms through one parameter. It is also harder to explain to an owner reading a warning: "the last three passes were 4 dB weaker than this antenna usually hears at those elevations" can be checked by hand from the rows; a cumulative sum's crossing cannot. If SC-9's runs show the median of three is too slow on the slowest degradations, CUSUM is the next thing to try.
+
+*Rejected: counting a pass that heard nothing as a total shortfall.* A chain that has degraded far enough hears nothing, and that would be strong evidence. But most passes that hear nothing are low ones in the outcome model, and in the world. The watch would then warn on geometry, and the warning has to come before reception fails anyway.
+
+---
+
+## D-295 — A warning reaches people four ways: a gauge and an alert, a Grafana panel, and the station's page
+
+**2026-10-28 · accepted** · *`meridian/api/domain_collector.py`; `meridian/store/watch_reads.py`; `/api/v1/stations/{id}/receive-chain` and `meridian/api/public/models/receive_chain.py`; `dashboard/src/receiveChain.ts`; `deploy/prometheus/rules/meridian.yml`; `deploy/grafana/dashboards/meridian-platform.json`; `deploy/front/snapshot-routes.txt`; `docs/THREAT-MODEL.md` §7; Stage 28. Applies D-086, D-109, D-111, D-112, D-210 and D-283.*
+
+The roadmap's gate asks that a warning reach "the dashboard and the alerting before the degradation fails a reception".
+
+**Two gauges, read at scrape time from the tables** (D-109), in a borrow of their own:
+- `meridian_receive_chains_watched{simulated}` counts chains with a baseline under the deployment's settings;
+- `meridian_receive_chain_warnings_open{simulated}` counts the warnings open.
+
+A failed read loses only these two, as D-186's reliability read does. **A population with no baseline publishes neither.** Zero open warnings there would read as "watched and well" when nothing is watched (D-086). No station or chain is a label (D-111).
+
+**`ReceiveChainDegrading` fires with no `for`.** The watch has already waited for a persistent shortfall over several receptions before raising the warning (D-294). A `for` on top would only delay an alert whose whole value is arriving before a pass is lost. It is a warning, not critical: nothing is lost yet. Simulated and measured fire apart, each labelled, so a simulated fleet's degradation is never read as ours. It has a firing test and a silent test, as D-112 requires; the firing test has a healthy measured chain beside the failing simulated one.
+
+**Grafana** gets a "Receive chains" row: warnings open and chains watched, each by population.
+
+**The station's page.** One public read, `/api/v1/stations/{id}/receive-chain`, returns each live capability of the station with:
+- its band and range;
+- its current baseline (bins to a tenth of a decibel);
+- its latest five warnings, newest first.
+
+The dashboard says, per chain, in a sentence an owner can check against those rows, one of:
+- not watched yet;
+- hearing as usual, against which days;
+- a warning since a day, how many decibels short, and at which elevations.
+
+An open warning carries a badge with the words "receive-chain warning", and the simulated badge on a simulated station. The colour has a token of its own, because "stale" and "snapshot" already mean other things.
+
+**The route is warmed by the front** (D-283), listed in `snapshot-routes.txt` and checked against the dashboard's own fetch by `snapshotRoutes.test.ts`. An owner opening the page in an outage still sees the last warning.
+
+**Reviewed for privacy** (D-210): every field is pinned in `test_public_privacy.py` and has a row in `THREAT-MODEL.md` §7.
+- No azimuth is published, so a warning gives no bearing to anything.
+- The capability's database id is not published, as it never has been; a chain is named by band and range.
+- SNR by elevation summarises what each observation's peak already publishes.
+
+*Rejected: a field on the station directory.* Every directory page would then join two more tables for every station, to serve a figure most visitors never open. Liveness, which every visitor needs, is already on the directory; this is not.
+
+---
+
+## D-296 — SC-9 is measured on sealed simulated fleets flown clean first, and a failure is a lost decode
+
+**2026-10-28 · accepted, targets proposed** · *`deploy/tools/watch_runs.py`; `meridian/datasets/watch_runs.py`; `meridian/reports/{watch,render_watch}.py`; `analysis/configs/watch.toml.example`; `meridian report build --watches`; Stage 28. Applies D-105, D-189, D-253 and D-278.*
+
+SC-9 asks whether the watch warns before a degradation fails a reception, and how often it warns when nothing is wrong. A degradation's onset and rate are in the simulator's ledger, which never reaches the platform (D-105). So, as for SC-8 (D-278), the figure is made in two places that meet only in files.
+
+**A fleet is flown and sealed by a tool.** `deploy/tools/watch_runs.py` flies a simulated fleet against the real platform in one process, in a database of its own. Every half hour of simulated time it runs the same `watch_chains` the jobs service runs. That is a coarser cadence than the jobs service's five minutes, so a warning here is never earlier than it would be live. The tool seals the run under `<datasets root>/watches/` with:
+- the ledger;
+- every scheduled pass with its clean outcome, recomputed from the seed;
+- every warning the platform raised.
+
+**Clean first, then the fault.** A degradation is a change from a chain's own history (`EVALUATION.md` §11.3), but Stage 25's onsets fall within the first hour of a run (D-253). So the tool holds the fault schedule at its first tick through `clean_days`, before any onset. The watch trains every chain's baseline on clean signal, and only then do the ticks run on. This changes no fault effect and touches no pinned module (D-270). Two scenarios:
+- **`degradation`** gives every station a loss of 1 to 8 dB a day;
+- **`clean`** injects nothing, so every warning its stations raise after the clean stretch is a false alarm.
+
+**A failure is a lost decode.** It is a pass begun after the onset that the outcome model decodes with nothing wrong, and that did not decode. A pass that only heard signal and then heard none never was a capture, and is not the reception SC-9 asks the warning to come before. That is SC-4's sense of captured.
+
+**The section, method `report-9`**, reports from the sealed runs alone:
+- per degradation, the delay from onset to warning, the loss in decibels by then from the ledger's rate, the lead from warning to first failure, and which came first;
+- a run that ended before either is reported as *neither*, and left out of SC-9's share, because it says nothing about their order;
+- false alarms per station per 30 days watched, with an exact Poisson interval.
+
+**The commit the harness lacked.** Stage 27's harness flew a fleet inside one transaction that never committed. Over days of heartbeats every station's row then held thousands of versions, and each update ran slower than the one before. A six-day fleet crawled. The SC-9 tool commits after every watch round, as the jobs service does; its scratch database is dropped afterwards either way. The same harness also built its Alembic configuration without the migrations' `prepend_sys_path`, so run as `OPERATIONS.md` says it would not migrate, which only the gate test, adding the path itself, had hidden. That is fixed in the shared harness.
+
+**A trial, not the figure.** One trial fleet, seed 4471, 4 stations, 3 clean days and then 3 days degraded at 2.3 to 6.5 dB a day:
+- every station was warned first, after 20.7 to 48.5 hours and 4.6 to 8.2 dB of loss;
+- the two stations that lost a decode lost it 16.5 and 24.9 hours after their warnings;
+- no warning in the two clean days watched.
+
+Decodes began to fail only after about 11 dB, well past the 3 dB the watch warns at. That margin is the simulator's (D-251), and the report says so beside the number. SC-9's figure is the configuration's fleets, about two hours each and twelve for all six. They are run by hand, overnight or in batches with `--run`, and not by CI.
+
+**The CI gate is one small fleet**, one station of seed 4472 over two clean days and a day and a half degraded, about two and a half minutes. Its warning came 14.6 hours after onset at about 4.5 dB, 19 hours before the first lost decode. It shows a warning reaching the dashboard's read and Prometheus's gauge before the degradation costs a decode, and nothing about the fault reaching any table. It does not measure SC-9.
+
+*Rejected: changing the simulator's onset range for these runs.* It is the pinned specification D-270 holds still for its review, and moving it would move every SC-8 fleet too.
+
+*Rejected: a failure as any pass worse than its clean outcome, as D-278 judges a cause.* For SC-8 a pass made worse is what a cause has to explain. For SC-9 it would make a pass that never decoded, and only went quieter, the reception the warning has to beat.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

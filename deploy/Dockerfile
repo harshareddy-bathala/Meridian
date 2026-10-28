@@ -14,7 +14,7 @@
 # The dashboard (D-081). Pinned to the build platform: the output is HTML, CSS
 # and JavaScript, identical for every target, so a multi-arch build compiles it
 # once natively instead of running npm under arm64 emulation.
-FROM --platform=$BUILDPLATFORM node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS dashboard
+FROM --platform=$BUILDPLATFORM node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS dashboard
 
 WORKDIR /dashboard
 # The lockfile first, for the same reason uv.lock goes first below.
@@ -24,7 +24,7 @@ COPY dashboard/ ./
 RUN npm run build
 
 
-FROM python:3.11.16-slim-bookworm@sha256:a36c24f9cbdf4fd0f52d67f0823eeac19c2028c637cecc392d97f980d4fec56b AS build
+FROM python:3.11.17-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf AS build
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.20@sha256:eaa5f1a3305307aaf9e67fe2bbba1d85ebbb2d8a63bce23af21797bfafbe0f8b /uv /usr/local/bin/uv
 
@@ -63,7 +63,7 @@ COPY simulator/ simulator/
 RUN uv sync --frozen --no-dev --no-editable --all-packages --no-install-package meridian-ingest
 
 
-FROM python:3.11.16-slim-bookworm@sha256:a36c24f9cbdf4fd0f52d67f0823eeac19c2028c637cecc392d97f980d4fec56b AS runtime
+FROM python:3.11.17-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf AS runtime
 
 # Debian's security updates, applied when the image is built (D-205). The base
 # image is pinned by digest and so never picks up a fix on its own; a Trivy scan

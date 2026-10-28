@@ -38,6 +38,7 @@ from meridian.datasets.fault_runs import read_fault_run
 from meridian.datasets.manifest import content_sha256
 from meridian.datasets.publish import DamagedSnapshotError, read_directory
 from meridian.datasets.seeds import MASTER_SEED_MAX
+from meridian.datasets.watch_runs import read_watch_run
 from meridian.reports.build import (
     REPORT_FILE,
     REPORTS,
@@ -55,6 +56,7 @@ from meridian.reports.verify import (
     locate_diagnosis_runs,
     locate_fault_runs,
     locate_snapshot,
+    locate_watch_runs,
     verify_run,
 )
 from meridian.scheduler.replay import ReplayInvalidError
@@ -116,6 +118,15 @@ def add_report_parser(
         " repeat for several (D-278)",
     )
     build.add_argument(
+        "--watches",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="a simulated fleet sealed by deploy/tools/watch_runs.py;"
+        " repeat for several (D-296)",
+    )
+    build.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -144,6 +155,14 @@ def add_report_parser(
         default=[],
         metavar="DIR",
         help="a diagnosis run the run judged, if it is not under the datasets root",
+    )
+    verify.add_argument(
+        "--watches",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="a watch run the run judged, if it is not under the datasets root",
     )
 
 
@@ -200,6 +219,7 @@ def _made(args: argparse.Namespace, root: Path) -> Run:
         config,
         tuple(read_fault_run(path) for path in args.faults),
         tuple(read_diagnosis_run(path) for path in args.diagnoses),
+        tuple(read_watch_run(path) for path in args.watches),
     )
     run = build_run(inputs, seed=args.seed, root=root, created_at=started)
     elapsed = (datetime.now(UTC) - started).total_seconds()
@@ -228,11 +248,13 @@ def _verify(args: argparse.Namespace) -> int:
         raw = locate_snapshot(run.manifest, root=root, given=args.snapshot)
         faults = locate_fault_runs(run.manifest, root=root, given=args.faults)
         diagnoses = locate_diagnosis_runs(run.manifest, root=root, given=args.diagnoses)
+        watches = locate_watch_runs(run.manifest, root=root, given=args.watches)
         verdict = verify_run(
             run,
             raw,
             faults=faults,
             diagnoses=diagnoses,
+            watches=watches,
             root=root,
             environment=run_environment(raw.path),
         )

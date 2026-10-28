@@ -34,13 +34,16 @@ SHARED_RULES = frozenset(
         "classification.py",
         "satellite_silence.py",
         "config.py",
+        "config_values.py",
+        "watch_config.py",
         "slis.py",
         "budget.py",
         "report.py",
     }
 )
 """The modules both the snapshot path and the live path call: the rules, the
-configuration, the indicators, the budget and the report."""
+configuration and the modules it is assembled from, the indicators, the budget
+and the report."""
 
 DIAGNOSIS_RULES = frozenset(
     {

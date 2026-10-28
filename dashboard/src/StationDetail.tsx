@@ -2,6 +2,7 @@ import { formatAge, formatDay, formatFrequency, formatWindow } from "./format";
 import { HorizonPlot } from "./HorizonPlot";
 import type { StationProfiles } from "./profiles";
 import { describeSignal, outcomeLabel, type Reception } from "./receptions";
+import { chainName, describeChain, openWarning, type StationReceiveChains } from "./receiveChain";
 import { describeCapture, type StationCapture } from "./reliability";
 import type { StationUptime } from "./uptime";
 import { UptimeStrip } from "./UptimeStrip";
@@ -167,6 +168,30 @@ function Results({ receptions, capture }: ResultsProps) {
   );
 }
 
+function ReceiveChains({ watched }: { watched: StationReceiveChains }) {
+  if (watched.chains.length === 0) {
+    return null;
+  }
+  return (
+    <>
+      <h3>Receive chain</h3>
+      <ul className="chains">
+        {watched.chains.map((chain) => {
+          const open = openWarning(chain);
+          return (
+            <li key={`${chain.band}-${String(chain.freqMinHz)}`} role={open === null ? undefined : "status"}>
+              <strong>{chainName(chain)}</strong>{" "}
+              {open !== null && <span className="badge badge-warning">receive-chain warning</span>}
+              {open !== null && watched.simulated && <SimulatedBadge />}
+              <div className={open === null ? "dim" : undefined}>{describeChain(chain)}</div>
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
 function StationSky({ profiles, uptime }: { profiles: StationProfiles | null; uptime: StationUptime | null }) {
   return (
     <>
@@ -209,7 +234,7 @@ interface DetailProps {
 export function StationDetail({ station, onClear }: DetailProps) {
   const stationId = station?.stationId ?? null;
   const detail = useStationDetail(stationId);
-  const { heartbeat, assignments, profiles, uptime, receptions, error } = detail;
+  const { heartbeat, assignments, profiles, uptime, receptions, receiveChains, error } = detail;
   const { capture, snapshot: captureSnapshot } = useStationCapture(stationId);
   // The panel is as old as the oldest thing on it.
   const snapshot = oldest(detail.snapshot, captureSnapshot);
@@ -230,6 +255,7 @@ export function StationDetail({ station, onClear }: DetailProps) {
       {error !== null && <p role="alert">Could not refresh: {error}</p>}
       <UpcomingAssignments assignments={assignments} error={error} showStation={station === null} />
       {station !== null && <Results receptions={receptions} capture={capture} />}
+      {receiveChains !== null && <ReceiveChains watched={receiveChains} />}
       <StationSky profiles={profiles} uptime={uptime} />
     </section>
   );

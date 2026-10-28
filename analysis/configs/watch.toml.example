@@ -1,0 +1,31 @@
+# The simulated fleets SC-9 is measured on, for
+#
+#   uv run python deploy/tools/watch_runs.py \
+#       --config analysis/configs/watch.toml.example \
+#       --database-url <a PostgreSQL server the tool may create databases on> \
+#       --root "$MERIDIAN_DATASETS_ROOT"
+#
+# One fleet per scenario and seed, each in a database of its own, sealed under
+# <root>/watches/ with its fault ledger (D-296). `meridian report build
+# --watches <run> …` then judges every sealed run. Every row is simulated, and
+# SC-9 claims only that a simulated chain's loss of signal is warned about
+# (D-105).
+
+# `degradation` gives every station a receive-chain loss growing at 1 to 8 dB a
+# day from an onset in the first hour of the watched stretch (D-253): its runs
+# give the delay, the loss by then and the lead. `clean` injects nothing: every
+# warning its stations raise is a false alarm.
+scenarios = ["degradation", "clean"]
+
+# Master seeds. Each gives its own fleet; the report shows every degradation.
+seeds = [4471, 4472, 4473]
+
+# Virtual stations per fleet.
+stations = 6
+
+# Days flown with nothing wrong, so every chain has a baseline, and then days
+# watched. The clean stretch should end on a day boundary from `start`, because
+# a baseline's interval ends at the start of a day (D-293).
+clean_days = 4.0
+watched_days = 4.0
+start = "2026-08-12T00:00:00+00:00"

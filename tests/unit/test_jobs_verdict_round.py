@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from prometheus_client import REGISTRY
 
 from meridian.cli_verdict import apply_lines
-from meridian.jobs.job_metrics import TASKS, VERDICTS
+from meridian.jobs.job_metrics import DIAGNOSIS, TASKS, VERDICTS
 from meridian.jobs.verdict_round import run_verdict_round
 from meridian.verdict_build import VerdictBuildReport
 
@@ -63,7 +63,7 @@ def test_a_failure_is_counted_and_survived() -> None:
 
 
 def test_the_verdict_task_runs_before_the_diagnosis_that_reads_it() -> None:
-    assert TASKS[-2] == VERDICTS
+    assert TASKS.index(VERDICTS) + 1 == TASKS.index(DIAGNOSIS)
 
 
 def test_apply_says_what_it_did() -> None:

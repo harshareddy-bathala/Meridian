@@ -38,6 +38,7 @@ from meridian.datasets.diagnosis_runs import (
 from meridian.datasets.fault_runs import FAULTS, FaultRun, read_fault_run
 from meridian.datasets.manifest import Manifest, content_sha256
 from meridian.datasets.publish import SnapshotDirectory, read_directory
+from meridian.datasets.watch_runs import WATCHES, WatchRun, read_watch_run
 from meridian.reports.build import (
     CONFIG_FILE,
     RunInputs,
@@ -53,6 +54,7 @@ __all__ = [
     "locate_diagnosis_runs",
     "locate_fault_runs",
     "locate_snapshot",
+    "locate_watch_runs",
     "verify_run",
 ]
 
@@ -68,7 +70,13 @@ _R = TypeVar("_R", bound=_Sealed)
 
 _SNAPSHOTS = "snapshots"
 _UNCOMPARED = frozenset(
-    ("snapshot_path", "runtime_s", "fault_run_paths", "diagnosis_run_paths")
+    (
+        "snapshot_path",
+        "runtime_s",
+        "fault_run_paths",
+        "diagnosis_run_paths",
+        "watch_run_paths",
+    )
 )
 """Environment entries that describe where or how long, not what, and are
 never a cause of a different number."""
@@ -174,6 +182,23 @@ def locate_diagnosis_runs(
     )
 
 
+def locate_watch_runs(
+    run: Manifest, *, root: Path, given: Sequence[Path] = ()
+) -> tuple[WatchRun, ...]:
+    """Every watch run ``run`` judged, each found and checked by its hash.
+
+    Looked for as a diagnosis run is: among the paths given, at the recorded
+    path, then under ``<root>/watches`` (D-296).
+
+    Raises:
+        SnapshotNotFoundError: A recorded watch run is nowhere searched.
+        DamagedSnapshotError: A candidate does not match its own manifest.
+    """
+    return _locate_runs(
+        run, ("watch_run", WATCHES, "--watches"), read_watch_run, root, given
+    )
+
+
 def _locate_runs(
     run: Manifest,
     kind: tuple[str, str, str],
@@ -223,6 +248,7 @@ def verify_run(  # noqa: PLR0913 — a run, its inputs, and where to build it
     *,
     faults: tuple[FaultRun, ...] = (),
     diagnoses: tuple[DiagnosisRun, ...] = (),
+    watches: tuple[WatchRun, ...] = (),
     root: Path,
     environment: Mapping[str, object],
 ) -> Verdict:
@@ -234,6 +260,7 @@ def verify_run(  # noqa: PLR0913 — a run, its inputs, and where to build it
         faults: Its fault runs, as :func:`locate_fault_runs` found them.
         diagnoses: Its diagnosis runs, as :func:`locate_diagnosis_runs` found
             them.
+        watches: Its watch runs, as :func:`locate_watch_runs` found them.
         root: The datasets root the evaluation dataset is published under.
         environment: This machine's environment, to compare with the recorded.
 
@@ -247,7 +274,13 @@ def verify_run(  # noqa: PLR0913 — a run, its inputs, and where to build it
     manifest = run.manifest
     seed = _require_run(manifest)
     rebuilt = build_run(
-        RunInputs(raw, parse_report_config(run.files[CONFIG_FILE]), faults, diagnoses),
+        RunInputs(
+            raw,
+            parse_report_config(run.files[CONFIG_FILE]),
+            faults,
+            diagnoses,
+            watches,
+        ),
         seed=seed,
         root=root,
         created_at=manifest.created_at,

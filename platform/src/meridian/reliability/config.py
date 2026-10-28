@@ -11,6 +11,14 @@ Three tables, read from ``deploy/reliability.toml`` or taken as defaults:
   is not in the hash.
 * ``[diagnosis]`` — the thresholds a loss's cause is judged by (D-273). Every
   stored diagnosis records the sha256 of these, as a classification does.
+* ``[baseline]`` — how a receive chain's baseline is trained (D-293). Every
+  stored baseline records the sha256 of these, with the diagnosis it read.
+* ``[watch]`` — when a chain's shortfall raises a warning and when it clears
+  (D-294). Every warning records the sha256 of these, with the baseline's.
+
+The last two are defined in :mod:`meridian.reliability.watch_config`, and every
+table is checked by :mod:`meridian.reliability.config_values`; both are
+re-exported here, so this module is still where a caller imports them from.
 
 **Strict**, as the labelling configuration is: an unknown key, a wrong type or
 a value out of range is refused by name, because a misspelled target that
@@ -18,68 +26,49 @@ silently kept its default is a target somebody believes they set.
 
 Standard library only: the snapshot command reads it beside the labeller.
 
-Reference: docs/DECISIONS.md D-146, D-147, D-182, D-184, D-273 to D-277.
+Reference: docs/DECISIONS.md D-146, D-147, D-182, D-184, D-273 to D-277,
+D-293, D-294.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import tomllib
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import TypeVar
 
+from meridian.reliability.config_values import (
+    DAY_S,
+    ReliabilityConfigError,
+    canonical_sha256,
+    number,
+    share,
+    whole,
+)
+from meridian.reliability.watch_config import BaselineConfig, WatchConfig
+
 __all__ = [
     "RELIABILITY_CONFIG_ENV",
+    "BaselineConfig",
     "ClassificationConfig",
     "DiagnosisConfig",
     "ReliabilityConfig",
     "ReliabilityConfigError",
     "SloConfig",
+    "WatchConfig",
     "load_deployed_reliability_config",
     "load_reliability_config",
     "parse_reliability_config",
 ]
 
-_DAY_S = 86_400
+_DAY_S = DAY_S
 
 RELIABILITY_CONFIG_ENV = "MERIDIAN_RELIABILITY_CONFIG"
 """The deployment's reliability file, read by the jobs service, the API and
 its metrics. Unset means the defaults, which ``deploy/reliability.toml.example``
 spells out. Every process of one deployment must read the same file: the
 classification's hash is how the API finds the rows the jobs service wrote."""
-
-
-class ReliabilityConfigError(ValueError):
-    """The reliability configuration cannot be read, or holds a bad value."""
-
-
-def _whole(name: str, value: object, low: int, high: int) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ReliabilityConfigError(f"{name} must be a whole number, not {value!r}")
-    if not low <= value <= high:
-        raise ReliabilityConfigError(f"{name} must be in {low}..{high}, not {value}")
-
-
-def _share(name: str, value: object) -> None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ReliabilityConfigError(f"{name} must be a number, not {value!r}")
-    if not 0.0 < value < 1.0:
-        raise ReliabilityConfigError(f"{name} must be between 0 and 1, not {value}")
-
-
-def _number(name: str, value: object, low: float, high: float) -> None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ReliabilityConfigError(f"{name} must be a number, not {value!r}")
-    if not low <= value <= high:
-        raise ReliabilityConfigError(f"{name} must be in {low}..{high}, not {value}")
-
-
-def _canonical_sha256(parameters: dict[str, object]) -> bytes:
-    text = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode("utf-8")).digest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,9 +89,9 @@ class ClassificationConfig:
 
     def __post_init__(self) -> None:
         """Refuse a value outside the labeller's own bounds."""
-        _whole("settle_margin_s", self.settle_margin_s, 0, 30 * _DAY_S)
-        _whole("silent_window_s", self.silent_window_s, 1, 7 * _DAY_S)
-        _whole("silent_min_attempts", self.silent_min_attempts, 1, 100)
+        whole("settle_margin_s", self.settle_margin_s, 0, 30 * _DAY_S)
+        whole("silent_window_s", self.silent_window_s, 1, 7 * _DAY_S)
+        whole("silent_min_attempts", self.silent_min_attempts, 1, 100)
 
     def parameters(self) -> dict[str, int]:
         """The parameters as recorded with every classification."""
@@ -110,7 +99,7 @@ class ClassificationConfig:
 
     def sha256(self) -> bytes:
         """The hash stored beside every classification made under these."""
-        return _canonical_sha256(dict(self.parameters()))
+        return canonical_sha256(dict(self.parameters()))
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +128,7 @@ class SloConfig:
 
     def __post_init__(self) -> None:
         """Refuse a target that cannot be met or cannot be missed."""
-        _whole("window_days", self.window_days, 1, 366)
+        whole("window_days", self.window_days, 1, 366)
         for name in (
             "capture_rate_min",
             "confirmed_miss_rate_max",
@@ -147,9 +136,9 @@ class SloConfig:
             "assignment_completion_rate_min",
             "schedule_execution_rate_min",
         ):
-            _share(name, getattr(self, name))
-        _whole("submission_delay_p95_max_s", self.submission_delay_p95_max_s, 1, _DAY_S)
-        _whole("failure_detection_max_s", self.failure_detection_max_s, 1, 3_600)
+            share(name, getattr(self, name))
+        whole("submission_delay_p95_max_s", self.submission_delay_p95_max_s, 1, _DAY_S)
+        whole("failure_detection_max_s", self.failure_detection_max_s, 1, 3_600)
 
     def parameters(self) -> dict[str, float]:
         """The targets, as every report prints them."""
@@ -230,24 +219,24 @@ class DiagnosisConfig:
 
     def __post_init__(self) -> None:
         """Refuse a threshold outside the range the tests were written for."""
-        _number("heard_snr_db", self.heard_snr_db, 0.0, 30.0)
-        _whole("lookback_s", self.lookback_s, 0, 90 * _DAY_S)
-        _number("obstruction_sector_deg", self.obstruction_sector_deg, 1.0, 90.0)
-        _number("obstruction_ceiling_deg", self.obstruction_ceiling_deg, 0.0, 90.0)
-        _number("elevation_match_deg", self.elevation_match_deg, 0.1, 30.0)
-        _whole("obstruction_min_passes", self.obstruction_min_passes, 1, 100)
-        _share("obstruction_min_lost_share", self.obstruction_min_lost_share)
-        _whole("obstruction_min_samples", self.obstruction_min_samples, 1, 100)
-        _share("obstruction_absent_share", self.obstruction_absent_share)
-        _number("audible_min_elevation_deg", self.audible_min_elevation_deg, 0.0, 90.0)
-        _number("interference_lift_db", self.interference_lift_db, 0.1, 40.0)
-        _whole("interference_min_baseline", self.interference_min_baseline, 1, 1000)
-        _whole("silent_window_s", self.silent_window_s, 1, 7 * _DAY_S)
-        _whole("silent_min_attempts", self.silent_min_attempts, 1, 100)
-        _number("silent_min_elevation_deg", self.silent_min_elevation_deg, 0.0, 90.0)
-        _number("timing_tolerance_s", self.timing_tolerance_s, 0.0, 3_600.0)
-        _whole("clock_margin_s", self.clock_margin_s, 0, _DAY_S)
-        _share("conflict_margin", self.conflict_margin)
+        number("heard_snr_db", self.heard_snr_db, 0.0, 30.0)
+        whole("lookback_s", self.lookback_s, 0, 90 * _DAY_S)
+        number("obstruction_sector_deg", self.obstruction_sector_deg, 1.0, 90.0)
+        number("obstruction_ceiling_deg", self.obstruction_ceiling_deg, 0.0, 90.0)
+        number("elevation_match_deg", self.elevation_match_deg, 0.1, 30.0)
+        whole("obstruction_min_passes", self.obstruction_min_passes, 1, 100)
+        share("obstruction_min_lost_share", self.obstruction_min_lost_share)
+        whole("obstruction_min_samples", self.obstruction_min_samples, 1, 100)
+        share("obstruction_absent_share", self.obstruction_absent_share)
+        number("audible_min_elevation_deg", self.audible_min_elevation_deg, 0.0, 90.0)
+        number("interference_lift_db", self.interference_lift_db, 0.1, 40.0)
+        whole("interference_min_baseline", self.interference_min_baseline, 1, 1000)
+        whole("silent_window_s", self.silent_window_s, 1, 7 * _DAY_S)
+        whole("silent_min_attempts", self.silent_min_attempts, 1, 100)
+        number("silent_min_elevation_deg", self.silent_min_elevation_deg, 0.0, 90.0)
+        number("timing_tolerance_s", self.timing_tolerance_s, 0.0, 3_600.0)
+        whole("clock_margin_s", self.clock_margin_s, 0, _DAY_S)
+        share("conflict_margin", self.conflict_margin)
 
     def parameters(self) -> dict[str, float]:
         """The thresholds as recorded with every diagnosis.
@@ -264,7 +253,7 @@ class DiagnosisConfig:
 
     def sha256(self) -> bytes:
         """The hash stored beside every diagnosis made under these."""
-        return _canonical_sha256(dict(self.parameters()))
+        return canonical_sha256(dict(self.parameters()))
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,11 +263,20 @@ class ReliabilityConfig:
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     slo: SloConfig = field(default_factory=SloConfig)
     diagnosis: DiagnosisConfig = field(default_factory=DiagnosisConfig)
+    baseline: BaselineConfig = field(default_factory=BaselineConfig)
+    watch: WatchConfig = field(default_factory=WatchConfig)
 
 
-_TABLES = ("classification", "slo", "diagnosis")
+_TABLES = ("classification", "slo", "diagnosis", "baseline", "watch")
 
-_T = TypeVar("_T", ClassificationConfig, SloConfig, DiagnosisConfig)
+_T = TypeVar(
+    "_T",
+    ClassificationConfig,
+    SloConfig,
+    DiagnosisConfig,
+    BaselineConfig,
+    WatchConfig,
+)
 
 
 def parse_reliability_config(text: str) -> ReliabilityConfig:
@@ -307,6 +305,8 @@ def parse_reliability_config(text: str) -> ReliabilityConfig:
         classification=_table(stored, "classification", ClassificationConfig),
         slo=_table(stored, "slo", SloConfig),
         diagnosis=_table(stored, "diagnosis", DiagnosisConfig),
+        baseline=_table(stored, "baseline", BaselineConfig),
+        watch=_table(stored, "watch", WatchConfig),
     )
 
 

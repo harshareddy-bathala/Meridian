@@ -178,6 +178,8 @@ convention = "google"
 "deploy/tools/restore_drill.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/scheduled_backup.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/diagnosis_runs.py" = ["T201", "D", "ANN", "PLR", "C90", "SLF001"]
+# SC-9's runs are SC-8's harness with a watch in it, and import it from beside them.
+"deploy/tools/watch_runs.py" = ["T201", "D", "ANN", "PLR", "C90", "SLF001"]
 # The front's warmer prints one line a round, as its log (D-283).
 "deploy/tools/front_warm.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # The §12.2 drill, a host script like chaos.py, importing compose_db the same way.

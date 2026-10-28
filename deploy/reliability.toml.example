@@ -124,3 +124,55 @@ clock_margin_s = 60
 # The lead the best-supported cause needs over the next to be named; within it
 # the loss is undetermined, because two causes conflict. Between 0 and 1.
 conflict_margin = 0.2
+
+[baseline]
+
+# How a receive chain's baseline is trained: its own signal at each elevation,
+# from receptions that heard the satellite (D-290, D-293). Every stored baseline
+# records the sha256 of these together with the diagnosis it read, so changing
+# one trains every chain again, beside the old baselines.
+
+# The width of an elevation bin, in degrees. 1 .. 45.
+bin_width_deg = 10.0
+
+# Signal below this elevation is left out, in degrees: it is mostly the
+# horizon's. 0 .. 80.
+min_elevation_deg = 5.0
+
+# How far back from its end a baseline's training interval reaches, in seconds.
+# 1 .. 365 days.
+train_s = 1209600
+
+# How old a baseline's interval may grow before a chain with no open warning is
+# trained again, in seconds. A chain with an open warning never is. 1 .. 365 days.
+retrain_s = 2592000
+
+# Receptions a bin needs to be part of a baseline. 1 .. 1000.
+min_receptions = 5
+
+# Bins a baseline needs: a shortfall is judged across elevations. 1 .. 18.
+min_bins = 2
+
+[watch]
+
+# When a receive chain's shortfall against its baseline raises a warning, and
+# when an open one clears (D-294). Every warning records the sha256 of these
+# together with its baseline's, so changing one starts every chain afresh.
+
+# How many of the chain's latest heard receptions a shortfall is judged over;
+# their median is unmoved by one bad pass. 1 .. 50.
+recent_receptions = 3
+
+# How far back those receptions may lie, in seconds. 3600 .. 90 days.
+lookback_s = 604800
+
+# Baseline bins a reception must cross to be judged, and bins that must fall
+# short together to raise a warning. 1 .. 18.
+min_bins = 2
+
+# The median shortfall that raises a warning, in decibels. 0.1 .. 40.
+raise_db = 3.0
+
+# The median shortfall at or below which an open warning clears, in decibels;
+# below raise_db, so a chain at the threshold does not flap. 0 .. 40.
+clear_db = 1.5

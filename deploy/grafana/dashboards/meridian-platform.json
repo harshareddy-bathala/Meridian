@@ -1643,6 +1643,137 @@
     },
     {
       "type": "row",
+      "title": "Receive chains",
+      "collapsed": false,
+      "id": 32,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Receive-chain warnings open",
+      "description": "Chains falling short of their own baseline across elevations, before reception fails (D-294). `meridian watch warnings <station>` says which and by how much.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (simulated) (meridian_receive_chain_warnings_open)",
+          "refId": "A",
+          "legendFormat": "simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 33,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 65
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Receive chains watched",
+      "description": "Chains with a baseline under the deployment's settings (D-293). A chain without one is not watched, and is absent here rather than counted as well.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "meridian-prometheus"
+          },
+          "expr": "sum by (simulated) (meridian_receive_chains_watched)",
+          "refId": "A",
+          "legendFormat": "simulated={{simulated}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 34,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 65
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "meridian-prometheus"
+      }
+    },
+    {
+      "type": "row",
       "title": "Alerts",
       "collapsed": false,
       "id": 27,
@@ -1650,7 +1781,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 64
+        "y": 73
       },
       "panels": []
     },
@@ -1704,7 +1835,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 74
       },
       "datasource": {
         "type": "prometheus",

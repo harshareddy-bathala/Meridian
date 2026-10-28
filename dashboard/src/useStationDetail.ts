@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { fetchProfiles, type StationProfiles } from "./profiles";
 import { fetchRecentReceptions, type Reception } from "./receptions";
+import { fetchReceiveChains, type StationReceiveChains } from "./receiveChain";
 import { type Snapshot, watchSnapshots } from "./snapshot";
 import { fetchUptime, type StationUptime } from "./uptime";
 import {
@@ -22,6 +23,8 @@ export interface StationDetailState {
   uptime: StationUptime | null;
   /** Undefined while loading; null for the whole network or when the read failed. */
   receptions: Reception[] | null | undefined;
+  /** Null for the whole network, while loading, or when the read failed. */
+  receiveChains: StationReceiveChains | null;
   /** Set when anything above is the front's kept copy rather than the platform's answer. */
   snapshot: Snapshot | null;
   error: string | null;
@@ -33,6 +36,7 @@ const LOADING: StationDetailState = {
   profiles: null,
   uptime: null,
   receptions: undefined,
+  receiveChains: null,
   snapshot: null,
   error: null,
 };
@@ -63,8 +67,11 @@ export function useStationDetail(stationId: string | null): StationDetailState {
         stationId === null
           ? Promise.resolve(null)
           : fetchRecentReceptions(fetcher, stationId, controller.signal).catch(() => null),
+        stationId === null
+          ? Promise.resolve(null)
+          : fetchReceiveChains(fetcher, stationId, controller.signal).catch(() => null),
       ])
-        .then(([heartbeat, assignments, profiles, uptime, receptions]) => {
+        .then(([heartbeat, assignments, profiles, uptime, receptions, receiveChains]) => {
           setState({
             key: stationId,
             value: {
@@ -73,6 +80,7 @@ export function useStationDetail(stationId: string | null): StationDetailState {
               profiles,
               uptime,
               receptions,
+              receiveChains,
               snapshot: watch.snapshot(),
               error: null,
             },

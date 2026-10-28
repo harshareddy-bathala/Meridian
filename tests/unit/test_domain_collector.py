@@ -32,6 +32,7 @@ from meridian.store.monitoring import (
     MonitoringSnapshot,
     StationHeartbeat,
 )
+from meridian.store.watch_reads import WatchCount
 
 NOW = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
 
@@ -79,6 +80,14 @@ def classified(monkeypatch: pytest.MonkeyPatch) -> Counts:
     monkeypatch.setattr(
         domain_collector, "count_classified_between", lambda *_, **__: held
     )
+    return held
+
+
+@pytest.fixture(autouse=True)
+def watched(monkeypatch: pytest.MonkeyPatch) -> list[WatchCount]:
+    """Chains with a baseline, and warnings open, as the fake database holds."""
+    held: list[WatchCount] = []
+    monkeypatch.setattr(domain_collector, "count_watched", lambda *_, **__: held)
     return held
 
 
@@ -283,3 +292,40 @@ def test_a_failed_reliability_read_loses_only_the_reliability_series(
     assert "meridian_schema_up_to_date" in families
     assert "meridian_stations" in families
     assert "meridian_passes_classified" not in families
+
+
+def test_no_baseline_publishes_no_watch_series(reachable: DomainCollector) -> None:
+    """Nothing watched yet is not "no warnings" (D-086, D-295)."""
+    families = _families(reachable)
+
+    assert families["meridian_receive_chains_watched"].samples == []
+    assert families["meridian_receive_chain_warnings_open"].samples == []
+
+
+def test_each_watched_population_reports_its_chains_and_open_warnings(
+    reachable: DomainCollector, watched: list[WatchCount]
+) -> None:
+    watched.append(WatchCount(simulated=True, chains=4, open=1))
+
+    families = _families(reachable)
+
+    open_now = families["meridian_receive_chain_warnings_open"]
+    assert _value(open_now, {"simulated": "true"}) == 1.0
+    assert _value(open_now, {"simulated": "false"}) is None
+    chains = families["meridian_receive_chains_watched"]
+    assert _value(chains, {"simulated": "true"}) == 4.0
+
+
+def test_a_failed_watch_read_loses_only_the_watch_series(
+    reachable: DomainCollector, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def missing(*_: object, **__: object) -> list[WatchCount]:
+        raise psycopg.errors.UndefinedTable('relation "signal_baselines"')
+
+    monkeypatch.setattr(domain_collector, "count_watched", missing)
+
+    families = _families(reachable)
+
+    assert "meridian_receive_chain_warnings_open" not in families
+    assert "meridian_passes_classified" in families
+    assert _value(families["meridian_database_reachable"], {}) == 1.0
