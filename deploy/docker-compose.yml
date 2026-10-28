@@ -65,7 +65,7 @@ x-platform: &platform
 services:
   db:
     <<: *hardening
-    image: timescale/timescaledb:2.30.2-pg16@sha256:6f139d56042989bd35f50ba5986e492cd32e35cc6778c50be2659add298dc09f
+    image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
     # The image's own postgres user (Alpine's 70), from the start. Running the
     # entrypoint as root needs CHOWN, SETUID and SETGID to hand the data
     # directory over and step down; starting as the owner needs none, and a
@@ -194,7 +194,7 @@ services:
     # not answer (EVALUATION.md §12.2). MSP, /metrics and /healthz are forwarded
     # and never kept. deploy/front/nginx.conf says the rest.
     <<: *hardening
-    image: nginxinc/nginx-unprivileged:1.30.5-alpine@sha256:ed04ec1ff34502c339ee5c3ae3f855442398edc1d05591e2b98981dcbbd20b1e
+    image: nginxinc/nginx-unprivileged:1.31.7-alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
     restart: unless-stopped
     logging: *logging
     # Straight to nginx: the image's entrypoint scripts rewrite files under
@@ -314,7 +314,7 @@ services:
   prometheus:
     <<: *hardening
     profiles: ["metrics"]
-    image: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
     restart: unless-stopped
     logging: *logging
     volumes:
@@ -375,7 +375,7 @@ services:
   grafana:
     <<: *hardening
     profiles: ["metrics"]
-    image: grafana/grafana:13.2.3@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
+    image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
     restart: unless-stopped
     logging: *logging
     # Grafana's scratch space, and the log directory it creates at start even
