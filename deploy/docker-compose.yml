@@ -339,6 +339,15 @@ services:
       # The notifications file, beside the other configuration under /datasets.
       - ${DATASETS_DIR:-../data/datasets}:/datasets:ro
       - report-sink:/var/lib/meridian/report-sink
+    # The sender touches this file after every pass that reached the database,
+    # every 30 s. Whether a report was delivered is ReportDeliveryFailing's
+    # question, not a healthcheck's: a restart would not fix a mail server.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/notifications-alive') < 120 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 60s
 
   prometheus:
     <<: *hardening

@@ -62,6 +62,9 @@ from meridian.store.stations import Connection
 __all__ = ["add_notify_parser", "delivery_lines", "run_notify"]
 
 EXIT_FAILED = 1
+ALIVE_FILE = Path("/tmp/notifications-alive")
+"""Touched after every pass with ``--follow`` that reached the database: the
+``notifications`` service's healthcheck reads its age."""
 NOTIFY_SECRETS = frozenset({DATABASE_PASSWORD})
 """The secrets the sender answers for at start; its channels' are its own."""
 
@@ -203,6 +206,7 @@ def _send(settings: Settings, config: NotificationsConfig, args: Namespace) -> i
     while not stop.is_set():
         try:
             one_pass()
+            ALIVE_FILE.touch()
         except (DatabaseUnreachableError, psycopg.Error):
             logging.getLogger(__name__).warning(
                 "the database did not answer; the next pass will try again"
