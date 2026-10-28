@@ -314,6 +314,32 @@ services:
       retries: 4
       start_period: 20s
 
+  notifications:
+    # Sends the owner reports the jobs service queues (D-304): the only process
+    # that holds a recipient or a channel's secret, so neither ever reaches the
+    # jobs process (D-206). With no NOTIFICATIONS_CONFIG there is nothing to
+    # send and it idles. Its secrets — the recipients file, the SMTP password
+    # and the Telegram bot token — are mounted by
+    # deploy/docker-compose.notifications.yml once a deployment has them.
+    <<: *platform
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      # meridian_api may read and write rows and nothing else (D-207).
+      DATABASE_URL: postgresql://meridian_api:${API_DATABASE_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+      API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
+      MERIDIAN_NOTIFICATIONS_CONFIG: ${NOTIFICATIONS_CONFIG:-}
+      MERIDIAN_PUBLIC: ${CLOUDFLARE_TUNNEL_TOKEN:+1}
+    command: ["meridian", "notify", "send", "--follow"]
+    volumes:
+      # The notifications file, beside the other configuration under /datasets.
+      - ${DATASETS_DIR:-../data/datasets}:/datasets:ro
+      - report-sink:/var/lib/meridian/report-sink
+
   prometheus:
     <<: *hardening
     profiles: ["metrics"]
@@ -490,3 +516,4 @@ volumes:
   alertmanager-data:
   grafana-data:
   sim-state:
+  report-sink:

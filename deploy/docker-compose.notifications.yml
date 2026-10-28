@@ -1,0 +1,42 @@
+# The notifications service's secrets (D-300, D-304), from files in
+# deploy/secrets/, which is gitignored:
+#
+#   recipients.toml       [recipients] station_id = "address or chat id"
+#   smtp_password         the SMTP account's password, or an SMTP key
+#   telegram_bot_token    the bot's token from @BotFather
+#
+#   docker compose -f deploy/docker-compose.yml \
+#     -f deploy/docker-compose.secrets.yml \
+#     -f deploy/docker-compose.notifications.yml up -d
+#
+# Apart from docker-compose.secrets.yml because a deployment without owner
+# reports has none of these files, and a missing file stops `up`. Each is
+# mounted one at a time with create_host_path off, so a missing one stops `up`
+# with its path rather than mounting an empty directory where it should be. A
+# channel whose secret is empty is absent, and its reports wait as
+# channel_not_configured. Only this service mounts them: the jobs process, which
+# queues reports, never holds a recipient or a channel's secret.
+# docs/OPERATIONS.md § Owner reports is the runbook.
+
+x-secret: &secret
+  type: bind
+  read_only: true
+  bind:
+    create_host_path: false
+
+services:
+  notifications:
+    environment:
+      MERIDIAN_RECIPIENTS_FILE: /run/secrets/meridian/recipients.toml
+      SMTP_PASSWORD_FILE: /run/secrets/meridian/smtp_password
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/meridian/telegram_bot_token
+    volumes:
+      - <<: *secret
+        source: ./secrets/recipients.toml
+        target: /run/secrets/meridian/recipients.toml
+      - <<: *secret
+        source: ./secrets/smtp_password
+        target: /run/secrets/meridian/smtp_password
+      - <<: *secret
+        source: ./secrets/telegram_bot_token
+        target: /run/secrets/meridian/telegram_bot_token
