@@ -856,6 +856,54 @@ uv run python deploy/tools/diagnosis_runs.py \
 - **The rarer causes need their own fleets.** In the combined `diagnosis` scenario an obstruction, an interference source or a silence seldom loses a whole pass. A decoded pass stays decoded while one frame survives, and a silence needs another station listening high in the sky within 45 minutes. So each also runs alone. Even then, a few cases a seed is normal, and the report prints how many beside every recall.
 
 The CI gate runs one small fleet of the combined scenario (`tests/integration/test_diagnosis_gate.py`). It shows that every loss is diagnosed, that the causes the fleet lost passes to are named, and that nothing about a fault reaches the platform. It does not measure SC-8.
+
+## The receive-chain watch
+
+Whether a station's receive chain (antenna, cable, LNA) is hearing less than it usually does, before a reception fails. Each chain, a station capability, has a baseline: its own median signal at each 10° of elevation, from its own heard receptions. A warning is raised when its last three receptions are 3 dB short of that across at least two elevations, and cleared when they recover to within 1.5 dB (D-290 to D-295).
+
+Decisions this section puts into practice: D-290 to D-296.
+
+### Running it
+
+```sh
+compose exec api meridian watch run
+compose exec api meridian watch warnings <station_id>
+compose exec api meridian watch baseline --station <station_id>
+```
+
+The `jobs` service does the same as `watch run` every round, last, under the task label `watch`: it trains the baselines that are due, then judges every chain.
+
+- **A baseline needs history.** It is trained over the fourteen days up to the start of today, UTC. Each bin needs five receptions, and a baseline needs two bins. A new station is "not watched yet" until then, which `run` prints as `no baseline yet` and the dashboard says in words.
+- **It is not retrained while a warning is open**, so a fault is never learned as normal. Otherwise it is retrained after thirty days.
+- **Losses another cause explains are left out.** A reception Stage 27 diagnosed as an obstruction, interference or a silent satellite is not the chain's.
+- **A reception two capabilities could have made belongs to neither.** `baseline` counts these as `left out`. Give two antennas distinct frequency ranges to have both watched.
+- **Settings are configuration**, the `[baseline]` and `[watch]` tables of the reliability file (`deploy/reliability.toml.example`). Each row records their hash. Changing one trains and judges every chain afresh beside the old rows; nothing is deleted.
+
+**Where a warning shows.** Four places:
+- `meridian watch warnings`;
+- the station's page on the dashboard;
+- `/api/v1/stations/{id}/receive-chain`;
+- Prometheus's `meridian_receive_chain_warnings_open`, which fires `ReceiveChainDegrading` (§ Alerts).
+
+**Simulated warnings are the simulator's.** A virtual station never has a real chain, and its warnings are labelled simulated everywhere.
+
+### Measuring SC-9
+
+SC-9 is measured on simulated fleets, never on a deployment: each degradation's onset and rate are the answer key, and live only in the simulator's ledger (D-105, D-296). Each fleet flies clean first, so its chains have baselines, then degrades (or stays clean, for false alarms), and the watch runs every half hour as the jobs service would.
+
+```sh
+uv run python deploy/tools/watch_runs.py \
+    --config analysis/configs/watch.toml.example \
+    --database-url postgresql://meridian:…@localhost:5432/meridian \
+    --root "$MERIDIAN_DATASETS_ROOT" [--run watch-degradation-4471 …]
+```
+
+- **It takes hours.** Each of the configuration's six fleets takes about two hours, about twelve in all. Run it overnight, or a few fleets a night with `--run`; a fleet already sealed is skipped, so a stopped batch is started again as it was.
+- **It needs the workspace and a PostgreSQL server it may create databases on**, as `diagnosis_runs.py` does. Each fleet gets a fresh database, and commits after every watch round.
+- **Each fleet is sealed** under `watches/` with its ledger, its passes and its warnings. `meridian report build --watches <run> …` judges them: per degradation the delay, the loss by then and the lead, and false alarms per station per 30 days.
+- **A failure is a lost decode**: a pass the clean outcome decodes that did not. A pass that only heard signal and then heard none is not one.
+
+The CI gate flies one station of seed 4472 over two clean days and a day and a half degraded (`tests/integration/test_watch_gate.py`). It shows the warning coming before the first lost decode, reaching the dashboard's read and the scrape's gauge, and nothing about the fault reaching the platform. It does not measure SC-9.
 ---
 
 ## Scheduling

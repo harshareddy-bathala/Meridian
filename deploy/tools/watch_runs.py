@@ -28,7 +28,8 @@ A ``clean`` fleet's never do: its warnings are SC-9's false alarms.
 56 minutes, so each of the example configuration's six fleets, six stations
 over eight days, takes about two hours, and all six about twelve. ``--run``
 picks fleets, so they can be run a few a night; each is sealed on its own, and
-the report takes every one given.
+the report takes every one given. A fleet already sealed under ``--root`` is
+skipped, so a batch that stopped part-way is simply started again.
 
 Reference: docs/DECISIONS.md D-105, D-138, D-253, D-278, D-294, D-296.
 """
@@ -36,6 +37,7 @@ Reference: docs/DECISIONS.md D-105, D-138, D-253, D-278, D-294, D-296.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 import tempfile
@@ -59,7 +61,7 @@ from diagnosis_runs import (
 
 from meridian.catalogue_file import read_catalogue
 from meridian.cli_catalogue import load_document
-from meridian.datasets.watch_runs import publish_watch_run
+from meridian.datasets.watch_runs import WATCHES, publish_watch_run
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.pass_generation import GenerationHorizon, generate_passes
 from meridian.registry import psycopg_registry
@@ -347,6 +349,22 @@ def run_one(server_url: str, plan: Plan, config: ReliabilityConfig, root: Path) 
         shutil.rmtree(work, ignore_errors=True)
 
 
+def already_sealed(plan: Plan, root: Path) -> Path | None:
+    """A sealed run of exactly this fleet under ``root``, if one is there.
+
+    So a night's batch that stopped part-way is started again, and carries on
+    from the first fleet it had not finished.
+    """
+    wanted = plan.record()
+    for path in sorted((root / WATCHES).glob("*/run.jsonl")):
+        (held,) = (
+            json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+        )
+        if all(held.get(key) == value for key, value in wanted.items()):
+            return path.parent
+    return None
+
+
 def plans(text: str) -> list[Plan]:
     """Every fleet the configuration asks for, scenario by seed."""
     stored = tomllib.loads(text)
@@ -392,6 +410,10 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"no fleet {unknown} in {args.config}")
         chosen = [plan for plan in chosen if plan.run_id in args.run]
     for plan in chosen:
+        held = already_sealed(plan, args.root)
+        if held is not None:
+            print(f"{plan.run_id}: already sealed at {held}", flush=True)
+            continue
         print(
             f"{plan.run_id}: {plan.stations} stations, {plan.clean_days} clean days,"
             f" {plan.watched_days} watched",

@@ -326,7 +326,9 @@ How modules 13–17 are proven (D-095). Everything above applies to them — tem
 
 - **Injected gradual degradation** (Stage 25): a receive-chain loss growing over days, at several rates, after a fault-free history long enough to build a baseline.
 - **Detection delay** — time from degradation onset to the warning, and the loss in dB at that moment.
-- **Lead** — time from the warning to the first reception the degradation turns into a failure. SC-9 asks that the warning come first.
+- **Lead** — time from the warning to the first reception the degradation turns into a failure. SC-9 asks that the warning come first. **A failure is a lost decode**: a pass the outcome model decodes with nothing wrong that did not decode. A pass that only heard signal and then heard none never was a capture (D-296).
+- **Clean first.** Each fleet flies days with nothing wrong before the degradation's onset, so every chain has a baseline to fall short of. A degradation that ended its run with neither a warning nor a failure is reported, and left out of SC-9's share, because it says nothing about their order.
+- **From sealed fleets.** `deploy/tools/watch_runs.py` flies and seals them, and `meridian report build --watches` judges them (D-296). They take hours, and are run by hand, never by CI.
 - **False-alarm rate** — warnings per station per 30 days on fault-free runs.
 - **Simulated results**, labelled as such and reported apart from anything measured.
 

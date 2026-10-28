@@ -46,9 +46,30 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-10-02. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-10-28. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stage 27's software is built** (2026-10-02), **before D-105's review of the fault specification**, by the team's choice (D-270). The specification is pinned so the review can still read exactly what the diagnosis was built against. Its decisions are D-270 through D-278, `docs/OPERATIONS.md` § Loss diagnosis is its runbook, and its migration is `0029`. Stage 24 merged before it, and its seventy-two hour run on the Pi is still owed. Stage 28 is next in order; Stages 29, 30 and 33 now wait only on stages after this one.
+**Stage 28's software is built** (2026-10-28). Its decisions are D-290 through D-296, `docs/OPERATIONS.md` § The receive-chain watch is its runbook, and its migration is `0030`. Stage 29 is next in order, then Stage 30.
+- **The completion gate passes, in two halves.** *SC-9's detection delay, lead and false-alarm rate regenerate from seeded runs, and on an injected degradation a warning reaches the dashboard and the alerting before the degradation fails a reception.*
+  - `tests/integration/test_watch_gate.py` flies one station of a pinned seed for two clean days and a day and a half degrading at 7.3 dB a day, through the harness SC-9's runs are made with. It asserts:
+    - the warning comes before the first lost decode (here 14.6 h after onset, 19 h before it);
+    - it shows open on the station's public read and in the scrape's gauge, labelled simulated;
+    - nothing about the fault reaches any table, with a planted positive control.
+  - `tests/unit/test_report_watch.py` builds SC-9 from sealed runs through `meridian report build --watches` and `verify`, with every socket refused.
+- **A receive chain is a capability** (D-290): the one whose range holds the assignment's frequency. A reception two could have made belongs to neither.
+- **A baseline is the chain's own signal by elevation** (D-291, D-293). It takes one vote per reception per 10° bin, trained over fourteen days and written once. It is never retrained while a warning is open, and losses Stage 27 put down to another cause are left out.
+- **A warning is a persistent shortfall** (D-294): the median of the last three receptions 3 dB short across two elevations. It clears at 1.5 dB, is raised and cleared once, and is never deleted (D-292).
+- **It reaches people four ways** (D-295): two scrape-time gauges and `ReceiveChainDegrading`, a Grafana row, `/api/v1/stations/{id}/receive-chain`, and a sentence on the dashboard's station page.
+- **SC-9 from sealed simulated fleets** (D-296): `deploy/tools/watch_runs.py` flies each fleet clean first, then degraded or clean, and seals it. The report judges them in its eighth section, method `report-9`.
+- **Found on the way, each fixed** (D-296): Stage 27's run harness could not migrate when run on its own, and held a whole fleet in one transaction that slowed every heartbeat more than the last.
+- **Owed, not done:**
+  - **SC-9's measured figure.** The configuration's six fleets take about twelve hours and are run by hand; a trial fleet of four stations warned every station before its first lost decode;
+  - the team's confirmation of D-294's thresholds and SC-9's proposed targets;
+  - the measured case on station 001 (`EVALUATION.md` §11.3), once it is built.
+- **Known limits:**
+  - a chain that degrades before its first baseline, or slowly enough that thirty days pass unwarned, has the loss trained in;
+  - the simulated decode fails only after about 11 dB of loss, which is the simulator's margin, not a real chain's.
+
+**Stage 27's software is built** (2026-10-02), **before D-105's review of the fault specification**, by the team's choice (D-270). The specification is pinned so the review can still read exactly what the diagnosis was built against. Its decisions are D-270 through D-278, `docs/OPERATIONS.md` § Loss diagnosis is its runbook, and its migration is `0029`. Stage 24 merged before it, and its seventy-two hour run on the Pi is still owed. Stage 28 was next in order; Stages 29, 30 and 33 now wait only on stages after this one.
 - **The completion gate passes, in two halves.** *SC-8's confusion matrix, per-cause recall, wrong-cause fraction and undetermined fraction regenerate from the simulator's seeds, labelled as simulated and reported apart from any real labelled cases.*
   - `tests/integration/test_diagnosis_gate.py` flies a faulted fleet of four stations for twelve hours through the harness SC-8's runs are made with. It asserts:
     - every loss is diagnosed;
