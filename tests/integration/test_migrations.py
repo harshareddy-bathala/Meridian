@@ -129,6 +129,9 @@ def test_all_expected_tables_exist(conn) -> None:
         # Each receive chain's signal by elevation, and its warnings (0030, D-291).
         "signal_baselines",
         "receive_chain_warnings",
+        # Owner reports and every attempt to deliver them (0031, D-301).
+        "report_deliveries",
+        "report_delivery_attempts",
     }
     assert expected <= tables
 
@@ -192,6 +195,7 @@ def test_simulated_flag_reaches_every_derived_table(conn) -> None:
         "loss_diagnoses",
         "signal_baselines",
         "receive_chain_warnings",
+        "report_deliveries",
     } <= carrying
     # D-049: element_sets is the deliberate exception. Its provenance lives in
     # `source`, which distinguishes celestrak from spacetrack from manual as
