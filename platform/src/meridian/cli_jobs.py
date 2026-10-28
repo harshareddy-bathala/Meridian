@@ -5,8 +5,9 @@ generates passes over the next ``SCHEDULE_HORIZON_S`` and schedules them under
 the ``schedule.toml`` named by ``SCHEDULE_CONFIG`` — configuration A on the
 elevation proxy when none is (D-168, D-170) — then expires work nobody took and
 classifies every pass that has settled (D-182, D-183), applies the verdict
-model if one is configured (D-263), diagnoses every classified loss (D-272)
-and watches every receive chain (D-294), then waits
+model if one is configured (D-263), diagnoses every classified loss (D-272),
+watches every receive chain (D-294) and queues every owner report now due
+(D-304), then waits
 ``SCHEDULE_INTERVAL_S``; SIGTERM or SIGINT ends the wait and the process exits
 after the task in hand. Its metrics are served on ``JOBS_METRICS_PORT`` behind
 the same token as the API's (D-109).
@@ -24,7 +25,7 @@ metrics directory then published ``meridian_passes_computed 0`` once per worker
 ``tests/unit/test_cli_jobs.py`` pins that importing the command tree loads none
 of them.
 
-Reference: docs/DECISIONS.md D-066, D-109, D-110, D-182, D-183, D-294.
+Reference: docs/DECISIONS.md D-066, D-109, D-110, D-182, D-183, D-294, D-304.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ from typing import TYPE_CHECKING
 
 import psycopg
 
+from meridian.cli_jobs_tasks import LaterTasks, later_tasks, run_later_tasks
 from meridian.cli_serve import LOG_LEVELS, logging_configuration
 from meridian.cli_snapshot import datasets_root
 from meridian.config import Settings, load_settings
@@ -58,11 +60,7 @@ from meridian.scheduler.scoring import ScorerSource
 from meridian.store.pool import CONNECT_TIMEOUT_S
 
 if TYPE_CHECKING:
-    from meridian.jobs.diagnosis_round import DatabaseDiagnosisWork
-    from meridian.jobs.reliability_round import DatabaseReliabilityWork
     from meridian.jobs.rounds import DatabaseRoundWork
-    from meridian.jobs.verdict_round import DatabaseVerdictWork
-    from meridian.jobs.watch_round import DatabaseWatchWork
 
 __all__ = ["JOBS_SECRETS", "add_jobs_parser", "run_jobs"]
 
@@ -152,153 +150,10 @@ def _rounds(settings: Settings, scorers: ScorerSource) -> DatabaseRoundWork:
     )
 
 
-def _reliability(settings: Settings) -> DatabaseReliabilityWork:
-    """The sweep and the classification, under the deployment's configuration."""
-    # Inside the function: see the module docstring.
-    from meridian.jobs.reliability_round import (  # noqa: PLC0415
-        DatabaseReliabilityWork,
-    )
-    from meridian.registry.psycopg_registry import PsycopgRegistry  # noqa: PLC0415
-    from meridian.reliability.config import (  # noqa: PLC0415
-        load_deployed_reliability_config,
-    )
-
-    url = settings.psycopg_url
-    return DatabaseReliabilityWork(
-        lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
-        lambda conn, now: PsycopgRegistry(
-            conn,
-            pepper=settings.token_hash_pepper,
-            recovery_window_s=settings.registration_recovery_window_s,
-            now_utc=now,
-        ),
-        load_deployed_reliability_config().classification,
-    )
-
-
-def _verdicts(settings: Settings) -> DatabaseVerdictWork | None:
-    """The verdict task under ``VERDICT_MODEL``, or ``None`` when it names none.
-
-    Raises:
-        MalformedModelError: The directory is not a verdict model, or does
-            not match its manifest.
-    """
-    # Inside the function: see the module docstring.
-    from meridian.jobs.verdict_round import DatabaseVerdictWork  # noqa: PLC0415
-    from meridian.prediction.verdict_files import (  # noqa: PLC0415
-        load_verdict_model,
-    )
-    from meridian.verdict_build import registry_for  # noqa: PLC0415
-
-    if not settings.verdict_model:
-        return None
-    model = load_verdict_model(Path(settings.verdict_model))
-    url = settings.psycopg_url
-    return DatabaseVerdictWork(
-        lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
-        lambda conn, now: registry_for(conn, settings, now),
-        model,
-    )
-
-
-def _diagnosis(
-    settings: Settings, verdicts: DatabaseVerdictWork | None
-) -> DatabaseDiagnosisWork:
-    """The diagnosis task, reading partial decodes against the verdict model's method.
-
-    Raises:
-        ReliabilityConfigError: The deployment's reliability file is refused.
-    """
-    # Inside the function: see the module docstring.
-    from meridian.jobs.diagnosis_round import DatabaseDiagnosisWork  # noqa: PLC0415
-    from meridian.reliability.config import (  # noqa: PLC0415
-        load_deployed_reliability_config,
-    )
-    from meridian.verdict_build import registry_for  # noqa: PLC0415
-
-    url = settings.psycopg_url
-    return DatabaseDiagnosisWork(
-        lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
-        lambda conn, now: registry_for(conn, settings, now),
-        SkyfieldOrbitService(),
-        config=load_deployed_reliability_config(),
-        verdict_method=None if verdicts is None else verdicts.method,
-    )
-
-
-def _watch(settings: Settings) -> DatabaseWatchWork:
-    """The receive-chain watch task.
-
-    Raises:
-        ReliabilityConfigError: The deployment's reliability file is refused.
-    """
-    # Inside the function: see the module docstring.
-    from meridian.jobs.watch_round import DatabaseWatchWork  # noqa: PLC0415
-    from meridian.reliability.config import (  # noqa: PLC0415
-        load_deployed_reliability_config,
-    )
-
-    url = settings.psycopg_url
-    return DatabaseWatchWork(
-        lambda: psycopg.connect(url, connect_timeout=CONNECT_TIMEOUT_S),
-        SkyfieldOrbitService(),
-        config=load_deployed_reliability_config(),
-    )
-
-
-def _configured(
-    settings: Settings,
-) -> tuple[
-    ScheduleConfig,
-    ScorerSource,
-    DatabaseReliabilityWork,
-    DatabaseVerdictWork | None,
-    DatabaseDiagnosisWork,
-    DatabaseWatchWork,
-]:
+def _configured(settings: Settings) -> tuple[ScheduleConfig, ScorerSource, LaterTasks]:
     """Every task a round runs, as configured, each refused before any round."""
     config, scorers = _schedule(settings)
-    verdicts = _verdicts(settings)
-    return (
-        config,
-        scorers,
-        _reliability(settings),
-        verdicts,
-        _diagnosis(settings, verdicts),
-        _watch(settings),
-    )
-
-
-def _after_scheduling(
-    reliability: DatabaseReliabilityWork,
-    verdicts: DatabaseVerdictWork | None,
-    diagnosis: DatabaseDiagnosisWork,
-    watch: DatabaseWatchWork,
-    now: datetime,
-) -> bool:
-    """The rest of a round, in order; True if every task in it completed.
-
-    Stage 20's sweep and classification, then the verdicts, the diagnosis and
-    the watch, each reading what the one before it wrote.
-    """
-    # Inside the function: see the module docstring.
-    from meridian.jobs.diagnosis_round import run_diagnosis_round  # noqa: PLC0415
-    from meridian.jobs.reliability_round import (  # noqa: PLC0415
-        run_reliability_round,
-    )
-    from meridian.jobs.verdict_round import run_verdict_round  # noqa: PLC0415
-    from meridian.jobs.watch_round import run_watch_round  # noqa: PLC0415
-
-    checked = run_reliability_round(reliability, now)
-    applied = run_verdict_round(verdicts, now)
-    diagnosed = run_diagnosis_round(diagnosis, now)
-    watched = run_watch_round(watch, now)
-    return None not in (
-        checked.expired,
-        checked.classified,
-        diagnosed,
-        watched,
-    ) and (verdicts is None or applied is not None)
+    return config, scorers, later_tasks(settings)
 
 
 def run_jobs(args: argparse.Namespace) -> int:
@@ -309,6 +164,9 @@ def run_jobs(args: argparse.Namespace) -> int:
         RoundPlan,
         run_round,
         run_until_stopped,
+    )
+    from meridian.notifications.config import (  # noqa: PLC0415
+        NotificationsConfigError,
     )
     from meridian.reliability.config import ReliabilityConfigError  # noqa: PLC0415
 
@@ -321,11 +179,12 @@ def run_jobs(args: argparse.Namespace) -> int:
         return _EXIT_FAILED
 
     try:
-        config, scorers, reliability, verdicts, diagnosis, watch = _configured(settings)
+        config, scorers, later = _configured(settings)
     except (
         ScheduleConfigError,
         LiveScoringError,
         ReliabilityConfigError,
+        NotificationsConfigError,
         MalformedModelError,
         OSError,
     ) as exc:
@@ -346,7 +205,7 @@ def run_jobs(args: argparse.Namespace) -> int:
         """One whole round; True if every task in it completed."""
         now = datetime.now(UTC)
         outcome = run_round(work, plan, now)
-        after = _after_scheduling(reliability, verdicts, diagnosis, watch, now)
+        after = run_later_tasks(later, now)
         return after and None not in (
             outcome.generated,
             outcome.scheduled,

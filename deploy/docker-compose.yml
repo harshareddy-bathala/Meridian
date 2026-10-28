@@ -287,6 +287,9 @@ services:
       # A verdict model directory, usually under /datasets/verdicts; empty
       # writes no verdicts (D-263).
       VERDICT_MODEL: ${VERDICT_MODEL:-}
+      # A notifications.toml inside the container, usually under /datasets;
+      # empty queues no owner reports. It holds no address (D-300).
+      MERIDIAN_NOTIFICATIONS_CONFIG: ${NOTIFICATIONS_CONFIG:-}
       MERIDIAN_DATASETS_ROOT: /datasets
       # Its metrics listener requires the same token as the API's /metrics,
       # and the same placeholder refusal applies when the deployment is public.

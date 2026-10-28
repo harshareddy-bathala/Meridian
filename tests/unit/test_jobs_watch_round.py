@@ -1,4 +1,4 @@
-"""The watch half of a round: timed, survived, and last.
+"""The watch half of a round: timed, survived, and after the diagnosis.
 
 Reference: docs/DECISIONS.md D-110, D-293, D-294.
 """
@@ -63,5 +63,5 @@ def test_a_failure_is_counted_and_survived() -> None:
     assert sample("meridian_job_failures_total") == before + 1
 
 
-def test_the_watch_runs_last_after_the_diagnosis_it_reads() -> None:
-    assert TASKS[-2:] == (DIAGNOSIS, WATCH)
+def test_the_watch_runs_after_the_diagnosis_it_reads() -> None:
+    assert TASKS.index(WATCH) == TASKS.index(DIAGNOSIS) + 1
