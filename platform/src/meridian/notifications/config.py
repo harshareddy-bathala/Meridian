@@ -32,10 +32,12 @@ from meridian.store.stations import Connection
 __all__ = [
     "CHANNELS",
     "NOTIFICATIONS_CONFIG_ENV",
+    "EmailSettings",
     "NotificationsConfig",
     "NotificationsConfigError",
     "Recipient",
     "RetryPolicy",
+    "TelegramSettings",
     "check_stations",
     "load_deployed_notifications_config",
     "load_notifications_config",
@@ -79,6 +81,30 @@ class RetryPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class EmailSettings:
+    """Where email is sent from: an SMTP server and an account on it.
+
+    The account's password is not here. It is the sender's secret, read from
+    ``SMTP_PASSWORD_FILE`` (D-300).
+    """
+
+    host: str = ""
+    """Empty when email is not set up; a station listed for email is refused."""
+
+    port: int = 587
+    username: str = ""
+    from_address: str = ""
+    starttls: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramSettings:
+    """Where the Telegram Bot API is. The bot's token is the sender's secret."""
+
+    api_base: str = "https://api.telegram.org"
+
+
+@dataclass(frozen=True, slots=True)
 class NotificationsConfig:
     """The deployment's owner reports."""
 
@@ -91,6 +117,8 @@ class NotificationsConfig:
 
     sink_directory: str = "/var/lib/meridian/report-sink"
     retry: RetryPolicy = field(default_factory=RetryPolicy)
+    email: EmailSettings = field(default_factory=EmailSettings)
+    telegram: TelegramSettings = field(default_factory=TelegramSettings)
 
     def channels(self, *, weekly: bool = False) -> dict[str, str]:
         """Each station's channel, by station id.
@@ -104,7 +132,7 @@ class NotificationsConfig:
         }
 
 
-_TABLES = {"reports", "retry", "sink", "station"}
+_TABLES = {"reports", "retry", "sink", "email", "telegram", "station"}
 
 
 def load_notifications_config(path: Path | None) -> NotificationsConfig:
@@ -123,9 +151,37 @@ def load_notifications_config(path: Path | None) -> NotificationsConfig:
     if unknown:
         raise NotificationsConfigError(f"{path}: unknown tables {sorted(unknown)}")
     reports = _table(parsed, "reports", {"wait_s", "weekly_settle_s"})
-    retry = _table(parsed, "retry", {"first_s", "cap_s", "attempts", "timeout_s"})
     sink = _table(parsed, "sink", {"directory"})
     defaults = NotificationsConfig()
+    directory = sink.get("directory", defaults.sink_directory)
+    if not isinstance(directory, str) or not directory.strip():
+        raise NotificationsConfigError("sink.directory must be a path")
+    config = NotificationsConfig(
+        stations=_stations(parsed.get("station", [])),
+        wait_s=_whole(reports, "wait_s", defaults.wait_s, 0, 7 * 24 * HOUR_S),
+        weekly_settle_s=_whole(
+            reports, "weekly_settle_s", defaults.weekly_settle_s, 0, 3 * 24 * HOUR_S
+        ),
+        sink_directory=directory,
+        retry=_retry(parsed),
+        email=_email(parsed),
+        telegram=TelegramSettings(
+            api_base=_text(
+                _table(parsed, "telegram", {"api_base"}),
+                "api_base",
+                TelegramSettings().api_base,
+            )
+        ),
+    )
+    if config.email.host == "" and "email" in config.channels().values():
+        raise NotificationsConfigError(
+            "a station's reports go by email, but [email] names no host"
+        )
+    return config
+
+
+def _retry(parsed: dict[str, object]) -> RetryPolicy:
+    retry = _table(parsed, "retry", {"first_s", "cap_s", "attempts", "timeout_s"})
     base = RetryPolicy()
     policy = RetryPolicy(
         first_s=_whole(retry, "first_s", base.first_s, 1, HOUR_S),
@@ -135,18 +191,34 @@ def load_notifications_config(path: Path | None) -> NotificationsConfig:
     )
     if policy.cap_s < policy.first_s:
         raise NotificationsConfigError("retry.cap_s must be at least retry.first_s")
-    directory = sink.get("directory", defaults.sink_directory)
-    if not isinstance(directory, str) or not directory.strip():
-        raise NotificationsConfigError("sink.directory must be a path")
-    return NotificationsConfig(
-        stations=_stations(parsed.get("station", [])),
-        wait_s=_whole(reports, "wait_s", defaults.wait_s, 0, 7 * 24 * HOUR_S),
-        weekly_settle_s=_whole(
-            reports, "weekly_settle_s", defaults.weekly_settle_s, 0, 3 * 24 * HOUR_S
-        ),
-        sink_directory=directory,
-        retry=policy,
+    return policy
+
+
+def _email(parsed: dict[str, object]) -> EmailSettings:
+    table = _table(
+        parsed, "email", {"host", "port", "username", "from_address", "starttls"}
     )
+    base = EmailSettings()
+    starttls = table.get("starttls", base.starttls)
+    if not isinstance(starttls, bool):
+        raise NotificationsConfigError("email.starttls must be true or false")
+    email = EmailSettings(
+        host=_text(table, "host", base.host),
+        port=_whole(table, "port", base.port, 1, 65_535),
+        username=_text(table, "username", base.username),
+        from_address=_text(table, "from_address", base.from_address),
+        starttls=starttls,
+    )
+    if email.host and "@" not in email.from_address:
+        raise NotificationsConfigError("email.from_address must be an address")
+    return email
+
+
+def _text(table: dict[str, object], key: str, default: str) -> str:
+    value = table.get(key, default)
+    if not isinstance(value, str):
+        raise NotificationsConfigError(f"{key} must be text, not {value!r}")
+    return value.strip()
 
 
 def load_deployed_notifications_config() -> NotificationsConfig:

@@ -39,6 +39,25 @@ timeout_s = 10
 # notifications container. Every simulated station's reports go here.
 directory = "/var/lib/meridian/report-sink"
 
+[email]
+
+# The SMTP server reports are sent through, and the account on it. Empty host:
+# no email, and a station listed for email is refused. The password, or an
+# SMTP key, is not here: it is deploy/secrets/smtp_password, which only the
+# notifications service mounts. For Brevo: host smtp-relay.brevo.com, port 587,
+# username the SMTP login it gives you, from_address an authenticated sender.
+host = ""
+port = 587
+username = ""
+from_address = ""
+starttls = true
+
+[telegram]
+
+# The Bot API. The bot's token is deploy/secrets/telegram_bot_token; a chat id
+# per station is in deploy/secrets/recipients.toml.
+api_base = "https://api.telegram.org"
+
 # One table per station. channel is email, telegram or sink; weekly says
 # whether it also gets the weekly summary.
 #

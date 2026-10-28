@@ -33,6 +33,10 @@ from meridian.notifications.config import (
 )
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "deploy/notifications.toml.example"
+EMAIL = (
+    '[email]\nhost = "smtp-relay.example.org"\nusername = "login"\n'
+    'from_address = "hello@example.org"\n'
+)
 
 
 def written(tmp_path: Path, text: str) -> Path:
@@ -55,6 +59,7 @@ def test_stations_are_read_with_their_channels(tmp_path: Path) -> None:
     config = load_notifications_config(
         written(
             tmp_path,
+            f"{EMAIL}\n"
             '[[station]]\nstation_id = "st_a"\nchannel = "email"\n\n'
             '[[station]]\nstation_id = "st_b"\nchannel = "sink"\nweekly = false\n',
         )
@@ -89,6 +94,10 @@ def test_stations_are_read_with_their_channels(tmp_path: Path) -> None:
         ("[reports]\nwait_s = true\n", "whole number"),
         ('[sink]\ndirectory = ""\n', "sink.directory"),
         ("[reports\n", "notifications.toml"),
+        ('[[station]]\nstation_id = "st_a"\nchannel = "email"\n', "names no host"),
+        ('[email]\nhost = "smtp.example.org"\nfrom_address = "hello"\n', "an address"),
+        ("[email]\nstarttls = 1\n", "starttls"),
+        ('[email]\npassword = "x"\n', "unknown keys"),
     ],
     ids=[
         "channel",
@@ -101,6 +110,10 @@ def test_stations_are_read_with_their_channels(tmp_path: Path) -> None:
         "not-a-number",
         "no-directory",
         "not-toml",
+        "email-without-host",
+        "from-not-an-address",
+        "starttls-not-bool",
+        "a-password",
     ],
 )
 def test_a_file_it_cannot_obey_is_refused(
