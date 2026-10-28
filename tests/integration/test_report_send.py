@@ -224,8 +224,14 @@ def test_a_failed_delivery_leaves_every_stored_result_untouched(world: Any) -> N
 
 
 def test_no_log_line_names_the_recipient(
-    world: Any, caplog: pytest.LogCaptureFixture
+    world: Any, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # A gate earlier in the run migrates a scratch database in this process,
+    # and Alembic's logging setup disables every logger already made; the
+    # sender's own process never migrates.
+    monkeypatch.setattr(
+        logging.getLogger("meridian.notifications.send"), "disabled", False
+    )
     sent = queued(world, "log-sent")
     refused = queued(world, "log-refused")
     unreachable = queued(world, "log-unreachable")
