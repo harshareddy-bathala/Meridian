@@ -1,0 +1,67 @@
+# Owner reports (Stage 29), for the jobs service, which queues them, and the
+# notifications service, which sends them. Name a copy with
+# NOTIFICATIONS_CONFIG in deploy/.env; empty sends no reports.
+#
+# This file holds no address and nothing secret (D-300). It says which
+# stations get reports and how; the address or chat id for each is in
+# deploy/secrets/recipients.toml, which only the notifications service reads.
+#
+# Only stations the team operates are listed (D-107 option b). A simulated
+# station may be listed for the sink only: the jobs service refuses the file
+# otherwise, and the database refuses the report (D-301).
+#
+# Every table and key is optional; the values below are the defaults. An
+# unknown key is refused rather than ignored.
+
+[reports]
+
+# How long after its window a pass is reported with whatever is stored, rather
+# than waiting longer for a verdict or a diagnosis. 0 .. 604800 (7 days).
+wait_s = 21600
+
+# How long after a week ends, Monday 00:00 UTC, its report is queued, so the
+# week's last passes have settled. 0 .. 259200 (3 days).
+weekly_settle_s = 21600
+
+[retry]
+
+# A failed delivery waits first_s, then twice that, and so on up to cap_s
+# (D-305). After `attempts` tries the report is abandoned and the
+# ReportDeliveryFailing alert says so. One attempt takes at most timeout_s.
+first_s = 60
+cap_s = 21600
+attempts = 8
+timeout_s = 10
+
+[sink]
+
+# Where the sink channel writes each report, one file per report, inside the
+# notifications container. Every simulated station's reports go here.
+directory = "/var/lib/meridian/report-sink"
+
+[email]
+
+# The SMTP server reports are sent through, and the account on it. Empty host:
+# no email, and a station listed for email is refused. The password, or an
+# SMTP key, is not here: it is deploy/secrets/smtp_password, which only the
+# notifications service mounts. For Brevo: host smtp-relay.brevo.com, port 587,
+# username the SMTP login it gives you, from_address an authenticated sender.
+host = ""
+port = 587
+username = ""
+from_address = ""
+starttls = true
+
+[telegram]
+
+# The Bot API. The bot's token is deploy/secrets/telegram_bot_token; a chat id
+# per station is in deploy/secrets/recipients.toml.
+api_base = "https://api.telegram.org"
+
+# One table per station. channel is email, telegram or sink; weekly says
+# whether it also gets the weekly summary.
+#
+# [[station]]
+# station_id = "st_0000000000000000"
+# channel = "email"
+# weekly = true

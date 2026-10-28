@@ -238,3 +238,136 @@ class ScheduleRows:
 def schedule_rows(rollback: Any) -> ScheduleRows:
     """A row-graph builder writing through this test's rolled-back transaction."""
     return ScheduleRows(rollback)
+
+
+REPORT_AOS = datetime(2026, 10, 14, 9, 30, tzinfo=UTC)
+REPORT_CLASSIFIED = bytes([5]) * 32
+REPORT_DIAGNOSED = bytes([6]) * 32
+REPORT_VERDICT = "verdict-1:abcdefabcdef"
+
+
+class ReportWorld:
+    """Stations, passes and what was concluded about them, for owner reports.
+
+    The deployment it writes under is :data:`REPORT_DEPLOYMENT`.
+    """
+
+    def __init__(self, rows: Any) -> None:
+        self.rows = rows
+        self.conn = rows.conn
+        held = self.conn.execute(
+            "select id from element_sets where satellite_id = 'norad:99970' limit 1"
+        ).fetchone()
+        self.element_set = held[0] if held else rows.satellite()
+
+    def station(self, station_id: str, *, simulated: bool = False) -> str:
+        return str(self.rows.station(station_id, simulated=simulated))
+
+    def assignment(
+        self,
+        station_id: str,
+        name: str,
+        *,
+        aos: datetime = REPORT_AOS,
+        state: str = "held",
+    ) -> str:
+        pass_id = self.rows.pass_(station_id, aos, element_set_id=self.element_set)
+        return str(self.rows.assignment(name, pass_id, state=state))
+
+    def classified(self, assignment_id: str, verdict: str) -> int:
+        from meridian.store.pass_classifications import (
+            NewClassification,
+            insert_classification,
+        )
+
+        row = self.conn.execute(
+            "select pass_id, station_id, start_at, end_at, simulated"
+            " from assignments where assignment_id = %s",
+            (assignment_id,),
+        ).fetchone()
+        insert_classification(
+            self.conn,
+            NewClassification(
+                assignment_ids=[assignment_id],
+                pass_id=row[0],
+                station_id=row[1],
+                satellite_id="norad:99970",
+                window_start=row[2],
+                window_end=row[3],
+                classification=verdict,
+                evidence={},
+                method="classification-1",
+                config_sha256=REPORT_CLASSIFIED,
+                simulated=row[4],
+            ),
+        )
+        return int(
+            self.conn.execute(
+                "select classification_id from pass_classifications"
+                " where assignment_id = %s",
+                (assignment_id,),
+            ).fetchone()[0]
+        )
+
+    def verdict(self, assignment_id: str, probability: float) -> None:
+        from meridian.store.verdicts import NewVerdict, insert_verdict
+
+        row = self.conn.execute(
+            "select started_at, station_id, simulated from observations"
+            " where assignment_id = %s and revision = 1",
+            (assignment_id,),
+        ).fetchone()
+        insert_verdict(
+            self.conn,
+            NewVerdict(
+                assignment_id=assignment_id,
+                revision=1,
+                observation_started_at=row[0],
+                station_id=row[1],
+                probability_usable=probability,
+                method=REPORT_VERDICT,
+                route="snr",
+                inputs_sha256=bytes([7]) * 32,
+                partial_below=0.4,
+                simulated=row[2],
+            ),
+        )
+
+    def diagnosis(self, assignment_id: str, classification_id: int, cause: str) -> None:
+        from meridian.store.loss_diagnoses import (
+            NewDiagnosis,
+            insert_diagnosis,
+        )
+
+        row = self.conn.execute(
+            "select a.station_id, a.simulated, o.revision, o.started_at"
+            " from assignments a left join observations o"
+            " on o.assignment_id = a.assignment_id where a.assignment_id = %s",
+            (assignment_id,),
+        ).fetchone()
+        insert_diagnosis(
+            self.conn,
+            NewDiagnosis(
+                assignment_id=assignment_id,
+                revision=row[2],
+                observation_started_at=row[3],
+                station_id=row[0],
+                classification_id=classification_id,
+                cause=cause,
+                candidates=[
+                    {"cause": "obstruction", "fired": cause == "obstruction"},
+                    {"cause": "interference", "fired": False},
+                ],
+                evidence={},
+                method="diagnosis-1",
+                config_sha256=REPORT_DIAGNOSED,
+                verdict_method=None,
+                simulated=row[1],
+            ),
+        )
+
+
+@pytest.fixture
+def world(schedule_rows: ScheduleRows) -> ReportWorld:
+    """Owner reports' row graph, in this test's rolled-back transaction."""
+    return ReportWorld(schedule_rows)

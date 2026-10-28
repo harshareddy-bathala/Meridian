@@ -6293,6 +6293,108 @@ Decodes began to fail only after about 11 dB, well past the 3 dB the watch warns
 
 ---
 
+## D-300 — Owner reports go only to stations the team operates, and no address is held anywhere but the sender's secret file
+
+**2026-10-28 · accepted** · *`meridian/notifications/{config,recipients}.py`; `deploy/notifications.toml.example`; `deploy/docker-compose.notifications.yml`; Stage 29. Builds D-107's option (b).*
+
+D-107 is still the team's question. Until it is answered, Stage 29 is built to its option (b): reports go only to stations the team runs, to the team's own addresses, and `PROJECT.md` §16 stands as written.
+
+**Two files, and only one of them knows a person.**
+- **`notifications.toml`** is configuration. It says which stations get reports, on which channel (`email`, `telegram` or `sink`), and whether they get the weekly summary, plus the SMTP server and account name, the sink's directory and the retry policy. It holds no address and nothing secret, so it can be copied, reviewed and kept under `/datasets` beside the other configuration.
+- **`deploy/secrets/recipients.toml`** maps each station to its address or chat id. It is gitignored, mounted read-only into the `notifications` service alone, and read by no other process. A key need not be a station: `meridian notify test --to team` checks a channel before station 001 exists.
+
+**No address in the database, a log line, an error or an MSP message.** `report_deliveries` has no column that could hold one. Every refusal the recipients file can cause names the key, never the value. A channel's error is a class, not the server's words (D-305), and the sender logs a report's id, station, channel and class, nothing else. The tests plant an address and look for it in every log line, error and refusal.
+
+**A simulated station's reports go to the sink, enforced three times**: the jobs task refuses a notifications file that lists one on another channel, the database refuses the row (D-301), and the sender abandons any it is handed.
+
+*Rejected: the address in `notifications.toml`.* The jobs process reads that file, and D-206 keeps the jobs process to the database and the metrics token; one copy of an address is one place it can leak from.
+
+---
+
+## D-301 — A report is one row written once, its attempts are appended, and the database refuses a simulated report anywhere but the sink
+
+**2026-10-28 · accepted** · *`report_deliveries`, `report_delivery_attempts`, migration 0031; `meridian/store/report_deliveries.py`; Stage 29. Amends `DATA-MODEL.md`'s planned `report_deliveries`.*
+
+`DATA-MODEL.md` planned one table whose `sent_at`, `failed_at`, `attempts` and `error` a sender would update. That makes the one row holding the report's hashes a row the sender rewrites on every retry, which D-104's append-only rule exists to avoid. So two tables, like Stage 32's regional alerts (D-232):
+
+- **`report_deliveries`**, one row per report, written once: station, kind (`pass` with its assignment, or `weekly` with a week starting Monday 00:00 UTC), channel, template version, the rows it names (`inputs_json`, D-302), `inputs_sha256`, `content_sha256`, `queued_at` and `simulated`.
+  - `simulated` is copied from the assignment or the station by the insert, never from the caller.
+  - A report is queued once per subject and channel, whatever the template version: an owner hears about a pass once.
+  - `check (not simulated or channel = 'sink')` makes rule 5 the database's own.
+- **`report_delivery_attempts`**, appended: when, the outcome (`sent`, `failed` or `abandoned`), an error class, and for a failure when to try again. A check holds each outcome to its shape, and a partial unique index allows one sent or abandoned attempt per report, so a report ends once.
+
+The rendered text is not stored. The rows it names and its template regenerate it, and its hash proves they did (D-098, D-302).
+
+---
+
+## D-302 — A report names the rows it was read from, and regenerating it reads exactly those
+
+**2026-10-28 · accepted** · *`meridian/store/{report_reads,week_reads}.py`; `meridian/notifications/{facts,reading}.py`; `meridian notify regenerate`; Stage 29.*
+
+The plan was to regenerate a report from what was stored as of the moment it was queued. That fails on the simulator's runs, where an observation's `submitted_at` and a verdict's `computed_at` are the database's clock and a heartbeat's `received_at` is the simulation's. A cut-off in one clock does not select the same rows in the other.
+
+**So a report names its rows.** A pass report keeps the assignment, the observation revision, the verdict method and the diagnosis id it read. A weekly report keeps the same for every pass of the week, and the ids of the warnings open at its end. Choosing what a report says reads the latest of everything; reading it again reads exactly the named rows, by key. Every one of those rows is append-only and none has a retention policy (D-178), so a verdict, a diagnosis or a corrected observation written afterwards never changes a report already sent. A named row that is gone fails regeneration loudly rather than reading another.
+
+**Two hashes.** The rows become a frozen set of facts, and `inputs_sha256` is their canonical JSON with every instant in UTC; `content_sha256` is the rendered subject and body. A regeneration must reproduce both, which tells a changed row from a changed template.
+
+**The sender regenerates before it sends.** A report goes out only if both hashes match what was recorded when it was queued, so what a person receives is always what `meridian notify regenerate` proves.
+
+---
+
+## D-303 — Templates are versioned plain-text functions of their facts, and a released one is never edited
+
+**2026-10-28 · accepted** · *`meridian/notifications/{templates,wording}.py`; `tests/unit/test_notification_templates.py`; Stage 29. Applies D-098.*
+
+- **`pass-1` and `weekly-1`** are functions of their facts alone: no clock, locale, database or environment. A pass report gives what was received, the verdict (or "not yet scored", and "partial" below the threshold), and for a loss its cause with every other cause tested. A weekly report gives hours heard, what the week's passes came to, the spread of verdicts in four fixed bands, losses by cause and any receive-chain warning still open.
+- **"Undetermined" is said plainly**: "The cause could not be determined from the evidence", with what was tested. It is never rounded up into the likeliest cause.
+- **Every sentence is in `wording.py`**, one per cause, outcome and verdict band, so a reviewer can read everything a report can say in one file.
+- **A released version is never edited.** A test pins each version's hash on fixed facts; a changed sentence is a new version beside the old, and a report keeps the version that rendered it.
+- **Plain text only.** Email is `text/plain` UTF-8 and Telegram has no parse mode, so nothing needs escaping and nothing can be injected. A station's own name is cleaned first: control and format characters, which could add a line or reverse text, are dropped, and it is capped at 64 characters.
+- **A simulated station's report says so first**, `[SIMULATED]` in its subject and "SIMULATED STATION — not a real reception." as its first line.
+
+---
+
+## D-304 — Reports are queued by the jobs service from the database alone, and sent by a service of their own
+
+**2026-10-28 · accepted** · *`meridian/jobs/report_round.py`; `meridian/cli_jobs_tasks.py`; `meridian/notifications/{compose,send}.py`; the `notifications` compose service; `meridian notify`; Stage 29. Applies D-102 and D-206.*
+
+**The `reports` task**, the ninth and last of a round, reads and writes the database alone. A pass is due once its window has closed and Stage 20 has classified it, then when what it will say is settled: its loss has a diagnosis, or it decoded and its verdict is written and above the partial threshold. If neither comes within six hours, it is reported with what there is. An expired or revoked assignment is a decline, never reported (D-008). The task renders each report to fix its hashes and writes it once.
+
+**The `notifications` service** runs `meridian notify send --follow`, every 30 seconds. It is the only process that holds a recipient, the SMTP password or the bot token, so the jobs process keeps what D-206 gave it. It touches nothing but `report_delivery_attempts`, so a delivery that fails, hangs or is never configured leaves scheduling, reception and every stored result as they were. A test fingerprints five tables across three failed deliveries.
+
+**Channels are the standard library's**: `smtplib` with STARTTLS, `urllib` to the Bot API, a file per report for the sink. No dependency is added (D-098).
+
+`cli_jobs.py` reached 405 lines with the task added, so the tasks after scheduling moved to `cli_jobs_tasks.py`, unchanged in behaviour.
+
+---
+
+## D-305 — A failed delivery backs off and is abandoned after eight tries, at least once, and its error is a class
+
+**2026-10-28 · accepted** · *`meridian/notifications/{channels,send}.py`; `meridian_report_deliveries`; `ReportDeliveryFailing`; Stage 29.*
+
+- **Backoff.** A failure waits a minute, then twice as long each time, capped at six hours; after eight attempts the report is abandoned. A failure no retry can help is abandoned at once: a refused recipient, a chat that blocked the bot, a report that no longer regenerates, a simulated report on a person's channel. A missing recipient or a channel with no secret is retried, because the operator can fix it.
+- **At least once.** Each attempt is committed as soon as it is made, but a crash between sending and recording sends the report again on restart. An email's `Message-ID` is the report's id, so the copy is recognisably the same message.
+- **An error is a class**, such as `timeout`, `smtp_auth`, `refused` or `http_403`, never a server's words, which can repeat the address they refused. The exception is never chained either, because an SMTP refusal carries the address and Telegram's URL carries the token.
+- **Seen in two places.** `meridian_report_deliveries{state, simulated}` counts reports queued, retrying, sent and abandoned, absent for a population that has never had one (D-086). `ReportDeliveryFailing`, a warning, fires when for an hour a report has been retrying or waiting with no attempt, which is the sender not running, or one was abandoned in the last six hours.
+
+---
+
+## D-306 — A week is Monday 00:00 UTC to Monday, queued six hours after it ends, and only the latest one
+
+**2026-10-28 · accepted** · *`meridian/notifications/compose.py`; `deploy/notifications.toml.example`; Stage 29.*
+
+UTC, because every stored instant is (D-013), and a station's local week would make one report's period depend on where it stands. Its passes are those the station held whose window began in it; its warnings, those open at its end. It is queued `weekly_settle_s` (six hours) after it ends, so its last passes have settled. Only the latest week is queued, so a station listed today gets this week's summary, not one for every week it has existed.
+
+---
+
+## D-307 — Regional alerts stay recorded only
+
+**2026-10-28 · accepted** · *`meridian/regions/alerts.py` unchanged; Stage 29. Revisits D-232.*
+
+D-232 expected Stage 29's channels to widen `region_alert_deliveries`. They do not. An area of interest has no owner and nothing about a person is held for one (D-137, D-227), so a regional alert has nobody it could go to under option (b). `RecordOnlyDelivery` stays the only delivery. An email or Telegram implementation of the same protocol is a small change once someone is meant to receive one, and that is a decision about people, as D-107 is.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -6312,7 +6414,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 |---|---|---|
 | **D-100** | Which method SC-3 is measured by, after `first_detection_at` is tested on archive data | SC-3's analysis in Stage 22 |
 | **D-106** | What label "usable" is, independent of the verdict's inputs | Settled 2026-10-01 by **D-260**, a blind human rating; the team confirms it with SC-7's target |
-| **D-107** | Whether an owner's contact is held, and how §16 of `PROJECT.md` changes | Stage 29 beyond team-operated stations |
+| **D-107** | Whether an owner's contact is held, and how §16 of `PROJECT.md` changes | Owner reports beyond team-operated stations; Stage 29 is built to option (b), D-300 |
 | **D-108** | Archive rows as runtime evidence; D-053 against §17; phase naming; calendar placement | — |
 
 **Opened 2026-09-18 with the two-tier deployment and public data**, each needing the team rather than another document:

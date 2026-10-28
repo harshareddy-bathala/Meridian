@@ -101,6 +101,10 @@ ENV PATH="/app/.venv/bin:$PATH" \
 # invents a root-owned one when the path is absent — which this container, which
 # is deliberately not root, then cannot write a single file to.
 RUN install -d -o meridian -g meridian /var/lib/meridian-sim
+# Where the notifications service's sink writes each report it receives: every
+# simulated station's, and any a deployment lists for it (D-301). Made here for
+# the same reason as the directory above.
+RUN install -d -o meridian -g meridian /var/lib/meridian/report-sink
 
 USER meridian
 EXPOSE 8000

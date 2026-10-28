@@ -114,6 +114,7 @@ meridian/
 │       ├── store/        SQL access layer
 │       ├── api/          public + MSP endpoints
 │       ├── datasets/     snapshot export, labels, completeness, propensity weights
+│       ├── notifications/ owner reports: templates, queue and delivery channels
 │       ├── regions/      areas of interest: series, change, coverage, cross-checks
 │       ├── reports/      evaluation reports: a sealed run from a snapshot, a config and a seed
 │       ├── jobs/         the `jobs` service: pass generation and scheduling on a timer

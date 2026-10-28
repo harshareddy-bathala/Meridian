@@ -4,7 +4,7 @@ PostgreSQL with TimescaleDB. Observations and heartbeats are hypertables.
 
 > **Phase 1 scope.** D-018 builds eight of the tables below plus `invite_tokens` (D-020) and `satellite_transmitters` (D-021). `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles` were deferred — see D-018 for why each one waited — and Stage 19 built them once each had a producer and a consumer (migration `0023`, D-173 to D-176). Two derived views and an hourly heartbeat aggregate followed (migration `0024`, D-177, D-178).
 >
-> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below. Stage 26 built the first two, `reception_ratings` and `reception_verdicts` (migrations `0027` and `0028`, D-260, D-263), Stage 27 the third, `loss_diagnoses` (migration `0029`, D-272), and Stage 28 the watch's two, `signal_baselines` and `receive_chain_warnings` (migration `0030`, D-291, D-292); the rest are **planned, not built**. The rules they share are D-104.
+> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below. Stage 26 built the first two, `reception_ratings` and `reception_verdicts` (migrations `0027` and `0028`, D-260, D-263), Stage 27 the third, `loss_diagnoses` (migration `0029`, D-272), Stage 28 the watch's two, `signal_baselines` and `receive_chain_warnings` (migration `0030`, D-291, D-292), and Stage 29 owner reports' two, `report_deliveries` and `report_delivery_attempts` (migration `0031`, D-301); `dataset_exports` is **planned, not built**. The rules they share are D-104.
 
 ---
 
@@ -333,10 +333,25 @@ A warning that a receive chain is degrading, raised before reception fails. `rai
 - **`simulated`** is the baseline's, which is the station's.
 - **Retention:** never dropped.
 
-### `report_deliveries` *(planned)*
-`(id, station_id, kind, assignment_id, period_start, channel, template_version, content_sha256, queued_at, sent_at, failed_at, attempts, error, simulated)`
+### `report_deliveries`
+`(id, station_id, kind, assignment_id, period_start, channel, template_version, inputs_json, inputs_sha256, content_sha256, queued_at, simulated)`, one per subject and channel: unique on `(assignment_id, channel)` for a pass and `(station_id, period_start, channel)` for a week.
 
-`kind` is `pass` (with `assignment_id`) or `weekly` (with `period_start`); `channel` is `email` or `telegram`. The rendered text is not stored — `template_version` and the stored results it read regenerate it, and `content_sha256` proves the regeneration matches. **No recipient address is held in this table**; where one is held at all is D-107's open question. A simulated station's report is rendered and recorded like any other and delivered only to a test sink, never to a person.
+One owner report, written once (D-301). `kind` is `pass`, about one assignment, or `weekly`, about a station's week from Monday 00:00 UTC; a check holds each to its own subject. **The rendered text is not stored.** `inputs_json` names the rows it was read from — the observation revision, the verdict method and the diagnosis of a pass, the same for every pass of a week, and the warnings open at its end — and `template_version` the template that rendered it. `inputs_sha256` is of the facts read, `content_sha256` of the text sent, and a regeneration must reproduce both (D-302).
+
+- **Producer:** the jobs service's `reports` task and `meridian notify queue` (Stage 29).
+- **Consumers:** the `notifications` service, which regenerates each report before sending it; `meridian notify list` and `regenerate`; the scrape's `meridian_report_deliveries`.
+- **No recipient is held** — no column could hold an address. Recipients are the sender's secret file alone (D-300).
+- **`simulated`** is copied from the assignment or the station by the insert, never from the caller, and a check refuses a simulated report on any channel but `sink` (rule 5).
+- **Retention:** never dropped.
+
+### `report_delivery_attempts`
+`(id, delivery_id, attempted_at, outcome, error_class, next_attempt_at)`
+
+Every attempt to deliver a report, appended. `outcome` is `sent`, `failed` or `abandoned`, and a check holds each to its shape: a failure names an error class and when to try again, an abandonment only the class, a send neither. **One sent or abandoned attempt ends a report**, held by a partial unique index. `error_class` is a short code such as `timeout`, `smtp_auth` or `refused`, never a server's words, which can repeat the address they refused (D-305).
+
+- **Producer:** the `notifications` service, `meridian notify send`.
+- **Consumers:** the sender, for what is due; `meridian notify list`; the scrape's gauge.
+- **Retention:** never dropped.
 
 ### `dataset_exports`
 `(export_id, snapshot_id, snapshot_sha256, config_sha256, seed, code_version, includes_simulated, row_counts_json, content_sha256, created_at)`
@@ -537,8 +552,9 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `station_capabilities.modes` | free-text lowercase array in Phase 1 — decoder naming varies too much to freeze |
 | `loss_diagnoses.cause` | `satellite_silent`, `station_not_listening`, `obstruction`, `interference`, `timing_fault`, `undetermined` — D-104 |
 | `signal_baselines.evidence` | `samples`, `peak` — D-291 |
-| `report_deliveries.kind` *(planned)* | `pass`, `weekly` — D-098 |
-| `report_deliveries.channel` *(planned)* | `email`, `telegram` — D-098 |
+| `report_deliveries.kind` | `pass`, `weekly` — D-301 |
+| `report_deliveries.channel` | `email`, `telegram`, `sink` — D-300, D-301 |
+| `report_delivery_attempts.outcome` | `sent`, `failed`, `abandoned` — D-305 |
 | `ingest_sources.access_constraint` | `none`, `key_counted`, `registration` — D-132 |
 | `ingest_records.payload_kind` | `data`, `tile` — a `tile` is never read for a value, D-133 |
 | `environment_samples.quantity` | lowercase words, `^[a-z][a-z0-9_]{0,63}$`: `kp_index`, `cloud_cover`, `aerosol_optical_depth`, `fire_radiative_power`, `ndvi`, `precipitation`, `night_lights_radiance` so far — free text, as `station_capabilities.modes` is, because naming varies too much between sources to freeze |
