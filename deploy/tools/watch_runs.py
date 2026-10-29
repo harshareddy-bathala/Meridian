@@ -199,7 +199,16 @@ def fly(
                 # version of every station's row, and slow each update more
                 # than the last.
                 conn.commit()
-    return ledger.read_text(encoding="utf-8"), tuple(station_ids)
+    return ledger_text(ledger), tuple(station_ids)
+
+
+def ledger_text(path: Path) -> str:
+    """The ledger the simulator wrote, or none at all for a clean fleet.
+
+    The simulator makes its ledger file on the first fault it records, so a
+    fleet that injects nothing leaves no file: an empty ledger, not a missing one.
+    """
+    return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
 def timeline(conn: Any, plan: Plan, station_ids: tuple[str, ...]) -> list[datetime]:
