@@ -569,3 +569,269 @@ def verdict_snapshot(datasets_root: Path) -> Callable[[Tables], Path]:
         ).path
 
     return publish
+
+
+EVIDENCE_TABLES = (*VERDICT_TABLES, "reception_verdicts", "loss_diagnoses")
+"""A raw snapshot from after migration 0031: verdicts and diagnoses as well."""
+
+EVIDENCE_AOS = AS_OF - timedelta(days=2)
+
+
+def _evidence_pass(number: int, station: str, aos: datetime) -> dict[str, object]:
+    return {
+        "id": number,
+        "satellite_id": "norad:57166",
+        "station_id": station,
+        "aos": aos,
+        "los": aos + timedelta(minutes=11),
+        "max_elevation_deg": 40.0 + number,
+        "max_elevation_at": aos + timedelta(minutes=5),
+        "aos_azimuth_deg": 350.0,
+        "los_azimuth_deg": 170.0,
+        "element_set_id": 1,
+        "min_elevation_deg": 10.0,
+        "computed_at": aos - timedelta(hours=5),
+        "simulated": station == "st_sim",
+    }
+
+
+def _evidence_assignment(
+    number: int, station: str, aos: datetime, **columns: object
+) -> dict[str, object]:
+    return {
+        "assignment_id": f"as_{number}",
+        "pass_id": number,
+        "station_id": station,
+        "issued_at": aos - timedelta(hours=4),
+        "start_at": aos,
+        "end_at": aos + timedelta(minutes=11),
+        "centre_freq_hz": 137_900_000,
+        "mode": "lrpt",
+        "timing_uncertainty_s": 4.2,
+        "predicted_yield": 0.7,
+        "priority": 1.0,
+        "decision": "scheduled",
+        "reason": "highest elevation in its window",
+        "model_config": "A",
+        "score": 0.6,
+        "conflicts_with_assignment_id": None,
+        "state": "reported",
+        "simulated": station == "st_sim",
+        "revision": 1,
+        "revoked_reason": None,
+    } | columns
+
+
+def _evidence_observation(
+    number: int, revision: int, outcome: str, aos: datetime, station: str = "st_a"
+) -> dict[str, object]:
+    return {
+        "assignment_id": f"as_{number}",
+        "revision": revision,
+        "observation_id": f"ob_{number}_{revision}",
+        "station_id": station,
+        "satellite_id": "norad:57166",
+        "started_at": aos,
+        "ended_at": aos + timedelta(minutes=11),
+        "outcome": outcome,
+        "signal_detected": outcome != "no_signal",
+        "first_detection_at": aos + timedelta(seconds=40),
+        "peak_snr_db": 9.5 + revision,
+        "doppler_samples": [{"t": aos + timedelta(minutes=5), "hz": 1210.5}],
+        "products_json": [{"kind": "image", "uri": "file:///private/path.png"}],
+        "client_notes": "private note from the station",
+        "simulated": station == "st_sim",
+        "provenance": "station",
+        "submitted_at": aos + timedelta(minutes=20 + revision),
+        "content_sha256": bytes([number * 16 + revision]) * 32,
+        "noise_floor_dbfs": -52.3,
+        "receiver_gain_db": 32.8,
+        "snr_samples": [{"t": aos + timedelta(minutes=4), "snr_db": 3.1}],
+        "decoder": "satdump",
+        "decoder_version": "1.2.2",
+        "frames_decoded": 400 if outcome == "decoded" else 0,
+        "frames_failed": 12,
+    }
+
+
+def _evidence_world() -> Tables:
+    late = AS_OF - timedelta(minutes=5)
+    rows: Tables = {name: [] for name in EVIDENCE_TABLES}
+    rows["stations"] = [
+        {
+            "station_id": "st_a",
+            "name": "Roof of the north block",
+            "lat_deg": 12.971599,
+            "lon_deg": 77.594566,
+            "alt_m": 920.0,
+            "registered_at": SINCE,
+            "location_precision_decimals": 2,
+            "simulated": False,
+            "simulator_run_id": None,
+            "seed": None,
+            "client_implementation": "meridian-client",
+            "client_version": "0.3.0",
+            "deleted_at": None,
+        },
+        {
+            "station_id": "st_sim",
+            "name": "virtual 1",
+            "lat_deg": 13.0,
+            "lon_deg": 77.6,
+            "alt_m": 900.0,
+            "registered_at": SINCE,
+            "location_precision_decimals": 2,
+            "simulated": True,
+            "simulator_run_id": "run-a",
+            "seed": 4471,
+            "client_implementation": "meridian-sim",
+            "client_version": "0.3.0",
+            "deleted_at": None,
+        },
+    ]
+    rows["element_sets"] = [
+        {
+            "id": 1,
+            "satellite_id": "norad:57166",
+            "epoch": EVIDENCE_AOS - timedelta(hours=6),
+            "retrieved_at": EVIDENCE_AOS - timedelta(hours=5),
+            "line1": (
+                "1 57166U 23091A   26264.00000000  .00000000  00000-0  00000-0 0  9990"
+            ),
+            "line2": (
+                "2 57166  98.7000 120.0000 0001000  90.0000 270.0000 14.20000000 10000"
+            ),
+            "source": "celestrak",
+            "content_sha256": bytes([9]) * 32,
+        }
+    ]
+    plan = [
+        # Decoded on its second revision, after a first that only heard signal.
+        (1, "st_a", EVIDENCE_AOS, {}),
+        # Held to the end of its window with no report: a miss.
+        (2, "st_a", EVIDENCE_AOS + timedelta(hours=2), {"state": "held"}),
+        # A decline, revoked work, a skipped pass, an open window, unacknowledged.
+        (3, "st_a", EVIDENCE_AOS + timedelta(hours=4), {"state": "expired"}),
+        (
+            4,
+            "st_a",
+            EVIDENCE_AOS + timedelta(hours=6),
+            {"state": "revoked", "revoked_reason": "station_offline"},
+        ),
+        (5, "st_a", EVIDENCE_AOS + timedelta(hours=8), {"decision": "skipped"}),
+        (7, "st_a", late, {"state": "held"}),
+        (8, "st_a", EVIDENCE_AOS + timedelta(hours=10), {"state": "issued"}),
+        # A simulated station's decode.
+        (6, "st_sim", EVIDENCE_AOS + timedelta(hours=3), {}),
+    ]
+    for number, station, aos, columns in plan:
+        rows["passes"].append(_evidence_pass(number, station, aos))
+        rows["assignments"].append(
+            _evidence_assignment(number, station, aos, **columns)
+        )
+    rows["observations"] = [
+        _evidence_observation(1, 1, "signal_no_decode", EVIDENCE_AOS),
+        _evidence_observation(1, 2, "decoded", EVIDENCE_AOS),
+        _evidence_observation(
+            6, 1, "decoded", EVIDENCE_AOS + timedelta(hours=3), station="st_sim"
+        ),
+    ]
+    rows["listening"] = [
+        {"assignment_id": "as_1", "station_id": "st_a", "listening_confirmed": True},
+        {"assignment_id": "as_2", "station_id": "st_a", "listening_confirmed": False},
+    ]
+    rows["reception_verdicts"] = [
+        {
+            "assignment_id": "as_1",
+            "revision": revision,
+            "observation_started_at": EVIDENCE_AOS,
+            "station_id": "st_a",
+            "probability_usable": probability,
+            "method": method,
+            "route": "full",
+            "inputs_sha256": bytes([revision]) * 32,
+            "partial_below": 0.4,
+            "computed_at": EVIDENCE_AOS + timedelta(hours=1),
+            "simulated": False,
+        }
+        for revision, method, probability in (
+            (1, "verdict-1:aaaaaaaaaaaa", 0.2),
+            (2, "verdict-1:aaaaaaaaaaaa", 0.81),
+            (2, "verdict-2:bbbbbbbbbbbb", 0.77),
+        )
+    ]
+    rows["loss_diagnoses"] = [
+        {
+            "diagnosis_id": 11,
+            "assignment_id": "as_2",
+            "revision": None,
+            "observation_started_at": None,
+            "station_id": "st_a",
+            "classification_id": 5,
+            "cause": "station_not_listening",
+            "candidates_json": [{"cause": "station_not_listening", "fired": True}],
+            "evidence_json": {"listening": False},
+            "method": "diagnosis-1",
+            "config_sha256": bytes([6]) * 32,
+            "verdict_method": None,
+            "computed_at": AS_OF - timedelta(hours=1),
+            "simulated": False,
+        }
+    ]
+    rows["products"] = [
+        {
+            "id": index,
+            "assignment_id": "as_1",
+            "revision": revision,
+            "observation_started_at": EVIDENCE_AOS,
+            "station_id": "st_a",
+            "element_index": element,
+            "kind": kind,
+            "sha256": bytes([index]) * 32,
+            "size_bytes": 1000 * index,
+            "created_at": EVIDENCE_AOS + timedelta(minutes=30),
+            "simulated": False,
+        }
+        for index, revision, element, kind in (
+            (1, 1, 0, "frames"),
+            (2, 2, 0, "image"),
+            (3, 2, 1, "frames"),
+        )
+    ]
+    return rows
+
+
+EVIDENCE_WORLD = _evidence_world()
+
+
+@pytest.fixture
+def evidence_world() -> Tables:
+    """Receptions of every kind a package must keep or leave out, every column."""
+    return {name: [dict(row) for row in rows] for name, rows in EVIDENCE_WORLD.items()}
+
+
+@pytest.fixture
+def evidence_snapshot(datasets_root: Path) -> Callable[[Tables], Path]:
+    """Publish a raw snapshot from after migration 0031 holding the given rows."""
+
+    def publish(tables: Tables) -> Path:
+        files = {
+            f"{name}.jsonl": b"".join(
+                canonical_line(row) for row in tables.get(name, ())
+            )
+            for name in EVIDENCE_TABLES
+        }
+        manifest = Manifest(
+            kind="raw_snapshot",
+            schema_revision="0031",
+            since=SINCE,
+            as_of=AS_OF,
+            files=tuple(file_entry(name, data) for name, data in sorted(files.items())),
+            created_at=AS_OF,
+        )
+        name = f"20260923T060000Z-{content_sha256(manifest).hex()[:12]}"
+        return publish_directory(
+            datasets_root / "snapshots", name, manifest, files
+        ).path
+
+    return publish
