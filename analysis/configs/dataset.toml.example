@@ -1,0 +1,12 @@
+# What an evidence package holds, for `meridian dataset export --config <this file>`.
+#
+# Every key is optional; the value below is the default. An unknown key is
+# refused rather than ignored.
+
+[export]
+
+# Which receptions the package holds: "measured", "simulated", or both. Each
+# population is a file of its own, receptions.jsonl and
+# receptions_simulated.jsonl, and simulated receptions are exported only when
+# named here (D-104), so a package nobody asked to mix cannot mix them.
+populations = ["measured"]
