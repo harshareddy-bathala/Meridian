@@ -16,7 +16,8 @@ and verifies Stage 22's evaluation reports (``cli_report``); ``verdict``
 rates receptions for the reception verdict (``cli_verdict``); ``diagnosis``
 says why each lost reception was lost (``cli_diagnosis``); ``watch`` watches
 each receive chain's signal against its own past (``cli_watch``); ``notify``
-queues, sends and regenerates owner reports (``cli_notify``). Every command the
+queues, sends and regenerates owner reports (``cli_notify``); ``dataset``
+exports and verifies the evidence dataset (``cli_dataset``). Every command the
 operations runbook documents is now built, so the table of commands whose
 stage had not arrived went with the last of them.
 
@@ -37,6 +38,7 @@ from collections.abc import Callable, Sequence
 
 from meridian import __version__
 from meridian.cli_catalogue import run_catalogue
+from meridian.cli_dataset import add_dataset_parser, run_dataset
 from meridian.cli_db import add_db_parser, run_db
 from meridian.cli_diagnosis import add_diagnosis_parser, run_diagnosis
 from meridian.cli_invite import run_invite
@@ -285,6 +287,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_diagnosis_parser(subcommands)
     add_watch_parser(subcommands)
     add_notify_parser(subcommands)
+    add_dataset_parser(subcommands)
 
     return parser
 
@@ -292,6 +295,7 @@ def _build_parser() -> argparse.ArgumentParser:
 NEEDS_ACTION = frozenset(
     {
         "catalogue",
+        "dataset",
         "db",
         "diagnosis",
         "invite",
@@ -319,6 +323,7 @@ unrunnable. Its one verb, ``evaluate``, is optional.
 
 IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
     "catalogue": run_catalogue,
+    "dataset": run_dataset,
     "db": run_db,
     "diagnosis": run_diagnosis,
     "invite": run_invite,
