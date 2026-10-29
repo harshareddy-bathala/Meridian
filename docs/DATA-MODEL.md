@@ -4,7 +4,7 @@ PostgreSQL with TimescaleDB. Observations and heartbeats are hypertables.
 
 > **Phase 1 scope.** D-018 builds eight of the tables below plus `invite_tokens` (D-020) and `satellite_transmitters` (D-021). `products`, `noise_measurements`, `horizon_profiles` and `interference_profiles` were deferred — see D-018 for why each one waited — and Stage 19 built them once each had a producer and a consumer (migration `0023`, D-173 to D-176). Two derived views and an hourly heartbeat aggregate followed (migration `0024`, D-177, D-178).
 >
-> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below. Stage 26 built the first two, `reception_ratings` and `reception_verdicts` (migrations `0027` and `0028`, D-260, D-263), Stage 27 the third, `loss_diagnoses` (migration `0029`, D-272), Stage 28 the watch's two, `signal_baselines` and `receive_chain_warnings` (migration `0030`, D-291, D-292), and Stage 29 owner reports' two, `report_deliveries` and `report_delivery_attempts` (migration `0031`, D-301); `dataset_exports` is **planned, not built**. The rules they share are D-104.
+> **Post-reception tables** — for the reception verdict, loss diagnosis, the station health watch, owner reports and the evidence dataset — are described under their own heading below. Stage 26 built the first two, `reception_ratings` and `reception_verdicts` (migrations `0027` and `0028`, D-260, D-263), Stage 27 the third, `loss_diagnoses` (migration `0029`, D-272), Stage 28 the watch's two, `signal_baselines` and `receive_chain_warnings` (migration `0030`, D-291, D-292), and Stage 29 owner reports' two, `report_deliveries` and `report_delivery_attempts` (migration `0031`, D-301). Stage 30's evidence dataset is files, and `dataset_exports` is **not built**: a package's manifest is its record (D-314). The rules they share are D-104.
 
 ---
 
@@ -353,10 +353,10 @@ Every attempt to deliver a report, appended. `outcome` is `sent`, `failed` or `a
 - **Consumers:** the sender, for what is due; `meridian notify list`; the scrape's gauge.
 - **Retention:** never dropped.
 
-### `dataset_exports`
+### `dataset_exports` *(not built)*
 `(export_id, snapshot_id, snapshot_sha256, config_sha256, seed, code_version, includes_simulated, row_counts_json, content_sha256, created_at)`
 
-One row per evidence-dataset package; the package itself is files, as `products` are. `content_sha256` is the hash that regenerating from the same `snapshot_sha256`, `config_sha256` and `seed` must reproduce (`CLAUDE.md` rule 8). Measured and simulated receptions are separate files inside the package, and `includes_simulated` is false unless simulated ones were requested by name. Products are referenced by their `sha256`, not bundled, so the hash covers the records whatever the image store holds.
+Planned as one row per evidence-dataset package, and **not built** (D-314). Every column it would hold — the snapshot's hash, the configuration's hash, the seed, the code version, the populations, the row counts and the content hash — is in the package's own sealed manifest, and a table would make a pure export write to a database (D-143). The package itself is files under `<datasets root>/evidence/`: measured and simulated receptions in separate files, simulated ones only when requested by name (D-311), and products referenced by `sha256`, not bundled (D-310).
 
 ---
 

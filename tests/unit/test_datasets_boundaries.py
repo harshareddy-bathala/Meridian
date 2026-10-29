@@ -71,6 +71,9 @@ MAY_IMPORT_DATASETS = frozenset(
         # Fitting and judging the reception verdict read a raw snapshot, as
         # `meridian model` does; rating and applying it do not (D-262).
         PLATFORM / "cli_verdict_model.py",
+        # The evidence dataset is built from a raw snapshot and reads no
+        # database, as `meridian report` is (D-143, D-310).
+        PLATFORM / "cli_dataset.py",
     }
 )
 PREDICTION = PLATFORM / "prediction"

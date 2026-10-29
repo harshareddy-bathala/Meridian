@@ -54,7 +54,7 @@ The sections below describe each module's responsibility in the finished system.
 | `platform/regions` | No directory yet — Stage 32, regional monitoring (module 19). |
 | `platform/reports` | Stage 22's evaluation reports: a sealed run built from a raw snapshot, one configuration and a master seed, and regenerated to verify it. Sections arrive one at a time; data, prediction, scheduling, orbit uncertainty and reliability are built. |
 | `platform/notifications` | Owner reports, Stage 29: versioned templates, queued by the jobs service and sent by the `notifications` service, to team-operated stations only (D-300 to D-307). |
-| `platform/datasets` | The evidence dataset is Stage 30, which adds the last of the post-reception layer (D-102). |
+| `platform/datasets` | Stage 15's snapshots and labels, and Stage 30's evidence dataset: a package of receptions regenerable to its hash from a snapshot, a configuration and a seed (D-310 to D-315). |
 | `firmware` | No directory yet, and excluded from the software roadmap: it is built alongside the antenna and rotator rather than in a software stage. |
 
 ### `platform/orbit`
@@ -119,7 +119,7 @@ Reads the verdict, diagnoses and receive-chain warnings as stored rows through `
 ### `platform/datasets`
 The evidence dataset (module 17), and the snapshot manifest and content hashing Stage 15 defines, shared rather than written twice.
 
-Exports receptions with their verdict, diagnosed cause and full provenance — station, element set, `simulated`, content hash — as a package whose hash is regenerable from a snapshot, a configuration and a seed. Reads stored rows through `store` and **never recomputes** a verdict or a diagnosis, which is what keeps the hash stable. Measured and simulated receptions are written to separate files, and simulated ones are exported only when asked for by name (D-104).
+Exports receptions with their verdict, diagnosed cause and full provenance — station, element set, `simulated`, content hash — as a package whose hash is regenerable from a snapshot, a configuration and a seed. Built from a raw snapshot alone, which `meridian snapshot export` is the only step to read from the database (D-143), and **never recomputes** a verdict or a diagnosis, which is what keeps the hash stable (D-310, D-312). Measured and simulated receptions are written to separate files, and simulated ones are exported only when asked for by name (D-104).
 
 ### `platform/api`
 Two surfaces: the public read API and the MSP endpoints. Thin — validation and serialisation only, no business logic.

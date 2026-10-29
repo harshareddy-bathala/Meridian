@@ -46,9 +46,24 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-10-28. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-10-29. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stage 29's software is built** (2026-10-28). Its decisions are D-300 through D-307, `docs/OPERATIONS.md` § Owner reports is its runbook, and its migration is `0031`. Stage 30 is next.
+**Stage 30's software is built** (2026-10-29). Its decisions are D-310 through D-316, `docs/OPERATIONS.md` § The evidence dataset is its runbook, and it has no migration. **With it, every stage of the roadmap's software is built.** What remains is Stage 24's seventy-two hour run on the Pi, the one acceptance clause still pending.
+- **The completion gate passes, across two machines.** *SC-10: regenerating the package from the same snapshot, configuration and seed, on a machine other than the one that produced it, gives the identical content hash.*
+  - `tests/integration/test_evidence_gate.py` flies Stage 27's pinned faulted fleet, exports a raw snapshot of its database and builds a package. It asserts the package holds the fleet's receptions and their diagnoses, that building it again is byte-identical, and that `meridian dataset verify` says so; in CI it hands both to an artifact.
+  - `ci.yml › evidence-elsewhere` rebuilds the package on a fresh runner, inside the platform image in a container with no network, to the hash its manifest recorded, and refuses a copy with one row changed.
+- **One row per held reception** (D-310): the current observation and its lineage, every verdict and diagnosis with its method, products by hash, provenance. No coordinates, names, notes, product locations or element-set lines.
+- **Measured and simulated apart, simulated only by name** (D-311).
+- **A pure function, sealed** (D-312): kind `evidence_dataset`, canonical rows in key order, the configuration's bytes, a datasheet and a licence rendered from its own facts; the environment unhashed; the seed recorded and drawing nothing.
+- **CC BY 4.0** (D-313), which settles D-136 for this package: it republishes no ingested source's records.
+- **No `dataset_exports` table** (D-314): the manifest is the record, and Stage 15's module was already the one implementation.
+- **Found on the way, fixed** (D-316): SC-9's tool stopped on its first clean fleet, whose fault ledger the simulator never creates.
+- **Owed, not done:**
+  - the first measured package, once station 001 has receptions;
+  - SC-9's three clean fleets, about four to six hours by hand;
+  - the team's confirmation of CC BY 4.0 and of SC-10's target.
+
+**Stage 29's software is built** (2026-10-28). Its decisions are D-300 through D-307, `docs/OPERATIONS.md` § Owner reports is its runbook, and its migration is `0031`. Stage 30 was next.
 - **The completion gate passes.** *In a rehearsal of the demonstration, a decoded pass and a diagnosed loss each produce a delivered report whose text regenerates to its recorded content hash.* `tests/integration/test_report_gate.py` flies Stage 27's pinned faulted fleet, classifies and diagnoses it, then queues and sends every report to the sink. It asserts:
   - a decoded pass and a diagnosed loss each delivered a report;
   - each delivered file hashes to its recorded content hash, and `meridian notify regenerate` says so from the database alone;

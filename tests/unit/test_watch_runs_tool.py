@@ -76,3 +76,14 @@ def test_a_fleet_already_sealed_is_found_and_another_is_not(
 
     assert tool.already_sealed(first, tmp_path) == sealed
     assert tool.already_sealed(second, tmp_path) is None
+
+
+def test_a_clean_fleet_that_wrote_no_ledger_has_an_empty_one(
+    tool: ModuleType, tmp_path: Path
+) -> None:
+    """The simulator makes its ledger on the first fault; a clean fleet has none."""
+    written = tmp_path / "faults.jsonl"
+
+    assert tool.ledger_text(tmp_path / "absent.jsonl") == ""
+    written.write_text('{"kind": "x"}\n', encoding="utf-8")
+    assert tool.ledger_text(written) == '{"kind": "x"}\n'

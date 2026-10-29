@@ -6395,6 +6395,95 @@ D-232 expected Stage 29's channels to widen `region_alert_deliveries`. They do n
 
 ---
 
+## D-310 — An evidence package holds one row per reception, with what Meridian concluded, and nothing private or ingested
+
+**2026-10-29 · accepted** · *`meridian/datasets/evidence_rows.py`; Stage 30. Applies D-102, D-104, D-134, D-145 and D-176.*
+
+**A reception is a pass a station held:** a scheduled assignment, neither expired nor revoked, whose window had closed by the snapshot's `as_of`, and which the station either reported on or was still holding. A held pass with no report is a reception that returned nothing, and is in the package; a declined, revoked, skipped or never-acknowledged assignment is not a reception (D-008), and is not.
+
+**Each row carries:**
+- the reception: assignment, pass, window, frequency, mode, and `listening_confirmed` as the registry answered at export (D-145);
+- the current observation, or `null`, and its **lineage**, every revision's content hash, oldest first;
+- every verdict on the current revision, each with its method, and every diagnosis, with its cause, candidates, evidence, method and configuration hash;
+- the current revision's products by `kind`, `sha256` and `size_bytes`, never bundled (D-104);
+- provenance: station and satellite, the pass's predicted geometry, and the element set by id, epoch, source and hash;
+- `simulated`.
+
+**Every value is copied from the snapshot.** A package never recomputes a verdict or a diagnosis, which is what keeps its hash stable (D-102).
+
+**Left out, because a package is published:**
+- station coordinates, which the snapshot holds at full precision and the public API never serves (D-082, D-093);
+- station names and a station's own free-text notes;
+- product URIs (D-176);
+- an element set's lines, which are an ingested source's records, as are the archive and environment rows the snapshot also holds (D-134).
+
+The datasheet in every package says so.
+
+---
+
+## D-311 — Measured and simulated receptions are separate files, and simulated ones are exported only by name
+
+**2026-10-29 · accepted** · *`meridian/datasets/evidence_config.py`; `analysis/configs/dataset.toml.example`; Stage 30. Builds D-104.*
+
+The configuration's one setting is `[export] populations`, `["measured"]` by default. Measured receptions are `receptions.jsonl`; simulated ones are `receptions_simulated.jsonl`, and that file exists only when the configuration names `"simulated"`. A package nobody asked to mix cannot mix them, and a researcher cannot be handed simulated rows they did not ask for. Every row keeps its own `simulated` flag as well, and the manifest counts each population apart.
+
+---
+
+## D-312 — A package is a pure function of a snapshot, a configuration and a seed, and the seed draws nothing
+
+**2026-10-29 · accepted** · *`meridian/datasets/evidence_dataset.py`, `evidence_datasheet.py`, `manifest_rules.py`; `meridian dataset export`; Stage 30. Applies D-143, D-144 and D-235.*
+
+- **Kind `evidence_dataset`**, derived from the raw snapshot it names by hash, with transformation `evidence-1`, the configuration's hash and the seed and populations as its parameters. It is sealed like every directory (D-144), under `<root>/evidence/<hash>`.
+- **Rows ordered by `assignment_id`**, rendered by D-070's canonical rules.
+- **`config.toml` is the configuration's exact bytes**, which `verify` rebuilds from; the hash is of its resolved values, so a comment changes nothing.
+- **`datasheet.md` and `licence.txt` are rendered from the package's own facts**, so they regenerate byte for byte too. Neither names a clock, a path or a machine.
+- **When, where and from which code it was built** are the manifest's environment, which is not hashed (D-235).
+- **The export draws nothing at random.** The roadmap's command takes a seed, and rule 8 names three inputs, so the seed is validated and recorded, and the datasheet says it changes nothing. A later transformation that samples would draw from it.
+
+`meridian dataset verify` finds the snapshot by hash, rebuilds the package from its own configuration and seed with its original `created_at`, and compares the whole content hash. It exits 0 when identical, 1 when not, naming the files that differ, and 3 when a file is not what the manifest says. Neither command opens a database or a socket.
+
+---
+
+## D-313 — The evidence dataset is licensed CC BY 4.0, which settles D-136 for it
+
+**2026-10-29 · accepted, the team to confirm** · *`meridian/datasets/evidence_datasheet.py` (`licence.txt`); Stage 30. Narrows D-136.*
+
+**CC BY 4.0**: anyone may share and adapt the package for any purpose, commercially included, if they credit it. It is the licence research datasets usually carry, it asks only for a citation, and it is compatible with reuse inside other open datasets. *Rejected:* CC0, which gives up even the credit; ODbL, whose share-alike makes the package harder to combine with anything else.
+
+**D-136 asked whether an ingested source's terms allow its records to be republished in the package.** This package republishes none: no archive row, no environmental sample, no element-set lines (D-310). So the question does not arise for it, and the package's licence is ours alone to choose. Should a later package want an ingested source's records, D-136 is open again for that source, and D-134's rule holds meanwhile: reference by identifier and checksum, never bundle.
+
+---
+
+## D-314 — No `dataset_exports` table: a package's manifest is its record
+
+**2026-10-29 · accepted** · *`DATA-MODEL.md`; Stage 30. Revisits D-104 and D-144.*
+
+D-104 and `DATA-MODEL.md` planned a `dataset_exports` row per package. Everything it would hold — snapshot hash, configuration hash, seed, code version, populations, row counts, content hash — is in the package's manifest, sealed with it. A table would make a pure export write to a database, which D-143 keeps it from doing, and it would be a second record able to disagree with the first. So it is not built, and no migration is needed.
+
+**The roadmap's "create `platform/datasets` and move Stage 15's manifest into it" was already true.** Stage 15 put its manifest and hashing in `meridian/datasets`, which is the only implementation, and the `datasets` commit scope has existed since then. Stage 30 adds to the module rather than moving anything.
+
+---
+
+## D-315 — SC-10 is measured by CI on a second runner, in a clean container with no network
+
+**2026-10-29 · accepted, target proposed** · *`tests/integration/test_evidence_gate.py`; `ci.yml › evidence-elsewhere`; Stage 30.*
+
+**On the first machine**, the `test` job's integration run flies Stage 27's pinned faulted fleet (four virtual stations, twelve hours), classifies and diagnoses it, exports a raw snapshot of its database and builds a package with both populations. The test checks that the package holds the fleet's receptions and their diagnoses, that building it again is byte-identical, and that `verify` says so. It then hands the snapshot and the package to an artifact, kept a day; both hold only a virtual fleet's scratch database.
+
+**On the second machine**, `evidence-elsewhere` builds the platform image from the same commit and runs `meridian dataset verify` inside a fresh container: read-only, no capabilities, no network, no database. The verification must name exactly the hash the package's manifest recorded. A copy with one row changed must be refused with exit 3.
+
+*Rejected: the `image` job's stack as the source.* It is snapshotted minutes after it started, before any pass window has closed, so its package would hold no reception and SC-10 would hold vacuously.
+
+---
+
+## D-316 — A clean SC-9 fleet's fault ledger is empty, not missing
+
+**2026-10-29 · accepted** · *`deploy/tools/watch_runs.py`; D-296's tool.*
+
+The simulator makes its ledger file on the first fault it records, so a fleet that injects none leaves no file. SC-9's tool read the file unconditionally, and the first full run sealed its three degradation fleets and then stopped on the first clean one, after flying it. A missing ledger now reads as an empty one, which is what a clean fleet's ledger is, and the report's tests already seal and judge a clean run with an empty ledger. The trial and the CI gate flew degradation fleets only, which is why it had not been seen.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -6422,7 +6511,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | | Question | Blocks |
 |---|---|---|
 | **D-135** | Which cloud host and tier, on whose account, and what happens when the credit lapses. *How long a station retains an unacknowledged reception is proposed by D-281: thirty days, the platform's acceptance window* | Nothing — no gate may need a cloud host (D-130) |
-| **D-136** | Whether any ingested source's terms permit its records to be republished inside the evidence dataset, which decides that dataset's own licence | Stage 30's licence entry |
+| **D-136** | Whether any ingested source's terms permit its records to be republished inside the evidence dataset | Settled for Stage 30's package by **D-313**: it republishes none, and is CC BY 4.0. Open again only for a package that would |
 | **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Publishing anything about an area. D-227 holds its place in the meantime: operator-only, unpublished |
 
 ---

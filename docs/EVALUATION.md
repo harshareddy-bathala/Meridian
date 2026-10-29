@@ -355,6 +355,12 @@ How modules 13–17 are proven (D-095). Everything above applies to them — tem
 
 **Proof.** Export once. Regenerate from the same snapshot, configuration and seed, **on a machine other than the one that produced it**. The content hashes are identical. This is `CLAUDE.md` rule 8 turned into a test.
 
+**Method.**
+- **The package is a pure function** of a raw snapshot, a configuration and a seed (D-312). It reads no database and no clock, and its datasheet and licence are rendered from its own facts. When and where it was built are in the manifest's environment, which is not hashed.
+- **On the first machine**, CI's integration run flies a faulted simulated fleet, exports a raw snapshot of its database and builds the package, and checks that building it again is byte-identical (D-315).
+- **On the second**, a fresh runner given only the snapshot and the package rebuilds it with `meridian dataset verify` inside the platform image, in a container with no network, and must reproduce the content hash the manifest recorded. A copy with one row changed must be refused.
+- **The CI package is simulated.** A measured package regenerates by the same code; the first is published once station 001 has receptions, with its own SC-10 run recorded beside it.
+
 **It does not claim** that the labels inside it are correct — only that anyone can reproduce exactly what Meridian concluded, and check it.
 
 ---

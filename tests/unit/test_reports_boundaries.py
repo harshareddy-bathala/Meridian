@@ -79,14 +79,28 @@ def test_no_report_module_names_the_database_setting() -> None:
     assert named == []
 
 
+ENVIRONMENT_ONLY = frozenset({"cli_dataset.py"})
+"""Commands that record the machine as a report does, and use nothing else of
+reports: the evidence dataset's manifest keeps the same unhashed block (D-312)."""
+
+
 def test_only_the_report_command_imports_reports() -> None:
     outside = [
         path
         for path in sorted(PLATFORM.rglob("*.py"))
-        if REPORTS not in path.parents and path.name != "cli_report.py"
+        if REPORTS not in path.parents
+        and path.name != "cli_report.py"
+        and path.name not in ENVIRONMENT_ONLY
     ]
 
     assert crossings(outside, ("meridian.reports",)) == []
+
+
+def test_a_command_that_records_the_machine_imports_only_that() -> None:
+    for name in ENVIRONMENT_ONLY:
+        found = crossings([PLATFORM / name], ("meridian.reports",))
+        assert found, name
+        assert all("meridian.reports.environment" in one for one in found), found
 
 
 def test_the_scans_would_notice_a_crossing(tmp_path: Path) -> None:
