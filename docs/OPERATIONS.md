@@ -1068,6 +1068,45 @@ diff one.txt two.txt                                                          # 
 
 ---
 
+## The evidence dataset
+
+A package of Meridian's own receptions — each with its current observation and lineage, its verdicts and diagnoses, and its provenance — that someone who was not in the room can regenerate to the same hash (SC-10). It is built from a raw snapshot (§ Dataset snapshots), a configuration and a seed, and nothing else: neither command opens a database or a socket.
+
+Decisions this section puts into practice: D-310 to D-316.
+
+### Exporting a package
+
+```sh
+uv run meridian snapshot export                       # if there is no recent snapshot
+uv run meridian dataset export \
+    --snapshot "$MERIDIAN_DATASETS_ROOT/snapshots/<as_of>-<hash>" \
+    --config analysis/configs/dataset.toml.example \
+    --seed 4471 [--output <directory>]
+```
+
+It is sealed under `<datasets root>/evidence/<hash prefix>/`, or at `--output`, and printed with its hash, the snapshot's, the configuration's, the seed and its counts. Exporting again from the same three names the same directory and writes nothing.
+
+- **Measured only, unless asked.** `populations = ["measured"]` is the default. Name `"simulated"` to add `receptions_simulated.jsonl`, a file of its own (D-311).
+- **What it holds** is in its `datasheet.md`: one row per reception a station held, a miss with no report included; and what was left out — station coordinates, names and notes, product locations and element-set lines (D-310).
+- **Its licence is CC BY 4.0**, in `licence.txt` (D-313).
+- **The seed changes nothing today.** The export draws nothing at random; the seed is recorded so a package names all three of its inputs (D-312).
+
+### Verifying one
+
+```sh
+uv run meridian dataset verify <package> [--snapshot <raw snapshot>]
+```
+
+It finds the snapshot by hash — `--snapshot`, then the path recorded when it was built, then the datasets root — rebuilds the package from its own `config.toml` and seed, and compares the whole content hash. **0** means it regenerated identically; **1** that it did not, naming the files that differ, or that the snapshot could not be found; **3** that a file is not what the manifest says.
+
+### Publishing one
+
+Publish the package directory together with the raw snapshot it names, or the package alone with a note that the snapshot is held privately: **a raw snapshot holds every station's coordinates at full precision** and is not for publication. Without its snapshot a package can still be read, and its manifest checked, but not regenerated. Keep the snapshot: it cannot be retaken (D-144), and a package is lost for good only with it.
+
+CI regenerates a simulated package on a second runner on every change (`ci.yml › evidence-elsewhere`, D-315).
+
+---
+
 ## Evaluation reports
 
 Every number in a report is regenerable from a raw snapshot, one configuration and one seed (rule 8, `EVALUATION.md` §9). `meridian report build` computes a report from those three and nothing else, and `meridian report verify` proves a report regenerates. Neither opens a database or a socket.
@@ -1478,7 +1517,7 @@ python deploy/tools/station_archive.py restore archives/station-2026-10-03.tar -
 | Ingest raw store, `data/ingest/raw` | the source, as retrieved (D-141) | until a person deletes it; not in a dump | the host's disk is lost, unless copied; it cannot be fetched again if the source withdrew it |
 | Raw dataset snapshots, `data/datasets/snapshots` | — | until a person deletes them; not in a dump (D-144) | the host's disk is lost; **cannot be recreated** |
 | Evaluation datasets, models, report runs, under the datasets root | — | until a person deletes them | regenerable from a raw snapshot, a configuration and a seed |
-| The evidence dataset package | — | Stage 30 has not been built; it adds its row (D-280) | — |
+| Evidence packages, `<datasets root>/evidence` | — | until a person deletes them; not in a dump | regenerable with `meridian dataset verify` from the raw snapshot each names; lost for good only with that snapshot (D-312) |
 | Prometheus series | — | Prometheus's default, fifteen days | by design |
 | The front's kept copies, `front-cache` | the api; a copy of its last answers (D-282) | thirty days unread, 256 MiB at most | dropped by design; refilled by the next visitor or warm |
 
