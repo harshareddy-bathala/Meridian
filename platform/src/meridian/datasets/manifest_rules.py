@@ -9,8 +9,10 @@ also holds its one ``model.json`` (D-163), and a verdict model its
 ``verdict.json`` (D-262). An evaluation report also holds the
 report a reader opens, the configuration it was built from, and its figures
 (D-235). A fault run of a long run also holds that run's record of itself
-(D-257). A name never comes from a row, and a name one kind holds is refused in
-another, so a raw snapshot cannot carry a stray report and still verify.
+(D-257). An evidence dataset also holds the configuration it was built from,
+its datasheet and its licence (D-312, D-313). A name never comes from a row,
+and a name one kind holds is refused in another, so a raw snapshot cannot carry
+a stray report and still verify.
 
 Reference: docs/DECISIONS.md D-144, D-163, D-229, D-235, D-262.
 """
@@ -45,6 +47,7 @@ Kind = Literal[
     "verdict_model",
     "diagnosis_run",
     "watch_run",
+    "evidence_dataset",
 ]
 KINDS: tuple[Kind, ...] = (
     "raw_snapshot",
@@ -56,6 +59,7 @@ KINDS: tuple[Kind, ...] = (
     "verdict_model",
     "diagnosis_run",
     "watch_run",
+    "evidence_dataset",
 )
 DERIVED: tuple[Kind, ...] = (
     "evaluation_dataset",
@@ -63,10 +67,11 @@ DERIVED: tuple[Kind, ...] = (
     "regions_report",
     "evaluation_report",
     "verdict_model",
+    "evidence_dataset",
 )
 """Kinds made from another directory, which name it and how (D-163, D-229)."""
 
-WITH_ENVIRONMENT: tuple[Kind, ...] = ("evaluation_report",)
+WITH_ENVIRONMENT: tuple[Kind, ...] = ("evaluation_report", "evidence_dataset")
 """Kinds whose manifest records the machine that made them, unhashed (D-235)."""
 
 _COUNT_NAME = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
@@ -76,7 +81,9 @@ _NAMED: dict[str, tuple[Kind, ...]] = {
     "model.json": ("model",),
     "verdict.json": ("verdict_model",),
     "report.md": ("evaluation_report",),
-    "config.toml": ("evaluation_report",),
+    "config.toml": ("evaluation_report", "evidence_dataset"),
+    "datasheet.md": ("evidence_dataset",),
+    "licence.txt": ("evidence_dataset",),
     "long_run.json": ("fault_run",),
 }
 """The single files a kind holds besides its tables, and which kinds hold each."""
