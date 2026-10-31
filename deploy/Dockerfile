@@ -14,7 +14,7 @@
 # The dashboard (D-081). Pinned to the build platform: the output is HTML, CSS
 # and JavaScript, identical for every target, so a multi-arch build compiles it
 # once natively instead of running npm under arm64 emulation.
-FROM --platform=$BUILDPLATFORM node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS dashboard
+FROM --platform=$BUILDPLATFORM node:24.22.1-bookworm-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c AS dashboard
 
 WORKDIR /dashboard
 # The lockfile first, for the same reason uv.lock goes first below.
