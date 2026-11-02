@@ -1,0 +1,75 @@
+# meridian-ingest settings for a live deployment: every real source this project
+# reads, enabled. Copy to `ingest.toml` on the ingest machine — never the
+# platform's, which does not install meridian-ingest (D-138) — and run
+# `meridian-ingest follow` there. deploy/ingest.toml.example explains every key.
+#
+# Before the first fetch of each source, re-read the terms page ATTRIBUTION.md
+# names for it (D-220). Nothing here is a key: the two sources that need one
+# read it from the environment, and are left commented until it is set.
+#
+# Places are station 001's published position. Every point is rounded before
+# it is sent, to 0.01° (0.1° for POWER), so a third party's logs never hold the
+# station's exact site (D-220).
+
+raw_root = "../data/ingest/raw"
+
+# How a source's operator reaches a person about our traffic. Worth setting.
+# contact = "hello@meridian.org.in"
+
+[sources.reference_archive]
+enabled = false
+
+# --- Stage 34 --------------------------------------------------------------
+
+# Current element sets for the satellites the catalogue holds (D-320). Load
+# deploy/catalogue/meteor.json on the platform first; a set for any other
+# object is counted and not loaded.
+[sources.celestrak_gp]
+enabled = true
+groups = ["weather"]
+
+# Another network's receptions, for training and evaluation only (D-322,
+# D-323). `follow` asks daily with a week's lookback; a first backfill is by
+# hand: `meridian-ingest fetch --source satnogs_network --since 2026-10-05T00:00:00Z
+# --until 2026-11-02T00:00:00Z`, four weeks of both Meteors in 224 requests.
+[sources.satnogs_network]
+enabled = true
+catalog_numbers = [57166, 59051]
+request_budget = 250
+
+# --- Stage 31 --------------------------------------------------------------
+
+[sources.noaa_swpc_kp]
+enabled = true
+
+[sources.open_meteo_cloud]
+enabled = true
+points = [[12.97, 77.59]]
+
+[sources.open_meteo_aerosol]
+enabled = true
+points = [[12.97, 77.59]]
+
+[sources.nasa_power_precipitation]
+enabled = true
+points = [[12.97, 77.59]]
+
+[sources.ornl_modis_ndvi]
+enabled = true
+points = [[12.97, 77.59]]
+
+# Needs $FIRMS_MAP_KEY (or FIRMS_MAP_KEY_FILE), a free key from NASA FIRMS.
+# [sources.nasa_firms]
+# enabled = true
+# bbox = [74.0, 11.5, 78.6, 18.5]
+
+# Needs $EARTHDATA_TOKEN and the hdf5 extra (`uv sync --extra hdf5`).
+# [sources.nasa_black_marble]
+# enabled = true
+# bbox = [74.0, 11.5, 78.6, 18.5]
+
+# Display only, never a number (D-133): tiles behind an area of interest.
+[sources.nasa_gibs]
+enabled = true
+bbox = [77.3, 12.8, 77.9, 13.2]
+layers = ["MODIS_Terra_CorrectedReflectance_TrueColor"]
