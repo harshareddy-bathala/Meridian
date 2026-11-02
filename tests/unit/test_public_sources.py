@@ -100,8 +100,9 @@ def store(tmp_path: Path) -> RawStore:
 PUBLIC = sorted(set(REGISTRY) - {"reference_archive"})
 
 
-def test_nine_classes_are_registered_each_with_both_halves() -> None:
-    assert len(PUBLIC) == 9
+def test_eleven_sources_are_registered_each_with_both_halves() -> None:
+    """Stage 31's nine, and Stage 34's element sets and archive (D-320, D-323)."""
+    assert len(PUBLIC) == 11
     for source_id in PUBLIC:
         registration = REGISTRY[source_id]
         assert isinstance(registration.adapter, Adapter)
@@ -575,6 +576,42 @@ def test_a_sample_with_incomplete_or_impossible_fields_is_refused(
 ) -> None:
     with pytest.raises(NormalisationError, match=said):
         a_sample(**overrides)
+
+
+@pytest.mark.parametrize(
+    ("quantity", "value"),
+    [
+        ("kp_index", 12.0),
+        ("kp_index", -0.3),
+        ("cloud_cover", 140.0),
+        ("aerosol_optical_depth", -0.01),
+        ("precipitation", -1.0),
+        ("ndvi", 1.4),
+        ("fire_radiative_power", -5.0),
+        ("night_lights_radiance", -1.0),
+    ],
+)
+def test_a_value_its_quantity_cannot_take_is_a_named_gap(
+    quantity: str, value: float
+) -> None:
+    """D-324: a source's error is kept visible, and never read as a feature."""
+    sample = a_sample(quantity=quantity, value=value)
+    assert sample.value is None
+    assert sample.missing_reason is not None
+    assert str(value) in sample.missing_reason
+    assert quantity in sample.missing_reason
+
+
+@pytest.mark.parametrize(
+    ("quantity", "value"),
+    [("kp_index", 0.0), ("kp_index", 9.0), ("cloud_cover", 100.0), ("ndvi", -1.0)],
+)
+def test_a_value_at_the_edge_of_its_range_is_kept(quantity: str, value: float) -> None:
+    assert a_sample(quantity=quantity, value=value).value == value
+
+
+def test_a_quantity_with_no_stated_range_is_not_checked() -> None:
+    assert a_sample(quantity="something_new", value=-1e9).value == -1e9
 
 
 def test_no_ingest_module_can_decode_an_image() -> None:

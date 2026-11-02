@@ -1,0 +1,31 @@
+# The evaluation report for the real-data model run (Stage 34, D-325):
+#
+#   meridian report build --snapshot <raw snapshot holding SatNOGS receptions> \
+#       --config analysis/configs/archive.toml --seed 4471
+#   meridian report verify <run>
+#   meridian report summary <run> --output data/published/model-summary.json
+#
+# Every table not given takes evaluation.toml.example's defaults. Copy this file,
+# set the split dates for the snapshot you exported, and keep the copy beside
+# the run: the run keeps it byte for byte as config.toml.
+#
+# The figures are another network's receptions (D-322). Only configuration A,
+# elevation, can be fitted on them: an archive pass carries its peak elevation
+# and nothing else we compute, so C and D are reported as not fitted, with the
+# reason (D-156). Every published copy says "Measured by the SatNOGS network,
+# not by Meridian", which `report summary` writes into the file.
+
+[prediction]
+population = "archive"
+
+# Temporal split, never shuffled (rule 6, D-162). For four weeks of archive,
+# say 2026-10-05 to 2026-11-02: train on the first two weeks, choose on the
+# third, test on the last. Set both before building; without them no model is
+# fitted and the summary refuses the run.
+# train_until = 2026-10-19T00:00:00Z
+# validate_until = 2026-10-26T00:00:00Z
+
+# The archive holds only passes its stations chose to observe, so the fit is
+# weighted by each pass's inverse propensity (EVALUATION.md §4, D-152, D-153).
+# "none" fits unweighted; the data section reports the completeness either way.
+weighting = "ipw"

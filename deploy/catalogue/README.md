@@ -17,7 +17,8 @@ fetch from an element-set provider.
 **Read this before quoting any number produced from it.**
 
 The two satellites are real — Meteor-M2-3 and Meteor-M2-4, with their real NORAD
-ids and their real LRPT downlinks at 137.1 and 137.9 MHz. The **element sets are
+ids and LRPT downlinks at 137.1 and 137.9 MHz as they were in 2024 (see
+`meteor.json` below for what we believe now). The **element sets are
 not retrieved**. They carry representative sun-synchronous elements at a fixed
 epoch, which is enough to make the simulator's passes real passes over a real
 sky, and is not enough to point an antenna at anything.
@@ -31,6 +32,37 @@ Two consequences follow:
 - **Replace it before receiving anything.** For a station that is actually
   listening, write a catalogue whose element sets came from an element-set
   provider on the day they are used.
+
+## `meteor.json` and current element sets, for a live deployment
+
+`meteor.json` holds the same two satellites with **no element sets**. Their
+sets come from a public catalogue through `meridian-ingest` (D-320), which
+loads a set only for a satellite already listed here:
+
+```sh
+meridian catalogue load --file deploy/catalogue/meteor.json
+meridian-ingest fetch --source celestrak_gp      # [sources.celestrak_gp] groups = ["weather"]
+meridian-ingest load --source celestrak_gp
+meridian catalogue export --output data/catalogue/live.json
+```
+
+The last line writes the catalogue held, with each satellite's current set, to
+a file a machine with **no network** can load instead (D-321). That file holds
+another catalogue's lines, so it lives under `data/`, which git ignores; its
+sets load as `manual`, and each one notes where it came from in
+`exported_from`. Refresh it before going offline: a set's error grows with its
+age, and `ElementSetsStale` fires at three days.
+
+Load one of `development.json` and `meteor.json`, not both: their Meteor-M2-3
+downlinks differ, and a database holding both would have two.
+
+**The frequency is unverified.** `meteor.json` gives both satellites LRPT at
+137.9 MHz, from the most recent statement we could find on 2026-11-02, an
+undated status table (usradioguy.com/meteor-satellite/) that also records both
+switching between 137.1 and 137.9 MHz during 2024. `development.json` keeps
+137.1 MHz for Meteor-M2-3 because the sealed simulated fleets were flown with
+it. Confirm on station 001's first live passes with SatDump before relying on
+either.
 
 ## Adding your own
 

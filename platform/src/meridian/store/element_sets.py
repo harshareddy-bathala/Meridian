@@ -29,8 +29,10 @@ from psycopg.rows import class_row
 from meridian.store.stations import Connection
 
 __all__ = [
+    "ARCHIVE_ONLY_SOURCES",
     "NewElementSet",
     "StoredElementSet",
+    "find_current_epochs",
     "find_element_set_by_id",
     "find_element_set_current_at",
     "find_element_sets_in_epoch_range",
@@ -38,19 +40,32 @@ __all__ = [
 ]
 
 
+ARCHIVE_ONLY_SOURCES = ("satnogs_network",)
+"""Sources whose sets are read only to compute an archive's denominator (D-325).
+
+Another network's observation carries the element set it was scheduled with:
+history no public catalogue still serves, and what lets Stage 16 compute the
+passes an archive station could have heard on a day before our own fetches
+began. It is never a runtime input (D-102, D-138), so every read here that
+pass generation or the live surfaces use leaves these sources out. The raw
+snapshot's archive selection, in ``store.snapshot_reads``, is the one reader
+that takes them.
+"""
+
+_LIVE = "e.source <> all(%(archive_only)s)"
+"""The filter every live read applies, written once."""
+
+
 @dataclass(frozen=True, slots=True)
 class NewElementSet:
     """One element set in insertable form.
 
-    ``retrieved_at`` is absent on purpose — it is the platform's own clock and
-    is left to the column default, the same reasoning
-    ``store.heartbeats.insert_heartbeat`` applies to ``received_at``. ``epoch``
-    *is* here because it is a property of the element set itself, read out of
-    the lines rather than observed by us.
+    ``epoch`` is here because it is a property of the element set itself, read
+    out of the lines rather than observed by us.
 
-    ``content_sha256`` is absent for a different reason: it is a generated
-    column, so the database computes it from the lines and no caller can supply
-    a value that disagrees with them (D-057).
+    ``content_sha256`` is absent: it is a generated column, so the database
+    computes it from the lines and no caller can supply a value that disagrees
+    with them (D-057).
     """
 
     satellite_id: str
@@ -58,10 +73,28 @@ class NewElementSet:
     line1: str
     line2: str
     source: str
-    """One of ``celestrak``, ``spacetrack``, ``manual``, ``simulator``.
+    """One of ``celestrak``, ``spacetrack``, ``satnogs_network``, ``manual``,
+    ``simulator``.
 
     This table records provenance in ``source`` rather than a ``simulated``
     boolean — the one table in the schema that does, deliberately (D-049).
+    """
+
+    ingest_record_id: int | None = None
+    """The ingest artefact a fetched set was read from (D-320).
+
+    None for a set loaded from a file, which has no artefact. The database
+    refuses one on a ``manual`` or ``simulator`` set.
+    """
+
+    retrieved_at: datetime | None = None
+    """When a fetched set was retrieved, from its artefact's manifest.
+
+    None leaves the column default, the platform's own clock, which is what a
+    file load means by it — the same reasoning ``store.heartbeats`` applies to
+    ``received_at``. A set loaded from an artefact passes the artefact's own
+    instant, because loading it hours after the fetch did not make it newer,
+    and the tie-break in :func:`find_element_set_current_at` reads this.
     """
 
 
@@ -110,8 +143,9 @@ def insert_element_set(conn: Connection, element_set: NewElementSet) -> bool:
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
-            insert into element_sets (satellite_id, epoch, line1, line2, source)
-            values (%s, %s, %s, %s, %s)
+            insert into element_sets (satellite_id, epoch, line1, line2, source,
+                                      ingest_record_id, retrieved_at)
+            values (%s, %s, %s, %s, %s, %s, coalesce(%s, now()))
             on conflict on constraint element_set_content_unique do nothing
             """,
             (
@@ -120,9 +154,50 @@ def insert_element_set(conn: Connection, element_set: NewElementSet) -> bool:
                 element_set.line1,
                 element_set.line2,
                 element_set.source,
+                element_set.ingest_record_id,
+                element_set.retrieved_at,
             ),
         )
         return cur.rowcount > 0
+
+
+@dataclass(frozen=True, slots=True)
+class _CurrentEpoch:
+    """One row of the current-epoch query, so the two columns arrive typed."""
+
+    satellite_id: str
+    epoch: datetime
+
+
+def find_current_epochs(conn: Connection, at: datetime) -> dict[str, datetime]:
+    """The epoch of the set current at ``at``, for every satellite tracked.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+        at: The instant to be current at, timezone-aware UTC.
+
+    Returns:
+        One entry per satellite not deleted that holds a set from before ``at``.
+        A satellite with none is absent, not dated: it has no age to report,
+        and pass generation skips it for the same reason.
+
+    Note:
+        The epoch :func:`find_element_set_current_at` would choose, for every
+        satellite at once, so the age a scrape reports is the age of the set
+        the next round propagates (D-321).
+    """
+    with conn.cursor(row_factory=class_row(_CurrentEpoch)) as cur:
+        cur.execute(
+            f"""
+            select e.satellite_id, max(e.epoch) as epoch
+            from element_sets e
+            join satellites s on s.satellite_id = e.satellite_id
+            where s.deleted_at is null and e.epoch <= %(at)s and {_LIVE}
+            group by e.satellite_id
+            """,
+            {"at": at, "archive_only": list(ARCHIVE_ONLY_SOURCES)},
+        )
+        return {row.satellite_id: row.epoch for row in cur.fetchall()}
 
 
 def find_element_set_current_at(
@@ -155,15 +230,20 @@ def find_element_set_current_at(
     """
     with conn.cursor(row_factory=class_row(StoredElementSet)) as cur:
         cur.execute(
-            """
-            select id, satellite_id, epoch, retrieved_at,
-                   line1, line2, source, content_sha256
-            from element_sets
-            where satellite_id = %s and epoch <= %s
-            order by epoch desc, retrieved_at desc, id desc
+            f"""
+            select e.id, e.satellite_id, e.epoch, e.retrieved_at,
+                   e.line1, e.line2, e.source, e.content_sha256
+            from element_sets e
+            where e.satellite_id = %(satellite_id)s and e.epoch <= %(at)s
+              and {_LIVE}
+            order by e.epoch desc, e.retrieved_at desc, e.id desc
             limit 1
             """,
-            (satellite_id, at),
+            {
+                "satellite_id": satellite_id,
+                "at": at,
+                "archive_only": list(ARCHIVE_ONLY_SOURCES),
+            },
         )
         return cur.fetchone()
 

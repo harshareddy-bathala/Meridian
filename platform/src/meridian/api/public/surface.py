@@ -21,6 +21,7 @@ from fastapi import APIRouter
 
 from meridian.api.public import (
     aggregates,
+    areas,
     assignments,
     observations,
     passes,
@@ -41,3 +42,4 @@ router.include_router(assignments.router)
 router.include_router(observations.router)
 router.include_router(reliability.router)
 router.include_router(aggregates.router)
+router.include_router(areas.router)

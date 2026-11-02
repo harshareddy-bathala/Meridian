@@ -13,6 +13,7 @@ from meridian.store.pool import DatabaseUnreachableError, connect_once
 from meridian_ingest.config import IngestSettings
 from meridian_ingest.console import refuse, say, warn
 from meridian_ingest.load import load_source
+from meridian_ingest.load_report import LoadReport
 from meridian_ingest.raw_store import RawStore
 
 __all__ = ["run_load"]
@@ -44,31 +45,47 @@ def run_load(
     conn.autocommit = True
     with conn:
         for source_id in sources:
-            report = load_source(conn, store, source_id, new_only=new_only)
-            say(
-                f"{source_id}: {report.records_written} artefacts, "
-                f"{report.stations_written} stations, "
-                f"{report.receptions_written} receptions written"
-            )
-            if report.samples_written or report.samples_already_held:
-                say(
-                    f"    {report.samples_written} published values written, "
-                    f"{report.samples_already_held} already held"
-                )
-            if report.receptions_already_held:
-                say(
-                    f"    {report.receptions_already_held} receptions were already "
-                    "held, identically"
-                )
-            for skipped in report.skipped:
-                say(f"    {skipped.raw_path}: {skipped.skipped}, nothing derived")
-            for reverted in report.reverted:
-                warn(
-                    f"    {reverted.raw_path} matches record {reverted.record_id}, "
-                    f"which record {reverted.reverted_past} superseded: the source "
-                    "went back to an earlier version, and superseded_by still "
-                    "names the later one (D-141)"
-                )
-            if report.wrote_nothing():
-                say("    nothing new — this tree was already loaded")
+            _say_report(load_source(conn, store, source_id, new_only=new_only))
     return 0
+
+
+def _say_report(report: LoadReport) -> None:
+    """What one source's load did, written for the operator who ran it."""
+    source_id = report.source_id
+    say(
+        f"{source_id}: {report.records_written} artefacts, "
+        f"{report.stations_written} stations, "
+        f"{report.receptions_written} receptions written"
+    )
+    if report.samples_written or report.samples_already_held:
+        say(
+            f"    {report.samples_written} published values written, "
+            f"{report.samples_already_held} already held"
+        )
+    if (
+        report.element_sets_written
+        or report.element_sets_already_held
+        or report.element_sets_untracked
+    ):
+        say(
+            f"    {report.element_sets_written} element sets written, "
+            f"{report.element_sets_already_held} already held, "
+            f"{report.element_sets_untracked} for satellites the catalogue "
+            "does not track (kept in the raw store, not loaded)"
+        )
+    if report.receptions_already_held:
+        say(
+            f"    {report.receptions_already_held} receptions were already "
+            "held, identically"
+        )
+    for skipped in report.skipped:
+        say(f"    {skipped.raw_path}: {skipped.skipped}, nothing derived")
+    for reverted in report.reverted:
+        warn(
+            f"    {reverted.raw_path} matches record {reverted.record_id}, "
+            f"which record {reverted.reverted_past} superseded: the source "
+            "went back to an earlier version, and superseded_by still "
+            "names the later one (D-141)"
+        )
+    if report.wrote_nothing():
+        say("    nothing new — this tree was already loaded")

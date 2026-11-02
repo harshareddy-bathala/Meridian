@@ -319,3 +319,30 @@ def test_the_shipped_example_contains_no_key() -> None:
 
     assert "api_key_env" in text, "it documents the indirection"
     assert 'api_key_env = "SOME_ARCHIVE_KEY"' in text, "and names a variable, not a key"
+
+
+def test_the_live_example_enables_every_keyless_real_source() -> None:
+    """Stage 34's settings for a live deployment load under the strict reader.
+
+    Keyed sources stay commented until their key is set, so a copied file
+    never fails its first fetch on a key nobody has (D-223).
+    """
+    example = Path(__file__).resolve().parents[2] / "deploy/ingest.live.toml.example"
+
+    settings = load_settings(example)
+
+    assert settings.enabled_sources() == (
+        "celestrak_gp",
+        "nasa_gibs",
+        "nasa_power_precipitation",
+        "noaa_swpc_kp",
+        "open_meteo_aerosol",
+        "open_meteo_cloud",
+        "ornl_modis_ndvi",
+        "satnogs_network",
+    )
+    assert settings.for_source("celestrak_gp").places.groups == ("weather",)
+    assert settings.for_source("satnogs_network").places.catalog_numbers == (
+        57166,
+        59051,
+    )

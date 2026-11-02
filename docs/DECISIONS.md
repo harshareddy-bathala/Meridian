@@ -1205,6 +1205,8 @@ The trigger to revisit: the first time the platform is reachable from outside th
 
 **The design obligation this leaves is small and worth keeping.** Reception (SDR capture, rotator control, decoders) stays separable from the MSP client rather than interleaving protocol calls with radio control, and standard interfaces are preferred where one exists — hamlib `rotctld` for the rotator, files or pipes for decoder output. That costs nothing now, and it is what stops "independent" from quietly meaning "unable to do anything else". It is a shape, not a feature, and no SatNOGS or TinyGS code, dependency or API call belongs in this repository.
 
+*Amended by D-322 (proposed 2026-11-02).* An API call reading SatNOGS Network's public observation archive, from `meridian-ingest` and for training and evaluation only, is no longer excluded by the sentence above. Everything else it says about the reception path stands.
+
 **Hardware this assumes.** The full ₹43,500 build — `PROJECT.md` §17's Tiers 1, 2 **and 3** — so tracking is funded rather than optional. One Pi-and-SDR station receiving on **137 MHz** (Meteor-M LRPT, the primary target) through a fixed QFH, and **437 MHz** through the crossed Yagi on the workshop-built rotator, the latter being where the cubesat traffic SatNOGS carries mostly sits. Tier 3 buys the antenna, rotator, motors and amplifier — not the receiver, which already tunes both. Alongside it, an **ESP LoRa node as a second receiving path** for LoRa-modulated satellites — a receiver, not a controller, and not a replacement for anything: the Arduino Uno R4 WiFi remains the rotator controller exactly as `CLAUDE.md`'s stack section states. The LoRa node is TinyGS-class hardware by nature and is nonetheless ours, speaking MSP; that it *could* run TinyGS firmware and will not is the clearest illustration of this decision.
 
 ---
@@ -6484,6 +6486,138 @@ The simulator makes its ledger file on the first fault it records, so a fleet th
 
 ---
 
+## D-320 — Element sets are an ingest product, loaded only for satellites the catalogue tracks
+
+**2026-11-02 · accepted** · *migration 0032, `meridian_ingest.adapters.public.celestrak`, `meridian_ingest.load`, `meridian.store.element_sets`, Stage 34*
+
+Every pass Meridian predicts is propagated from an element set, and every set until now came from `deploy/catalogue/development.json` (D-079): two satellites at an epoch of 11 August, 83 days old when this was written. A set's along-track error grows with age, so every acquisition time the dashboard showed was wrong by minutes, and nothing could make it right except a person editing a file.
+
+**A public catalogue's current sets arrive through `meridian-ingest`, like any other source** (D-132). The adapter asks CelesTrak's GP service for named groups, one request each, or single catalogue numbers; the normaliser reads each object's name line and two lines; the loader writes `element_sets` with source `celestrak`. Nothing about D-079 or D-138 moves: the platform still loads only from a file and fetches nothing, and `meridian-ingest follow` runs on the ingest machine (D-225). A round with every source down schedules from the newest set it holds, and that set's age says how stale it is.
+
+**Only a satellite the catalogue already tracks is loaded.** A group lists far more objects than a deployment receives, and storing a set for one would need a `satellites` row nobody wrote, letting somebody else's catalogue decide what pass generation propagates. That is the argument D-139 made for archive receptions, and the answer is the same: the rest are counted in the load report and left in the raw store, from which a later load takes them if the catalogue adds the satellite.
+
+**A fetched set traces to its artefact.** Migration 0032 adds `element_sets.ingest_record_id`, and the load writes the artefact's retrieval instant into `retrieved_at` rather than the load's, because loading a set hours after it was fetched did not make it newer, and `find_element_set_current_at` breaks epoch ties on that column (D-057). A CHECK refuses an artefact on a `manual` or `simulator` set. `ingest_sources.source_class` gains `orbital_elements`, since a catalogue of element sets is none of Stage 14's or Stage 31's classes.
+
+**The epoch is read by the platform's own reader**, `meridian.orbit.element_set_epoch`, which checks length, line numbers and checksums first. The normaliser also refuses a set filed under a number its own lines do not carry. A set that would propagate to no passes is refused at the artefact, not discovered as an empty schedule.
+
+**Politeness is the source's own.** CelesTrak checks for new data every two hours, asks for one download per update, answers a second with a 403, and firewalls an address after fifty errors in two hours. So `follow` asks every six hours, a group is preferred to many single numbers, a fetch naming more queries than its budget is refused rather than cut short, and a 403 is never retried (`politeness.RETRYABLE_STATUSES` already excluded it).
+
+**No licence is published, so none is claimed.** CelesTrak states that it makes the data freely available to all users, and the data originates with the US Space Force through Space-Track, whose agreement may govern redistribution. `ATTRIBUTION.md` records exactly that, and no element-set line is republished: the evidence dataset already leaves them out (D-310).
+
+*Rejected: a source per satellite.* A satellite is a query, not a source: one set of terms, one politeness budget, one class.
+
+*Rejected: storing every object a group lists.* It would be harmless to the scheduler, which propagates only what `satellites` holds, and it would make `element_sets` the record of a catalogue rather than of what this deployment tracks — and a later "which sets did we hold for this satellite?" would need to ask which ones were ever used.
+
+---
+
+## D-321 — The catalogue can be exported for an offline machine, and element-set age is a published figure
+
+**2026-11-02 · accepted** · *`meridian catalogue export`, `meridian.catalogue_export`, `meridian.store.catalogue_reads`, `meridian_element_set_age_seconds`, `ElementSetsStale`, `deploy/catalogue/meteor.json`, Stage 34*
+
+D-320 brings current element sets in through `meridian-ingest`, which needs a network. The independence test asks that Meridian keep scheduling with every external service gone, and the expo, a classroom or a field site may have none. Two things follow.
+
+**`meridian catalogue export --output <file>` writes the catalogue held, with each satellite's current set, in the format `load` reads.** A connected machine fetches and exports; an offline machine loads the file. The export carries only active, undeleted satellites and downlinks, because `load` cannot write an inactive row and an exported one would come back active.
+
+**An exported set loads as `manual`.** The reader stamps every set it loads `manual`, because a file is something an operator holds and a line in it may have been edited (D-079). The export writes where each set came from — source, epoch, retrieval time — in an `exported_from` field the reader ignores, so a person can see the provenance and nothing loaded from the file can claim it. Keeping `celestrak` across a file would put a provenance in the archive that nothing checked.
+
+**The file is not committed.** It holds another catalogue's lines, which the project does not republish (D-310, D-320). `data/`, which git ignores, is where it goes.
+
+**Age is published, and alerted on.** `meridian_element_set_age_seconds{satellite_id}` is the time since the epoch of the set the next round propagates, read at scrape time by the same query pass generation's choice reduces to. Its label is a satellite, so the series count is the catalogue's size and does not grow with the fleet (D-197). `ElementSetsStale` fires at three days for fifteen minutes: about a dozen missed fetches at a six-hour cadence. Nothing stops when it fires, because nothing should (D-131's reasoning: an external source is never a gate). A satellite with no set publishes no series, rather than an age of zero (D-086).
+
+**`deploy/catalogue/meteor.json` is the live deployment's catalogue**: the two Meteors with no element sets, whose sets ingest supplies. Both downlinks are LRPT at 137.9 MHz, the most recent statement found, from an undated status table that also records both satellites switching between 137.1 and 137.9 MHz in 2024. It is unverified, and recorded as unverified until station 001 hears a pass. `development.json` keeps 137.1 MHz for Meteor-M2-3, because the sealed SC-8 and SC-9 fleets were flown on it and changing it would make a new fleet differ from the sealed ones for a reason unrelated to the fault under test.
+
+*Rejected: committing a refreshed `development.json` with real sets.* It would republish CelesTrak's lines, and it would age in git exactly as the current file has.
+
+*Rejected: an age computed per pass and stored.* `passes.element_set_id` already lets a report compute it for any pass; the figure missing was the live one.
+
+---
+
+## D-322 — D-053 narrowed: another network's public archive may be read, for training and evaluation only
+
+**2026-11-02 · proposed, for the team to accept** · *amends D-053; `meridian_ingest.adapters.public.satnogs_network`, Stage 34*
+
+D-053 ends: "no SatNOGS or TinyGS code, dependency or API call belongs in this repository." It was written about the reception path — whether a third-party client sits on our station — and its reasons are all about that path: one receiver, two schedulers, scope. D-138, a month later, named what an archive *may* be used for (fitting the simulator, cross-checking a silent satellite, training and evaluation under Stage 16's weighting) and built the ingest subsystem for it, and the only archive it could then read was one we wrote. The two entries now disagree about whether the archive D-138 was built for may be read at all.
+
+**Settled narrowly.** `meridian-ingest` may read SatNOGS Network's public observation archive, through its public API, on the ingest machine (D-225). Everything else D-053 says stands:
+- **no third-party client, code or dependency** on Meridian's path from prediction to reception;
+- **no adapter on the reception path**, and no runtime read of archive rows by scheduling, reception or diagnosis (D-102; D-108's first question stays open);
+- **no published comparison** of their totals with ours. Parity is still measured on our own numbers, for the selection-bias reason D-053 gives;
+- **no code copied or read** from the network's software, which is AGPL (rule 3). The adapter is written from the endpoint's own answers and the network's published pages.
+
+**What the archive is for** is D-138's list: fitting the yield model and the simulator's outcome distributions, with completeness and inverse-propensity weights because the archive holds only passes somebody chose to observe (Stage 16), and cross-checking a silent satellite in evaluation. A figure computed from it is labelled as measured by that network, not by Meridian.
+
+**Why now.** The yield model has only ever been fitted on hand-built worlds (Stage 22's own caveat), and station 001 has no receptions yet. A real fit, honestly labelled and weighted, is the first evidence the prediction method works on data nobody here invented.
+
+*Rejected: leaving D-053's sentence as it is and building nothing.* Every model figure would remain a figure about a world we wrote.
+
+*Rejected: deleting the sentence.* D-053 is a record of what was decided and why; the amendment is how the log stays honest about having been too broad (the precedent is D-053's own same-day amendment).
+
+---
+
+## D-323 — SatNOGS observations: one window per request, their rating kept, a full page refused
+
+**2026-11-02 · accepted, under D-322** · *`meridian_ingest.adapters.public.satnogs_network`, `ATTRIBUTION.md`, Stage 34*
+
+**The licence is CC BY-SA 4.0**, as the network's home page states. Share-alike binds anything that republishes the records, so none is: the evidence dataset already carries no ingested row (D-310, D-313), and D-136 stays settled for it.
+
+**One request is one satellite over one six-hour window on the UTC grid.** The endpoint pages 25 at a time behind a cursor in a `Link` header, and the fetch path follows a listing one level, not a chain of cursors. A Meteor satellite is observed about sixteen times a day network-wide, so a window fits in a page; **a page that comes back full is refused**, because it may have been cut short and a reception silently missing is a selection filter nobody chose. The window is named by its start, so a re-fetch is the same identifier and supersedes rather than duplicates (D-141).
+
+**A reception belongs to the window it starts in.** The normaliser keeps only observations whose start lies in the artefact's window, whatever the endpoint means by its own `start` and `end`, so adjacent windows never count one twice. A `future` observation has not happened and is dropped. A page naming another satellite than the one asked about is refused: it is the sign of a filter ignored, which a first probe of the endpoint showed can happen silently.
+
+**Their rating, kept; ours, derived.** `source_outcome` holds `status` and `waterfall_status` verbatim. `archive_outcome` maps them: good with demodulated data → `decoded`; good without, or a person's "with signal" → `signal_no_decode`; bad → `no_data`; failed or unknown → `unknown`, because a failed observation is the station's failure, not the satellite's silence. Never `no_signal` (D-139).
+
+**No limit is published, so none is declared** (D-223). Each fetch is bounded by its request budget, `follow` asks daily, and its week of lookback re-fetches windows whose ratings were still being vetted, each re-fetch a superseding artefact.
+
+**Unverified, and said so:** the `waterfall_status` spellings beyond `unknown` (`with-signal`, `without-signal`) were read from the network's vetting page, not seen in an answer; a different spelling would map a vetted observation to `unknown`, which loses information and invents none.
+
+---
+
+## D-324 — A published value its quantity cannot take is stored as a gap that names it
+
+**2026-11-02 · accepted** · *`meridian_ingest.normalise.samples`, `deploy/ingest.live.toml.example`, Stage 34*
+
+Stage 31's normalisers check shape — a value or a missing reason, finite, a place on the globe — and never sense. They have only read fixtures we wrote, whose values we chose. A live source can publish a Kp of 12, a cloud cover of 140 %, a negative rainfall: a source's error, which a feature would then learn from as though it were weather.
+
+**Each quantity states the range it can physically take**, closed at both ends: Kp 0–9, cloud cover 0–100 %, aerosol optical depth 0–10, precipitation 0–2 000 mm a day, NDVI −1 to 1, and a floor of zero for fire radiative power and night-time radiance. A value outside its range is stored as missing, with a reason naming the value and the range — D-221's published gap, not a dropped row. The artefact still loads, the error is visible in the table, and the pre-pass rule (D-222) reads it as the gap it is.
+
+**Generous on purpose.** A range that clipped a real extreme would discard the event a series exists to show, so each bound is past the recorded extreme rather than at the expected one. A quantity not listed is not checked.
+
+**Applied in the sample record itself**, not in each normaliser, so a source added later is checked without anyone remembering to. No transformation version moves: for every value a normaliser has produced in range, the output is unchanged.
+
+*Rejected: refusing the artefact.* One bad value would cost every good one beside it, and the refusal would leave a hole nobody could see in the table.
+
+---
+
+## D-325 — An archive's carried element sets compute its denominator, and nothing live reads them
+
+**2026-11-02 · accepted** · *migration 0032, `meridian.store.element_sets.ARCHIVE_ONLY_SOURCES`, `meridian_ingest.adapters.public.satnogs_network`, `meridian report summary`, Stage 34*
+
+D-150 computes the passes an archive station could have heard with the element set current at the start of each day. CelesTrak serves only today's sets, so a backfill of past weeks had no set for any of its days, no archive passes, and no training examples.
+
+**Each SatNOGS observation carries the set it was scheduled with.** Those sets are stored as `element_sets.source = 'satnogs_network'`, only for satellites the catalogue tracks, each naming its artefact (a CHECK requires it). The raw snapshot's archive selection reads every source, so a past day has a set; **every live read excludes them** — `find_element_set_current_at` (pass generation, catalogue export), the element-set age gauge, and the public catalogue's latest epoch. An archive's history never schedules a pass (D-102, D-138).
+
+**`meridian report summary <run> --output <file>`** writes `model-summary-1` from a sealed archive run's own results files, never recomputing: run hash, method, the label "Measured by the SatNOGS network, not by Meridian", source and licence, completeness, and A, C and D. C and D carry only the report's reason, because an archive pass has an elevation and nothing else (D-156). A run of our own stations is refused: it has no published label yet. The dashboard reads the file (D-332).
+
+---
+
+## D-326 — Proposed answer to D-137: the team registers areas, a registration is public, and publishing is a switch the team throws
+
+**2026-11-02 · proposed, for the team to accept** · *`meridian regions summary`, `GET /api/v1/areas`, `AREAS_PUBLISHED`, `AREAS_SUMMARY`, Stage 34. Settles D-137 when accepted; D-227 holds until then.*
+
+D-137 asks who may register an area of interest and whether a registration is public. D-227 answered it narrowly for Stage 32: an operator registers at the command line and nothing is published. This proposes the rest.
+
+- **Only the team registers an area**, at the command line, as now. No endpoint, public or MSP, creates one; a station owner who wants an area asks the team. An area is then a decision somebody accountable took, and the label rules of D-227 — never a person, an address, a phone or an email — stay enforced at registration.
+- **A registration is public**: its label, its size and its bounding box, with the public-product series and changes the regional report computes over it, and the sources and terms each value came from. Never its notes, which stay an operator's (D-227), never its polygon, which a bounding box summarises well enough for a map, and never a count of our own receptions over it, which may be simulated and belongs with the reception figures.
+- **Publishing is a switch the team throws.** `meridian regions summary <report> --output <file>` writes `areas-summary-1` from a sealed report, copied and never recomputed (D-229). `GET /api/v1/areas` serves it only when `AREAS_PUBLISHED=true` and `AREAS_SUMMARY` names the file; otherwise it answers `not_yet_computed` with this decision's number (D-086). A file the reader does not recognise is a `server_error`, never part of a page. Accepting this entry and setting the flag are one act, recorded in the PR or commit that sets it.
+
+**Why public.** The regional layer exists to say something about places from published environmental data and our own receptions (D-131). Hidden, it is an operator's notebook; public, with its sources named and its intervals shown, it is checkable.
+
+*Rejected: anyone may register an area.* A public form invites labels that describe people, and makes moderation a duty nobody on the team has taken on.
+
+*Rejected: publishing each area's polygon.* Nothing the dashboard draws needs more than a box, and a box is a coarser statement about a place somebody cares about.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -6512,7 +6646,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 |---|---|---|
 | **D-135** | Which cloud host and tier, on whose account, and what happens when the credit lapses. *How long a station retains an unacknowledged reception is proposed by D-281: thirty days, the platform's acceptance window* | Nothing — no gate may need a cloud host (D-130) |
 | **D-136** | Whether any ingested source's terms permit its records to be republished inside the evidence dataset | Settled for Stage 30's package by **D-313**: it republishes none, and is CC BY 4.0. Open again only for a package that would |
-| **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Publishing anything about an area. D-227 holds its place in the meantime: operator-only, unpublished |
+| **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Publishing anything about an area. D-227 holds its place in the meantime: operator-only, unpublished. **D-326 proposes the answer** (team-registered, public, behind `AREAS_PUBLISHED`); the team accepts it |
 
 ---
 
@@ -6836,6 +6970,19 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the completion gate | `tests/msp_conformance/test_independence_drill.py` (§12.1); `ci.yml › image › The dashboard serves its last snapshot with the api stopped` (§12.2); `ci.yml › restore-elsewhere` (the restore on another machine) |
 | — the amended entries | D-115, whose manifest now counts rows and whose restore checks them; D-135, whose station half D-281 answers |
 | — the documents | `THREAT-MODEL.md` (B3, P-12 to P-14, T-5, T-6, O-7, O-8, D-4); `EVALUATION.md` §12; `GLOSSARY.md`; `README.md`; `CLAUDE.md` (the layout's `deploy/` line) |
+
+**Landed 2026-11-02**, building Stage 34's real-data ingest.
+
+| Decision | Applied to |
+|---|---|
+| D-320 element sets as an ingest product | migration 0032; `meridian_ingest/adapters/public/celestrak.py`; `meridian_ingest/{load,load_report,cli_load,config_extent}.py`; `meridian_ingest/normalise/records.py`; `meridian/store/{element_sets,satellites}.py`; `ATTRIBUTION.md`; `tests/unit/test_celestrak_source.py`; `tests/integration/test_element_set_ingest.py` |
+| D-321 the offline catalogue and element-set age | `meridian/{catalogue_export,cli_catalogue}.py`; `meridian/store/catalogue_reads.py`; `meridian/api/element_set_families.py`; `deploy/prometheus/{rules,tests}/`; `deploy/catalogue/{meteor.json,README.md}`; `OPERATIONS.md` § ElementSetsStale |
+| D-322 D-053 narrowed (proposed) | D-053's amendment note |
+| D-323 SatNOGS observations | `meridian_ingest/adapters/public/satnogs_network.py`; `ATTRIBUTION.md`; `tests/unit/test_satnogs_network_source.py`; `tests/integration/test_satnogs_archive_load.py` |
+| D-324 impossible values as named gaps | `meridian_ingest/normalise/samples.py`; `deploy/ingest.live.toml.example` |
+| D-325 carried sets and the model summary | migration 0032; `meridian/store/{element_sets,satellite_catalogue,snapshot_reads}.py`; `meridian/datasets/archive_passes.py`; `meridian/reports/summary.py`; `meridian/cli_report.py`; `analysis/configs/archive.toml.example`; `tests/unit/test_report_summary.py` |
+| D-326 areas, closed until D-137 is accepted (proposed) | `meridian/regions/summary.py`; `meridian/cli_regions.py`; `meridian/api/public/{areas,models/areas,surface}.py`; `THREAT-MODEL.md` §7; `tests/msp_conformance/test_public_areas_endpoint.py` |
+| — the completion gate | `tests/integration/test_external_data_flow.py`; `docs/ACCEPTANCE.md` § Real-data path |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 

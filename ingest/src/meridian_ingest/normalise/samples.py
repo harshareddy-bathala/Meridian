@@ -19,7 +19,13 @@ stored, rather than dropped, because "the source said it had nothing for this
 hour" and "we never asked" are different facts, and the pre-pass rule must be
 able to tell a published gap from an unpublished one (D-221).
 
-Reference: docs/DECISIONS.md D-131, D-133, D-221, D-222.
+**A value outside what its quantity can physically be is a gap, not a
+number.** A Kp of 12 or a cloud cover of 140 % is a source's error, and a
+feature that read it would be learning the error. It is stored as missing,
+with a reason naming the value and the range, so the artefact still loads and
+the error stays visible (D-324).
+
+Reference: docs/DECISIONS.md D-131, D-133, D-221, D-222, D-324.
 """
 
 from __future__ import annotations
@@ -33,6 +39,7 @@ from meridian_ingest.normalise.records import NormalisationError
 from meridian_ingest.raw_manifest import canonical_sha256, instant
 
 __all__ = [
+    "PHYSICAL_RANGES",
     "PUBLISHED_BASES",
     "QUANTITY",
     "NormalisedSample",
@@ -45,6 +52,25 @@ QUANTITY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 PUBLISHED_BASES = ("source_declared", "retrieved")
 
 _MAX_LAT, _MAX_LON = 90.0, 180.0
+
+PHYSICAL_RANGES: dict[str, tuple[float, float]] = {
+    "kp_index": (0.0, 9.0),
+    "cloud_cover": (0.0, 100.0),
+    "aerosol_optical_depth": (0.0, 10.0),
+    "precipitation": (0.0, 2000.0),
+    "ndvi": (-1.0, 1.0),
+    "fire_radiative_power": (0.0, math.inf),
+    "night_lights_radiance": (0.0, math.inf),
+}
+"""What each quantity can physically be, closed at both ends (D-324).
+
+Generous on purpose: a range that clipped a real extreme would discard the
+event a series exists to show. Kp is a 0–9 scale by definition; cloud cover a
+percentage; aerosol optical depth above 10 has never been reported; 2 000 mm
+of rain in a day is past the world record; NDVI is a normalised difference.
+Power and radiance have no ceiling worth writing, only a floor. A quantity not
+listed is not checked.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +125,7 @@ class NormalisedSample:
             raise NormalisationError(message)
         _instants(self)
         _value(self)
+        _physical(self)
         _place(self)
 
     @property
@@ -166,6 +193,22 @@ def _value(sample: NormalisedSample) -> None:
     if sample.value is not None and not math.isfinite(sample.value):
         message = f"{sample.series_key}: {sample.value} is not a finite number"
         raise NormalisationError(message)
+
+
+def _physical(sample: NormalisedSample) -> None:
+    """Turn a value its quantity cannot take into a gap that names it."""
+    bounds = PHYSICAL_RANGES.get(sample.quantity)
+    if sample.value is None or bounds is None:
+        return
+    low, high = bounds
+    if low <= sample.value <= high:
+        return
+    reason = (
+        f"published {sample.value} {sample.value_unit}, outside what "
+        f"{sample.quantity} can be [{low}, {high}]"
+    )
+    object.__setattr__(sample, "value", None)
+    object.__setattr__(sample, "missing_reason", reason)
 
 
 def _place(sample: NormalisedSample) -> None:

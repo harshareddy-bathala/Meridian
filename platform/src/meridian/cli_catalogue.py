@@ -1,4 +1,4 @@
-"""``meridian catalogue load`` — the operator's way to say what this deployment sees.
+"""``meridian catalogue load`` and ``export`` — what this deployment sees, in and out.
 
 Reads one local catalogue document, opens a short-lived connection, and writes
 the satellites, downlinks and element sets it describes. Parsing is
@@ -22,8 +22,14 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+from meridian.catalogue_export import (
+    catalogue_document,
+    read_held_catalogue,
+    write_catalogue,
+)
 from meridian.catalogue_file import (
     CatalogueDocument,
     MalformedCatalogueError,
@@ -139,7 +145,54 @@ def _print_tally(tally: LoadTally) -> None:
 
 
 def run_catalogue(args: argparse.Namespace) -> int:
-    """Run ``meridian catalogue load``, the subcommand's only action.
+    """Run ``meridian catalogue load`` or ``export``.
+
+    Args:
+        args: The parsed command line, carrying ``action``.
+
+    Returns:
+        What the action returns.
+    """
+    if args.action == "export":
+        return _run_export(Path(args.output))
+    return _run_load(args)
+
+
+def _run_export(output: Path) -> int:
+    """Write the catalogue held, with each satellite's current set.
+
+    Returns:
+        ``0``, or ``EXIT_FAILED`` when the database cannot be reached or the
+        file cannot be written.
+    """
+    try:
+        conn = connect_once(load_settings())
+    except DatabaseUnreachableError as exc:
+        print(f"meridian catalogue export: {exc}", file=sys.stderr)  # noqa: T201
+        return EXIT_FAILED
+    now = datetime.now(UTC)
+    with conn:
+        satellites, transmitters, sets = read_held_catalogue(conn, now)
+    try:
+        write_catalogue(output, catalogue_document(satellites, transmitters, sets))
+    except OSError as exc:
+        print(f"meridian catalogue export: {exc}", file=sys.stderr)  # noqa: T201
+        return EXIT_FAILED
+    print(f"Wrote {output}")  # noqa: T201
+    for satellite in satellites:
+        held = sets.get(satellite.satellite_id)
+        state = (
+            "no element set"
+            if held is None
+            else f"{held.source} set, epoch {held.epoch:%Y-%m-%d %H:%M}Z, "
+            f"{(now - held.epoch).total_seconds() / 86_400:.1f} days old"
+        )
+        print(f"  {satellite.satellite_id} {satellite.name}: {state}")  # noqa: T201
+    return 0
+
+
+def _run_load(args: argparse.Namespace) -> int:
+    """Run ``meridian catalogue load``.
 
     Args:
         args: The parsed command line, carrying ``file`` as typed.

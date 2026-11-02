@@ -189,6 +189,8 @@ def fetch_source(
         points=source.places.points,
         bbox=source.places.bbox,
         layers=source.places.layers,
+        groups=source.places.groups,
+        catalog_numbers=source.places.catalog_numbers,
     )
     try:
         planned = registration.adapter.plan(request)

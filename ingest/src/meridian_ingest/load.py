@@ -44,6 +44,7 @@ from meridian.store.ingest_sources import find_ingest_source, insert_ingest_sour
 from meridian.store.stations import Connection
 from meridian_ingest.adapters import adapter_for, normaliser_for
 from meridian_ingest.adapters.protocol import Normaliser, SourceDescriptor
+from meridian_ingest.load_element_sets import load_element_sets
 from meridian_ingest.load_report import ArtefactLoad, LoadReport
 from meridian_ingest.load_rows import load_samples, new_record, new_source
 from meridian_ingest.normalise.records import NormalisedBatch
@@ -226,6 +227,7 @@ def load_artefact(
             conn, manifest, arrival.record_id, batch, stations
         )
         samples = load_samples(conn, manifest, arrival.record_id, batch)
+        element_sets = load_element_sets(conn, manifest, arrival.record_id, batch)
     return ArtefactLoad(
         raw_path=raw_path,
         record_id=arrival.record_id,
@@ -238,6 +240,9 @@ def load_artefact(
         receptions_already_held=receptions.already_held,
         samples_written=samples.written,
         samples_already_held=samples.already_held,
+        element_sets_written=element_sets.written,
+        element_sets_already_held=element_sets.already_held,
+        element_sets_untracked=element_sets.untracked,
     )
 
 

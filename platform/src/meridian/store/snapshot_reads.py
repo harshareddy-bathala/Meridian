@@ -123,9 +123,14 @@ _CURRENT_FOR_ARCHIVE = (
     "  order by e.epoch desc, e.retrieved_at desc, e.id desc limit 1) current"
 )
 """For each satellite an archive station received in scope, the element set
-current at the start of every UTC day in scope — the set pass generation would
-have used (``find_element_set_current_at``), and what the export propagates an
-archive station's denominator from (D-150)."""
+current at the start of every UTC day in scope, ordered as
+``find_element_set_current_at`` orders them, and what the export propagates an
+archive station's denominator from (D-150).
+
+Every source, including the sets an archive's own observations carried
+(``satnogs_network``, D-325): this is the one read that takes them. A day
+before our own fetches began has no other set, and live pass generation never
+reads them, so the two denominators stay apart."""
 
 CONDITIONS_LOOKBACK = "interval '7 days'"
 """How far before ``since`` a published value can still describe a pass in

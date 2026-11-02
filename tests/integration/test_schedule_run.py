@@ -503,7 +503,11 @@ def test_an_offline_station_is_given_nothing_and_decided_when_back(
 
     with rollback.cursor() as cur:
         cur.execute(
-            "update stations set last_heartbeat_at = now() where station_id = %s",
+            # clock_timestamp(), not now(): now() is this rolled-back
+            # transaction's start, which a slow suite can leave older than the
+            # liveness window by the time the round judges it.
+            "update stations set last_heartbeat_at = clock_timestamp()"
+            " where station_id = %s",
             (STATION,),
         )
     back = run_schedule(rollback, SkyfieldOrbitService(), a_request())

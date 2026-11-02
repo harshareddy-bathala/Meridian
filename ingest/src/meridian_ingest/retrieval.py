@@ -42,6 +42,8 @@ FIXTURE_MEDIA_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".h5": "application/x-hdf5",
+    ".tle": "text/plain",
+    ".txt": "text/plain",
 }
 """What a fixture file's suffix says it is.
 

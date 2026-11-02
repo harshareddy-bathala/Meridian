@@ -48,7 +48,9 @@ MSP §4.1 requires an invite token to be **consumed** by a successful registrati
 ### `element_sets`
 Every element set ever retrieved, for every tracked object. **Never overwritten** — the historical series is what makes uncertainty modelling possible.
 
-`(id, satellite_id, epoch, retrieved_at, line1, line2, source, content_sha256)`
+`(id, satellite_id, epoch, retrieved_at, line1, line2, source, content_sha256, ingest_record_id)`
+
+`ingest_record_id` names the `ingest_records` artefact a fetched set was read from, and `retrieved_at` is then that artefact's retrieval instant, not the load's (D-320, migration 0032). A set loaded from a file has neither an artefact nor a claim to one: a CHECK refuses `ingest_record_id` on any source but `celestrak` and `spacetrack`. Ingest stores a set only for a satellite already in `satellites`, so a public catalogue never decides what is propagated.
 
 A set is identified by `(satellite_id, source, content_sha256)` — its **contents**, not its epoch. Two different sets can carry the same epoch from one source, and keying on epoch discarded the second (D-057). `content_sha256` is a generated column, so no row can carry a hash that disagrees with its lines.
 
@@ -373,7 +375,7 @@ Seven tables and a view, for modules 18 and 19. **Five are built.** Migration `0
 ### `ingest_sources`
 `(source_id, source_class, name, licence, terms_url, access_constraint, attribution_entry, added_at, active)`
 
-One row per source we take data from, created by Stage 14's migration and **insert-only**: a change of terms is a new `source_id`, so stored records keep pointing at the terms they arrived under (D-140). `licence` and `terms_url` are recorded here and in `ATTRIBUTION.md` before the first retrieval (D-134); `attribution_entry` names the entry, so a record can be traced to the terms it arrived under — which is what decides whether the evidence dataset may republish it (D-136). `access_constraint` is `none`, `key_counted` or `registration`.
+One row per source we take data from, created by Stage 14's migration and **insert-only**: a change of terms is a new `source_id`, so stored records keep pointing at the terms they arrived under (D-140). `licence` and `terms_url` are recorded here and in `ATTRIBUTION.md` before the first retrieval (D-134); `attribution_entry` names the entry, so a record can be traced to the terms it arrived under — which is what decides whether the evidence dataset may republish it (D-136). `access_constraint` is `none`, `key_counted` or `registration`. `source_class` is `archive_receptions`, `space_weather`, `atmospheric`, `imagery`, `regional_product` or, since migration 0032, `orbital_elements` (D-320).
 
 ### `ingest_records`
 `(record_id, source_id, original_identifier, source_version, payload_kind, retrieved_at, sha256, raw_path, media_type, byte_count, valid_from, valid_to, spatial_extent, superseded_by)`
@@ -543,7 +545,7 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `pass_classifications.classification` | `successful_reception`, `signal_no_decode`, `confirmed_miss`, `satellite_silent`, `satellite_state_indeterminate`, `station_unavailable`, `station_not_confirmed_listening`, `assignment_declined` — D-180 |
 | `observations.outcome` | the five values of MSP §4.4 — D-010 |
 | `observations.provenance` | `station`, `archive`, `manual` |
-| `element_sets.source` | `celestrak`, `spacetrack`, `manual`, `simulator` |
+| `element_sets.source` | `celestrak`, `spacetrack`, `satnogs_network`, `manual`, `simulator` — `satnogs_network` is a set an archived observation carried, read only for the archive's denominator and never by a live read (D-325) |
 | `noise_measurements.source` | `observation`, `survey` — D-173 |
 | `horizon_profiles.source` | `declared`, `learned` — D-031, D-174 |
 | `satellites.orbital_regime` | `leo`, `meo`, `geo`, `heo`, `other` — `EVALUATION.md` §6.1 segments by it |

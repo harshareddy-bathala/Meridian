@@ -516,6 +516,53 @@ A source is due when its newest retrieval is older than its cadence (Kp and clou
 
 **A value is a feature only for passes after it was published**, and "published" is our own fetch unless the artefact states an earlier production time (D-222). So a backfill never supplies features for passes already flown: the conditions group fills in from when `follow` starts running. Features are read from a snapshot's `environment_samples.jsonl`, never from the table while scheduling (D-224).
 
+### Element sets and the archive, and every source live
+
+Stage 34 adds two sources to the nine above (D-320 to D-324): `celestrak_gp`, current element sets for the satellites the catalogue holds, and `satnogs_network`, another network's receptions for training and evaluation only (D-322). `deploy/ingest.live.toml.example` enables every source that needs no key. Bringing a deployment onto live data, in order:
+
+1. **On the platform**, load the live catalogue, which names the satellites and leaves their element sets to ingest:
+   ```bash
+   docker compose exec api meridian catalogue load --file deploy/catalogue/meteor.json
+   ```
+   Load it into a database that does not already hold `development.json`; the two disagree about Meteor-M2-3's downlink.
+2. **On the ingest machine**, copy the settings and re-read each source's terms page in `ATTRIBUTION.md` (D-220):
+   ```bash
+   cp deploy/ingest.live.toml.example ingest.toml     # then set raw_root to data/ingest/raw
+   export DATABASE_URL=postgresql://...               # the platform's database
+   ```
+3. **Element sets first**, and check them:
+   ```bash
+   uv run meridian-ingest fetch --source celestrak_gp
+   uv run meridian-ingest load --source celestrak_gp  # "2 element sets written, …, N for satellites the catalogue does not track"
+   ```
+   The next round of `jobs` generates passes from them. Compare the dashboard's next Meteor pass over station 001 with an independent tracker (Heavens-Above or N2YO, from the same position): acquisition within a minute, peak elevation within a degree. A larger difference is a wrong set or a wrong place, not rounding.
+4. **The archive, backfilled once by hand** (224 requests for four weeks of both Meteors):
+   ```bash
+   uv run meridian-ingest fetch --source satnogs_network --since 2026-10-05T00:00:00Z --until 2026-11-02T00:00:00Z
+   uv run meridian-ingest load --source satnogs_network
+   ```
+   A window refused as a *full page* may have been cut short; it is left out rather than stored as complete (D-323). Nothing at runtime reads these rows.
+5. **The other sources, once each**, then `load`: `noaa_swpc_kp`, `open_meteo_cloud`, `open_meteo_aerosol`, and `nasa_power_precipitation` and `ornl_modis_ndvi` with `--since`/`--until`. A value outside what its quantity can be — a Kp of 12, cloud cover of 140 % — loads as a gap whose reason names it (D-324).
+6. **Then `follow`**, by the cron line above. `ElementSetsStale` is the alert that says it stopped.
+7. **Before going offline** — a demonstration, a field site — export the catalogue the platform now holds, on a connected machine, and load that file on the offline one (D-321):
+   ```bash
+   docker compose exec api meridian catalogue export --output /tmp/live.json && docker compose cp api:/tmp/live.json data/catalogue/live.json
+   ```
+
+**Record each first live fetch** in the table below: the date, what came back and anything refused. Until a row is filled, that source has only ever been run against fixtures.
+
+| Source | First live fetch | Result |
+|---|---|---|
+| `celestrak_gp` | — | — |
+| `satnogs_network` | — | — |
+| `noaa_swpc_kp` | — | — |
+| `open_meteo_cloud` | — | — |
+| `open_meteo_aerosol` | — | — |
+| `nasa_power_precipitation` | — | — |
+| `ornl_modis_ndvi` | — | — |
+| `nasa_firms` | — | — needs `FIRMS_MAP_KEY` |
+| `nasa_black_marble` | — | — needs `EARTHDATA_TOKEN` |
+
 ## Dataset snapshots
 
 Prediction and evaluation never read the live tables. They read an **immutable snapshot**, so every number in a report can be regenerated from a snapshot, a configuration and a seed (rule 8). There are two steps, and only the first one needs the database (D-143):
@@ -1208,6 +1255,27 @@ It then builds the run again and compares hashes. It prints any difference betwe
 
 A run edited *and resealed* passes its own manifest check but fails verification, because only regeneration can tell a forged number from a computed one.
 
+### The real-data model run, from the SatNOGS archive
+
+The first model fitted on receptions nobody here invented (D-322, D-325). The figures are another network's, and every published copy says so.
+
+1. **Backfill the archive**, as § Element sets and the archive, and every source live says: `meridian-ingest fetch --source satnogs_network --since … --until …`, then `load`. Each page's carried element sets load beside its receptions, for satellites the catalogue tracks; live pass generation never reads them.
+2. **Export a raw snapshot covering the backfill:**
+   ```bash
+   meridian snapshot export --since 2026-10-05T00:00:00Z
+   ```
+   Its manifest's `archive_denominator.*` counts say how many satellite-days had no set current at their start. Near zero is expected; a large count means the backfill's pages carried no sets.
+3. **Copy `analysis/configs/archive.toml.example`**, set `train_until` and `validate_until` for the snapshot's span (two weeks to train, one to choose, one to test, for four weeks), then build, verify and summarise:
+   ```bash
+   meridian report build --snapshot <snapshot> --config archive.toml --seed 4471
+   meridian report verify <run>
+   meridian report summary <run> --output data/published/model-summary.json
+   ```
+   `build` and `verify` need the `fit` extra (D-155); `summary` does not.
+4. **Publish** by setting `REPORT_SUMMARY=/published/model-summary.json` on the api (D-332). The dashboard's insights view reads the file and nothing else; a file it refuses is a `server_error` naming the setting, never a partial page.
+
+**What it is and is not.** Only configuration A, elevation, can be fitted on an archive: C and D appear as not computable, with the reason (D-156). The completeness ratio and the weighting are in the run's data section, because the archive holds only passes its stations chose to observe. **Never compare its totals with ours**, on the site, a slide or a poster (D-053).
+
 ### The completion gate, at a prompt
 
 Stage 22's gate is that every number and figure can be regenerated from a snapshot, a configuration, a seed and a code version. `tests/unit/test_report_gate.py` asserts it clause by clause, with every socket and database refused. To see it by hand:
@@ -1398,6 +1466,26 @@ meridian regions record-alerts --report data/datasets/regions/<dir>
 Each alert is recorded in `region_alerts` once — recording the same report again writes nothing — and handed to the delivery interface, which **records only** until Stage 29 builds notifications: each attempt is a `region_alert_deliveries` row with channel `record_only` saying so (D-232). An alert recorded by a run that stopped before its delivery was recorded is delivered by the next run, not passed by. Nothing is emailed or messaged.
 
 ---
+
+
+### Publishing areas, once D-137 is settled
+
+Nothing about an area is public until the team accepts D-326 (D-227). Until then `/api/v1/areas` answers `not_yet_computed`. To prepare, and later to publish:
+
+1. **Register the areas**, as the team decides. Three proposed for the first public set:
+   ```bash
+   meridian regions add --label "Bengaluru urban"   --bbox 77.46,12.83,77.75,13.14
+   meridian regions add --label "Bandipur forest"   --bbox 76.20,11.60,76.75,11.85
+   meridian regions add --label "Mandya farmland"   --bbox 76.50,12.30,77.20,12.80
+   ```
+   Give FIRMS, NDVI, POWER and Black Marble boxes and points that cover them (§ Element sets and the archive, and every source live).
+2. **Report and summarise** from a snapshot:
+   ```bash
+   meridian regions report --snapshot <raw snapshot>
+   meridian regions summary <report directory> --output data/published/areas.json
+   ```
+   The summary holds each active area's label, size and box, its series and changes, and the sources behind them: no note, no polygon, no reception count.
+3. **Publish only on the team's acceptance of D-326**: set `AREAS_PUBLISHED=true` and `AREAS_SUMMARY=/published/areas.json` on the api, and record the acceptance in the same change.
 
 ## Stored measurements and profiles
 
@@ -1932,6 +2020,7 @@ Prometheus and Alertmanager are not published on the host. Grafana is, so its ad
 - **API panels:** `meridian_http_*` comes from every API worker.
 - **Pool panel:** reflects whichever worker answered the scrape.
 - **Scheduling panels:** `meridian_job_*`, `meridian_passes_computed`, `meridian_scheduler_candidates`, `meridian_scheduler_runs_total{status}`, `meridian_scheduler_solver_seconds` and `meridian_scheduler_history_age_seconds` come from the jobs process alone. A rising `status="fallback"` count means the schedule is greedy's; the history age is how long the model's history has gone unrefreshed (D-170).
+- **Element-set age (no Grafana panel yet):** `meridian_element_set_age_seconds{satellite_id}` is the time since the epoch of the set the next round propagates, read by the API at scrape time. A satellite with no set publishes nothing. `ElementSetsStale` fires at three days (D-321).
 - **Reliability series (no Grafana panel yet):** `meridian_passes_classified` (by class, so confirmed misses and indeterminate satellites are two of its series) and `meridian_loss_budget_remaining_ratio`, read by the API from `pass_classifications` over the SLO window (D-186). A population with nothing classified yet publishes neither, rather than zeros that would mean "not measured" (D-086). Passes settle a day after their window, so a fresh deployment shows nothing here for its first day.
 
 ### Delivering alerts
@@ -2065,6 +2154,15 @@ A lost pass is not the same as a miss. Every debit carries its reason, and only 
 2. A report waiting with no attempt means the `notifications` service is not running: `docker compose ps notifications`, then its logs.
 3. `smtp_auth` or `http_4xx`: the channel's secret is wrong or expired. Replace the file in `deploy/secrets/` and restart the service. `timeout` or `refused`: the mail server or Telegram is unreachable from the host.
 4. `meridian notify test --channel <channel> --station <id>` sends one fixed message, which shows whether a channel works before the next real report.
+
+### ElementSetsStale
+
+**Warning.** The element set the next round propagates for one satellite is more than three days past its epoch, so its predicted acquisition times are drifting by minutes (D-321). Scheduling carries on from that set; nothing stops, it only gets less accurate. CelesTrak publishes every two hours and `meridian-ingest follow` asks every six, so this is about a dozen missed fetches.
+
+1. On the ingest machine, `ls <raw root>/celestrak_gp/` lists every retrieval, each directory named by when it was fetched (D-141). If the newest is old, `follow` is not running: start it. `meridian-ingest fetch --source celestrak_gp`, then `load`, refreshes by hand.
+2. A 403 from CelesTrak means a second download of one update, or an address CelesTrak has blocked after too many errors. Do not retry in a loop: its usage policy asks a program to stop on any non-200 and tell a person (`https://celestrak.org/usage-policy.php`).
+3. If the load reports the sets as *for satellites the catalogue does not track*, the group fetched does not hold this satellite. Add its number to `[sources.celestrak_gp] catalog_numbers`.
+4. **Offline on purpose,** for a demonstration with no network: the alert is the honest state of the predictions. Refresh `data/catalogue/live.json` (`meridian catalogue export`) on a connected machine just before going offline, and load it.
 
 ### Reliability figures
 

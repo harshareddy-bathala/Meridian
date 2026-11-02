@@ -35,6 +35,7 @@ __all__ = [
     "fill_frame_interval",
     "find_active_transmitters",
     "find_satellite_priorities",
+    "find_tracked_satellite_ids",
     "insert_satellite",
     "insert_transmitter",
 ]
@@ -251,6 +252,27 @@ def find_active_transmitters(conn: Connection) -> list[StoredTransmitter]:
             """
         )
         return cur.fetchall()
+
+
+def find_tracked_satellite_ids(conn: Connection) -> frozenset[str]:
+    """Every satellite the catalogue holds and has not deleted.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+
+    Returns:
+        Their ids. An inactive satellite is included: it is still propagated,
+        because a silent transmitter is judged against passes it was over a
+        station for (EVALUATION.md §5).
+
+    Note:
+        Ingest loads a fetched element set only for a satellite listed here, so
+        a catalogue somebody else publishes never decides what pass generation
+        propagates (D-320).
+    """
+    with conn.cursor() as cur:
+        cur.execute("select satellite_id from satellites where deleted_at is null")
+        return frozenset(str(row[0]) for row in cur.fetchall())
 
 
 @dataclass(frozen=True, slots=True)

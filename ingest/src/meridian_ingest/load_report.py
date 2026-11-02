@@ -56,6 +56,11 @@ class ArtefactLoad:
     receptions_already_held: int = 0
     samples_written: int = 0
     samples_already_held: int = 0
+    element_sets_written: int = 0
+    element_sets_already_held: int = 0
+    element_sets_untracked: int = 0
+    """Sets for objects the catalogue does not track, left in the raw store
+    rather than stored (D-320)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +118,21 @@ class LoadReport:
         """Published values that were already stored, identically."""
         return sum(one.samples_already_held for one in self.artefacts)
 
+    @property
+    def element_sets_written(self) -> int:
+        """Element sets this run stored for the first time (D-320)."""
+        return sum(one.element_sets_written for one in self.artefacts)
+
+    @property
+    def element_sets_already_held(self) -> int:
+        """Element sets whose exact lines were already stored from this source."""
+        return sum(one.element_sets_already_held for one in self.artefacts)
+
+    @property
+    def element_sets_untracked(self) -> int:
+        """Element sets for objects the catalogue does not track, not stored."""
+        return sum(one.element_sets_untracked for one in self.artefacts)
+
     def wrote_nothing(self) -> bool:
         """Whether this run added no rows at all.
 
@@ -124,4 +144,5 @@ class LoadReport:
             and self.stations_written == 0
             and self.receptions_written == 0
             and self.samples_written == 0
+            and self.element_sets_written == 0
         )

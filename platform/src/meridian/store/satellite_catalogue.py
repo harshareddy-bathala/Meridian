@@ -33,6 +33,7 @@ from datetime import datetime
 
 from psycopg.rows import class_row
 
+from meridian.store.element_sets import ARCHIVE_ONLY_SOURCES
 from meridian.store.stations import Connection
 
 __all__ = [
@@ -43,11 +44,15 @@ __all__ = [
     "find_transmitters_for_satellite",
 ]
 
-_CATALOGUE_COLUMNS = """
+_ARCHIVE_ONLY = ", ".join(f"'{source}'" for source in ARCHIVE_ONLY_SOURCES)
+"""Constants, never input: an archive's element sets are not the catalogue's."""
+
+_CATALOGUE_COLUMNS = f"""
     s.satellite_id, s.name, s.orbital_regime, s.priority,
     s.active as is_active,
     (select max(e.epoch) from element_sets e
-      where e.satellite_id = s.satellite_id) as latest_element_set_epoch
+      where e.satellite_id = s.satellite_id
+        and e.source not in ({_ARCHIVE_ONLY})) as latest_element_set_epoch
 """
 """Every column both reads select, written once so the two cannot diverge.
 
