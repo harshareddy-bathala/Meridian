@@ -461,13 +461,16 @@ services:
       # meridian_api may read and write rows and nothing else (D-207).
       DATABASE_URL: postgresql://meridian_api:${API_DATABASE_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
       SIMULATOR_STATION_COUNT: ${SIMULATOR_STATION_COUNT:-1}
-      # Catalogue files in deploy/catalogue/, the first that exists is loaded.
-      SIMULATOR_CATALOGUE: ${SIMULATOR_CATALOGUE:-development.json}
+      # Catalogue files, as paths inside this container, of which the first
+      # that exists is loaded: /catalogue is deploy/catalogue/, /data is data/.
+      SIMULATOR_CATALOGUE: ${SIMULATOR_CATALOGUE:-/catalogue/development.json}
     volumes:
       - sim-state:/var/lib/meridian-sim
       # The checkout's catalogue directory rather than the image's copy, so a
-      # catalogue written after the image was built is the one loaded.
+      # catalogue written after the image was built is the one loaded; and the
+      # data directory, where `meridian catalogue export` writes an offline one.
       - ./catalogue:/catalogue:ro
+      - ../data:/data:ro
     # One invite per station, written where the simulator will look for them.
     #
     # Re-running is safe, and both halves of that matter. The catalogue load is
@@ -486,11 +489,11 @@ services:
       - |
         set -e
         catalogue=
-        for name in $${SIMULATOR_CATALOGUE:-development.json}; do
-          if [ -f "/catalogue/$$name" ]; then catalogue="/catalogue/$$name"; break; fi
+        for path in $${SIMULATOR_CATALOGUE:-/catalogue/development.json}; do
+          if [ -f "$$path" ]; then catalogue="$$path"; break; fi
         done
         if [ -z "$$catalogue" ]; then
-          echo "none of SIMULATOR_CATALOGUE is in deploy/catalogue: $$SIMULATOR_CATALOGUE" >&2
+          echo "none of SIMULATOR_CATALOGUE exists: $$SIMULATOR_CATALOGUE" >&2
           exit 1
         fi
         echo "loading $$catalogue"
@@ -544,13 +547,16 @@ services:
     environment:
       DATABASE_URL: postgresql://meridian_api:${API_DATABASE_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
       SIMULATOR_STATION_COUNT: ${DEMO_STATION_COUNT:-50}
-      # live.json is element sets fetched by meridian-ingest and exported for
-      # offline use; expo.json the curated targets; development.json the
-      # fallback that is always there.
-      SIMULATOR_CATALOGUE: live.json expo.json development.json
+      # data/catalogue/live.json is the held catalogue with each satellite's
+      # current element set, exported by `meridian catalogue export` for an
+      # offline machine; development.json is the fallback that is always there.
+      # Only one is loaded: two catalogues in one database can name one
+      # satellite's downlink twice.
+      SIMULATOR_CATALOGUE: /data/catalogue/live.json /catalogue/development.json
     volumes:
       - demo-state:/var/lib/meridian-sim
       - ./catalogue:/catalogue:ro
+      - ../data:/data:ro
 
   demo-simulator:
     <<: *simulator
@@ -566,7 +572,7 @@ services:
       SIMULATOR_STATION_COUNT: ${DEMO_STATION_COUNT:-50}
       SIMULATOR_SCENARIO: demo
       # The satellite the scenario's one fleet-wide silence switches off. It
-      # must be in the loaded catalogue; Meteor-M2-3 is in all three.
+      # must be in the loaded catalogue; Meteor-M2-3 is in both.
       SIMULATOR_SILENT_SATELLITE: ${DEMO_SILENT_SATELLITE:-norad:57166}
       SIMULATOR_STATE_DIR: /var/lib/meridian-sim
       SIMULATOR_INVITES_FILE: /var/lib/meridian-sim/invites.txt
