@@ -6733,6 +6733,38 @@ The dashboard was one page: the station map and list, and a station's panel. Sta
 
 ---
 
+## D-335 — The rehearsal is two halves: the platform's in CI, the browser's against a running stack
+
+**2026-11-02 · accepted** · *`tests/integration/test_demo_rehearsal.py`; `deploy/tools/demo_rehearsal.py`; `docs/OPERATIONS.md` § The demonstration; Stage 35's completion gate. Applies D-198, D-283 and D-333.*
+
+Stage 35's gate is a rehearsal of `PROJECT.md` §13's software steps against the demo profile. They are two kinds of claim, and each is tested where it can be.
+
+**The platform's half runs on every build.** `test_demo_rehearsal.py` flies the `demo` scenario's own seed, four of its stations over twelve hours, through the harness SC-8's runs use, against the real application. It settles under `reliability.demo.toml` and delivers reports to the sink. It then asks `/api/v1` what the views would show:
+- every station listed, and simulated;
+- a station's decisions with their explanations and orbit epochs;
+- the latest round with its gain not measured;
+- the reliability figures counting the fleet as simulated and nothing as measured;
+- every loss diagnosed, with all five causes tested;
+- a delivered report that regenerates to its hash;
+- `simulated` true on every result in every body.
+
+It takes about five minutes. An eight-station fleet took over fifteen, which every build cannot afford.
+
+**The browser's half runs against a live stack.** It needs one, and Chromium, which CI's runners have neither of for a fifty-station fleet. `demo_rehearsal.py` drives a browser through the front, as a visitor meets it:
+- every view renders, with no console error and no content-security-policy violation, recorded by a listener the page installs before its own code;
+- the fleet and a station's decision carry the simulated badge;
+- a chosen pass is explained with its orbit's age;
+- with the api stopped, every view says *Not live*;
+- with the api started again, whatever happened, the marks clear.
+
+It is a host tool, like the front drill it imports from (D-282), and exits non-zero on any failure.
+
+**Playwright is not a dependency.** Only this tool uses it, so `uvx --with playwright` brings it for the run, and `--chromium` names a browser already installed.
+
+*Rejected: the browser half in CI.* It would need a compose stack of fifty simulated stations and a browser on a runner, for a check whose failure modes (a view that does not render, a missing note) the dashboard's own tests and the front drill already cover in parts. It is run before a showing, by hand, and its result is recorded.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

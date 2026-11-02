@@ -1141,6 +1141,31 @@ curl -s localhost:8000/api/v1/schedule-runs/latest | python -m json.tool
 
 **A loss's findings are a reviewed subset.** The full record of what each cause's test read is the operator's, through `meridian diagnosis explain`; the public list withholds the obstruction sectors, the raw noise levels and every internal id (`THREAT-MODEL.md` §7).
 
+## The demonstration
+
+The demonstration fleet is fifty simulated stations under the `demo` scenario. About one in five carries a single fault, and losses are diagnosed an hour after each pass (D-330, D-333):
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --profile demo up -d
+```
+
+Open `http://localhost:8080/#/kiosk` on the screen it is shown on. The kiosk cycles the network, a station's schedule, the losses and the insights every 20 seconds, and holds for a minute after a touch.
+
+**What a cold start shows, and when.**
+- **At once:** the fleet, its schedule and each decision's explanation.
+- **About an hour after the first passes:** the first diagnosed losses.
+- **Never, from a cold start:** a receive-chain warning, because a chain needs two weeks of its own history first (D-293). The view says *No receive-chain warning is open*, and that is true. SC-9's sealed fleets are the evidence that warnings work.
+
+**Rehearse it in a browser** before it is shown, against the running stack. The tool walks every view and fails on a content-security-policy violation or a console error. It checks that simulated figures carry the badge and that a chosen pass is explained. Then it stops the api for about a minute, checks that every view says *Not live*, and starts the api again (D-335):
+
+```bash
+uvx --with playwright python deploy/tools/demo_rehearsal.py --base http://localhost:8080
+```
+
+Add `--skip-outage` to leave the api running, and `--chromium PATH` to use a browser already installed. Exit status 0 means every check passed. The platform's half of the gate, every step of `PROJECT.md` §13 in what `/api/v1` answers, is `tests/integration/test_demo_rehearsal.py`, which CI runs.
+
+**Offline.** With Wi-Fi off, the stack still comes up and the map draws its own graticule, without tiles (D-092). Before going offline, run `meridian catalogue export --output data/catalogue/live.json` so the fleet flies current element sets. Without it, the development catalogue's orbits are months old, and the schedule view says so beside every pass.
+
 ## The evidence dataset
 
 A package of Meridian's own receptions — each with its current observation and lineage, its verdicts and diagnoses, and its provenance — that someone who was not in the room can regenerate to the same hash (SC-10). It is built from a raw snapshot (§ Dataset snapshots), a configuration and a seed, and nothing else: neither command opens a database or a socket.
