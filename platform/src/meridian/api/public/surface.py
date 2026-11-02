@@ -29,6 +29,7 @@ from meridian.api.public import (
     passes,
     reliability,
     satellites,
+    schedule,
     stations,
 )
 from meridian.api.public.envelope import API_PREFIX
@@ -47,3 +48,4 @@ router.include_router(aggregates.router)
 router.include_router(areas.router)
 router.include_router(losses.router)
 router.include_router(chain_warnings.router)
+router.include_router(schedule.router)

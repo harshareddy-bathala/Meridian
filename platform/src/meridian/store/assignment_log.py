@@ -10,12 +10,16 @@ A skipped pass is listed on purpose. "Why was this not scheduled" is the questio
 a schedule exists to answer, and hiding skips would publish only the half of each
 decision that looks like success.
 
+A station's schedule over the next hours is the same decisions, each with its
+pass's peak elevation and the epoch of the element set that predicted it, so a
+reader sees how old the orbit behind a decision was (D-331).
+
 Windows come back exact; the public model widens them (D-093). Paging is keyset
 on ``(start_at, assignment_id)`` with a cursor naming only the assignment id, so
 the cursor cannot carry a time the body rounded.
 
 Reference: docs/DATA-MODEL.md ``assignments``; docs/DECISIONS.md D-008, D-085,
-D-093.
+D-093, D-331.
 """
 
 from __future__ import annotations
@@ -27,7 +31,13 @@ from psycopg.rows import class_row
 
 from meridian.store.stations import Connection
 
-__all__ = ["LoggedAssignment", "find_assignment", "find_assignments"]
+__all__ = [
+    "LoggedAssignment",
+    "ScheduleEntry",
+    "find_assignment",
+    "find_assignments",
+    "find_station_schedule",
+]
 
 _LOG_COLUMNS = """
     a.assignment_id, a.pass_id, a.station_id, p.satellite_id,
@@ -159,3 +169,53 @@ def find_assignment(conn: Connection, assignment_id: str) -> LoggedAssignment | 
             (assignment_id,),
         )
         return cur.fetchone()
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleEntry(LoggedAssignment):
+    """One decision in a station's schedule, with what predicted its pass."""
+
+    max_elevation_deg: float
+    element_set_epoch: datetime
+
+
+SCHEDULE_LIMIT = 500
+"""The most decisions one schedule read returns: a day of passes, many times over."""
+
+
+def find_station_schedule(
+    conn: Connection, station_id: str, *, start: datetime, end: datetime
+) -> list[ScheduleEntry]:
+    """A station's current decisions whose window meets ``[start, end)``.
+
+    Scheduled and skipped alike, soonest first, each pass's current revision
+    only (D-171), at most :data:`SCHEDULE_LIMIT`.
+    """
+    with conn.cursor(row_factory=class_row(ScheduleEntry)) as cur:
+        cur.execute(
+            f"""
+            select {_LOG_COLUMNS}, p.max_elevation_deg, e.epoch as element_set_epoch
+            from assignments a
+            join passes p on p.id = a.pass_id
+            join element_sets e on e.id = p.element_set_id
+            join stations s on s.station_id = a.station_id
+            where s.deleted_at is null
+              and a.station_id = %(station_id)s
+              and a.end_at > %(start)s and a.start_at < %(end)s
+              and not exists (
+                select 1 from assignments later
+                where later.pass_id = a.pass_id
+                  and later.model_config is not distinct from a.model_config
+                  and later.revision > a.revision
+              )
+            order by a.start_at asc, a.assignment_id asc
+            limit %(limit)s
+            """,
+            {
+                "station_id": station_id,
+                "start": start,
+                "end": end,
+                "limit": SCHEDULE_LIMIT,
+            },
+        )
+        return cur.fetchall()
