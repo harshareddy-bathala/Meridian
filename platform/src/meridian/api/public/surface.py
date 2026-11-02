@@ -24,6 +24,7 @@ from meridian.api.public import (
     areas,
     assignments,
     chain_warnings,
+    conditions,
     losses,
     observations,
     passes,
@@ -49,3 +50,4 @@ router.include_router(areas.router)
 router.include_router(losses.router)
 router.include_router(chain_warnings.router)
 router.include_router(schedule.router)
+router.include_router(conditions.router)
