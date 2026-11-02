@@ -34,7 +34,6 @@ from meridian.store.archive_observations import (
     insert_archive_observation,
 )
 from meridian.store.archive_stations import NewArchiveStation, insert_archive_station
-from meridian.store.element_sets import NewElementSet, insert_element_set
 from meridian.store.ingest_records import (
     find_ingest_record_by_id,
     find_ingest_records_for_source,
@@ -42,22 +41,15 @@ from meridian.store.ingest_records import (
     mark_ingest_record_superseded,
 )
 from meridian.store.ingest_sources import find_ingest_source, insert_ingest_source
-from meridian.store.satellites import find_tracked_satellite_ids
 from meridian.store.stations import Connection
 from meridian_ingest.adapters import adapter_for, normaliser_for
 from meridian_ingest.adapters.protocol import Normaliser, SourceDescriptor
-from meridian_ingest.adapters.public import celestrak, satnogs_network
+from meridian_ingest.load_element_sets import load_element_sets
 from meridian_ingest.load_report import ArtefactLoad, LoadReport
 from meridian_ingest.load_rows import load_samples, new_record, new_source
 from meridian_ingest.normalise.records import NormalisedBatch
 from meridian_ingest.raw_manifest import RawManifest
 from meridian_ingest.raw_store import RawStore
-
-_ELEMENT_SET_SOURCES = {
-    **celestrak.ELEMENT_SET_SOURCES,
-    **satnogs_network.ELEMENT_SET_SOURCES,
-}
-"""The ``element_sets.source`` each source's element sets load under."""
 
 __all__ = [
     "TermsChangedError",
@@ -235,7 +227,7 @@ def load_artefact(
             conn, manifest, arrival.record_id, batch, stations
         )
         samples = load_samples(conn, manifest, arrival.record_id, batch)
-        element_sets = _load_element_sets(conn, manifest, arrival.record_id, batch)
+        element_sets = load_element_sets(conn, manifest, arrival.record_id, batch)
     return ArtefactLoad(
         raw_path=raw_path,
         record_id=arrival.record_id,
@@ -324,56 +316,6 @@ def _load_receptions(
         )
         applied = _counted(applied, arrival.written)
     return applied
-
-
-@dataclass(frozen=True, slots=True)
-class _ElementSetsApplied:
-    """What an artefact's element sets came to: written, held, or not ours to load."""
-
-    written: int = 0
-    already_held: int = 0
-    untracked: int = 0
-
-
-def _load_element_sets(
-    conn: Connection, manifest: RawManifest, record_id: int, batch: NormalisedBatch
-) -> _ElementSetsApplied:
-    """Store the sets of satellites the catalogue tracks, and count the rest.
-
-    **Ingest never decides what pass generation propagates.** A catalogue
-    publishes far more objects than this deployment tracks, and storing a set
-    for one of them would need a ``satellites`` row the operator never wrote —
-    the same argument that keeps archive receptions off ``satellites`` (D-139).
-    So a set for an untracked object is counted and left in the raw store, from
-    which a later load takes it if the catalogue ever adds the satellite
-    (D-320).
-
-    Each set carries the artefact it came from and the artefact's retrieval
-    instant, not the instant of this load.
-    """
-    if not batch.element_sets:
-        return _ElementSetsApplied()
-    tracked = find_tracked_satellite_ids(conn)
-    written = already_held = untracked = 0
-    for one in batch.element_sets:
-        if one.satellite_key not in tracked:
-            untracked += 1
-            continue
-        stored = insert_element_set(
-            conn,
-            NewElementSet(
-                satellite_id=one.satellite_key,
-                epoch=one.epoch,
-                line1=one.line1,
-                line2=one.line2,
-                source=_ELEMENT_SET_SOURCES[manifest.provenance.source_id],
-                ingest_record_id=record_id,
-                retrieved_at=manifest.provenance.retrieved_at,
-            ),
-        )
-        written += 1 if stored else 0
-        already_held += 0 if stored else 1
-    return _ElementSetsApplied(written, already_held, untracked)
 
 
 def _station_id(key: str | None, stations: _Applied) -> int | None:
