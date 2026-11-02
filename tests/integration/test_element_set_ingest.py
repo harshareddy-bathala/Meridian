@@ -24,12 +24,22 @@ import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from meridian.store.element_sets import (  # noqa: E402 — after importorskip
+from meridian.catalogue_export import (  # noqa: E402 — after importorskip
+    catalogue_document,
+    read_held_catalogue,
+)
+from meridian.store.element_sets import (  # noqa: E402
     NewElementSet,
+    find_current_epochs,
     find_element_set_current_at,
     insert_element_set,
 )
-from meridian.store.satellites import NewSatellite, insert_satellite  # noqa: E402
+from meridian.store.satellites import (  # noqa: E402
+    NewSatellite,
+    NewTransmitter,
+    insert_satellite,
+    insert_transmitter,
+)
 from meridian_ingest.adapters import REGISTRY  # noqa: E402
 from meridian_ingest.adapters.protocol import FetchRequest  # noqa: E402
 from meridian_ingest.load import load_source  # noqa: E402
@@ -171,3 +181,57 @@ def test_a_set_from_a_file_cannot_claim_an_artefact(
                 ingest_record_id=record_id,
             ),
         )
+
+
+def test_the_age_a_scrape_reports_is_the_set_pass_generation_uses(
+    tracked: Any, store: RawStore, publish_public: Any
+) -> None:
+    """D-321: the epoch current at the scrape, per satellite with a set."""
+    fetch_weather(store, publish_public)
+    load_source(tracked, store, SOURCE)
+
+    before = find_current_epochs(tracked, datetime(2026, 11, 2, 9, tzinfo=UTC))
+    after = find_current_epochs(tracked, datetime(2026, 11, 2, 18, tzinfo=UTC))
+
+    assert before == {"norad:59051": datetime(2026, 11, 2, 6, tzinfo=UTC)}
+    assert after == {
+        "norad:57166": datetime(2026, 11, 2, 12, tzinfo=UTC),
+        "norad:59051": datetime(2026, 11, 2, 6, tzinfo=UTC),
+    }
+
+
+def test_an_export_carries_each_satellites_current_fetched_set(
+    tracked: Any, store: RawStore, publish_public: Any
+) -> None:
+    insert_transmitter(
+        tracked,
+        NewTransmitter(
+            satellite_id="norad:57166",
+            centre_freq_hz=137_900_000,
+            mode="lrpt",
+            polarisation="rhcp",
+            bandwidth_hz=150_000,
+            frame_interval_s=0.113778,
+        ),
+    )
+    fetch_weather(store, publish_public)
+    load_source(tracked, store, SOURCE)
+
+    document: Any = catalogue_document(
+        *read_held_catalogue(tracked, datetime(2026, 11, 2, 18, tzinfo=UTC))
+    )
+
+    entries = {one["satellite_id"]: one for one in document["satellites"]}
+    assert set(entries) == {"norad:57166", "norad:59051"}
+    assert entries["norad:57166"]["transmitters"] == [
+        {
+            "centre_freq_hz": 137_900_000,
+            "mode": "lrpt",
+            "polarisation": "rhcp",
+            "bandwidth_hz": 150_000,
+            "frame_interval_s": 0.113778,
+        }
+    ]
+    (exported,) = entries["norad:57166"]["element_sets"]
+    assert exported["exported_from"]["source"] == "celestrak"
+    assert exported["exported_from"]["retrieved_at"] == FETCHED.isoformat()

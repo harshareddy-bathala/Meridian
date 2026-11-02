@@ -173,7 +173,7 @@ def _add_invite_parser(
 def _add_catalogue_parser(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """Wire ``meridian catalogue`` and its one action."""
+    """Wire ``meridian catalogue`` and its two actions."""
     catalogue = subcommands.add_parser(
         "catalogue",
         help="load the satellites this deployment tracks",
@@ -193,6 +193,22 @@ def _add_catalogue_parser(
         required=True,
         metavar="PATH",
         help="the catalogue document; see deploy/catalogue/README.md",
+    )
+    export = catalogue_actions.add_parser(
+        "export",
+        help="write the catalogue held, with each satellite's current set, to a file",
+        description=(
+            "Writes the satellites, downlinks and the element set current now for "
+            "each, in the format `load` reads, so a machine with no network can "
+            "bring a stack up from the sets another machine fetched (D-321). The "
+            "file holds another catalogue's lines: keep it out of git."
+        ),
+    )
+    export.add_argument(
+        "--output",
+        required=True,
+        metavar="PATH",
+        help="where to write it, for example data/catalogue/live.json",
     )
 
 
