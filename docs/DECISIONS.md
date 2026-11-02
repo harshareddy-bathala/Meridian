@@ -6618,6 +6618,34 @@ D-137 asks who may register an area of interest and whether a registration is pu
 
 ---
 
+## D-330 — The demonstration fleet: fifty stations, one fault to a fifth of them, and nothing tuned for the audience
+
+**2026-11-02 · accepted** · *`meridian_sim/{faults,fault_schedule}.py` (`station_faults`, scenario `demo`); `deploy/docker-compose.yml` (`--profile demo`, `SIMULATOR_CATALOGUE`); `deploy/.env.example`; Stage 35. Applies D-075, D-189, D-253 and D-270.*
+
+A fleet somebody watches on the wall clock has to look like a network: most stations working, and a few failing in ways the platform can be seen to explain. Every existing scenario gives each station every fault it names, so a fleet under `diagnosis` breaks everywhere at once.
+
+**The `demo` scenario** names `diagnosis`'s six faults. A station carries the fleet's faults and **at most one of its own**:
+- about one station in five carries one (`ONE_FAULT_SHARE`), and the rest carry none;
+- the choice is drawn from the station's seed alone, on a stream of its own, so it never depends on the fleet's size (D-075) and a restart keeps it;
+- seed 4471's fifty stations give eleven faulty ones: three clock steps, three degraded decoders, three dead receivers, one obstruction and one interference source. A unit test pins that fleet, so a change to the draw shows there rather than as a trial of a different fleet;
+- the silent satellite is the fleet's (D-253), so every station sees it, once, in the run's first hour or so. The profile names Meteor-M2-3, which every shipped catalogue holds.
+
+Every other scenario draws exactly what it drew before: `station_faults` returns a scenario's whole list unless it is in `ONE_FAULT_SHARE`. The pinned digest of the earlier scenarios' schedules holds.
+
+**The fault specification is untouched** (D-270). `sky_faults.py` and `clock_faults.py` still draw every kind the scenario names, and `schedule_for` keeps from their draws only the one the station carries. A carried fault therefore has the very shape and onset the pinned code drew, and the review D-105 owes reads the same text it did. The choice of which fault a station carries is `faults.py`'s, which is not part of the specification.
+
+**Degradation is left out, and nothing is tuned to bring a warning on screen.** A receive-chain warning needs a baseline, trained from complete UTC days over fourteen days (D-293), and then the median of three receptions 3 dB short (D-294). A fleet started cold trains its first baselines on whatever its chains do, so a degradation from the first hour would be learned as normal and never warned of. Shortening the training interval for the demonstration, or flying weeks of history into its database, would show a warning that the deployed rules would not have raised. The demonstration shows what the platform does: an open warning when one arises, and *none open* otherwise. SC-9's sealed fleets are the evidence that warnings work (D-296).
+
+**A profile, not an override file.** Everything the demonstration changes is the simulator's: its count, scenario, run id and catalogue. The jobs service already schedules with the optimiser under its defaults (D-170). So `demo-seed` and `demo-simulator` are the sim services with other settings, merged from the same anchors, and a state volume of their own. Their stations, invites and ledger never meet a sim fleet's (D-080), and the run id is `demo-<seed>`.
+
+**The catalogue is chosen, not fixed.** `sim-seed` loads the first file of `SIMULATOR_CATALOGUE` that exists in `deploy/catalogue/`, mounted from the checkout, so a file exported after the image was built is the one loaded. The sim profile's default is `development.json`, as before. The demo's list is `live.json`, then `expo.json`, then `development.json`: element sets fetched by `meridian-ingest` and exported for offline use first (D-079, D-225), and the file that is always there last.
+
+*Rejected: a share drawn per fleet* (exactly ten faulty stations of fifty). It would make a station's fault depend on the count, which D-075 rules out.
+
+*Rejected: a `demo` mode in the platform.* The platform does not know it is being demonstrated, which is the point of demonstrating it.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
