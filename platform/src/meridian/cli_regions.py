@@ -27,7 +27,7 @@ from pathlib import Path
 import psycopg
 
 from meridian.config import load_settings
-from meridian.datasets.publish import DamagedSnapshotError
+from meridian.datasets.publish import DamagedSnapshotError, read_directory
 from meridian.regions.alerts import RecordOnlyDelivery, read_alerts, record_alerts
 from meridian.regions.areas import AreaRefusedError, NewArea, new_area
 from meridian.regions.config import (
@@ -38,6 +38,11 @@ from meridian.regions.config import (
 from meridian.regions.geometry import GeometryError, Polygon
 from meridian.regions.publish import publish_report
 from meridian.regions.report_text import report_lines
+from meridian.regions.summary import (
+    NotSummarisableError,
+    areas_summary,
+    write_summary,
+)
 from meridian.store.areas_of_interest import (
     NewAreaRow,
     insert_area,
@@ -56,7 +61,7 @@ DEFAULT_ROOT = Path("data/datasets")
 def add_regions_parser(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """Wire ``meridian regions`` and its five actions."""
+    """Wire ``meridian regions`` and its six actions."""
     regions = subcommands.add_parser(
         "regions",
         help="areas of interest: register them, report on them, record alerts",
@@ -81,12 +86,25 @@ def add_regions_parser(
     report.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     record = actions.add_parser("record-alerts", help="record a report's alerts")
     record.add_argument("--report", type=Path, required=True)
+    summary = actions.add_parser(
+        "summary",
+        help="write a report's areas, series and changes for the public read API",
+    )
+    summary.add_argument("report", type=Path, help="a sealed regional report")
+    summary.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="for example data/published/areas.json; served only once D-137 "
+        "is settled and AREAS_PUBLISHED is set (D-326)",
+    )
 
 
 def run_regions(args: argparse.Namespace) -> int:
     """Run one ``meridian regions`` action."""
-    if args.action == "report":
-        return _report(args)
+    offline = {"report": _report, "summary": _summary}
+    if args.action in offline:
+        return offline[args.action](args)
     actions = {
         "add": _add,
         "list": _list,
@@ -189,6 +207,18 @@ def _report(args: argparse.Namespace) -> int:
     _say(f"{published.path}  {held}")
     for line in report_lines(report):
         _say(line)
+    return 0
+
+
+def _summary(args: argparse.Namespace) -> int:
+    try:
+        summary = areas_summary(read_directory(args.report))
+        write_summary(args.output, summary)
+    except (NotSummarisableError, DamagedSnapshotError, OSError) as exc:
+        return _refuse("summary", str(exc))
+    _say(f"Wrote {args.output}")
+    _say(f"  report  {summary['report_sha256']}")
+    _say("  not public until D-137 is settled and AREAS_PUBLISHED is set (D-326)")
     return 0
 
 
