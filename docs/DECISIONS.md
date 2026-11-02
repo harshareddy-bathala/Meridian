@@ -1205,6 +1205,8 @@ The trigger to revisit: the first time the platform is reachable from outside th
 
 **The design obligation this leaves is small and worth keeping.** Reception (SDR capture, rotator control, decoders) stays separable from the MSP client rather than interleaving protocol calls with radio control, and standard interfaces are preferred where one exists — hamlib `rotctld` for the rotator, files or pipes for decoder output. That costs nothing now, and it is what stops "independent" from quietly meaning "unable to do anything else". It is a shape, not a feature, and no SatNOGS or TinyGS code, dependency or API call belongs in this repository.
 
+*Amended by D-322 (proposed 2026-11-02).* An API call reading SatNOGS Network's public observation archive, from `meridian-ingest` and for training and evaluation only, is no longer excluded by the sentence above. Everything else it says about the reception path stands.
+
 **Hardware this assumes.** The full ₹43,500 build — `PROJECT.md` §17's Tiers 1, 2 **and 3** — so tracking is funded rather than optional. One Pi-and-SDR station receiving on **137 MHz** (Meteor-M LRPT, the primary target) through a fixed QFH, and **437 MHz** through the crossed Yagi on the workshop-built rotator, the latter being where the cubesat traffic SatNOGS carries mostly sits. Tier 3 buys the antenna, rotator, motors and amplifier — not the receiver, which already tunes both. Alongside it, an **ESP LoRa node as a second receiving path** for LoRa-modulated satellites — a receiver, not a controller, and not a replacement for anything: the Arduino Uno R4 WiFi remains the rotator controller exactly as `CLAUDE.md`'s stack section states. The LoRa node is TinyGS-class hardware by nature and is nonetheless ours, speaking MSP; that it *could* run TinyGS firmware and will not is the clearest illustration of this decision.
 
 ---
@@ -6527,6 +6529,46 @@ D-320 brings current element sets in through `meridian-ingest`, which needs a ne
 *Rejected: committing a refreshed `development.json` with real sets.* It would republish CelesTrak's lines, and it would age in git exactly as the current file has.
 
 *Rejected: an age computed per pass and stored.* `passes.element_set_id` already lets a report compute it for any pass; the figure missing was the live one.
+
+---
+
+## D-322 — D-053 narrowed: another network's public archive may be read, for training and evaluation only
+
+**2026-11-02 · proposed, for the team to accept** · *amends D-053; `meridian_ingest.adapters.public.satnogs_network`, Stage 34*
+
+D-053 ends: "no SatNOGS or TinyGS code, dependency or API call belongs in this repository." It was written about the reception path — whether a third-party client sits on our station — and its reasons are all about that path: one receiver, two schedulers, scope. D-138, a month later, named what an archive *may* be used for (fitting the simulator, cross-checking a silent satellite, training and evaluation under Stage 16's weighting) and built the ingest subsystem for it, and the only archive it could then read was one we wrote. The two entries now disagree about whether the archive D-138 was built for may be read at all.
+
+**Settled narrowly.** `meridian-ingest` may read SatNOGS Network's public observation archive, through its public API, on the ingest machine (D-225). Everything else D-053 says stands:
+- **no third-party client, code or dependency** on Meridian's path from prediction to reception;
+- **no adapter on the reception path**, and no runtime read of archive rows by scheduling, reception or diagnosis (D-102; D-108's first question stays open);
+- **no published comparison** of their totals with ours. Parity is still measured on our own numbers, for the selection-bias reason D-053 gives;
+- **no code copied or read** from the network's software, which is AGPL (rule 3). The adapter is written from the endpoint's own answers and the network's published pages.
+
+**What the archive is for** is D-138's list: fitting the yield model and the simulator's outcome distributions, with completeness and inverse-propensity weights because the archive holds only passes somebody chose to observe (Stage 16), and cross-checking a silent satellite in evaluation. A figure computed from it is labelled as measured by that network, not by Meridian.
+
+**Why now.** The yield model has only ever been fitted on hand-built worlds (Stage 22's own caveat), and station 001 has no receptions yet. A real fit, honestly labelled and weighted, is the first evidence the prediction method works on data nobody here invented.
+
+*Rejected: leaving D-053's sentence as it is and building nothing.* Every model figure would remain a figure about a world we wrote.
+
+*Rejected: deleting the sentence.* D-053 is a record of what was decided and why; the amendment is how the log stays honest about having been too broad (the precedent is D-053's own same-day amendment).
+
+---
+
+## D-323 — SatNOGS observations: one window per request, their rating kept, a full page refused
+
+**2026-11-02 · accepted, under D-322** · *`meridian_ingest.adapters.public.satnogs_network`, `ATTRIBUTION.md`, Stage 34*
+
+**The licence is CC BY-SA 4.0**, as the network's home page states. Share-alike binds anything that republishes the records, so none is: the evidence dataset already carries no ingested row (D-310, D-313), and D-136 stays settled for it.
+
+**One request is one satellite over one six-hour window on the UTC grid.** The endpoint pages 25 at a time behind a cursor in a `Link` header, and the fetch path follows a listing one level, not a chain of cursors. A Meteor satellite is observed about sixteen times a day network-wide, so a window fits in a page; **a page that comes back full is refused**, because it may have been cut short and a reception silently missing is a selection filter nobody chose. The window is named by its start, so a re-fetch is the same identifier and supersedes rather than duplicates (D-141).
+
+**A reception belongs to the window it starts in.** The normaliser keeps only observations whose start lies in the artefact's window, whatever the endpoint means by its own `start` and `end`, so adjacent windows never count one twice. A `future` observation has not happened and is dropped. A page naming another satellite than the one asked about is refused: it is the sign of a filter ignored, which a first probe of the endpoint showed can happen silently.
+
+**Their rating, kept; ours, derived.** `source_outcome` holds `status` and `waterfall_status` verbatim. `archive_outcome` maps them: good with demodulated data → `decoded`; good without, or a person's "with signal" → `signal_no_decode`; bad → `no_data`; failed or unknown → `unknown`, because a failed observation is the station's failure, not the satellite's silence. Never `no_signal` (D-139).
+
+**No limit is published, so none is declared** (D-223). Each fetch is bounded by its request budget, `follow` asks daily, and its week of lookback re-fetches windows whose ratings were still being vetted, each re-fetch a superseding artefact.
+
+**Unverified, and said so:** the `waterfall_status` spellings beyond `unknown` (`with-signal`, `without-signal`) were read from the network's vetting page, not seen in an answer; a different spelling would map a vetted observation to `unknown`, which loses information and invents none.
 
 ---
 
