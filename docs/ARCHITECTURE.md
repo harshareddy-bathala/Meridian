@@ -169,6 +169,23 @@ Target is an Arduino Uno R4 WiFi — **Renesas RA4M1, not AVR.** AVR-targeted st
 ### `ingest`
 External archive adapters, and adapters for published environmental and space-weather products — nine source classes since Stage 31, into `environment_samples` (D-132, D-220, D-221). **Optional path.** Failure here degrades model quality; it never blocks scheduling or reception. Near-real-time ingest is `meridian-ingest follow`, run beside the platform and never inside its jobs service (D-225); features read what it loaded from a snapshot, never live (D-224).
 
+Since Stage 34 it also brings **current element sets** (D-320) and **another network's receptions** (D-322, D-323). How external data reaches each module, every arrow through `meridian-ingest` and its raw store:
+
+```mermaid
+flowchart LR
+    C[CelesTrak GP] --> I[meridian-ingest<br/>raw store, load]
+    S[SatNOGS Network] --> I
+    P[Kp, cloud, POWER,<br/>NDVI, FIRMS, lights] --> I
+    I -->|element_sets, source celestrak| G[pass generation]
+    G --> SC[scheduler] --> M[MSP to stations]
+    I -->|archive_observations,<br/>carried sets| X[snapshot]
+    I -->|environment_samples| X
+    X --> F[fit A–D] --> R[sealed report] --> Y[model summary] --> D[dashboard]
+    X --> RG[regional report] --> A[areas summary]
+```
+
+Nothing live reads an archive row or an archive-carried set (D-102, D-325), and with every source unreachable the scheduler keeps propagating the last stored set while `ElementSetsStale` says how old it is (D-321).
+
 One subsystem, whatever the payload. Every source records the same provenance — source, original identifier, retrieval time, source version, licence, checksum, transformation version — and every adapter downloads into immutable raw storage, validates, hashes and normalises separately. Access constraints differ per source and are recorded per source: some need a free key and count requests, some need registration before a download, at least one needs neither. Keys are secrets and are never committed.
 
 **Published indices and conditions reach the model as features, never as gates** (D-131). A missing index degrades a prediction; it never skips a pass, which would both make an external service a runtime dependency and poison the archive by never observing the passes the model most needs. Feature values are the ones published *before* the pass, never a later revision.

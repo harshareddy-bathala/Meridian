@@ -545,7 +545,7 @@ Settled in D-013 and D-021, because `DATA-MODEL.md` previously gave column names
 | `pass_classifications.classification` | `successful_reception`, `signal_no_decode`, `confirmed_miss`, `satellite_silent`, `satellite_state_indeterminate`, `station_unavailable`, `station_not_confirmed_listening`, `assignment_declined` — D-180 |
 | `observations.outcome` | the five values of MSP §4.4 — D-010 |
 | `observations.provenance` | `station`, `archive`, `manual` |
-| `element_sets.source` | `celestrak`, `spacetrack`, `manual`, `simulator` |
+| `element_sets.source` | `celestrak`, `spacetrack`, `satnogs_network`, `manual`, `simulator` — `satnogs_network` is a set an archived observation carried, read only for the archive's denominator and never by a live read (D-325) |
 | `noise_measurements.source` | `observation`, `survey` — D-173 |
 | `horizon_profiles.source` | `declared`, `learned` — D-031, D-174 |
 | `satellites.orbital_regime` | `leo`, `meo`, `geo`, `heo`, `other` — `EVALUATION.md` §6.1 segments by it |

@@ -249,7 +249,8 @@ def test_every_clause_is_in_the_register_once_as_the_roadmap_words_it() -> None:
     clauses = roadmap_clauses(ROADMAP.read_text(encoding="utf-8"))
     rows = register_rows(REGISTER.read_text(encoding="utf-8"))
 
-    assert sum(len(one) for one in clauses.values()) == 40
+    # 40 clauses through Stage 30, and Stage 34's real-data path (D-320).
+    assert sum(len(one) for one in clauses.values()) == 41
     assert coverage_problems(clauses, rows) == []
 
 

@@ -22,6 +22,10 @@ Terms used across the specification documents, the code and the report. Written 
 
 **Element set** — a small published file of orbital parameters from which a satellite's position is predicted. Commonly called a TLE (two-line element set). Free, public, regularly updated, and **distributed with no stated uncertainty** — which is the gap this project measures.
 
+**Carried element set** — the element set another network's archived observation was scheduled with, stored as source `satnogs_network`. It is the only record of what a past day's orbit looked like, so it computes which passes an archive station could have heard; no live read ever uses it (D-325).
+
+**Offline catalogue** — `data/catalogue/live.json`, the catalogue a connected machine exports with each satellite's current set, which a machine with no network loads instead of fetching (D-321).
+
 **Epoch** — the timestamp an element set describes. Prediction error grows with the age of the element set relative to its epoch, so **element-set age is a first-class feature everywhere in this system**.
 
 **SGP4** — the standard model that turns an element set into a position. We use the `sgp4` and `skyfield` libraries and never reimplement it; a hand-written version would be slower and subtly wrong.

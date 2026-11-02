@@ -46,7 +46,28 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-10-29. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-11-02. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+
+**Stage 34's software is built** (2026-11-02), beside Stage 35. Its decisions are D-320 through D-326, its migration is `0032`, and `docs/OPERATIONS.md` § Element sets and the archive, and every source live, § The real-data model run, from the SatNOGS archive, and § Publishing areas, once D-137 is settled are its runbook. External data had only ever reached Meridian as fixtures; now it can arrive for real.
+- **The completion gate passes.** *External data reaches every module that reads it, through `meridian-ingest` alone and labelled with its source, and the platform keeps scheduling from what it last stored when every source is unreachable.* `tests/integration/test_external_data_flow.py` loads `deploy/catalogue/meteor.json`, then a CelesTrak fetch through the raw store, and generates passes on the real propagator. It asserts:
+  - every pass names a fetched set and its artefact;
+  - a culmination matches the simulator's own propagation of the same lines to 0.01°;
+  - with every socket refused, a later day still generates, and the age the scrape reports grows;
+  - nothing live imports `meridian_ingest` or reads an archive table.
+- **Element sets are an ingest product** (D-320): CelesTrak's GP sets for satellites the catalogue tracks, traced to their artefact; the platform still loads only from a file.
+- **An offline catalogue and a published age** (D-321): `meridian catalogue export`, `meridian_element_set_age_seconds` and `ElementSetsStale`; `meteor.json`, its LRPT frequency recorded as unverified.
+- **SatNOGS Network's archive, under D-322's narrowing of D-053**, for training and evaluation only (D-323): one six-hour window per request, a full page refused, the network's rating kept verbatim.
+- **An impossible published value is a named gap** (D-324).
+- **Carried element sets and the model summary** (D-325): the set each archived observation was scheduled with computes the archive's denominator and nothing live; `meridian report summary` writes `model-summary-1` for the dashboard (D-332).
+- **Areas, built and closed** (D-326, proposed): `meridian regions summary` and `GET /api/v1/areas`, served only once the team accepts D-326 and sets `AREAS_PUBLISHED`.
+- **Owed, not done:**
+  - **the first live fetch of each source**, by hand on the ingest machine, recorded in the runbook's table;
+  - **the real-data model run**, once the SatNOGS backfill is loaded;
+  - the team's acceptance of D-322 and D-326;
+  - the LRPT frequency confirmed on station 001.
+- **Known limits:**
+  - only configuration A can be fitted on an archive: its passes carry an elevation and nothing else we compute (D-156);
+  - SatNOGS's endpoint is undocumented beyond its browsable page, so its adapter relies on what its answers showed.
 
 **Stage 30's software is built** (2026-10-29). Its decisions are D-310 through D-316, `docs/OPERATIONS.md` § The evidence dataset is its runbook, and it has no migration. **With it, every stage of the roadmap's software is built.** What remains is Stage 24's seventy-two hour run on the Pi, the one acceptance clause still pending.
 - **The completion gate passes, across two machines.** *SC-10: regenerating the package from the same snapshot, configuration and seed, on a machine other than the one that produced it, gives the identical content hash.*
@@ -2779,6 +2800,12 @@ Added with Stages 25–30 (D-095). Those stages follow this one only so that no 
 - owner reports are delivered and regenerate to their recorded hash;
 - the evidence dataset regenerates to an identical hash;
 - simulator ground truth never reaches MSP or the platform database.
+
+## Real-data path
+
+Added with Stage 34, when external data first reached Meridian for real (D-320).
+
+- external data reaches every module that reads it through meridian-ingest alone, and scheduling continues from what is stored when every source is unreachable.
 
 ---
 

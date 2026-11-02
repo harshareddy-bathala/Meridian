@@ -6971,6 +6971,19 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the amended entries | D-115, whose manifest now counts rows and whose restore checks them; D-135, whose station half D-281 answers |
 | — the documents | `THREAT-MODEL.md` (B3, P-12 to P-14, T-5, T-6, O-7, O-8, D-4); `EVALUATION.md` §12; `GLOSSARY.md`; `README.md`; `CLAUDE.md` (the layout's `deploy/` line) |
 
+**Landed 2026-11-02**, building Stage 34's real-data ingest.
+
+| Decision | Applied to |
+|---|---|
+| D-320 element sets as an ingest product | migration 0032; `meridian_ingest/adapters/public/celestrak.py`; `meridian_ingest/{load,load_report,cli_load,config_extent}.py`; `meridian_ingest/normalise/records.py`; `meridian/store/{element_sets,satellites}.py`; `ATTRIBUTION.md`; `tests/unit/test_celestrak_source.py`; `tests/integration/test_element_set_ingest.py` |
+| D-321 the offline catalogue and element-set age | `meridian/{catalogue_export,cli_catalogue}.py`; `meridian/store/catalogue_reads.py`; `meridian/api/element_set_families.py`; `deploy/prometheus/{rules,tests}/`; `deploy/catalogue/{meteor.json,README.md}`; `OPERATIONS.md` § ElementSetsStale |
+| D-322 D-053 narrowed (proposed) | D-053's amendment note |
+| D-323 SatNOGS observations | `meridian_ingest/adapters/public/satnogs_network.py`; `ATTRIBUTION.md`; `tests/unit/test_satnogs_network_source.py`; `tests/integration/test_satnogs_archive_load.py` |
+| D-324 impossible values as named gaps | `meridian_ingest/normalise/samples.py`; `deploy/ingest.live.toml.example` |
+| D-325 carried sets and the model summary | migration 0032; `meridian/store/{element_sets,satellite_catalogue,snapshot_reads}.py`; `meridian/datasets/archive_passes.py`; `meridian/reports/summary.py`; `meridian/cli_report.py`; `analysis/configs/archive.toml.example`; `tests/unit/test_report_summary.py` |
+| D-326 areas, closed until D-137 is accepted (proposed) | `meridian/regions/summary.py`; `meridian/cli_regions.py`; `meridian/api/public/{areas,models/areas,surface}.py`; `THREAT-MODEL.md` §7; `tests/msp_conformance/test_public_areas_endpoint.py` |
+| — the completion gate | `tests/integration/test_external_data_flow.py`; `docs/ACCEPTANCE.md` § Real-data path |
+
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
