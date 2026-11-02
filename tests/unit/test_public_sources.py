@@ -578,6 +578,42 @@ def test_a_sample_with_incomplete_or_impossible_fields_is_refused(
         a_sample(**overrides)
 
 
+@pytest.mark.parametrize(
+    ("quantity", "value"),
+    [
+        ("kp_index", 12.0),
+        ("kp_index", -0.3),
+        ("cloud_cover", 140.0),
+        ("aerosol_optical_depth", -0.01),
+        ("precipitation", -1.0),
+        ("ndvi", 1.4),
+        ("fire_radiative_power", -5.0),
+        ("night_lights_radiance", -1.0),
+    ],
+)
+def test_a_value_its_quantity_cannot_take_is_a_named_gap(
+    quantity: str, value: float
+) -> None:
+    """D-324: a source's error is kept visible, and never read as a feature."""
+    sample = a_sample(quantity=quantity, value=value)
+    assert sample.value is None
+    assert sample.missing_reason is not None
+    assert str(value) in sample.missing_reason
+    assert quantity in sample.missing_reason
+
+
+@pytest.mark.parametrize(
+    ("quantity", "value"),
+    [("kp_index", 0.0), ("kp_index", 9.0), ("cloud_cover", 100.0), ("ndvi", -1.0)],
+)
+def test_a_value_at_the_edge_of_its_range_is_kept(quantity: str, value: float) -> None:
+    assert a_sample(quantity=quantity, value=value).value == value
+
+
+def test_a_quantity_with_no_stated_range_is_not_checked() -> None:
+    assert a_sample(quantity="something_new", value=-1e9).value == -1e9
+
+
 def test_no_ingest_module_can_decode_an_image() -> None:
     """D-133 by construction: no image library is imported, so no pixel is read."""
     source = Path(__file__).parents[2] / "ingest" / "src"
