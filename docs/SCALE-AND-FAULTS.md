@@ -332,3 +332,31 @@ The negative control is Stage 21's `decoder_degraded`, which has no cause catego
 The negative control is unchanged: a degraded decoder should be *undetermined*.
 
 **Known limits:** a step is a shape, not a model of how a clock fails. A real failed time source drifts, steps and recovers in ways this does not draw. The claim it supports is D-105's narrow one again: given evidence of this shape, the diagnoser names a timing fault.
+
+---
+
+## The demonstration fleet
+
+**Simulated, every figure.** Stage 35's `demo` profile: fifty stations, seed 4471, the `demo` scenario. Eleven of the fifty carry one fault each, and the rest none (D-330). Passes settle an hour after their window, because no fault in the scenario queues a report (D-333). One laptop, 2 November 2026, on the development catalogue, whose element sets were 83 days old. The geometry is therefore internally consistent and not today's sky.
+
+**The first trial found the margin.** It flew 3 h 53 min under the default 24-hour settle margin. `meridian reliability faults` judged its 74 faults with none failed, and the database held **no classification and no diagnosis**: no pass had settled. That is why D-333 exists.
+
+**The second trial, 2 hours** (13:51–15:51 UTC), under `reliability.demo.toml`:
+
+| | |
+|---|---|
+| faults judged by `meridian reliability faults` | 72, none failed: 50 fleet-wide silence windows, 12 dead receivers, 6 degraded decoders, 2 stepped clocks, 1 obstruction, 1 interference source |
+| no false confirmed miss | held on every fault it applied to. The dead receivers touched no pass that had been classified, so the check had nothing to refuse |
+| passes reported | 26: 5 decoded, 9 signal without a decode, 11 no signal, 1 aborted |
+| passes settled and classified | 6, the ones whose window closed more than an hour before the end: 5 confirmed misses, 1 signal without a decode |
+| losses diagnosed | all 6, none left over: 1 *satellite silent*, 5 *undetermined* |
+
+**What the six diagnoses say.**
+- **The silence** opened at 14:02:32 on Meteor-M2-3 and closed at 14:46:03.
+- **Named:** sim-047's pass, at 42.8°, heard nothing and was named *satellite silent*, with two silences and no signal around it. It began 29 seconds before the silence opened. So by D-253's rule (a fault in force when the pass began) it is not a case of the fault, although the satellite was silent for all but the first 29 seconds of it.
+- **Two passes began inside the silence and were left *undetermined*:** sim-032's at 78.5° and sim-021's at 65.6°. Another station heard the satellite within D-276's ±45 minutes, after the silence had closed, so the test read the satellite as transmitting. **A 44-minute silence is shorter than the 90 minutes the test looks across**, which is the limit D-276's window carries. Saying *undetermined* rather than a wrong cause is the behaviour D-273 asks for.
+- **The other three were low passes**, at 14.7°, 14.9° and 23.8°. Below D-276's 40° floor a silence says nothing, and *undetermined* is the honest answer.
+
+**What two hours cannot show.** No pass a station fault acted on was among the six that settled. So no dead receiver, stepped clock, obstruction or interference source had a loss to be named for. A fleet left running for a day gives the diagnosis its cases. SC-8's sealed fleets are where its accuracy is measured (D-278), and a demonstration is not.
+
+**Regenerating it.** Bring up the profile as `OPERATIONS.md` § The demonstration says, wait two hours, stop `demo-simulator`, and judge its ledger with `meridian reliability faults --ledger -`. The seed fixes which stations break and when (D-330). The passes depend on the catalogue and the start time, so a later run is a different trial of the same fleet, not a regeneration of this one.
