@@ -235,3 +235,24 @@ def test_the_shipped_development_catalogue_reads(tmp_path: Path) -> None:  # noq
     assert all(one.source == "manual" for one in document.element_sets)
     # Both downlinks are Meteor LRPT, whose interval the file states (D-250).
     assert {one.frame_interval_s for one in document.transmitters} == {0.113778}
+
+
+def test_the_live_catalogue_reads_and_leaves_its_sets_to_ingest() -> None:
+    """`meteor.json` names what a live deployment tracks; ingest dates it (D-320).
+
+    No element set: a set in this file would be a fixed epoch ageing in git,
+    the problem `development.json` already documents. Its downlinks must be
+    Meteor LRPT in the band a virtual station declares, or a demonstration
+    fleet would register and be given nothing.
+    """
+    document = read_catalogue(Path("deploy/catalogue/meteor.json"))
+
+    assert [one.satellite_id for one in document.satellites] == [
+        "norad:57166",
+        "norad:59051",
+    ]
+    assert document.element_sets == ()
+    for one in document.transmitters:
+        assert one.mode == "lrpt"
+        assert 136_000_000 <= one.centre_freq_hz <= 138_000_000
+        assert one.frame_interval_s == 0.113778

@@ -1,0 +1,34 @@
+{
+  "satellites": [
+    {
+      "satellite_id": "norad:57166",
+      "name": "Meteor-M2-3",
+      "orbital_regime": "leo",
+      "transmitters": [
+        {
+          "centre_freq_hz": 137900000,
+          "mode": "lrpt",
+          "polarisation": "rhcp",
+          "bandwidth_hz": 150000,
+          "frame_interval_s": 0.113778
+        }
+      ],
+      "element_sets": []
+    },
+    {
+      "satellite_id": "norad:59051",
+      "name": "Meteor-M2-4",
+      "orbital_regime": "leo",
+      "transmitters": [
+        {
+          "centre_freq_hz": 137900000,
+          "mode": "lrpt",
+          "polarisation": "rhcp",
+          "bandwidth_hz": 150000,
+          "frame_interval_s": 0.113778
+        }
+      ],
+      "element_sets": []
+    }
+  ]
+}
