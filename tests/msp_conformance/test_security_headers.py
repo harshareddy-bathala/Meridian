@@ -88,6 +88,20 @@ def test_the_policy_allows_nothing_inline_and_nothing_elsewhere() -> None:
     assert foreign == {"https://tile.openstreetmap.org"}
 
 
+def test_the_tiles_alone_send_the_dashboard_s_origin() -> None:
+    """D-336: no referrer from the page, and only the origin from a tile request.
+
+    OpenStreetMap refuses a browser's tile request that names no referrer, so
+    the tile layer overrides the page's ``no-referrer`` for its images alone, to
+    ``strict-origin``: the dashboard's origin, never a path.
+    """
+    station_map = (REPO_ROOT / "dashboard/src/StationMap.tsx").read_text()
+
+    assert 'TILE_REFERRER_POLICY = "strict-origin"' in station_map
+    assert "referrerPolicy: TILE_REFERRER_POLICY" in station_map
+    assert HEADERS["referrer-policy"] == "no-referrer"
+
+
 def test_the_tile_origin_is_the_one_the_map_uses() -> None:
     """D-092's tiles: the map and the policy must name the same host."""
     station_map = (REPO_ROOT / "dashboard/src/StationMap.tsx").read_text()

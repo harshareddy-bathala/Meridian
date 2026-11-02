@@ -6767,6 +6767,22 @@ It is a host tool, like the front drill it imports from (D-282), and exits non-z
 
 ---
 
+## D-336 — The map's tiles send the dashboard's origin, because OpenStreetMap refuses a browser that sends none
+
+**2026-11-02 · accepted** · *`dashboard/src/StationMap.tsx` (`TILE_REFERRER_POLICY`); `tests/msp_conformance/test_security_headers.py`; Stage 35. Narrows D-208 for tile images; D-092's tile choice unchanged.*
+
+On the demonstration stack, every map tile came back as OpenStreetMap's "Access blocked" image: *App is not following the tile usage policy*. The map drew those images, because a refusal sent as a picture is not a failed tile, so D-092's fallback to the graticule never ran. **The cause is ours.** D-208 sends `Referrer-Policy: no-referrer` on every response, so the browser's tile requests named no referrer, and OSM's tile policy refuses a browser app that sends none. Requests from `curl` were served, which is why it had not been seen. Through Vite's dev server, which sends no such header, the tiles loaded.
+
+**The tile layer alone sends `strict-origin`.** Leaflet sets the policy as an attribute on each tile image, and an element's own policy takes precedence over the document's. A tile request now names the dashboard's origin, `https://dash.meridian.org.in/`, and never a path or a fragment. Every other request from the page still sends no referrer.
+
+**What it discloses** is the dashboard's hostname, to the one tile server the policy already lets the page load images from. That hostname is public: it is the address a visitor typed. A test holds the tile layer's policy and the page's `no-referrer` together.
+
+**Seen in a browser** on this branch's image: 16 tiles, all `200`, each naming `http://localhost:8080/` and nothing more; the map drawn on its base layer.
+
+*Rejected: `strict-origin-when-cross-origin` for the whole page.* It would fix the tiles and send our origin with every other cross-origin request the page might make, where nothing needs it. *Rejected: dropping the tiles.* D-092 kept them because a graticule alone tells a reader nothing about where a station is. Its alternatives, a self-hosted tile set or a bundled coastline, remain the answer if the tile policy ever refuses us for volume.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
