@@ -1467,6 +1467,26 @@ Each alert is recorded in `region_alerts` once — recording the same report aga
 
 ---
 
+
+### Publishing areas, once D-137 is settled
+
+Nothing about an area is public until the team accepts D-326 (D-227). Until then `/api/v1/areas` answers `not_yet_computed`. To prepare, and later to publish:
+
+1. **Register the areas**, as the team decides. Three proposed for the first public set:
+   ```bash
+   meridian regions add --label "Bengaluru urban"   --bbox 77.46,12.83,77.75,13.14
+   meridian regions add --label "Bandipur forest"   --bbox 76.20,11.60,76.75,11.85
+   meridian regions add --label "Mandya farmland"   --bbox 76.50,12.30,77.20,12.80
+   ```
+   Give FIRMS, NDVI, POWER and Black Marble boxes and points that cover them (§ Element sets and the archive, and every source live).
+2. **Report and summarise** from a snapshot:
+   ```bash
+   meridian regions report --snapshot <raw snapshot>
+   meridian regions summary <report directory> --output data/published/areas.json
+   ```
+   The summary holds each active area's label, size and box, its series and changes, and the sources behind them: no note, no polygon, no reception count.
+3. **Publish only on the team's acceptance of D-326**: set `AREAS_PUBLISHED=true` and `AREAS_SUMMARY=/published/areas.json` on the api, and record the acceptance in the same change.
+
 ## Stored measurements and profiles
 
 What Stage 19 keeps, where each comes from, and how to read it (D-173 to D-178). Nothing here is dropped on a timer: raw heartbeats and observations are compressed after 7 days and kept (D-178).

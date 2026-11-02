@@ -6600,6 +6600,24 @@ D-150 computes the passes an archive station could have heard with the element s
 
 ---
 
+## D-326 — Proposed answer to D-137: the team registers areas, a registration is public, and publishing is a switch the team throws
+
+**2026-11-02 · proposed, for the team to accept** · *`meridian regions summary`, `GET /api/v1/areas`, `AREAS_PUBLISHED`, `AREAS_SUMMARY`, Stage 34. Settles D-137 when accepted; D-227 holds until then.*
+
+D-137 asks who may register an area of interest and whether a registration is public. D-227 answered it narrowly for Stage 32: an operator registers at the command line and nothing is published. This proposes the rest.
+
+- **Only the team registers an area**, at the command line, as now. No endpoint, public or MSP, creates one; a station owner who wants an area asks the team. An area is then a decision somebody accountable took, and the label rules of D-227 — never a person, an address, a phone or an email — stay enforced at registration.
+- **A registration is public**: its label, its size and its bounding box, with the public-product series and changes the regional report computes over it, and the sources and terms each value came from. Never its notes, which stay an operator's (D-227), never its polygon, which a bounding box summarises well enough for a map, and never a count of our own receptions over it, which may be simulated and belongs with the reception figures.
+- **Publishing is a switch the team throws.** `meridian regions summary <report> --output <file>` writes `areas-summary-1` from a sealed report, copied and never recomputed (D-229). `GET /api/v1/areas` serves it only when `AREAS_PUBLISHED=true` and `AREAS_SUMMARY` names the file; otherwise it answers `not_yet_computed` with this decision's number (D-086). A file the reader does not recognise is a `server_error`, never part of a page. Accepting this entry and setting the flag are one act, recorded in the PR or commit that sets it.
+
+**Why public.** The regional layer exists to say something about places from published environmental data and our own receptions (D-131). Hidden, it is an operator's notebook; public, with its sources named and its intervals shown, it is checkable.
+
+*Rejected: anyone may register an area.* A public form invites labels that describe people, and makes moderation a duty nobody on the team has taken on.
+
+*Rejected: publishing each area's polygon.* Nothing the dashboard draws needs more than a box, and a box is a coarser statement about a place somebody cares about.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -6628,7 +6646,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 |---|---|---|
 | **D-135** | Which cloud host and tier, on whose account, and what happens when the credit lapses. *How long a station retains an unacknowledged reception is proposed by D-281: thirty days, the platform's acceptance window* | Nothing — no gate may need a cloud host (D-130) |
 | **D-136** | Whether any ingested source's terms permit its records to be republished inside the evidence dataset | Settled for Stage 30's package by **D-313**: it republishes none, and is CC BY 4.0. Open again only for a package that would |
-| **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Publishing anything about an area. D-227 holds its place in the meantime: operator-only, unpublished |
+| **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Publishing anything about an area. D-227 holds its place in the meantime: operator-only, unpublished. **D-326 proposes the answer** (team-registered, public, behind `AREAS_PUBLISHED`); the team accepts it |
 
 ---
 
