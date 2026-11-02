@@ -2,7 +2,8 @@
 
 Turns ``store.watch_reads.ChainWatch`` into a response body: each live
 capability of the station, its current baseline, and its latest receive-chain
-warnings, open or cleared.
+warnings, open or cleared. And ``NetworkWarning`` into one row of the network's
+list, the same warning with the station and chain it names (D-331).
 
 **A chain is named by its band and frequency range**, as ``capabilities``
 already publishes them, not by the capability's database id, which the public
@@ -28,13 +29,14 @@ from pydantic import BaseModel
 
 from meridian.store.receive_chain_warnings import StoredWarning
 from meridian.store.signal_baselines import StoredBaseline
-from meridian.store.watch_reads import ChainWatch
+from meridian.store.watch_reads import ChainWatch, NetworkWarning
 
 __all__ = [
     "PublicAffectedBin",
     "PublicBaselineBin",
     "PublicChainBaseline",
     "PublicChainWarning",
+    "PublicNetworkWarning",
     "PublicReceiveChain",
     "PublicStationReceiveChains",
 ]
@@ -170,4 +172,30 @@ class PublicStationReceiveChains(BaseModel):
             station_id=station_id,
             simulated=simulated,
             chains=[PublicReceiveChain.from_row(one) for one in rows],
+        )
+
+
+class PublicNetworkWarning(PublicChainWarning):
+    """A warning in the network's list: the warning, and whose chain it is."""
+
+    warning_id: int
+    """The cursor's key; it names nothing the warning does not."""
+    station_id: str
+    band: str
+    freq_min_hz: int
+    freq_max_hz: int
+    simulated: bool
+
+    @classmethod
+    def from_network(cls, row: NetworkWarning) -> Self:
+        """Publish one warning of the network's list."""
+        held = PublicChainWarning.from_row(row.warning)
+        return cls(
+            **held.model_dump(),
+            warning_id=row.warning.id,
+            station_id=row.warning.station_id,
+            band=row.band,
+            freq_min_hz=row.freq_min_hz,
+            freq_max_hz=row.freq_max_hz,
+            simulated=row.warning.simulated,
         )

@@ -196,3 +196,47 @@ def test_the_scrape_counts_chains_and_open_warnings_per_population(
 
     assert grew(True) == (1, 1)
     assert grew(False) == (1, 0)
+
+
+def test_the_network_lists_open_warnings_newest_first_with_their_chain(
+    client: TestClient, rollback: Any, schedule_rows: Any
+) -> None:
+    """``/api/v1/receive-chain-warnings``: every station's, open by default (D-331)."""
+    schedule_rows.station(STATION, simulated=True)
+    schedule_rows.station("st_chain_api_2", simulated=False)
+    first = capability(rollback, STATION, 137_000_000)
+    second = capability(rollback, "st_chain_api_2", 137_000_000)
+    cleared = warning(rollback, baseline(rollback, STATION, first), RAISED)
+    assert cleared is not None
+    clear_warning(rollback, cleared, at=RAISED + timedelta(days=1), shortfall_db=1.0)
+    warning(rollback, baseline(rollback, STATION, first), RAISED + timedelta(days=2))
+    other = baseline(rollback, "st_chain_api_2", second)
+    warning(rollback, other, RAISED + timedelta(days=3))
+    warning(
+        rollback,
+        baseline(rollback, STATION, first),
+        RAISED + timedelta(days=4),
+        config_sha256=bytes([9]) * 32,
+    )
+
+    opened = client.get("/api/v1/receive-chain-warnings").json()
+    every = client.get("/api/v1/receive-chain-warnings", params={"state": "all"}).json()
+    paged = client.get("/api/v1/receive-chain-warnings", params={"limit": 1}).json()
+    refused = client.get("/api/v1/receive-chain-warnings", params={"state": "shut"})
+
+    assert [(one["station_id"], one["cleared_at"]) for one in opened["items"]] == [
+        ("st_chain_api_2", None),
+        (STATION, None),
+    ]
+    assert len(every["items"]) == 3
+    top = opened["items"][0]
+    assert top["band"] == "vhf"
+    assert top["freq_min_hz"] == 137_000_000
+    assert top["shortfall_db"] == 4.2
+    assert top["affected_bins"] == [
+        {"elevation_deg": 10.0, "shortfall_db": 4.4, "receptions": 3}
+    ]
+    assert top["simulated"] is False
+    assert opened["items"][1]["simulated"] is True
+    assert paged["next_cursor"] is not None
+    assert refused.status_code == 400

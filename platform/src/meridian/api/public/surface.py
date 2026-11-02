@@ -23,6 +23,7 @@ from meridian.api.public import (
     aggregates,
     areas,
     assignments,
+    chain_warnings,
     losses,
     observations,
     passes,
@@ -45,3 +46,4 @@ router.include_router(reliability.router)
 router.include_router(aggregates.router)
 router.include_router(areas.router)
 router.include_router(losses.router)
+router.include_router(chain_warnings.router)
