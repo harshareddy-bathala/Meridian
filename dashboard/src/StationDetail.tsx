@@ -7,6 +7,7 @@ import { describeCapture, type StationCapture } from "./reliability";
 import type { StationUptime } from "./uptime";
 import { UptimeStrip } from "./UptimeStrip";
 import { describeValue, type Assignment, type LatestHeartbeat } from "./schedule";
+import { SimBadge } from "./SimBadge";
 import { SnapshotNote } from "./SnapshotNote";
 import { oldest, snapshotClass } from "./snapshot";
 import type { Station } from "./stations";
@@ -94,14 +95,6 @@ function Assignments({ assignments, showStation }: { assignments: Assignment[]; 
   );
 }
 
-function SimulatedBadge() {
-  return (
-    <span className="badge badge-simulated" title="Reported by a virtual station run by the simulator">
-      simulated
-    </span>
-  );
-}
-
 function Receptions({ receptions }: { receptions: Reception[] }) {
   if (receptions.length === 0) {
     return <p>This station has reported no reception yet.</p>;
@@ -125,7 +118,7 @@ function Receptions({ receptions }: { receptions: Reception[] }) {
               <td>{formatWindow(reception.startedAt, reception.endedAt)}</td>
               <td>
                 <span className={`badge badge-outcome badge-${reception.outcome}`}>{outcomeLabel(reception.outcome)}</span>
-                {reception.simulated && <SimulatedBadge />}
+                {reception.simulated && <SimBadge />}
                 {reception.revision > 1 && <div className="dim">corrected, revision {reception.revision}</div>}
               </td>
               <td>{describeSignal(reception)}</td>
@@ -146,7 +139,7 @@ function Capture({ capture }: { capture: StationCapture | null }) {
     <p>
       Capture rate <strong>{describeCapture(capture.capture)}</strong> (95% interval), for passes whose windows
       closed between {formatDay(capture.windowStart)} and {formatDay(capture.windowEnd)}.{" "}
-      {capture.simulated && <SimulatedBadge />}
+      {capture.simulated && <SimBadge />}
     </p>
   );
 }
@@ -182,7 +175,7 @@ function ReceiveChains({ watched }: { watched: StationReceiveChains }) {
             <li key={`${chain.band}-${String(chain.freqMinHz)}`} role={open === null ? undefined : "status"}>
               <strong>{chainName(chain)}</strong>{" "}
               {open !== null && <span className="badge badge-warning">receive-chain warning</span>}
-              {open !== null && watched.simulated && <SimulatedBadge />}
+              {open !== null && watched.simulated && <SimBadge />}
               <div className={open === null ? "dim" : undefined}>{describeChain(chain)}</div>
             </li>
           );

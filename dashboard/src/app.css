@@ -1,9 +1,42 @@
+/* IBM Plex, the site's typeface, self-hosted from the same unmodified files
+   (ATTRIBUTION.md). `font-src 'self'` already allows them (D-208), and no font
+   is fetched from anywhere else. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("./fonts/IBMPlexSans-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("./fonts/IBMPlexSans-Medium.woff2") format("woff2");
+  font-weight: 500 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./fonts/IBMPlexMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
 /* The site's grounds and ink (site/brand/README.md). The signal colours there
    mean above horizon, below horizon and predicted, so liveness does not borrow
    them: it has its own tokens, and always a text label beside the colour. */
 :root {
   color-scheme: light dark;
-  font-family: system-ui, sans-serif;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  /* One spacing scale, so views laid out apart still line up. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
   --bg: #faf9f7;
   --surface: #f2f0eb;
   --rule: #c9c2b6;
@@ -53,7 +86,7 @@ main {
 }
 
 .mono {
-  font-family: ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 0.9em;
 }
 

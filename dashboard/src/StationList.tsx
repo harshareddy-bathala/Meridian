@@ -1,15 +1,6 @@
 import { formatAge, livenessLabel, precisionLabel } from "./format";
+import { SimBadge } from "./SimBadge";
 import type { Station } from "./stations";
-
-function SimulatedBadge() {
-  // Text, not only a colour or an icon: the label has to survive a screenshot,
-  // a screen reader and a greyscale print (CLAUDE.md rule 5).
-  return (
-    <span className="badge badge-simulated" title="A virtual station run by the simulator">
-      Simulated
-    </span>
-  );
-}
 
 export type Select = (stationId: string) => void;
 
@@ -34,7 +25,7 @@ function StationRow({ station, now, selected, onSelect }: RowProps) {
         >
           {station.name}
         </button>{" "}
-        {station.simulated && <SimulatedBadge />}
+        {station.simulated && <SimBadge title="A virtual station run by the simulator" />}
         <div className="dim mono">{station.stationId}</div>
       </th>
       <td>
