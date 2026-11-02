@@ -754,7 +754,12 @@ jobs:
           set -euo pipefail
           cp deploy/.env.example deploy/.env
           docker compose -f deploy/docker-compose.yml build api
-          echo "IMAGE=$(docker compose -f deploy/docker-compose.yml config --images api | head -1)" >> "$GITHUB_ENV"
+          # The api service's own image, read from the model by name: `config
+          # --images api` also lists its dependencies' images, in an order that
+          # put the database's first.
+          image=$(docker compose -f deploy/docker-compose.yml config --format json \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["api"]["image"])')
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
           echo "PACKAGE=$(ls evidence/evidence)" >> "$GITHUB_ENV"
 
       - name: The package regenerates here, to its own content hash
