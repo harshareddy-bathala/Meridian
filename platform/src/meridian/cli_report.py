@@ -1,6 +1,6 @@
 """``meridian report`` — build an evaluation report, and regenerate one to check it.
 
-Two verbs:
+Three verbs:
 
 * ``build --snapshot DIR --config FILE --seed N [--output DIR]`` reads a raw
   snapshot and one configuration, derives every seed from ``N``, and
@@ -13,7 +13,10 @@ Two verbs:
   0 only if the hash is the same. It prints which files differ, and how this
   machine differs from the one that made the run.
 
-Neither opens a database or a socket: a report is computed from a snapshot,
+* ``summary <run> --output FILE`` writes an archive run's model figures as
+  ``model-summary-1``, copied from its results files, for the dashboard.
+
+None opens a database or a socket: a report is computed from a snapshot,
 never from the live tables (D-143) and never from a service (rule 8).
 
 Reference: docs/DECISIONS.md D-234 to D-236.
@@ -51,6 +54,11 @@ from meridian.reports.build import (
 )
 from meridian.reports.config import load_report_config
 from meridian.reports.environment import run_environment
+from meridian.reports.summary import (
+    NotSummarisableError,
+    model_summary,
+    write_summary,
+)
 from meridian.reports.verify import (
     SnapshotNotFoundError,
     locate_diagnosis_runs,
@@ -70,7 +78,7 @@ EXIT_FAILED = 1
 def add_report_parser(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """Wire ``meridian report`` and its two actions."""
+    """Wire ``meridian report`` and its three actions."""
     report = subcommands.add_parser(
         "report",
         help="build an evaluation report from a snapshot, and verify one",
@@ -132,6 +140,23 @@ def add_report_parser(
         default=None,
         help="where the run goes (default: <root>/reports/<hash prefix>)",
     )
+    summary = actions.add_parser(
+        "summary",
+        help="write an archive run's model figures for the dashboard to publish",
+        description=(
+            "Writes model-summary-1 from a sealed run's own results files: its "
+            "hash, its label, the archive's completeness, and A, C and D's Brier "
+            "scores and reliability diagrams. Nothing is recomputed (D-325). "
+            "Run `verify` on the run first."
+        ),
+    )
+    summary.add_argument("run", type=Path, help="a run directory")
+    summary.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="where to write it, for example data/published/model-summary.json",
+    )
     verify = actions.add_parser("verify", help="regenerate a run and compare")
     verify.add_argument("run", type=Path, help="a run directory")
     verify.add_argument(
@@ -173,7 +198,7 @@ def run_report(args: argparse.Namespace) -> int:
     does not install (D-155); without it they say what to install rather than
     raise, as ``meridian model`` does.
     """
-    actions = {"build": _build, "verify": _verify}
+    actions = {"build": _build, "verify": _verify, "summary": _summary}
     try:
         return actions[args.action](args)
     except ModuleNotFoundError as exc:
@@ -277,6 +302,24 @@ def _verify(args: argparse.Namespace) -> int:
     for change in verdict.environment_changes:
         _say(f"  environment        {change}")
     return 0 if verdict.matches else EXIT_FAILED
+
+
+def _summary(args: argparse.Namespace) -> int:
+    """``meridian report summary``: no model is fitted, so no extra is needed."""
+    try:
+        run = read_directory(args.run)
+    except DamagedSnapshotError as exc:
+        _refuse("summary", str(exc))
+        return EXIT_CORRUPT
+    try:
+        summary = model_summary(run)
+        write_summary(args.output, summary)
+    except (NotSummarisableError, OSError) as exc:
+        return _refuse("summary", str(exc))
+    _say(f"Wrote {args.output}")
+    _say(f"  run      {summary['run_sha256']}")
+    _say(f"  label    {summary['label']}")
+    return 0
 
 
 def _say(line: str) -> None:
