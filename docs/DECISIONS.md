@@ -6761,6 +6761,8 @@ It is a host tool, like the front drill it imports from (D-282), and exits non-z
 
 **Playwright is not a dependency.** Only this tool uses it, so `uvx --with playwright` brings it for the run, and `--chromium` names a browser already installed.
 
+**Run on 2 November 2026**, against a fresh fifty-station demo stack on this branch's image: 24 checks, none failed. Every view rendered with no violation and no console error. The fleet and a decision carried the badge, and a chosen pass was explained with its orbit's age. With the api stopped, the network, losses and insights views each said *Not live*, and after it started again each cleared. **The probe was proven to see a violation:** an image requested from a foreign origin on the same page was recorded as `img-src https://example.invalid/x.png`. Without that control, a probe that recorded nothing would read as a policy that held.
+
 *Rejected: the browser half in CI.* It would need a compose stack of fifty simulated stations and a browser on a runner, for a check whose failure modes (a view that does not render, a missing note) the dashboard's own tests and the front drill already cover in parts. It is run before a showing, by hand, and its result is recorded.
 
 ---
