@@ -1,0 +1,17 @@
+# Reliability settings for the demonstration fleet (D-333), named by
+# docker-compose.demo.yml for the api and the jobs service alike. Every key not
+# set here is the default in reliability.toml.example.
+#
+# Only the settle margin differs. It waits for reports a station queued through
+# an outage (D-146, D-182), and the `demo` scenario injects no fault that
+# queues one: no outage, no stalled upload, no restart. Every virtual station
+# reports within a tick of its window closing, so an hour waits for every
+# report the fleet can owe, many times over. tests/unit/test_demo_reliability.py
+# holds the scenario to that.
+#
+# Classifications record the sha256 of this table, so a demonstration's never
+# mix with the default's, and every figure counted from them says which it was.
+
+[classification]
+
+settle_margin_s = 3600

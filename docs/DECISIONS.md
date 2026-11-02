@@ -6688,6 +6688,22 @@ The dashboard's network, schedule, losses and insights views need reads the publ
 
 ---
 
+## D-333 — The demonstration fleet settles its passes after an hour, because none of its faults queues a report
+
+**2026-11-02 · accepted** · *`deploy/reliability.demo.toml`, `deploy/docker-compose.demo.yml`; `RELIABILITY_CONFIG` for the api and the jobs service in `deploy/docker-compose.yml`; `tests/unit/test_demo_reliability.py`; Stage 35. Amends D-330. Applies D-146 and D-182.*
+
+The first trial of the `demo` profile flew fifty stations for 3 h 53 min, and `meridian reliability faults` judged its 74 faults with none failed. It showed **no loss at all**. A pass is classified, and so diagnosed, only once its window has closed by the settle margin, 24 hours by default (D-146, D-182). The margin waits for a report a station queued through an outage, and without it a report still on its way would be read as absence (rule 7).
+
+**The demonstration's margin is an hour, and the reason is its own fault set.** The `demo` scenario injects no outage, partition, stalled upload, restart, delayed heartbeat, slow platform or revoked token, so no virtual station ever holds a finished observation in its queue. Each reports within a tick of its window closing. An hour waits for every report the fleet can owe, many times over. A test holds the scenario to that: a fault that queues a report added to `demo` fails it, and the margin has to be argued again.
+
+**This is not the warning case.** D-330 refused to shorten the watch's training interval, because a baseline trained on hours would raise warnings the deployed rule would not. A shorter margin changes when a pass is classified, not what it is classified as, for a fleet whose reports have all arrived. Every classification records the hash of its `[classification]` table, so the demonstration's are never counted with the default's, and the figures say which table they came from.
+
+**An override file after all.** D-330 chose a profile alone because everything it changed was the simulator's. The margin is the api's and the jobs service's, and both must read the same file: the api counts the figures from classifications the jobs service wrote, found by that table's hash. A profile cannot change a default service's settings, so `docker-compose.demo.yml` names the file for both. The base file now passes `RELIABILITY_CONFIG` to both as well. `OPERATIONS.md` already told operators to set it for the two together, and compose never passed it.
+
+*Rejected: keeping 24 hours and starting the demonstration a day early.* It is correct, and it makes the fleet's first day show nothing. That is a cost paid by every contributor who brings it up to see what Meridian does.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

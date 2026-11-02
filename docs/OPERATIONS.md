@@ -56,7 +56,7 @@ The platform image is `ghcr.io/harshareddy-bathala/meridian:main`, published for
 | *(default)* | `db`, `migrate`, `api` on `:8000`, `jobs` | `deploy/.env` |
 | `metrics` | Prometheus, Alertmanager, Grafana on `:3001` | `deploy/prometheus/metrics_token` |
 | `sim` | catalogue and invite seeding, a simulated fleet | nothing more |
-| `demo` | the same two services for a fifty-station fleet under the `demo` scenario, in a state volume of its own (D-330) | nothing more; not together with `sim` |
+| `demo` | the same two services for a fifty-station fleet under the `demo` scenario, in a state volume of its own (D-330) | `-f deploy/docker-compose.demo.yml`, which gives the api and jobs the demonstration's one-hour settle margin (D-333); not together with `sim` |
 
 ```bash
 compose --profile metrics up -d
@@ -157,7 +157,7 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | Pass timing error, clock-corrected | `compose exec api meridian passes timing [--station <id>]` — § Stored measurements and profiles |
 | Build the horizon and interference profiles now | `compose exec jobs meridian profiles build` — the jobs service does it each round |
 | Run the simulator | `compose --profile sim up -d` — `SIMULATOR_*` in `deploy/.env` set count, seed, scenario and catalogue |
-| Run the demonstration fleet | `compose --profile demo up -d` — fifty stations, about one in five with one fault; `DEMO_*` in `deploy/.env` (D-330) |
+| Run the demonstration fleet | `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --profile demo up -d` — fifty stations, about one in five with one fault, losses diagnosed an hour after each pass; `DEMO_*` in `deploy/.env` (D-330, D-333) |
 | Judge the demonstration fleet's faults | `compose exec -T demo-simulator cat /var/lib/meridian-sim/faults.jsonl \| compose exec -T api meridian reliability faults --ledger -` |
 | Check the public surface | `python deploy/tools/verify_public_surface.py https://<hostname>` |
 | Fetch and load an external archive | `uv run meridian-ingest …` — its own binary, not in the image; § External archive ingest |

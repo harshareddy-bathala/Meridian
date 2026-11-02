@@ -3356,7 +3356,7 @@ Depends on Stages 18, 20, 21, 25, 27, 28 and 33. Uses Stage 34's live element se
 
 - A **`demo` compose profile**: the sim profile's two services with their own state volume, fifty stations, and the freshest catalogue in `deploy/catalogue/` (an exported live one, then a curated one, then the development file).
 - A **`demo` scenario**: the faults SC-8 scores a cause against, spread so that most stations are clean and about one in five carries one fault, drawn from the station's seed alone. The fault ledger stays out of the platform (D-189).
-- The jobs service runs its usual round. Nothing about the demonstration changes a threshold, a training interval or a decision rule: what it shows is what the platform does.
+- The jobs service runs its usual round. Nothing about the demonstration changes a threshold, a training interval or a decision rule: what it shows is what the platform does. The one setting it changes is the settle margin, which its own faults bound (D-333).
 - **A wall-clock trial** of the profile, judged by `meridian reliability faults` against its ledger, with every loss diagnosed and no false confirmed miss, reported as simulated.
 
 ### Public endpoints the views need

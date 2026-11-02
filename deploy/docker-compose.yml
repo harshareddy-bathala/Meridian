@@ -171,6 +171,10 @@ services:
       # A sealed model run's summary under /published, for /api/v1/insights/model;
       # empty answers not_yet_computed (D-332).
       REPORT_SUMMARY: ${REPORT_SUMMARY:-}
+      # A reliability.toml inside the container; empty uses the defaults. The
+      # jobs service must name the same file: the figures here are counted from
+      # classifications it wrote, found by their configuration's hash.
+      MERIDIAN_RELIABILITY_CONFIG: ${RELIABILITY_CONFIG:-}
     # What the public API may serve from files: published summaries, and nothing
     # else. Not the datasets directory, so the process that faces the internet
     # never holds a snapshot it could be made to read (D-332).
@@ -298,6 +302,8 @@ services:
       # A notifications.toml inside the container, usually under /datasets;
       # empty queues no owner reports. It holds no address (D-300).
       MERIDIAN_NOTIFICATIONS_CONFIG: ${NOTIFICATIONS_CONFIG:-}
+      # The same reliability.toml as the api's; empty uses the defaults.
+      MERIDIAN_RELIABILITY_CONFIG: ${RELIABILITY_CONFIG:-}
       MERIDIAN_DATASETS_ROOT: /datasets
       # Its metrics listener requires the same token as the API's /metrics,
       # and the same placeholder refusal applies when the deployment is public.
