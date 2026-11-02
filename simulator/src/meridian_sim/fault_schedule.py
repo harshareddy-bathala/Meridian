@@ -32,6 +32,7 @@ from meridian_sim.faults import (
     SLOW_API,
     TOKEN_REVOKED,
     UPLOAD_BLOCKED,
+    station_faults,
 )
 from meridian_sim.sky_faults import SkyFault, sky_faults_for
 
@@ -267,7 +268,7 @@ def schedule_for(station_seed: int, scenario: str) -> FaultSchedule:
         station heard depend on what broke, so adding a fault would silently
         change every pass that was not affected by it.
     """
-    kinds = SCENARIOS[scenario]
+    kinds = station_faults(station_seed, scenario)
     stream = random.Random(f"{station_seed}:{scenario}")
 
     cycles = tuple(
@@ -300,8 +301,12 @@ def schedule_for(station_seed: int, scenario: str) -> FaultSchedule:
         cycles=cycles + later,
         revoked_from=revoked_from,
         drift_s_per_tick=round(drift, 3),
-        clock_step_s=step_for(station_seed, scenario),
-        sky=sky_faults_for(station_seed, scenario),
+        # Drawn by their own modules for the whole scenario, which D-270 pins,
+        # and kept here only if this station carries them (D-330).
+        clock_step_s=step_for(station_seed, scenario) if CLOCK_STEP in kinds else 0.0,
+        sky=tuple(
+            one for one in sky_faults_for(station_seed, scenario) if one.kind in kinds
+        ),
     )
 
 

@@ -35,6 +35,7 @@ docs/DECISIONS.md D-024, D-074, D-075, D-188, D-189.
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -48,10 +49,12 @@ __all__ = [
     "CLOCK_STEP",
     "DECLINES",
     "DECODER_DEGRADED",
+    "FLEET_FAULTS",
     "HEARTBEAT_DELAYED",
     "INTERFERENCE",
     "NETWORK_DOWN",
     "OBSTRUCTION",
+    "ONE_FAULT_SHARE",
     "PARTITION",
     "RECEIVER_DOWN",
     "RESTART",
@@ -64,6 +67,7 @@ __all__ = [
     "UPLOAD_BLOCKED",
     "FaultInjectingTransport",
     "FaultState",
+    "station_faults",
 ]
 
 NETWORK_DOWN = "network_down"
@@ -252,6 +256,14 @@ SCENARIOS: dict[str, tuple[str, ...]] = {
         INTERFERENCE,
         SATELLITE_SILENT,
     ),
+    "demo": (
+        RECEIVER_DOWN,
+        DECODER_DEGRADED,
+        CLOCK_STEP,
+        OBSTRUCTION,
+        INTERFERENCE,
+        SATELLITE_SILENT,
+    ),
 }
 """Which faults each named scenario may inject.
 
@@ -270,7 +282,61 @@ decoder as its control, in one fleet (D-278): a dead receiver for a station not
 listening, the stepped clock for timing, and Stage 25's obstruction,
 interference and silence. Stage 25's degradation is left out: it is SC-9's, and
 its loss on every pass would hide the others.
+
+``demo`` is the diagnosis set spread thin, for a fleet people watch on the wall
+clock (D-330): most stations carry nothing, and each of the rest carries one of
+its station faults (:data:`ONE_FAULT_SHARE`). Degradation is left out here too,
+for a reason of its own: a fleet started cold trains its first baselines on
+whatever its chains already do (D-293), so a degradation present from the first
+hour would be learned as normal and never warned of.
 """
+
+FLEET_FAULTS = frozenset({PARTITION, SATELLITE_SILENT})
+"""The faults drawn once for the fleet rather than for a station.
+
+A partition is a share of the fleet cut off at once (D-188), and a silent
+satellite is silent at every station (D-253). Neither is a station's to carry or
+to be spared.
+"""
+
+ONE_FAULT_SHARE: dict[str, float] = {"demo": 0.2}
+"""Scenarios in which a station carries at most one of its station faults.
+
+The value is the share of stations that carry one at all. A fleet where every
+station breaks every way at once is a fault injector's test; one where a fifth
+of the stations each break one way is what a network looks like, and lets a
+reader see a loss beside the healthy stations it stands out from.
+"""
+
+
+def station_faults(station_seed: int, scenario: str) -> tuple[str, ...]:
+    """The fault kinds one station's own schedule is drawn for.
+
+    Args:
+        station_seed: The station's seed, from
+            :func:`~meridian_sim.config.seed_for_station`.
+        scenario: A key of :data:`SCENARIOS`.
+
+    Returns:
+        Every kind the scenario names, unless it is in :data:`ONE_FAULT_SHARE`.
+        Then the fleet's faults and at most one station fault, chosen from the
+        station's seed alone: a station's fault never depends on how many
+        stations the fleet has (D-075), and a restart keeps the same one.
+
+    Raises:
+        KeyError: No such scenario, for the reason
+            :func:`~meridian_sim.fault_schedule.schedule_for` gives.
+    """
+    kinds = SCENARIOS[scenario]
+    share = ONE_FAULT_SHARE.get(scenario)
+    if share is None:
+        return kinds
+    fleet = tuple(kind for kind in kinds if kind in FLEET_FAULTS)
+    own = tuple(kind for kind in kinds if kind not in FLEET_FAULTS)
+    stream = random.Random(f"{station_seed}:{scenario}:pick")
+    if stream.random() >= share:
+        return fleet
+    return (stream.choice(own), *fleet)
 
 
 @dataclass

@@ -14,6 +14,7 @@ Reference: docs/DECISIONS.md D-024, D-074, D-076, D-080.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -28,8 +29,9 @@ from meridian_client import transport as transport_module
 from meridian_sim import supervisor as supervisor_module
 from meridian_sim.config import RunConfig, seed_for_station
 from meridian_sim.fault_schedule import partition_for, schedule_for
-from meridian_sim.faults import PARTITION
+from meridian_sim.faults import FLEET_FAULTS, PARTITION, SATELLITE_SILENT
 from meridian_sim.ledger import FaultLedger, read_ledger
+from meridian_sim.sky_faults import silence_for
 from meridian_sim.supervisor import Supervisor
 from meridian_sim.virtual_station import RegistrationNeededError, paths_for
 
@@ -310,6 +312,55 @@ def test_the_ledger_is_the_schedule_that_was_printed(
         for one in records
         if one.kind == PARTITION
     )
+
+
+def test_a_demo_ledger_holds_each_stations_one_fault_and_the_fleets_silence(
+    started: Any, rollback: Any, tmp_path: Path
+) -> None:
+    """Under ``demo`` a station's ledger is its one fault or nothing (D-330).
+
+    Seed 4471's first four stations: station 4 steps its clock and the other
+    three carry nothing of their own, and the silence opens on all four.
+    """
+    count = 4
+    satellite = "norad:57166"
+    tokens = issue(rollback, count)
+    config = replace(
+        run_config(tmp_path, count, scenario="demo"), silent_satellite=satellite
+    )
+    book = FaultLedger(tmp_path / "faults.jsonl", config.run_id)
+    start = datetime.now(UTC)
+
+    with Supervisor(config, tokens, started._transport, ledger=book) as fleet:
+        fleet.bring_up()
+        for tick in range(LEDGER_ROUNDS):
+            fleet.tick_round(tick, start + timedelta(seconds=30 * tick))
+
+    silence = silence_for(MASTER_SEED, "demo", satellite)
+    assert silence is not None
+    assert silence.first_tick < LEDGER_ROUNDS
+    expected = set()
+    for index in range(1, count + 1):
+        schedule = schedule_for(seed_for_station(MASTER_SEED, index), "demo")
+        expected |= {
+            (f"station:{index}", one.kind, one.first_tick, _closed_on(one.last_tick))
+            for one in schedule.windows(LEDGER_ROUNDS)
+        }
+        expected.add(
+            (
+                f"station:{index}",
+                SATELLITE_SILENT,
+                silence.first_tick,
+                _closed_on(silence.last_tick),
+            )
+        )
+
+    records = read_ledger(book.path)
+    written = {(one.target, one.kind, one.first_tick, one.last_tick) for one in records}
+    own = {(one.target, one.kind) for one in records if one.kind not in FLEET_FAULTS}
+
+    assert written == expected
+    assert own == {("station:4", "clock_step")}
 
 
 def _closed_on(last_tick: int | None) -> int | None:
