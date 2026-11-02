@@ -6704,6 +6704,35 @@ The first trial of the `demo` profile flew fifty stations for 3 h 53 min, and `m
 
 ---
 
+## D-334 — The dashboard's views: one per question, each saying what it cannot show
+
+**2026-11-02 · accepted** · *`dashboard/src/{route,useRoute,Nav,Network,ScheduleTimeline,Losses,Insights,Kiosk,SimBadge,usePolled}.ts(x)` and their data modules; `dashboard/src/fonts/`; `deploy/front/snapshot-routes.txt`; Stage 35. Applies D-081, D-091, D-208, D-283, D-284, D-331 and D-332.*
+
+The dashboard was one page: the station map and list, and a station's panel. Stage 35 gives it four more views, each answering one question a reader brings.
+
+**One fragment per view** (D-091): `#/network`, `#/stations[/<id>]`, `#/schedule[/<id>]`, `#/losses`, `#/insights` and `#/kiosk`. Anything else lands on the network view, so an old link to `#/stations/<id>` still opens that station. The route is parsed by a pure function with its own tests, and the hook that followed only a station id is gone.
+
+**What each shows:**
+- **Network:** the fleet by liveness and on the map, each population's capture rate and loss budget apart, and every open receive-chain warning.
+- **Schedule:** one station's next six hours as a timeline. Choosing a pass, by pointer or from a keyboard-reachable list, opens what the scheduler recorded: its value as the product of its terms, what it displaced or lost to, its peak and its orbit's age. The latest round sits below, with its gain over a baseline stated as not measured live (D-331).
+- **Losses:** every diagnosed loss with its cause, or *undetermined* and why, and every cause tested beside it.
+- **Insights:** the latest conditions, credited to their sources, and the sealed model run's calibration with its label (D-332).
+- **Kiosk:** the four in turn every 20 seconds, held for a minute by a touch or a key. Each step is the view itself, with its own snapshot note and badges, so the kiosk can say nothing the view would not.
+
+**Every absence is said in words.** No settled pass, no open warning, no round yet, no Kp ingested, no model published: each is a sentence, never an empty chart or a zero (D-086).
+
+**One simulated badge.** The two local copies became `SimBadge`, and a test renders each view's parts with simulated data to static markup and counts the badges. It also checks that a measured population and a measured model run carry none.
+
+**One refresh, one watch.** Each view polls through `usePolled`, which runs every refresh through a new snapshot watch, as the station panel does. So a view drawn from the front's copy says so until the platform answers again (D-284). Every request the views make is in `snapshot-routes.txt`, and the test that holds the two equal now runs the new fetch functions too (D-283).
+
+**The site's typeface, self-hosted.** The dashboard carries the same unmodified IBM Plex files as the site. `font-src 'self'` already allowed them, so the policy is unchanged (D-208), and no font is fetched from anywhere else.
+
+**Seen in a browser,** on the demonstration fleet through Vite's proxy, at 1280 and 360 pixels: every view rendered, with no console error and no horizontal scroll. The schedule's explanation pane showed a decision's value, its rival, its peak, and an 83-day-old orbit flagged as such. The development catalogue's elements are that old.
+
+*Rejected: a client-side router library.* Six fragments are a function of twenty lines, and a router would add a dependency to do what `hashchange` already does.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
