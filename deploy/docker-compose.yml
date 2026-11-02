@@ -171,6 +171,11 @@ services:
       # A sealed model run's summary under /published, for /api/v1/insights/model;
       # empty answers not_yet_computed (D-332).
       REPORT_SUMMARY: ${REPORT_SUMMARY:-}
+      # The areas summary under /published, served by /api/v1/areas only while
+      # AREAS_PUBLISHED is true; until the team settles D-137 it stays false
+      # and the read answers not_yet_computed (D-227, D-326).
+      AREAS_PUBLISHED: ${AREAS_PUBLISHED:-false}
+      AREAS_SUMMARY: ${AREAS_SUMMARY:-}
       # A reliability.toml inside the container; empty uses the defaults. The
       # jobs service must name the same file: the figures here are counted from
       # classifications it wrote, found by their configuration's hash.
