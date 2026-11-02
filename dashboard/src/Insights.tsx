@@ -90,7 +90,7 @@ function ConfigurationFigure({ configuration }: { configuration: Configuration }
   );
 }
 
-function ModelPanel({ read }: { read: InsightsRead }) {
+export function ModelPanel({ read }: { read: InsightsRead }) {
   if ("notYetComputed" in read) {
     return (
       <div className="figure">

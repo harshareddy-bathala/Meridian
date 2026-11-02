@@ -41,7 +41,7 @@ function Fleet({ stations }: { stations: Station[] }) {
   );
 }
 
-function Population({ population }: { population: PopulationSummary }) {
+export function Population({ population }: { population: PopulationSummary }) {
   const name = population.simulated ? "Simulated stations" : "Measured stations";
   return (
     <div className="figure">
@@ -62,7 +62,7 @@ function Population({ population }: { population: PopulationSummary }) {
   );
 }
 
-function Warnings({ warnings, go }: { warnings: NetworkWarning[]; go: Go }) {
+export function Warnings({ warnings, go }: { warnings: NetworkWarning[]; go: Go }) {
   if (warnings.length === 0) {
     return <p className="dim">No receive-chain warning is open.</p>;
   }

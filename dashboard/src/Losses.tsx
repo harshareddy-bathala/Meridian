@@ -32,7 +32,7 @@ function Tested({ loss }: { loss: Loss }) {
   );
 }
 
-function LossRow({ loss, go }: { loss: Loss; go: Go }) {
+export function LossRow({ loss, go }: { loss: Loss; go: Go }) {
   const undetermined = whyUndetermined(loss);
   return (
     <tr>

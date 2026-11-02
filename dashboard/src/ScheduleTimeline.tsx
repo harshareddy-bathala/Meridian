@@ -132,7 +132,7 @@ function Reasons({ why, decision }: { why: Explanation_; decision: string }) {
   );
 }
 
-function Explanation({ entry }: { entry: ScheduleEntry }) {
+export function Explanation({ entry }: { entry: ScheduleEntry }) {
   const { assignment } = entry;
   const why = assignment.explanation;
   return (
@@ -155,7 +155,7 @@ function Explanation({ entry }: { entry: ScheduleEntry }) {
   );
 }
 
-function LatestRound({ run }: { run: ScheduleRun | null }) {
+export function LatestRound({ run }: { run: ScheduleRun | null }) {
   if (run === null) {
     return <p className="dim">No scheduling round has decided anything yet.</p>;
   }
@@ -174,7 +174,7 @@ function LatestRound({ run }: { run: ScheduleRun | null }) {
   );
 }
 
-function Planned({ schedule }: { schedule: StationSchedule }) {
+export function Planned({ schedule }: { schedule: StationSchedule }) {
   const [selected, setSelected] = useState<string | null>(null);
   const entry = schedule.entries.find((one) => one.assignment.assignmentId === selected) ?? null;
   return (

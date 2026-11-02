@@ -12,11 +12,17 @@ import { describe, expect, it } from "vitest";
 
 import routesFile from "../../deploy/front/snapshot-routes.txt?raw";
 import type { Fetcher } from "./api";
+import { fetchConditions } from "./conditions";
+import { fetchInsights } from "./insights";
+import { fetchLosses } from "./losses";
+import { fetchOpenWarnings } from "./networkWarnings";
 import { fetchProfiles } from "./profiles";
 import { fetchRecentReceptions } from "./receptions";
 import { fetchReceiveChains } from "./receiveChain";
-import { fetchStationCapture } from "./reliability";
+import { fetchNetworkReliability, fetchStationCapture } from "./reliability";
 import { fetchLatestHeartbeat, fetchUpcomingAssignments } from "./schedule";
+import { fetchLatestRun } from "./scheduleRun";
+import { fetchStationSchedule } from "./stationSchedule";
 import { fetchAllStations } from "./stations";
 import { fetchUptime } from "./uptime";
 
@@ -49,6 +55,13 @@ async function requests(): Promise<string[]> {
     fetchUptime(fetcher, STATION_ID, signal),
     fetchRecentReceptions(fetcher, STATION_ID, signal),
     fetchReceiveChains(fetcher, STATION_ID, signal),
+    fetchNetworkReliability(fetcher, signal),
+    fetchOpenWarnings(fetcher, signal),
+    fetchLosses(fetcher, null, signal),
+    fetchStationSchedule(fetcher, STATION_ID, signal),
+    fetchLatestRun(fetcher, signal),
+    fetchConditions(fetcher, signal),
+    fetchInsights(fetcher, signal),
   ];
   await Promise.allSettled(calls);
   return urls;
