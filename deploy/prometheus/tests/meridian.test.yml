@@ -64,6 +64,9 @@ tests:
         values: "0.8x100"
       - series: 'meridian_receive_chain_warnings_open{job="meridian", instance="api:8000", simulated="false"}'
         values: "0x100"
+      # A set fetched six hours after its epoch, ageing as the scrapes go by.
+      - series: 'meridian_element_set_age_seconds{job="meridian", instance="api:8000", satellite_id="norad:57166"}'
+        values: "21600+15x100"
     alert_rule_test:
       - {eval_time: 20m, alertname: ApiUnavailable, exp_alerts: []}
       - {eval_time: 20m, alertname: DatabaseUnavailable, exp_alerts: []}
@@ -77,6 +80,7 @@ tests:
       - {eval_time: 20m, alertname: ScheduledTaskNeverSucceeded, exp_alerts: []}
       - {eval_time: 20m, alertname: LossBudgetThresholdReached, exp_alerts: []}
       - {eval_time: 20m, alertname: ReceiveChainDegrading, exp_alerts: []}
+      - {eval_time: 20m, alertname: ElementSetsStale, exp_alerts: []}
 
   # --- Platform ------------------------------------------------------------
   - name: the api stops answering
@@ -350,6 +354,27 @@ tests:
             exp_annotations:
               summary: "1 receive chain(s) falling short of their own baseline (simulated=true)."
               runbook: docs/OPERATIONS.md#receivechaindegrading
+
+  - name: one satellite's element set ages past three days while another is fresh
+    interval: 1m
+    input_series:
+      # Three days less a minute at the start, a minute older every scrape.
+      - series: 'meridian_element_set_age_seconds{job="meridian", instance="api:8000", satellite_id="norad:57166"}'
+        values: "259140+60x40"
+      - series: 'meridian_element_set_age_seconds{job="meridian", instance="api:8000", satellite_id="norad:59051"}'
+        values: "3600+60x40"
+    alert_rule_test:
+      # Past three days from the second minute, and held for fifteen.
+      - eval_time: 10m
+        alertname: ElementSetsStale
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: ElementSetsStale
+        exp_alerts:
+          - exp_labels: {severity: warning, satellite_id: "norad:57166"}
+            exp_annotations:
+              summary: "The element set used for norad:57166 is more than three days old."
+              runbook: docs/OPERATIONS.md#elementsetsstale
 
   - name: the reliability task has failed every round since the process started
     interval: 1m

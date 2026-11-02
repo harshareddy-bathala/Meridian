@@ -22,7 +22,7 @@ import psycopg
 import pytest
 from prometheus_client.metrics_core import Metric
 
-from meridian.api import domain_collector, report_families
+from meridian.api import domain_collector, element_set_families, report_families
 from meridian.api.domain_collector import DomainCollector
 from meridian.registry.liveness_counts import count_by_liveness
 from meridian.reliability.classification import PASS_CLASSES
@@ -97,6 +97,16 @@ def delivered(monkeypatch: pytest.MonkeyPatch) -> list[DeliveryCount]:
     """Owner reports by population and state, as the fake database holds."""
     held: list[DeliveryCount] = []
     monkeypatch.setattr(report_families, "count_deliveries", lambda *_, **__: held)
+    return held
+
+
+@pytest.fixture(autouse=True)
+def epochs(monkeypatch: pytest.MonkeyPatch) -> dict[str, datetime]:
+    """Each satellite's current epoch, as the fake database holds them."""
+    held: dict[str, datetime] = {}
+    monkeypatch.setattr(
+        element_set_families, "find_current_epochs", lambda *_, **__: held
+    )
     return held
 
 
@@ -370,4 +380,38 @@ def test_a_failed_report_read_loses_only_the_delivery_series(
     families = _families(reachable)
 
     assert "meridian_report_deliveries" not in families
+    assert "meridian_stations" in families
+
+
+def test_each_satellites_element_set_age_is_seconds_since_its_epoch(
+    reachable: DomainCollector, epochs: dict[str, datetime]
+) -> None:
+    """D-321: the age of the set the next round propagates, by satellite."""
+    epochs["norad:57166"] = NOW - timedelta(hours=6)
+    epochs["norad:59051"] = NOW - timedelta(days=4)
+
+    ages = _families(reachable)["meridian_element_set_age_seconds"]
+
+    assert _value(ages, {"satellite_id": "norad:57166"}) == 6 * 3600.0
+    assert _value(ages, {"satellite_id": "norad:59051"}) == 4 * 86400.0
+
+
+def test_a_satellite_with_no_element_set_publishes_no_age(
+    reachable: DomainCollector,
+) -> None:
+    """No set is not a fresh set: the series is absent, never zero (D-086)."""
+    assert _families(reachable)["meridian_element_set_age_seconds"].samples == []
+
+
+def test_a_failed_element_set_read_loses_only_the_age_series(
+    reachable: DomainCollector, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failing(*_: object, **__: object) -> dict[str, datetime]:
+        raise psycopg.OperationalError("the read was cancelled")
+
+    monkeypatch.setattr(element_set_families, "find_current_epochs", failing)
+
+    families = _families(reachable)
+
+    assert "meridian_element_set_age_seconds" not in families
     assert "meridian_stations" in families

@@ -31,6 +31,7 @@ from meridian.store.stations import Connection
 __all__ = [
     "NewElementSet",
     "StoredElementSet",
+    "find_current_epochs",
     "find_element_set_by_id",
     "find_element_set_current_at",
     "find_element_sets_in_epoch_range",
@@ -140,6 +141,45 @@ def insert_element_set(conn: Connection, element_set: NewElementSet) -> bool:
             ),
         )
         return cur.rowcount > 0
+
+
+@dataclass(frozen=True, slots=True)
+class _CurrentEpoch:
+    """One row of the current-epoch query, so the two columns arrive typed."""
+
+    satellite_id: str
+    epoch: datetime
+
+
+def find_current_epochs(conn: Connection, at: datetime) -> dict[str, datetime]:
+    """The epoch of the set current at ``at``, for every satellite tracked.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+        at: The instant to be current at, timezone-aware UTC.
+
+    Returns:
+        One entry per satellite not deleted that holds a set from before ``at``.
+        A satellite with none is absent, not dated: it has no age to report,
+        and pass generation skips it for the same reason.
+
+    Note:
+        The epoch :func:`find_element_set_current_at` would choose, for every
+        satellite at once, so the age a scrape reports is the age of the set
+        the next round propagates (D-321).
+    """
+    with conn.cursor(row_factory=class_row(_CurrentEpoch)) as cur:
+        cur.execute(
+            """
+            select e.satellite_id, max(e.epoch) as epoch
+            from element_sets e
+            join satellites s on s.satellite_id = e.satellite_id
+            where s.deleted_at is null and e.epoch <= %s
+            group by e.satellite_id
+            """,
+            (at,),
+        )
+        return {row.satellite_id: row.epoch for row in cur.fetchall()}
 
 
 def find_element_set_current_at(

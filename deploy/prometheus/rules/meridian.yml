@@ -168,6 +168,23 @@ groups:
           summary: "Owner reports are not being delivered (simulated={{ $labels.simulated }})."
           runbook: docs/OPERATIONS.md#reportdeliveryfailing
 
+      - alert: ElementSetsStale
+        # D-321. The element set the next round propagates for a satellite is
+        # more than three days past its epoch, so every predicted acquisition
+        # time for it is drifting by minutes. CelesTrak publishes every two
+        # hours and `follow` asks every six, so three days is about a dozen
+        # missed fetches: ingest has stopped, or its source has. Scheduling
+        # carries on from the last set either way (D-138). For 15 minutes, so a
+        # scrape during a slow load is not an alert. A satellite with no set
+        # publishes no series and pass generation already skips it.
+        expr: max by (satellite_id) (meridian_element_set_age_seconds) > 3 * 86400
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The element set used for {{ $labels.satellite_id }} is more than three days old."
+          runbook: docs/OPERATIONS.md#elementsetsstale
+
   - name: meridian-scheduling
     rules:
       - alert: SchedulerUnavailable

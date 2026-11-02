@@ -55,6 +55,10 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from meridian.api import platform_clock
+from meridian.api.element_set_families import (
+    element_set_age_family,
+    read_current_epochs,
+)
 from meridian.api.report_families import delivery_families, read_deliveries
 from meridian.registry.liveness_counts import count_by_liveness
 from meridian.reliability.budget import remaining_ratio_of
@@ -178,9 +182,7 @@ class DomainCollector(Collector):
             watched = _read_watched(pool, reliability)
             if watched is not None:
                 yield from _watch_families(watched)
-        delivered = read_deliveries(pool, SCRAPE_CONNECTION_TIMEOUT_S)
-        if delivered is not None:
-            yield from delivery_families(delivered)
+        yield from _apart_families(pool, now)
 
     def _reliability_config(self) -> ReliabilityConfig | None:
         """The deployment's reliability configuration, read once."""
@@ -211,6 +213,21 @@ class DomainCollector(Collector):
         )
         family.add_metric([], 1.0 if current_revision == self._head_revision else 0.0)
         return family
+
+
+def _apart_families(pool: Pool, now: datetime) -> Iterator[Metric]:
+    """The series read in borrows of their own, each lost alone if its read fails.
+
+    Owner reports and element-set age: neither needs the reliability
+    configuration, and a table a pending migration has not created should cost
+    its own series and nothing else.
+    """
+    delivered = read_deliveries(pool, SCRAPE_CONNECTION_TIMEOUT_S)
+    if delivered is not None:
+        yield from delivery_families(delivered)
+    epochs = read_current_epochs(pool, now, SCRAPE_CONNECTION_TIMEOUT_S)
+    if epochs is not None:
+        yield from element_set_age_family(epochs, now)
 
 
 def _read(pool: Pool, now: datetime) -> _Reading | None:
