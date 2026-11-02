@@ -6508,6 +6508,28 @@ Every pass Meridian predicts is propagated from an element set, and every set un
 
 ---
 
+## D-321 — The catalogue can be exported for an offline machine, and element-set age is a published figure
+
+**2026-11-02 · accepted** · *`meridian catalogue export`, `meridian.catalogue_export`, `meridian.store.catalogue_reads`, `meridian_element_set_age_seconds`, `ElementSetsStale`, `deploy/catalogue/meteor.json`, Stage 34*
+
+D-320 brings current element sets in through `meridian-ingest`, which needs a network. The independence test asks that Meridian keep scheduling with every external service gone, and the expo, a classroom or a field site may have none. Two things follow.
+
+**`meridian catalogue export --output <file>` writes the catalogue held, with each satellite's current set, in the format `load` reads.** A connected machine fetches and exports; an offline machine loads the file. The export carries only active, undeleted satellites and downlinks, because `load` cannot write an inactive row and an exported one would come back active.
+
+**An exported set loads as `manual`.** The reader stamps every set it loads `manual`, because a file is something an operator holds and a line in it may have been edited (D-079). The export writes where each set came from — source, epoch, retrieval time — in an `exported_from` field the reader ignores, so a person can see the provenance and nothing loaded from the file can claim it. Keeping `celestrak` across a file would put a provenance in the archive that nothing checked.
+
+**The file is not committed.** It holds another catalogue's lines, which the project does not republish (D-310, D-320). `data/`, which git ignores, is where it goes.
+
+**Age is published, and alerted on.** `meridian_element_set_age_seconds{satellite_id}` is the time since the epoch of the set the next round propagates, read at scrape time by the same query pass generation's choice reduces to. Its label is a satellite, so the series count is the catalogue's size and does not grow with the fleet (D-197). `ElementSetsStale` fires at three days for fifteen minutes: about a dozen missed fetches at a six-hour cadence. Nothing stops when it fires, because nothing should (D-131's reasoning: an external source is never a gate). A satellite with no set publishes no series, rather than an age of zero (D-086).
+
+**`deploy/catalogue/meteor.json` is the live deployment's catalogue**: the two Meteors with no element sets, whose sets ingest supplies. Both downlinks are LRPT at 137.9 MHz, the most recent statement found, from an undated status table that also records both satellites switching between 137.1 and 137.9 MHz in 2024. It is unverified, and recorded as unverified until station 001 hears a pass. `development.json` keeps 137.1 MHz for Meteor-M2-3, because the sealed SC-8 and SC-9 fleets were flown on it and changing it would make a new fleet differ from the sealed ones for a reason unrelated to the fault under test.
+
+*Rejected: committing a refreshed `development.json` with real sets.* It would republish CelesTrak's lines, and it would age in git exactly as the current file has.
+
+*Rejected: an age computed per pass and stored.* `passes.element_set_id` already lets a report compute it for any pass; the figure missing was the live one.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

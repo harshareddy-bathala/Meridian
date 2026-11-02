@@ -1932,6 +1932,7 @@ Prometheus and Alertmanager are not published on the host. Grafana is, so its ad
 - **API panels:** `meridian_http_*` comes from every API worker.
 - **Pool panel:** reflects whichever worker answered the scrape.
 - **Scheduling panels:** `meridian_job_*`, `meridian_passes_computed`, `meridian_scheduler_candidates`, `meridian_scheduler_runs_total{status}`, `meridian_scheduler_solver_seconds` and `meridian_scheduler_history_age_seconds` come from the jobs process alone. A rising `status="fallback"` count means the schedule is greedy's; the history age is how long the model's history has gone unrefreshed (D-170).
+- **Element-set age (no Grafana panel yet):** `meridian_element_set_age_seconds{satellite_id}` is the time since the epoch of the set the next round propagates, read by the API at scrape time. A satellite with no set publishes nothing. `ElementSetsStale` fires at three days (D-321).
 - **Reliability series (no Grafana panel yet):** `meridian_passes_classified` (by class, so confirmed misses and indeterminate satellites are two of its series) and `meridian_loss_budget_remaining_ratio`, read by the API from `pass_classifications` over the SLO window (D-186). A population with nothing classified yet publishes neither, rather than zeros that would mean "not measured" (D-086). Passes settle a day after their window, so a fresh deployment shows nothing here for its first day.
 
 ### Delivering alerts
@@ -2065,6 +2066,15 @@ A lost pass is not the same as a miss. Every debit carries its reason, and only 
 2. A report waiting with no attempt means the `notifications` service is not running: `docker compose ps notifications`, then its logs.
 3. `smtp_auth` or `http_4xx`: the channel's secret is wrong or expired. Replace the file in `deploy/secrets/` and restart the service. `timeout` or `refused`: the mail server or Telegram is unreachable from the host.
 4. `meridian notify test --channel <channel> --station <id>` sends one fixed message, which shows whether a channel works before the next real report.
+
+### ElementSetsStale
+
+**Warning.** The element set the next round propagates for one satellite is more than three days past its epoch, so its predicted acquisition times are drifting by minutes (D-321). Scheduling carries on from that set; nothing stops, it only gets less accurate. CelesTrak publishes every two hours and `meridian-ingest follow` asks every six, so this is about a dozen missed fetches.
+
+1. On the ingest machine, `ls <raw root>/celestrak_gp/` lists every retrieval, each directory named by when it was fetched (D-141). If the newest is old, `follow` is not running: start it. `meridian-ingest fetch --source celestrak_gp`, then `load`, refreshes by hand.
+2. A 403 from CelesTrak means a second download of one update, or an address CelesTrak has blocked after too many errors. Do not retry in a loop: its usage policy asks a program to stop on any non-200 and tell a person (`https://celestrak.org/usage-policy.php`).
+3. If the load reports the sets as *for satellites the catalogue does not track*, the group fetched does not hold this satellite. Add its number to `[sources.celestrak_gp] catalog_numbers`.
+4. **Offline on purpose,** for a demonstration with no network: the alert is the honest state of the predictions. Refresh `data/catalogue/live.json` (`meridian catalogue export`) on a connected machine just before going offline, and load it.
 
 ### Reliability figures
 
