@@ -1255,6 +1255,27 @@ It then builds the run again and compares hashes. It prints any difference betwe
 
 A run edited *and resealed* passes its own manifest check but fails verification, because only regeneration can tell a forged number from a computed one.
 
+### The real-data model run, from the SatNOGS archive
+
+The first model fitted on receptions nobody here invented (D-322, D-325). The figures are another network's, and every published copy says so.
+
+1. **Backfill the archive**, as § Element sets and the archive, and every source live says: `meridian-ingest fetch --source satnogs_network --since … --until …`, then `load`. Each page's carried element sets load beside its receptions, for satellites the catalogue tracks; live pass generation never reads them.
+2. **Export a raw snapshot covering the backfill:**
+   ```bash
+   meridian snapshot export --since 2026-10-05T00:00:00Z
+   ```
+   Its manifest's `archive_denominator.*` counts say how many satellite-days had no set current at their start. Near zero is expected; a large count means the backfill's pages carried no sets.
+3. **Copy `analysis/configs/archive.toml.example`**, set `train_until` and `validate_until` for the snapshot's span (two weeks to train, one to choose, one to test, for four weeks), then build, verify and summarise:
+   ```bash
+   meridian report build --snapshot <snapshot> --config archive.toml --seed 4471
+   meridian report verify <run>
+   meridian report summary <run> --output data/published/model-summary.json
+   ```
+   `build` and `verify` need the `fit` extra (D-155); `summary` does not.
+4. **Publish** by setting `REPORT_SUMMARY=/published/model-summary.json` on the api (D-332). The dashboard's insights view reads the file and nothing else; a file it refuses is a `server_error` naming the setting, never a partial page.
+
+**What it is and is not.** Only configuration A, elevation, can be fitted on an archive: C and D appear as not computable, with the reason (D-156). The completeness ratio and the weighting are in the run's data section, because the archive holds only passes its stations chose to observe. **Never compare its totals with ours**, on the site, a slide or a poster (D-053).
+
 ### The completion gate, at a prompt
 
 Stage 22's gate is that every number and figure can be regenerated from a snapshot, a configuration, a seed and a code version. `tests/unit/test_report_gate.py` asserts it clause by clause, with every socket and database refused. To see it by hand:
