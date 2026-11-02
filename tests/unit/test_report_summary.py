@@ -24,6 +24,7 @@ from meridian.cli import main
 from meridian.datasets.canonical import canonical_line
 from meridian.datasets.manifest import Manifest, SourceEntry, content_sha256, file_entry
 from meridian.datasets.publish import publish_directory, read_directory
+from meridian.reports.config import parse_report_config
 from meridian.reports.summary import SCHEMA, NotSummarisableError, model_summary
 
 SINCE = datetime(2026, 9, 1, tzinfo=UTC)
@@ -295,3 +296,41 @@ def test_a_run_of_our_own_stations_has_no_label_and_is_refused(
                 sealed.path, sealed.manifest, {**sealed.files, "config.toml": own}
             )
         )
+
+
+def test_the_archive_example_parses_and_fits_with_its_dates_set(
+    guarded: Any, datasets_root: Path, tmp_path: Path, capsys: Any
+) -> None:
+    """The shipped config is the one the real run starts from (D-325)."""
+    del guarded
+    example = Path(__file__).parents[2] / "analysis/configs/archive.toml.example"
+    text = example.read_text("utf-8")
+    parse_report_config(text.encode("utf-8"))
+    dated = text.replace(
+        "# train_until = 2026-10-19T00:00:00Z", "train_until = 2026-09-13T00:00:00Z"
+    ).replace(
+        "# validate_until = 2026-10-26T00:00:00Z",
+        "validate_until = 2026-09-17T00:00:00Z\nresamples = 200",
+    )
+    config = tmp_path / "archive.toml"
+    config.write_text(dated, encoding="utf-8")
+    snapshot = publish(datasets_root, archive_world())
+    code = main(
+        [
+            "report",
+            "--root",
+            str(datasets_root),
+            "build",
+            "--snapshot",
+            str(snapshot),
+            "--config",
+            str(config),
+            "--seed",
+            "4471",
+        ]
+    )
+    out = capsys.readouterr()
+    assert code == 0, out.err
+    run = Path(out.out.splitlines()[0].split(": ", 1)[1].rsplit(" (", 1)[0])
+    (first, *_) = model_summary(read_directory(run))["configurations"]  # type: ignore[misc]
+    assert first["computable"] is True
