@@ -100,8 +100,9 @@ def store(tmp_path: Path) -> RawStore:
 PUBLIC = sorted(set(REGISTRY) - {"reference_archive"})
 
 
-def test_nine_classes_are_registered_each_with_both_halves() -> None:
-    assert len(PUBLIC) == 9
+def test_ten_sources_are_registered_each_with_both_halves() -> None:
+    """Stage 31's nine and Stage 34's element sets (D-320)."""
+    assert len(PUBLIC) == 10
     for source_id in PUBLIC:
         registration = REGISTRY[source_id]
         assert isinstance(registration.adapter, Adapter)

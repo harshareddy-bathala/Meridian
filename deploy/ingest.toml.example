@@ -68,6 +68,17 @@ enabled = true
 # out the command says which artefact it stopped before, and you resume there.
 request_budget = 50
 
+# Stage 34's element sets (D-320). Current sets for the satellites the catalogue
+# already holds; a set for any other object is counted and not loaded. Name a
+# group, fetched whole in one request, or single catalogue numbers, one request
+# each. CelesTrak updates every two hours and refuses a second download of one
+# update, and `follow` asks every six.
+#
+# [sources.celestrak_gp]
+# enabled = true
+# groups = ["weather"]               # METEOR-M2 3 (57166) and 4 (59051) are here
+# catalog_numbers = []               # for an object no group holds
+
 # Stage 31's public sources (D-220). Every one is off until enabled here or named
 # with --source, and each asks about the places given here — never an adapter's
 # literal. Re-read the terms page ATTRIBUTION.md names before the first fetch.

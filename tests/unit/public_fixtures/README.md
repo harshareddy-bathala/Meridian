@@ -9,3 +9,8 @@ in a public repository, which is the redistribution question D-136 leaves open
 The night-lights granule is not here. It is written at test time with `h5py`
 (`tests/unit/public_sources.py`), because an HDF5 file is binary and its
 layout reads better as the code that builds it.
+
+`celestrak-weather.tle` and `celestrak-no-data.txt` stand in for Stage 34's
+element-set source (D-320). The three element sets were written field by field
+with invented values and their checksums computed, in the column layout of the
+two-line format; none is a set CelesTrak published.

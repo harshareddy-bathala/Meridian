@@ -1,11 +1,11 @@
-"""The nine Stage 31 sources, as the registry lists them.
+"""The public sources, as the registry lists them: Stage 31's nine and Stage 34's.
 
 Each row pairs an adapter with its normaliser and says how the source is
 reached. Limits are the source's own published figures, and only where we
 could read them; the per-fetch request budget applies to every source either
 way (D-223). Every row is disabled by default (D-220).
 
-Reference: docs/DECISIONS.md D-220, D-223, D-225.
+Reference: docs/DECISIONS.md D-220, D-223, D-225, D-320.
 """
 
 from __future__ import annotations
@@ -14,6 +14,10 @@ from meridian_ingest.adapters.public.bhuvan import BhuvanAdapter
 from meridian_ingest.adapters.public.black_marble import (
     BlackMarbleAdapter,
     BlackMarbleNormaliser,
+)
+from meridian_ingest.adapters.public.celestrak import (
+    CelestrakAdapter,
+    CelestrakNormaliser,
 )
 from meridian_ingest.adapters.public.firms import FirmsAdapter, FirmsNormaliser
 from meridian_ingest.adapters.public.gibs import GibsAdapter
@@ -48,6 +52,9 @@ OPEN_METEO_LIMITS = (
 """The free API's published limits, per client, shared by both endpoints."""
 
 PUBLIC: tuple[Registration, ...] = (
+    # CelesTrak updates every two hours and refuses a second download of one
+    # update, so six hours is well inside what it asks (D-320).
+    Registration(CelestrakAdapter(), CelestrakNormaliser(), cadence_s=6 * HOUR),
     Registration(SwpcKpAdapter(), SwpcKpNormaliser(), cadence_s=HOUR),
     Registration(
         HourlyAdapter(OPEN_METEO_CLOUD),

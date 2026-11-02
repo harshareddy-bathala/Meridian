@@ -54,6 +54,7 @@ SOURCE_CLASSES = (
     "atmospheric",
     "imagery",
     "regional_product",
+    "orbital_elements",
 )
 """Classes, not vendors, as ``ATTRIBUTION.md`` names them (D-132).
 
@@ -176,6 +177,12 @@ class FetchRequest:
 
     layers: tuple[str, ...] = ()
     """Named layers of an imagery service, from the settings file."""
+
+    groups: tuple[str, ...] = ()
+    """Named groups of an element-set catalogue, from the settings file."""
+
+    catalog_numbers: tuple[int, ...] = ()
+    """Objects an element-set catalogue is asked about one by one."""
 
     def __post_init__(self) -> None:
         """Refuse a request that cannot be honoured politely."""

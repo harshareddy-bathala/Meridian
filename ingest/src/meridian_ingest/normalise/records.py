@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from meridian.orbit.element_set_epoch import epoch_of
 from meridian_ingest.raw_manifest import canonical_sha256, instant
 
 if TYPE_CHECKING:  # the sample module imports this one's error
@@ -41,6 +42,7 @@ __all__ = [
     "SATELLITE_KEY_KINDS",
     "NormalisationError",
     "NormalisedBatch",
+    "NormalisedElementSet",
     "NormalisedReception",
     "NormalisedStation",
 ]
@@ -219,6 +221,53 @@ class NormalisedReception:
 
 
 @dataclass(frozen=True, slots=True)
+class NormalisedElementSet:
+    """One element set as a catalogue published it, before it has a row.
+
+    The epoch is read out of the lines by the platform's own reader, which
+    checks their length, line numbers and checksums first, so a set that would
+    propagate to nothing is refused here rather than stored (D-320).
+
+    Raises:
+        NormalisationError: The key is not ``norad:<number>``, or the lines are
+            not a well-formed element set for that number.
+    """
+
+    satellite_key: str
+    """``norad:NNNNN``, the catalogue's identity, matched against ``satellites``
+    at load. Never a foreign key here: whether we track the object is the
+    load's question, answered from the database."""
+
+    line1: str
+    line2: str
+    name: str | None = None
+    """The catalogue's own name line, verbatim. Kept for the report, never
+    used to identify the object: names are not unique, numbers are."""
+
+    epoch: datetime = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Read the epoch, and refuse lines that are not this object's set."""
+        number = self.satellite_key.removeprefix("norad:")
+        if not self.satellite_key.startswith("norad:") or not number.isdigit():
+            message = f"{self.satellite_key!r} is not norad:<catalogue number>"
+            raise NormalisationError(message)
+        try:
+            epoch = epoch_of(self.line1, self.line2)
+        except ValueError as exc:
+            message = f"{self.satellite_key} is not a readable element set: {exc}"
+            raise NormalisationError(message) from exc
+        for line in (self.line1, self.line2):
+            if line[2:7].strip().lstrip("0") != number.lstrip("0"):
+                message = (
+                    f"{self.satellite_key}'s lines name catalogue number "
+                    f"{line[2:7].strip()!r}, not {number}"
+                )
+                raise NormalisationError(message)
+        object.__setattr__(self, "epoch", epoch)
+
+
+@dataclass(frozen=True, slots=True)
 class NormalisedBatch:
     """Everything one artefact normalised to, under one normaliser version.
 
@@ -242,6 +291,9 @@ class NormalisedBatch:
     """Stage 31's published values (D-221). A source publishes receptions or
     values; nothing stops one artefact holding both, and nothing needs it to."""
 
+    element_sets: tuple[NormalisedElementSet, ...] = field(default_factory=tuple)
+    """Stage 34's element sets from a public catalogue (D-320)."""
+
     def __post_init__(self) -> None:
         """Refuse a batch the load could only half apply."""
         if not self.transformation_version.strip():
@@ -255,6 +307,7 @@ class NormalisedBatch:
             [reception.source_observation_id for reception in self.receptions],
         )
         _no_duplicates("sample", [sample.series_key for sample in self.samples])
+        _no_duplicates("element set", [one.satellite_key for one in self.element_sets])
         described = {station.source_station_key for station in self.stations}
         dangling = sorted(
             {
