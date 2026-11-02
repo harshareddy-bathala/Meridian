@@ -56,6 +56,7 @@ The platform image is `ghcr.io/harshareddy-bathala/meridian:main`, published for
 | *(default)* | `db`, `migrate`, `api` on `:8000`, `jobs` | `deploy/.env` |
 | `metrics` | Prometheus, Alertmanager, Grafana on `:3001` | `deploy/prometheus/metrics_token` |
 | `sim` | catalogue and invite seeding, a simulated fleet | nothing more |
+| `demo` | the same two services for a fifty-station fleet under the `demo` scenario, in a state volume of its own (D-330) | nothing more; not together with `sim` |
 
 ```bash
 compose --profile metrics up -d
@@ -155,7 +156,9 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | How recent schedule runs fared | `compose exec api meridian schedule runs [--limit 20]` — § Stored measurements and profiles |
 | Pass timing error, clock-corrected | `compose exec api meridian passes timing [--station <id>]` — § Stored measurements and profiles |
 | Build the horizon and interference profiles now | `compose exec jobs meridian profiles build` — the jobs service does it each round |
-| Run the simulator | `compose --profile sim up -d` — `SIMULATOR_*` in `deploy/.env` set count, seed and scenario |
+| Run the simulator | `compose --profile sim up -d` — `SIMULATOR_*` in `deploy/.env` set count, seed, scenario and catalogue |
+| Run the demonstration fleet | `compose --profile demo up -d` — fifty stations, about one in five with one fault; `DEMO_*` in `deploy/.env` (D-330) |
+| Judge the demonstration fleet's faults | `compose exec -T demo-simulator cat /var/lib/meridian-sim/faults.jsonl \| compose exec -T api meridian reliability faults --ledger -` |
 | Check the public surface | `python deploy/tools/verify_public_surface.py https://<hostname>` |
 | Fetch and load an external archive | `uv run meridian-ingest …` — its own binary, not in the image; § External archive ingest |
 | Freeze the database into a raw snapshot | `compose run --rm --no-deps … api meridian snapshot export --since <ISO-8601 Z>` — § Dataset snapshots |
