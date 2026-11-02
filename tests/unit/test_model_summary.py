@@ -39,14 +39,14 @@ def summary() -> dict[str, Any]:
             "name": "SatNOGS Network",
             "licence": "CC BY-SA 4.0",
             "terms_url": "https://network.satnogs.org/terms",
-            "retrieved_from": "2026-10-01T00:00:00Z",
+            "retrieved_from": "2026-10-01T00:00:00+00:00",
             "retrieved_until": "2026-10-29T00:00:00Z",
         },
         "simulated": False,
         "completeness_ratio": 0.31,
         "split": {
-            "train_until": "2026-10-15",
-            "validate_until": "2026-10-22",
+            "train_until": "2026-10-15T00:00:00.000Z",
+            "validate_until": "2026-10-22T00:00:00.000Z",
             "as_of": "2026-10-29T00:00:00Z",
         },
         "configurations": [

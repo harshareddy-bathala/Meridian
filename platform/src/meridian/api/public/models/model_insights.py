@@ -22,7 +22,7 @@ This module builds no SQL and opens no connection.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -66,8 +66,9 @@ class SummarySource(_Strict):
 class SummarySplit(_Strict):
     """The temporal split the run fitted, validated and tested on (rule 6)."""
 
-    train_until: date
-    validate_until: date
+    train_until: datetime
+    validate_until: datetime
+    """Each an instant, as the sealed report states its split's bounds."""
     as_of: datetime
 
 
