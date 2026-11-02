@@ -1118,6 +1118,27 @@ diff one.txt two.txt                                                          # 
 
 ---
 
+## The network's public views
+
+Stage 35 adds six reads to the public API for the dashboard's network, schedule, losses and insights views (D-331). Each follows the surface's rules: windows to whole minutes and angles to whole degrees (D-093), keyset cursors (D-085), `simulated` on every body that has results, and a stated absence rather than a zero (D-086).
+
+| Read | What it answers |
+|---|---|
+| `GET /api/v1/losses[?station_id=]` | every diagnosed loss under the deployment's `[diagnosis]`, newest first: its cause or *undetermined*, and every cause tested with its support and a listed set of findings |
+| `GET /api/v1/receive-chain-warnings[?state=open\|all]` | every station's receive-chain warnings, open ones by default |
+| `GET /api/v1/schedule?station_id=<id>[&hours=6]` | a station's decisions over the next 1 to 24 hours, scheduled and skipped, each with its explanation, its pass's peak and its element set's epoch |
+| `GET /api/v1/schedule-runs/latest` | the newest round's record; its gain over a baseline is `not_measured` live, and is `meridian schedule evaluate`'s (D-172) |
+| `GET /api/v1/conditions` | the newest Kp and each point's cloud cover for this hour, credited to its source; Kp is `not_measured` until `meridian-ingest follow` has run |
+| `GET /api/v1/insights/model` | `not_yet_computed` until a sealed model run on measured receptions is published (Stage 34) |
+
+```bash
+curl -s localhost:8000/api/v1/losses?limit=5 | python -m json.tool
+curl -s "localhost:8000/api/v1/schedule?station_id=<id>&hours=6" | python -m json.tool
+curl -s localhost:8000/api/v1/schedule-runs/latest | python -m json.tool
+```
+
+**A loss's findings are a reviewed subset.** The full record of what each cause's test read is the operator's, through `meridian diagnosis explain`; the public list withholds the obstruction sectors, the raw noise levels and every internal id (`THREAT-MODEL.md` §7).
+
 ## The evidence dataset
 
 A package of Meridian's own receptions — each with its current observation and lineage, its verdicts and diagnoses, and its provenance — that someone who was not in the room can regenerate to the same hash (SC-10). It is built from a raw snapshot (§ Dataset snapshots), a configuration and a seed, and nothing else: neither command opens a database or a socket.

@@ -6646,6 +6646,32 @@ Every other scenario draws exactly what it drew before: `station_faults` returns
 
 ---
 
+## D-331 — Six public reads for the network's views, each saying what it cannot give
+
+**2026-11-02 · accepted** · *`meridian/api/public/{losses,chain_warnings,schedule,conditions}.py` and their models; `meridian/store/{loss_reads,schedule_run_reads,conditions_reads}.py`, `find_network_warnings`, `find_station_schedule`; `THREAT-MODEL.md` §7; Stage 35. Applies D-085, D-086, D-093, D-134, D-172, D-177, D-187 and D-210.*
+
+The dashboard's network, schedule, losses and insights views need reads the public API did not have. Each is thin, as every public endpoint is, and each states an absence in words.
+
+**`/losses` lists each diagnosed loss, where the budget only counts its debits.** D-187 counts the loss budget's debits and does not list them, because a debit names the exact instant a window closed. A loss here names its window widened to whole minutes, like every published window (D-093), so listing it gives away nothing D-187 protects. Only the deployment's own diagnosis method and `[diagnosis]` hash are read, and only an assignment's latest revision, so no pass appears diagnosed twice.
+
+**What a cause's test found is published from a list.** `candidates_json` is free-form and written for an operator. It holds exact angles, a station's raw noise floor and the sectors its own history marks as blocked. `PUBLISHED_FINDINGS` names each finding the API states and its rounding: angles to the degree, decibels and seconds to a tenth, shares and supports to a hundredth. Everything else is withheld, and `meridian diagnosis explain` prints the whole record. Every cause tested is published, fired or not (D-273).
+
+**`/receive-chain-warnings`** gathers each station's warnings into one list, open ones by default, coarsened as the station's own response coarsens them (D-295).
+
+**`/schedule` is a station's decisions over the next 1 to 24 hours.** They are the decisions `/assignments` lists, each with its pass's peak to the degree and the epoch of the element set that predicted it. Element-set age is a first-class figure, and this puts it beside every decision without anything new being stored.
+
+**`/schedule-runs/latest` is the run's own record, and its gain over a baseline is not measured live.** The jobs service records only the configuration it scheduled with. Configuration A on another round is a different problem, and a gain computed against it would be a number no snapshot regenerates (rule 8). So `baseline_gain` is `not_measured`, and its reason names `meridian schedule evaluate` (D-172). What became of a run's assignments stays `scheduler_performance`'s, an operator's read (D-177). The run's decisions are counted by population, so a round over simulated stations says so.
+
+**`/conditions` is the latest Kp and each point's cloud cover, credited to its source** (D-134), read for display only. The scheduler's conditions come from a snapshot (D-224). A point is published to one decimal of a degree. Points are usually stations, and one decimal is MSP's coarsest declared precision, so it is never finer than a station chose (D-082). No Kp is `not_measured`, never a null.
+
+**`/insights/model` is `not_yet_computed`.** The API may not read a snapshot or a report's package (D-143's boundary). A sealed model run on measured receptions is Stage 34's, and its summary's format is that stage's to define. The endpoint will carry data when one is published, and §7 reviews it then.
+
+**The front's warmed routes are not changed here.** `snapshot-routes.txt` lists exactly the requests the dashboard makes, and a test holds the two equal (D-283). The new reads join it with the views that request them.
+
+*Rejected: recording configuration A's objective on every round,* to publish a live gain. It needs a migration and a second solve per round, and would still compare a round's schedule with a counterfactual nobody flew. The replay compares them properly.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
