@@ -329,3 +329,153 @@ tr.selected {
 .snapshot-note {
   color: var(--snapshot);
 }
+
+/* The views (Stage 35). Each is one section; the nav says which is open in
+   words as well as weight, through aria-current. */
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 var(--space-4);
+}
+
+.nav a {
+  color: var(--ink);
+}
+
+.nav a[aria-current="page"] {
+  font-weight: 600;
+  text-decoration-thickness: 2px;
+}
+
+.view h3 {
+  margin-block: var(--space-5) var(--space-2);
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-4);
+}
+
+.figure {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  padding: var(--space-3) var(--space-4);
+}
+
+.figure dt {
+  color: var(--dim);
+}
+
+.figure dd {
+  margin: 0 0 var(--space-2);
+}
+
+.warnings,
+.tested,
+.entries {
+  padding-inline-start: var(--space-5);
+}
+
+.tested li.fired {
+  font-weight: 500;
+}
+
+.picker select {
+  max-width: 100%;
+  font: inherit;
+}
+
+/* The timeline: a scheduled pass is filled, a skipped one hollow and dashed,
+   so the two differ without colour as well as with it. */
+.timeline {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-block: var(--space-3);
+}
+
+.timeline-hour {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+
+.timeline-pass {
+  cursor: pointer;
+}
+
+.timeline-pass rect {
+  stroke: var(--online);
+  stroke-width: 2;
+}
+
+.timeline-scheduled rect {
+  fill: var(--online);
+  fill-opacity: 0.35;
+}
+
+.timeline-skipped rect {
+  fill: none;
+  stroke: var(--dim);
+  stroke-dasharray: 6 4;
+}
+
+.timeline-pass.selected rect {
+  stroke: var(--ink);
+  stroke-width: 3;
+}
+
+.timeline-pass text {
+  fill: var(--ink);
+  font-size: 13px;
+}
+
+.explanation {
+  border-inline-start: 3px solid var(--online);
+  padding-inline-start: var(--space-4);
+  margin-block: var(--space-4);
+}
+
+.calibration {
+  display: block;
+  width: min(100%, 12rem);
+  border: 1px solid var(--rule);
+  margin-block: var(--space-2);
+}
+
+.calibration-ideal {
+  stroke: var(--dim);
+  stroke-dasharray: 4 4;
+}
+
+.calibration circle {
+  fill: var(--online);
+}
+
+/* Who measured what a figure was fitted on travels with it (D-332). */
+.label-note {
+  font-weight: 500;
+}
+
+/* The kiosk: one view at a time, at a size read across a room. */
+.kiosk-main {
+  max-width: none;
+  font-size: clamp(1rem, 0.6rem + 1vw, 1.5rem);
+}
+
+.kiosk-step {
+  margin-block: 0 var(--space-2);
+}
+
+@media (max-width: 40rem) {
+  main {
+    padding-inline: var(--space-3);
+  }
+
+  .timeline-pass text {
+    font-size: 22px;
+  }
+}
