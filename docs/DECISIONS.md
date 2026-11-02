@@ -6572,6 +6572,22 @@ D-053 ends: "no SatNOGS or TinyGS code, dependency or API call belongs in this r
 
 ---
 
+## D-324 — A published value its quantity cannot take is stored as a gap that names it
+
+**2026-11-02 · accepted** · *`meridian_ingest.normalise.samples`, `deploy/ingest.live.toml.example`, Stage 34*
+
+Stage 31's normalisers check shape — a value or a missing reason, finite, a place on the globe — and never sense. They have only read fixtures we wrote, whose values we chose. A live source can publish a Kp of 12, a cloud cover of 140 %, a negative rainfall: a source's error, which a feature would then learn from as though it were weather.
+
+**Each quantity states the range it can physically take**, closed at both ends: Kp 0–9, cloud cover 0–100 %, aerosol optical depth 0–10, precipitation 0–2 000 mm a day, NDVI −1 to 1, and a floor of zero for fire radiative power and night-time radiance. A value outside its range is stored as missing, with a reason naming the value and the range — D-221's published gap, not a dropped row. The artefact still loads, the error is visible in the table, and the pre-pass rule (D-222) reads it as the gap it is.
+
+**Generous on purpose.** A range that clipped a real extreme would discard the event a series exists to show, so each bound is past the recorded extreme rather than at the expected one. A quantity not listed is not checked.
+
+**Applied in the sample record itself**, not in each normaliser, so a source added later is checked without anyone remembering to. No transformation version moves: for every value a normaliser has produced in range, the output is unchanged.
+
+*Rejected: refusing the artefact.* One bad value would cost every good one beside it, and the refusal would leave a hole nobody could see in the table.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
