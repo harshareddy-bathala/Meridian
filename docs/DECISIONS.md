@@ -6484,6 +6484,30 @@ The simulator makes its ledger file on the first fault it records, so a fleet th
 
 ---
 
+## D-320 — Element sets are an ingest product, loaded only for satellites the catalogue tracks
+
+**2026-11-02 · accepted** · *migration 0032, `meridian_ingest.adapters.public.celestrak`, `meridian_ingest.load`, `meridian.store.element_sets`, Stage 34*
+
+Every pass Meridian predicts is propagated from an element set, and every set until now came from `deploy/catalogue/development.json` (D-079): two satellites at an epoch of 11 August, 83 days old when this was written. A set's along-track error grows with age, so every acquisition time the dashboard showed was wrong by minutes, and nothing could make it right except a person editing a file.
+
+**A public catalogue's current sets arrive through `meridian-ingest`, like any other source** (D-132). The adapter asks CelesTrak's GP service for named groups, one request each, or single catalogue numbers; the normaliser reads each object's name line and two lines; the loader writes `element_sets` with source `celestrak`. Nothing about D-079 or D-138 moves: the platform still loads only from a file and fetches nothing, and `meridian-ingest follow` runs on the ingest machine (D-225). A round with every source down schedules from the newest set it holds, and that set's age says how stale it is.
+
+**Only a satellite the catalogue already tracks is loaded.** A group lists far more objects than a deployment receives, and storing a set for one would need a `satellites` row nobody wrote, letting somebody else's catalogue decide what pass generation propagates. That is the argument D-139 made for archive receptions, and the answer is the same: the rest are counted in the load report and left in the raw store, from which a later load takes them if the catalogue adds the satellite.
+
+**A fetched set traces to its artefact.** Migration 0032 adds `element_sets.ingest_record_id`, and the load writes the artefact's retrieval instant into `retrieved_at` rather than the load's, because loading a set hours after it was fetched did not make it newer, and `find_element_set_current_at` breaks epoch ties on that column (D-057). A CHECK refuses an artefact on a `manual` or `simulator` set. `ingest_sources.source_class` gains `orbital_elements`, since a catalogue of element sets is none of Stage 14's or Stage 31's classes.
+
+**The epoch is read by the platform's own reader**, `meridian.orbit.element_set_epoch`, which checks length, line numbers and checksums first. The normaliser also refuses a set filed under a number its own lines do not carry. A set that would propagate to no passes is refused at the artefact, not discovered as an empty schedule.
+
+**Politeness is the source's own.** CelesTrak checks for new data every two hours, asks for one download per update, answers a second with a 403, and firewalls an address after fifty errors in two hours. So `follow` asks every six hours, a group is preferred to many single numbers, a fetch naming more queries than its budget is refused rather than cut short, and a 403 is never retried (`politeness.RETRYABLE_STATUSES` already excluded it).
+
+**No licence is published, so none is claimed.** CelesTrak states that it makes the data freely available to all users, and the data originates with the US Space Force through Space-Track, whose agreement may govern redistribution. `ATTRIBUTION.md` records exactly that, and no element-set line is republished: the evidence dataset already leaves them out (D-310).
+
+*Rejected: a source per satellite.* A satellite is a query, not a source: one set of terms, one politeness budget, one class.
+
+*Rejected: storing every object a group lists.* It would be harmless to the scheduler, which propagates only what `satellites` holds, and it would make `element_sets` the record of a catalogue rather than of what this deployment tracks — and a later "which sets did we hold for this satellite?" would need to ask which ones were ever used.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
