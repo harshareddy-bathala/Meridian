@@ -42,15 +42,12 @@ __all__ = [
 class NewElementSet:
     """One element set in insertable form.
 
-    ``retrieved_at`` is absent on purpose — it is the platform's own clock and
-    is left to the column default, the same reasoning
-    ``store.heartbeats.insert_heartbeat`` applies to ``received_at``. ``epoch``
-    *is* here because it is a property of the element set itself, read out of
-    the lines rather than observed by us.
+    ``epoch`` is here because it is a property of the element set itself, read
+    out of the lines rather than observed by us.
 
-    ``content_sha256`` is absent for a different reason: it is a generated
-    column, so the database computes it from the lines and no caller can supply
-    a value that disagrees with them (D-057).
+    ``content_sha256`` is absent: it is a generated column, so the database
+    computes it from the lines and no caller can supply a value that disagrees
+    with them (D-057).
     """
 
     satellite_id: str
@@ -62,6 +59,23 @@ class NewElementSet:
 
     This table records provenance in ``source`` rather than a ``simulated``
     boolean — the one table in the schema that does, deliberately (D-049).
+    """
+
+    ingest_record_id: int | None = None
+    """The ingest artefact a fetched set was read from (D-320).
+
+    None for a set loaded from a file, which has no artefact. The database
+    refuses one on a ``manual`` or ``simulator`` set.
+    """
+
+    retrieved_at: datetime | None = None
+    """When a fetched set was retrieved, from its artefact's manifest.
+
+    None leaves the column default, the platform's own clock, which is what a
+    file load means by it — the same reasoning ``store.heartbeats`` applies to
+    ``received_at``. A set loaded from an artefact passes the artefact's own
+    instant, because loading it hours after the fetch did not make it newer,
+    and the tie-break in :func:`find_element_set_current_at` reads this.
     """
 
 
@@ -110,8 +124,9 @@ def insert_element_set(conn: Connection, element_set: NewElementSet) -> bool:
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
-            insert into element_sets (satellite_id, epoch, line1, line2, source)
-            values (%s, %s, %s, %s, %s)
+            insert into element_sets (satellite_id, epoch, line1, line2, source,
+                                      ingest_record_id, retrieved_at)
+            values (%s, %s, %s, %s, %s, %s, coalesce(%s, now()))
             on conflict on constraint element_set_content_unique do nothing
             """,
             (
@@ -120,6 +135,8 @@ def insert_element_set(conn: Connection, element_set: NewElementSet) -> bool:
                 element_set.line1,
                 element_set.line2,
                 element_set.source,
+                element_set.ingest_record_id,
+                element_set.retrieved_at,
             ),
         )
         return cur.rowcount > 0
