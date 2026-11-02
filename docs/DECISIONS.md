@@ -6664,11 +6664,27 @@ The dashboard's network, schedule, losses and insights views need reads the publ
 
 **`/conditions` is the latest Kp and each point's cloud cover, credited to its source** (D-134), read for display only. The scheduler's conditions come from a snapshot (D-224). A point is published to one decimal of a degree. Points are usually stations, and one decimal is MSP's coarsest declared precision, so it is never finer than a station chose (D-082). No Kp is `not_measured`, never a null.
 
-**`/insights/model` is `not_yet_computed`.** The API may not read a snapshot or a report's package (D-143's boundary). A sealed model run on measured receptions is Stage 34's, and its summary's format is that stage's to define. The endpoint will carry data when one is published, and §7 reviews it then.
+**`/insights/model` serves a sealed run's summary, or `not_yet_computed`.** The API may not read a snapshot or a report's package (D-143's boundary), so it reads a summary file the run writes. D-332 settles its format and where it is mounted.
 
 **The front's warmed routes are not changed here.** `snapshot-routes.txt` lists exactly the requests the dashboard makes, and a test holds the two equal (D-283). The new reads join it with the views that request them.
 
 *Rejected: recording configuration A's objective on every round,* to publish a live gain. It needs a migration and a second solve per round, and would still compare a round's schedule with a counterfactual nobody flew. The replay compares them properly.
+
+---
+
+## D-332 — The model insight is a published summary file, checked whole, in a directory of its own
+
+**2026-11-02 · accepted** · *`meridian/api/public/{conditions,models/model_insights}.py`; `meridian/config.py` (`REPORT_SUMMARY`); the api service's `/published` mount; Stage 35. Settles the format D-331 left to Stage 34. Applies D-086, D-143 and D-206.*
+
+`/api/v1/insights/model` publishes a sealed model run's figures: each configuration's Brier score against the base rate, its skill, its calibration bins, and the completeness ratio, with the label that says who measured the receptions behind them.
+
+**A summary file, written by the sealed run.** The API may not read a snapshot or a report's directory (D-143's boundary). So Stage 34's run writes a summary beside its seal, `model-summary-1`, every figure copied from the report's prediction rows and named by the run's hash. Its shape was agreed with that stage, which writes it. Nothing is computed on a request.
+
+**Checked whole, and refused whole.** The schema string must match exactly, no key may be unknown and nothing is coerced from another type. A computable configuration carries ten bins, empty ones kept with nulls. One the archive cannot support carries a reason and no number at all, never a zero (D-086). A file that fails any of this is a `server_error` naming the setting, with the reason in the log, never part of a body. Unnamed, the answer is `not_yet_computed`. The response is one schema, discriminated on `status`.
+
+**A directory of its own.** The api container mounts `PUBLISHED_DIR` read-only at `/published`, and `REPORT_SUMMARY` names a file there. It is not given the datasets directory, so the process that faces the internet never holds a snapshot it could be made to read (D-206).
+
+*Rejected: reading `prediction.jsonl` from the sealed run directly.* It couples the public surface to a report's internal rows, which a new method version may reshape (D-235), and it puts the run directory, with its configuration and environment, inside the api container.
 
 ---
 

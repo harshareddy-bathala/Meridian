@@ -13,6 +13,7 @@ Reference: docs/DECISIONS.md D-082, D-086, D-134, D-221, D-222, D-331.
 from __future__ import annotations
 
 import itertools
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -199,3 +200,72 @@ def test_the_model_insight_is_not_yet_computed(client: TestClient) -> None:
     assert body["status"] == "not_yet_computed"
     assert body["available_from_stage"] == 34
     assert set(body) == {"status", "reason", "available_from_stage"}
+
+
+SUMMARY = {
+    "schema": "model-summary-1",
+    "run_sha256": "ab" * 32,
+    "method": "report-9",
+    "label": "Measured by the SatNOGS network, not by Meridian. Selection-biased.",
+    "source": {
+        "name": "SatNOGS Network",
+        "licence": "CC BY-SA 4.0",
+        "terms_url": "https://network.satnogs.org/terms",
+        "retrieved_from": "2026-10-01T00:00:00Z",
+        "retrieved_until": "2026-10-29T00:00:00Z",
+    },
+    "simulated": False,
+    "completeness_ratio": None,
+    "split": {
+        "train_until": "2026-10-15",
+        "validate_until": "2026-10-22",
+        "as_of": "2026-10-29T00:00:00Z",
+    },
+    "configurations": [
+        {"name": "C", "computable": False, "reason": "needs a station profile"}
+    ],
+}
+"""A valid summary; ``tests/unit/test_model_summary.py`` checks the format itself."""
+
+
+@pytest.fixture
+def named(
+    rollback: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> Iterator[tuple[TestClient, Any]]:
+    """An app whose ``REPORT_SUMMARY`` names a file in ``tmp_path``."""
+    path = tmp_path / "model-summary.json"
+    monkeypatch.setenv("REPORT_SUMMARY", str(path))
+    app = create_app()
+    app.dependency_overrides[get_connection] = lambda: rollback
+    with TestClient(app, raise_server_exceptions=False) as started:
+        yield started, path
+
+
+def test_a_named_summary_is_served_with_its_label(
+    named: tuple[TestClient, Any],
+) -> None:
+    client, path = named
+    path.write_text(json.dumps(SUMMARY))
+
+    body = client.get("/api/v1/insights/model").json()
+
+    assert body["status"] == "computed"
+    assert body["label"].startswith("Measured by the SatNOGS network")
+    assert body["simulated"] is False
+    assert body["configurations"] == [
+        {"name": "C", "computable": False, "reason": "needs a station profile"}
+    ]
+
+
+def test_a_named_summary_that_is_missing_or_damaged_is_refused(
+    named: tuple[TestClient, Any],
+) -> None:
+    client, path = named
+    missing = client.get("/api/v1/insights/model")
+    path.write_text('{"schema": "model-summary-2"}')
+    damaged = client.get("/api/v1/insights/model")
+
+    for response in (missing, damaged):
+        assert response.status_code == 500
+        assert response.json()["error"] == "server_error"
+        assert "REPORT_SUMMARY" in response.json()["message"]

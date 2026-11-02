@@ -1129,7 +1129,7 @@ Stage 35 adds six reads to the public API for the dashboard's network, schedule,
 | `GET /api/v1/schedule?station_id=<id>[&hours=6]` | a station's decisions over the next 1 to 24 hours, scheduled and skipped, each with its explanation, its pass's peak and its element set's epoch |
 | `GET /api/v1/schedule-runs/latest` | the newest round's record; its gain over a baseline is `not_measured` live, and is `meridian schedule evaluate`'s (D-172) |
 | `GET /api/v1/conditions` | the newest Kp and each point's cloud cover for this hour, credited to its source; Kp is `not_measured` until `meridian-ingest follow` has run |
-| `GET /api/v1/insights/model` | `not_yet_computed` until a sealed model run on measured receptions is published (Stage 34) |
+| `GET /api/v1/insights/model` | a sealed model run's summary, the file `REPORT_SUMMARY` names under `PUBLISHED_DIR` (`/published` in the container); `not_yet_computed` while it is unset, and `server_error` if the file is refused (D-332) |
 
 ```bash
 curl -s localhost:8000/api/v1/losses?limit=5 | python -m json.tool

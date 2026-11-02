@@ -168,6 +168,14 @@ services:
       # an older .env still counts, so upgrading never makes a deployment that
       # considered itself public stop doing so.
       MERIDIAN_PUBLIC: ${CLOUDFLARE_TUNNEL_TOKEN:+1}
+      # A sealed model run's summary under /published, for /api/v1/insights/model;
+      # empty answers not_yet_computed (D-332).
+      REPORT_SUMMARY: ${REPORT_SUMMARY:-}
+    # What the public API may serve from files: published summaries, and nothing
+    # else. Not the datasets directory, so the process that faces the internet
+    # never holds a snapshot it could be made to read (D-332).
+    volumes:
+      - ${PUBLISHED_DIR:-../data/published}:/published:ro
     # For a laptop and for CI. docker-compose.public.yml removes it: with the
     # port published, a request that never crossed Cloudflare could name any
     # address in CF-Connecting-IP (D-051, D-206).
