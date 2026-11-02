@@ -307,7 +307,13 @@ class NormalisedBatch:
             [reception.source_observation_id for reception in self.receptions],
         )
         _no_duplicates("sample", [sample.series_key for sample in self.samples])
-        _no_duplicates("element set", [one.satellite_key for one in self.element_sets])
+        _no_duplicates(
+            "element set",
+            [
+                f"{one.satellite_key} {one.line1} {one.line2}"
+                for one in self.element_sets
+            ],
+        )
         described = {station.source_station_key for station in self.stations}
         dangling = sorted(
             {

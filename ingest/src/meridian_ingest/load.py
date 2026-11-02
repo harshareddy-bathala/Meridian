@@ -46,12 +46,18 @@ from meridian.store.satellites import find_tracked_satellite_ids
 from meridian.store.stations import Connection
 from meridian_ingest.adapters import adapter_for, normaliser_for
 from meridian_ingest.adapters.protocol import Normaliser, SourceDescriptor
-from meridian_ingest.adapters.public.celestrak import ELEMENT_SET_SOURCES
+from meridian_ingest.adapters.public import celestrak, satnogs_network
 from meridian_ingest.load_report import ArtefactLoad, LoadReport
 from meridian_ingest.load_rows import load_samples, new_record, new_source
 from meridian_ingest.normalise.records import NormalisedBatch
 from meridian_ingest.raw_manifest import RawManifest
 from meridian_ingest.raw_store import RawStore
+
+_ELEMENT_SET_SOURCES = {
+    **celestrak.ELEMENT_SET_SOURCES,
+    **satnogs_network.ELEMENT_SET_SOURCES,
+}
+"""The ``element_sets.source`` each source's element sets load under."""
 
 __all__ = [
     "TermsChangedError",
@@ -360,7 +366,7 @@ def _load_element_sets(
                 epoch=one.epoch,
                 line1=one.line1,
                 line2=one.line2,
-                source=ELEMENT_SET_SOURCES[manifest.provenance.source_id],
+                source=_ELEMENT_SET_SOURCES[manifest.provenance.source_id],
                 ingest_record_id=record_id,
                 retrieved_at=manifest.provenance.retrieved_at,
             ),

@@ -19,7 +19,9 @@ machines.
 * each satellite, each day, is propagated with the element set current at the
   start of that UTC day — newest epoch not after it, ties to the latest
   retrieval, then the highest id, as ``find_element_set_current_at`` orders
-  them — over that day inside the scope, against the geometric horizon. The
+  them, from any source including the sets the archive's own observations
+  carried (D-325) — over that day inside the scope, against the geometric
+  horizon. The
   labelling configuration's elevation floor is applied later, to
   ``max_elevation_deg``, so changing it needs no new export.
 
@@ -31,7 +33,7 @@ current at its start.
 
 Pure: rows in, rows and counts out. The orbit service is handed in.
 
-Reference: docs/DECISIONS.md D-138, D-150.
+Reference: docs/DECISIONS.md D-138, D-150, D-325.
 """
 
 from __future__ import annotations

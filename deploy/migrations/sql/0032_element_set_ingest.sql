@@ -14,6 +14,13 @@
 --   set from a file, which has no artefact; a `manual` or `simulator` set may
 --   not claim one, and a fetched one may not lose it.
 --
+-- * `element_sets.source` gains `satnogs_network`: the element set another
+--   network used for an archived observation, carried on that observation
+--   (D-325). It is history the public catalogue no longer serves, and it is
+--   read only to compute the passes an archive station could have heard. Live
+--   pass generation never reads one; `meridian.store.element_sets` excludes the
+--   source from every live read. Such a set must name its artefact.
+--
 -- `element_set_content_unique (satellite_id, source, content_sha256)` is left
 -- as it is (D-057): the same lines fetched twice are one row, which keeps the
 -- artefact that first carried them.
@@ -32,8 +39,16 @@ alter table ingest_sources add constraint ingest_sources_source_class_check
 alter table element_sets
     add column ingest_record_id bigint references ingest_records (record_id);
 
+alter table element_sets drop constraint element_sets_source_check;
+alter table element_sets add constraint element_sets_source_check
+    check (source in ('celestrak', 'spacetrack', 'satnogs_network', 'manual', 'simulator'));
+
 alter table element_sets add constraint element_sets_ingest_record_source_check
-    check (ingest_record_id is null or source in ('celestrak', 'spacetrack'));
+    check (
+        (ingest_record_id is null
+            or source in ('celestrak', 'spacetrack', 'satnogs_network'))
+        and (source <> 'satnogs_network' or ingest_record_id is not null)
+    );
 
 comment on column element_sets.ingest_record_id is
     'The ingest artefact a fetched set was read from (D-320). Null for a set loaded from a file.';

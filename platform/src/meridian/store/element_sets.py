@@ -29,6 +29,7 @@ from psycopg.rows import class_row
 from meridian.store.stations import Connection
 
 __all__ = [
+    "ARCHIVE_ONLY_SOURCES",
     "NewElementSet",
     "StoredElementSet",
     "find_current_epochs",
@@ -37,6 +38,22 @@ __all__ = [
     "find_element_sets_in_epoch_range",
     "insert_element_set",
 ]
+
+
+ARCHIVE_ONLY_SOURCES = ("satnogs_network",)
+"""Sources whose sets are read only to compute an archive's denominator (D-325).
+
+Another network's observation carries the element set it was scheduled with:
+history no public catalogue still serves, and what lets Stage 16 compute the
+passes an archive station could have heard on a day before our own fetches
+began. It is never a runtime input (D-102, D-138), so every read here that
+pass generation or the live surfaces use leaves these sources out. The raw
+snapshot's archive selection, in ``store.snapshot_reads``, is the one reader
+that takes them.
+"""
+
+_LIVE = "e.source <> all(%(archive_only)s)"
+"""The filter every live read applies, written once."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +73,8 @@ class NewElementSet:
     line1: str
     line2: str
     source: str
-    """One of ``celestrak``, ``spacetrack``, ``manual``, ``simulator``.
+    """One of ``celestrak``, ``spacetrack``, ``satnogs_network``, ``manual``,
+    ``simulator``.
 
     This table records provenance in ``source`` rather than a ``simulated``
     boolean — the one table in the schema that does, deliberately (D-049).
@@ -170,14 +188,14 @@ def find_current_epochs(conn: Connection, at: datetime) -> dict[str, datetime]:
     """
     with conn.cursor(row_factory=class_row(_CurrentEpoch)) as cur:
         cur.execute(
-            """
+            f"""
             select e.satellite_id, max(e.epoch) as epoch
             from element_sets e
             join satellites s on s.satellite_id = e.satellite_id
-            where s.deleted_at is null and e.epoch <= %s
+            where s.deleted_at is null and e.epoch <= %(at)s and {_LIVE}
             group by e.satellite_id
             """,
-            (at,),
+            {"at": at, "archive_only": list(ARCHIVE_ONLY_SOURCES)},
         )
         return {row.satellite_id: row.epoch for row in cur.fetchall()}
 
@@ -212,15 +230,20 @@ def find_element_set_current_at(
     """
     with conn.cursor(row_factory=class_row(StoredElementSet)) as cur:
         cur.execute(
-            """
-            select id, satellite_id, epoch, retrieved_at,
-                   line1, line2, source, content_sha256
-            from element_sets
-            where satellite_id = %s and epoch <= %s
-            order by epoch desc, retrieved_at desc, id desc
+            f"""
+            select e.id, e.satellite_id, e.epoch, e.retrieved_at,
+                   e.line1, e.line2, e.source, e.content_sha256
+            from element_sets e
+            where e.satellite_id = %(satellite_id)s and e.epoch <= %(at)s
+              and {_LIVE}
+            order by e.epoch desc, e.retrieved_at desc, e.id desc
             limit 1
             """,
-            (satellite_id, at),
+            {
+                "satellite_id": satellite_id,
+                "at": at,
+                "archive_only": list(ARCHIVE_ONLY_SOURCES),
+            },
         )
         return cur.fetchone()
 

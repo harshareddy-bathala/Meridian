@@ -6588,6 +6588,18 @@ Stage 31's normalisers check shape — a value or a missing reason, finite, a pl
 
 ---
 
+## D-325 — An archive's carried element sets compute its denominator, and nothing live reads them
+
+**2026-11-02 · accepted** · *migration 0032, `meridian.store.element_sets.ARCHIVE_ONLY_SOURCES`, `meridian_ingest.adapters.public.satnogs_network`, `meridian report summary`, Stage 34*
+
+D-150 computes the passes an archive station could have heard with the element set current at the start of each day. CelesTrak serves only today's sets, so a backfill of past weeks had no set for any of its days, no archive passes, and no training examples.
+
+**Each SatNOGS observation carries the set it was scheduled with.** Those sets are stored as `element_sets.source = 'satnogs_network'`, only for satellites the catalogue tracks, each naming its artefact (a CHECK requires it). The raw snapshot's archive selection reads every source, so a past day has a set; **every live read excludes them** — `find_element_set_current_at` (pass generation, catalogue export), the element-set age gauge, and the public catalogue's latest epoch. An archive's history never schedules a pass (D-102, D-138).
+
+**`meridian report summary <run> --output <file>`** writes `model-summary-1` from a sealed archive run's own results files, never recomputing: run hash, method, the label "Measured by the SatNOGS network, not by Meridian", source and licence, completeness, and A, C and D. C and D carry only the report's reason, because an archive pass has an elevation and nothing else (D-156). A run of our own stations is refused: it has no published label yet. The dashboard reads the file (D-332).
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

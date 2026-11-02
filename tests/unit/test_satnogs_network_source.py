@@ -216,3 +216,43 @@ def test_normalising_twice_gives_the_same_rows(
     assert [one.content_sha256 for one in first.receptions] == [
         one.content_sha256 for one in again.receptions
     ]
+
+
+# --- the element sets a page carries -----------------------------------------
+
+
+def test_each_distinct_set_a_kept_observation_carries_is_one_element_set(
+    store: RawStore, publish_public: Any
+) -> None:
+    """D-325: the archive's own history, read once per distinct set."""
+    batch = normalise(fetched(store, publish_public, PAGE))
+
+    epochs = sorted(one.epoch for one in batch.element_sets)
+    assert epochs == [
+        datetime(2026, 10, 6, 6, tzinfo=UTC),
+        datetime(2026, 10, 7, 6, tzinfo=UTC),
+    ]
+    assert {one.satellite_key for one in batch.element_sets} == {"norad:57166"}
+    assert {one.name for one in batch.element_sets} == {"0 METEOR-M2 3"}
+
+
+def test_a_set_carried_for_another_satellite_refuses_the_page(
+    store: RawStore, publish_public: Any, tmp_path: Path
+) -> None:
+    page = json.loads(PAGE.read_text("utf-8"))
+    page[-1]["tle1"] = page[-1]["tle1"].replace("57166", "59051", 1)
+    other = tmp_path / "wrong-set.json"
+    other.write_text(json.dumps(page), "utf-8")
+    with pytest.raises(NormalisationError, match=r"\[6\]"):
+        normalise(fetched(store, publish_public, other))
+
+
+def test_an_observation_without_a_set_carries_none(
+    store: RawStore, publish_public: Any, tmp_path: Path
+) -> None:
+    page = json.loads(PAGE.read_text("utf-8"))
+    for one in page:
+        one["tle1"] = one["tle2"] = ""
+    bare = tmp_path / "bare.json"
+    bare.write_text(json.dumps(page), "utf-8")
+    assert normalise(fetched(store, publish_public, bare)).element_sets == ()

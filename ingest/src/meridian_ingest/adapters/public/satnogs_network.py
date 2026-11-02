@@ -28,6 +28,14 @@ means by ``start`` and ``end``, the normaliser keeps only observations whose
 start falls inside the artefact's window, so adjacent windows never count one
 reception twice.
 
+**The element set each observation was scheduled with comes too** (D-325).
+It is history no public catalogue still serves, and the only way Stage 16 can
+compute which passes an archive station could have heard on a day before our
+own fetches began (D-150). Each distinct set on a page is one element set,
+stored as source ``satnogs_network`` for a satellite the catalogue tracks, and
+read by nothing live: ``meridian.store.element_sets`` leaves the source out of
+every query pass generation makes.
+
 **Their words, kept.** ``status`` is the network's own rating — good, bad,
 unknown, failed — and ``waterfall_status`` a person's vetting. Both are kept
 verbatim in ``source_outcome``; ``archive_outcome`` is our reading of them,
@@ -55,6 +63,7 @@ from meridian_ingest.adapters.public.common import (
 from meridian_ingest.normalise.records import (
     NormalisationError,
     NormalisedBatch,
+    NormalisedElementSet,
     NormalisedReception,
     NormalisedStation,
 )
@@ -62,6 +71,7 @@ from meridian_ingest.raw_store import StoredArtefact
 from meridian_ingest.retrieval import RemoteArtefact, RetrievedArtefact
 
 __all__ = [
+    "ELEMENT_SET_SOURCES",
     "PAGE_SIZE",
     "SATNOGS_NETWORK",
     "TRANSFORMATION_VERSION",
@@ -83,6 +93,9 @@ SATNOGS_NETWORK = SourceDescriptor(
     attribution_entry="SatNOGS Network observations",
     access_constraint="none",
 )
+
+ELEMENT_SET_SOURCES = {SATNOGS_NETWORK.source_id: "satnogs_network"}
+"""The ``element_sets.source`` this source's carried sets load under (D-325)."""
 
 BASE_URL = "https://network.satnogs.org/api/observations/"
 TRANSFORMATION_VERSION = "satnogs-network-1"
@@ -150,29 +163,15 @@ class SatnogsNetworkNormaliser:
                 and so possibly cut short, names another satellite than the one
                 asked about, or carries no window to judge starts against.
         """
-        provenance = artefact.manifest.provenance
-        refuse_a_tile(provenance)
-        if provenance.valid_from is None or provenance.valid_to is None:
-            message = f"{artefact.raw_path} carries no window to judge starts against"
-            raise NormalisationError(message)
-        payload = parse_json(artefact)
-        if not isinstance(payload, list):
-            message = f"{artefact.raw_path} is not a JSON array of observations"
-            raise NormalisationError(message)
-        if len(payload) >= PAGE_SIZE:
-            message = (
-                f"{artefact.raw_path} holds {len(payload)} observations, a full "
-                "page: more may be behind its cursor, so it is refused rather "
-                "than stored as complete. Fetch a shorter window"
-            )
-            raise NormalisationError(message)
-        asked = provenance.original_identifier.split("/", 1)[0].removeprefix("norad=")
+        window, payload = _page(artefact)
+        asked = artefact.manifest.provenance.original_identifier.split("/", 1)[0]
         stations: dict[str, NormalisedStation] = {}
+        sets: dict[tuple[str, str], NormalisedElementSet] = {}
         receptions = []
         for index, entry in enumerate(payload):
             where = f"{artefact.raw_path}[{index}]"
             observation = _object(entry, where)
-            if str(observation.get("norad_cat_id")) != asked:
+            if f"norad={observation.get('norad_cat_id')}" != asked:
                 message = (
                     f"{where} is satellite {observation.get('norad_cat_id')}, not "
                     f"{asked}: the filter was not applied, and the page is not "
@@ -182,15 +181,19 @@ class SatnogsNetworkNormaliser:
             started = _instant(observation.get("start"), f"{where}.start")
             if observation.get("status") == "future":
                 continue
-            if not provenance.valid_from <= started < provenance.valid_to:
+            if not window[0] <= started < window[1]:
                 continue
             station = _station(observation, where)
             stations.setdefault(station.source_station_key, station)
             receptions.append(_reception(observation, station, started, where))
+            carried = _element_set(observation, where)
+            if carried is not None:
+                sets.setdefault((carried.line1, carried.line2), carried)
         return NormalisedBatch(
             transformation_version=self.transformation_version,
             stations=tuple(stations.values()),
             receptions=tuple(receptions),
+            element_sets=tuple(sets.values()),
         )
 
 
@@ -310,6 +313,57 @@ def _reception(
         mode=None if mode is None else mode.lower(),
         source_outcome=f"status={status};waterfall_status={waterfall}",
     )
+
+
+def _page(artefact: StoredArtefact) -> tuple[tuple[datetime, datetime], list[object]]:
+    """The artefact's window and its observations, once the page is believable.
+
+    Raises:
+        NormalisationError: It is a tile, carries no window, is not a list, or
+            is a full page and so possibly cut short.
+    """
+    provenance = artefact.manifest.provenance
+    refuse_a_tile(provenance)
+    if provenance.valid_from is None or provenance.valid_to is None:
+        message = f"{artefact.raw_path} carries no window to judge starts against"
+        raise NormalisationError(message)
+    payload = parse_json(artefact)
+    if not isinstance(payload, list):
+        message = f"{artefact.raw_path} is not a JSON array of observations"
+        raise NormalisationError(message)
+    if len(payload) >= PAGE_SIZE:
+        message = (
+            f"{artefact.raw_path} holds {len(payload)} observations, a full "
+            "page: more may be behind its cursor, so it is refused rather "
+            "than stored as complete. Fetch a shorter window"
+        )
+        raise NormalisationError(message)
+    return (provenance.valid_from, provenance.valid_to), payload
+
+
+def _element_set(
+    observation: dict[str, object], where: str
+) -> NormalisedElementSet | None:
+    """The set the observation was scheduled with, or None where it carries none.
+
+    Raises:
+        NormalisationError: The lines are there and are not a well-formed set
+            for the observation's own satellite. Refused, not skipped: a page
+            whose sets disagree with its receptions is not one to believe.
+    """
+    line1, line2 = observation.get("tle1"), observation.get("tle2")
+    if not (isinstance(line1, str) and line1.strip() and isinstance(line2, str)):
+        return None
+    try:
+        return NormalisedElementSet(
+            satellite_key=f"norad:{observation.get('norad_cat_id')}",
+            line1=line1.strip(),
+            line2=line2.strip(),
+            name=_text(observation.get("tle0")),
+        )
+    except NormalisationError as exc:
+        message = f"{where}: {exc}"
+        raise NormalisationError(message) from exc
 
 
 def _text(value: object) -> str | None:
