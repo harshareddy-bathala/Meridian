@@ -3261,6 +3261,57 @@ Both independence drills pass, a station's reception survives a full outage and 
 
 ---
 
+# Stage 34 — Real-data ingest
+
+Depends on Stages 14, 15, 16, 17, 31 and 32. Added after every earlier stage was built, because external data had still only ever reached Meridian as fixtures.
+
+## Learn
+
+- the GP element-set formats a public catalogue publishes, and what their epoch and age mean;
+- a public observation archive's API, its pagination and its vetting vocabulary;
+- what a foreign station's reception can and cannot tell a model trained for our own.
+
+## Implement
+
+All of it in `meridian-ingest` and the platform's offline modules. The platform still fetches nothing (D-079, D-138, D-225).
+
+### Element sets from a public catalogue
+
+- An adapter fetches current element sets for the satellites the catalogue already holds, and the loader writes them to `element_sets` with source `celestrak` and the artefact they came from.
+- Ingest never decides what pass generation propagates. A set for a satellite the catalogue does not hold is counted, and not stored.
+- A catalogue file written from the newest fetched sets lets a machine with no network bring the stack up with `meridian catalogue load`.
+- Element-set age is published as a metric, with an alert when the newest set is stale.
+
+### A public observation archive
+
+- An adapter reads another network's public observation archive into `archive_observations` (D-139), under a decision that narrows D-053: training, evaluation, fitting the simulator and cross-checking a silent satellite only. Never a runtime input, and never a published comparison of totals.
+- Its own vetting is kept verbatim beside our label.
+
+### Public sources, live
+
+Stage 31's sources run against their real endpoints, on the ingest machine, by an operator; CI still opens no socket (D-142).
+
+### A model from real data
+
+A snapshot holding archive receptions is weighted for completeness (Stage 16), fitted with configurations A to D on a temporal split (Stage 17), and sealed as a report (Stage 22). Its figures are labelled as measured by the archive's network, not by Meridian.
+
+### Areas of interest
+
+A decision proposes D-137's answer. Areas are registered and reported, and nothing about them is published until the team accepts it (D-227).
+
+## Tests
+
+- every hop from a fixture to the module that reads it: element sets to passes to a schedule to a station; samples to the conditions feature; archive rows to a fitted model;
+- with ingest stopped and every socket refused, a round still schedules from the last stored set, and its age rises;
+- a predicted pass from fetched elements agrees with an independent propagation of the same lines;
+- the platform imports nothing from `meridian_ingest`, and the scheduler reads no archive table.
+
+## Completion gate
+
+External data reaches every module that reads it, through `meridian-ingest` alone and labelled with its source, and the platform keeps scheduling from what it last stored when every source is unreachable.
+
+---
+
 # Recommended immediate implementation sequence
 
 These are the next concrete batches I would implement:
