@@ -35,6 +35,10 @@ from meridian_ingest.adapters.public.power_precipitation import (
     PowerAdapter,
     PowerNormaliser,
 )
+from meridian_ingest.adapters.public.satnogs_network import (
+    SatnogsNetworkAdapter,
+    SatnogsNetworkNormaliser,
+)
 from meridian_ingest.adapters.public.swpc_kp import SwpcKpAdapter, SwpcKpNormaliser
 from meridian_ingest.adapters.public.tiles import DisplayOnlyNormaliser
 from meridian_ingest.adapters.registration import Registration
@@ -55,6 +59,15 @@ PUBLIC: tuple[Registration, ...] = (
     # CelesTrak updates every two hours and refuses a second download of one
     # update, so six hours is well inside what it asks (D-320).
     Registration(CelestrakAdapter(), CelestrakNormaliser(), cadence_s=6 * HOUR),
+    # No limit is published, so none is declared (D-223); the per-fetch budget
+    # bounds every run. A week's lookback re-fetches windows whose ratings and
+    # vetting were still settling, each a superseding artefact (D-323).
+    Registration(
+        SatnogsNetworkAdapter(),
+        SatnogsNetworkNormaliser(),
+        cadence_s=DAY,
+        lookback_s=7 * DAY,
+    ),
     Registration(SwpcKpAdapter(), SwpcKpNormaliser(), cadence_s=HOUR),
     Registration(
         HourlyAdapter(OPEN_METEO_CLOUD),

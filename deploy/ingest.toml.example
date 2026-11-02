@@ -79,6 +79,18 @@ request_budget = 50
 # groups = ["weather"]               # METEOR-M2 3 (57166) and 4 (59051) are here
 # catalog_numbers = []               # for an object no group holds
 
+# Stage 34's archive of another network's receptions (D-322, D-323): training
+# and evaluation input only, never read at runtime, never compared in public
+# with our own totals. One request per satellite per six-hour window; a fetch
+# needs --since and --until (`follow` supplies them, with a week's lookback
+# while ratings settle). No rate limit is published, so the budget bounds it:
+# four weeks of two satellites is 224 requests.
+#
+# [sources.satnogs_network]
+# enabled = true
+# catalog_numbers = [57166, 59051]
+# request_budget = 250
+
 # Stage 31's public sources (D-220). Every one is off until enabled here or named
 # with --source, and each asks about the places given here — never an adapter's
 # literal. Re-read the terms page ATTRIBUTION.md names before the first fetch.

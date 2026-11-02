@@ -14,3 +14,9 @@ layout reads better as the code that builds it.
 element-set source (D-320). The three element sets were written field by field
 with invented values and their checksums computed, in the column layout of the
 two-line format; none is a set CelesTrak published.
+
+`satnogs-network-57166.json` stands in for one six-hour window of Stage 34's
+archive source (D-323): seven observations of one satellite, in the shape the
+network's observations endpoint answers with, every value invented — the ids,
+the stations, their places and the ratings. It covers each rating, a future
+observation and one that starts after the window.
