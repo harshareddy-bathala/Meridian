@@ -187,10 +187,15 @@ def test_the_latest_run_is_the_newest_counted_by_population(
     }
 
 
-def test_no_run_yet_is_not_found(client: TestClient, rollback: Any) -> None:
+def test_no_run_yet_is_not_yet_computed(client: TestClient, rollback: Any) -> None:
     if rollback.execute("select count(*) from schedule_runs").fetchone()[0]:
         pytest.skip("this database already holds schedule runs")
 
     response = client.get("/api/v1/schedule-runs/latest")
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "not_yet_computed",
+        "reason": "No scheduling round has decided anything yet.",
+        "available_from_stage": 18,
+    }

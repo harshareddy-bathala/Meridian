@@ -89,8 +89,8 @@ describe("the latest round", () => {
   });
 
   it("is null before any round decided anything", async () => {
-    const fetcher: Fetcher = () =>
-      Promise.resolve(new Response(JSON.stringify({ error: "not_found", message: "none" }), { status: 404 }));
+    const body = { status: "not_yet_computed", reason: "No round yet.", available_from_stage: 18 };
+    const fetcher: Fetcher = () => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
     expect(await fetchLatestRun(fetcher, new AbortController().signal)).toBeNull();
   });
 });

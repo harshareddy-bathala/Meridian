@@ -8,7 +8,9 @@ the orbit's age beside each decision, so a timeline is one request.
 
 ``/schedule-runs/latest`` is the newest round's own record: its configuration,
 the solver's status and objective, and its decisions by population. Its gain
-over a baseline is stated as not measured live, with the reason (D-172).
+over a baseline is stated as not measured live, with the reason (D-172). Before
+any round has decided anything, it is ``not_yet_computed`` rather than a 404, so
+the front keeps a copy of that answer like any other (D-086, D-282).
 
 Reference: docs/DECISIONS.md D-086, D-093, D-165, D-170, D-172, D-177, D-331.
 """
@@ -23,6 +25,7 @@ from fastapi import APIRouter, Depends, Query
 from meridian.api import platform_clock
 from meridian.api.dependencies import get_connection
 from meridian.api.public.envelope import NOT_FOUND, PublicError
+from meridian.api.public.models.not_yet_computed import NotYetComputed
 from meridian.api.public.models.schedule import (
     PublicScheduleRun,
     PublicStationSchedule,
@@ -32,10 +35,13 @@ from meridian.store.schedule_run_reads import find_latest_run
 from meridian.store.station_directory import find_station
 from meridian.store.stations import Connection
 
-__all__ = ["MAX_HOURS", "router"]
+__all__ = ["MAX_HOURS", "SCHEDULE_RUNS_STAGE", "router"]
 
 MAX_HOURS = 24
 """The longest span one schedule read covers: four of the jobs service's horizons."""
+
+SCHEDULE_RUNS_STAGE = 18
+"""The stage whose rounds write ``schedule_runs`` (D-170)."""
 
 router = APIRouter()
 
@@ -73,14 +79,15 @@ def get_station_schedule(
 @router.get("/schedule-runs/latest")
 def get_latest_schedule_run(
     conn: Connection = Depends(get_connection, scope="function"),
-) -> PublicScheduleRun:
-    """The newest scheduling round's record.
+) -> PublicScheduleRun | NotYetComputed:
+    """The newest scheduling round's record, or ``not_yet_computed`` before one.
 
-    Raises:
-        PublicError: ``not_found`` before any round has decided anything, which
-            is when a round leaves a record (D-170).
+    A round leaves a record only once it has decided something (D-170).
     """
     row = find_latest_run(conn)
     if row is None:
-        raise PublicError(NOT_FOUND, "No scheduling round has decided anything yet.")
+        return NotYetComputed(
+            reason="No scheduling round has decided anything yet.",
+            available_from_stage=SCHEDULE_RUNS_STAGE,
+        )
     return PublicScheduleRun.from_row(row)

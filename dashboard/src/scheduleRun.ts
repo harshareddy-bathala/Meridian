@@ -4,7 +4,8 @@
 // solver's status and objective, and its decisions by population. Its gain over
 // a baseline is `not_measured` live, with the reason: the replay measures it on
 // a snapshot (D-172). Before any round has decided anything there is no record,
-// and the read says `not_found`, which is shown as that and not as an error.
+// and the read says `not_yet_computed`, which is shown as that and not as an
+// error.
 
 import { getJson, type Fetcher } from "./api";
 import { asNumber, asObject, asOneOf, asString } from "./decode";
@@ -49,9 +50,9 @@ export function decodeScheduleRun(body: unknown): ScheduleRun {
 /** The newest round, or null before any round has decided anything. */
 export async function fetchLatestRun(fetcher: Fetcher, signal: AbortSignal): Promise<ScheduleRun | null> {
   const url = "/api/v1/schedule-runs/latest";
-  const response = await fetcher(url, { signal });
-  if (response.status === 404) {
+  const body = await getJson(fetcher, url, "the latest round", signal);
+  if (asObject(body, "schedule_run").status === "not_yet_computed") {
     return null;
   }
-  return decodeScheduleRun(await getJson(() => Promise.resolve(response), url, "the latest round", signal));
+  return decodeScheduleRun(body);
 }
