@@ -1,0 +1,40 @@
+name: I am building or running a station
+description: Joining the network, implementing MSP, or a question about station hardware.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. A station that a stranger built is the best review the protocol can get.
+        [The protocol](https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md) and [Join with a station](https://meridian.org.in/stations/) are worth reading first.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What you want
+      options:
+        - To join the network with a station
+        - Help implementing MSP myself
+        - Help with the reference station client
+        - The specification is unclear or wrong somewhere
+    validations:
+      required: true
+  - type: textarea
+    id: station
+    attributes:
+      label: Your station
+      description: Roughly where it is (a city is plenty), the computer, the receiver and the antenna.
+      placeholder: Bengaluru · Raspberry Pi 5 · RTL-SDR v4 · QFH antenna
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: For a specification problem, the section number and what it should say.
+    validations:
+      required: true
+  - type: checkboxes
+    id: receive
+    attributes:
+      label: Receive only
+      options:
+        - label: I understand Meridian stations only ever receive, and never transmit
+          required: true

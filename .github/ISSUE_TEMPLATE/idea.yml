@@ -1,0 +1,21 @@
+name: An idea
+description: A feature, a satellite to support, a way to use the data, or anything else.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What it would let someone do
+      description: Start from the person who wants it and what they are trying to do, not from the code.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you considered instead

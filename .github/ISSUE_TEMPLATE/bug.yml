@@ -1,0 +1,50 @@
+name: Something is wrong
+description: The platform, the client, the simulator, the dashboard or the site does not do what it should.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, including any error message, word for word.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: The commands you ran, or the page and what you clicked.
+      placeholder: |
+        1. docker compose -f deploy/docker-compose.yml up -d --build
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: A release tag, or the output of `git rev-parse --short HEAD`.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Platform or API
+        - Station client
+        - Simulator
+        - Dashboard
+        - Site (meridian.org.in)
+        - Deployment or tools
+        - Not sure
+  - type: checkboxes
+    id: simulated
+    attributes:
+      label: Data
+      options:
+        - label: This involves simulated data shown or stored as if it were measured

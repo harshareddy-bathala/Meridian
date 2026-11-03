@@ -1,0 +1,4 @@
+# The "Sponsor" button on the repository. It points at the support page, which
+# lists every way to give and says what support pays for (D-343). Add
+# `github: [harshareddy-bathala]` once the Sponsors profile is live.
+custom: ["https://meridian.org.in/support/"]
