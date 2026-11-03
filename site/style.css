@@ -343,15 +343,6 @@ body {
 }
 .globe-state { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--ink-dim); }
 .globe-state .swatch { transition: background-color var(--dur-2) var(--ease); }
-/* The hint is only true once main.js is drawing: without it the globe is a
-   still picture and cannot be turned. */
-.globe-hint { display: none; }
-:root.intro-ready .globe-hint { display: block; }
-.hint-touch { display: none; }
-@media (hover: none) {
-  .hint-fine { display: none; }
-  .hint-touch { display: inline; }
-}
 @media (max-width: 63.9375rem) {
   .globe-note { justify-items: start; text-align: left; }
 }
@@ -1306,63 +1297,66 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.125rem;
-  height: 1.125rem;
-  margin: 0 0.1em 0 0.25em;
+  width: 0.9375rem;
+  height: 0.9375rem;
+  margin: 0 0.1em 0 0.3em;
   padding: 0;
   border: 1px solid var(--muted);
   border-radius: 50%;
   background: none;
   color: var(--muted);
-  font-family: var(--serif);
-  font-size: 0.75rem;
-  font-style: italic;
+  font-family: var(--sans);
+  font-size: 0.625rem;
+  font-weight: 600;
+  font-style: normal;
   line-height: 1;
-  vertical-align: 0.12em;
+  vertical-align: 0.15em;
   cursor: pointer;
-  transition: color 180ms var(--ease-out), border-color 180ms var(--ease-out);
+  transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease);
 }
-/* The glyph is 18px; the target is 44px, by an invisible hit area, so a thumb
+/* The circle is 15px; the target is 44px, by an invisible hit area, so a thumb
    finds it without a large circle sitting in every sentence. */
-.info::after { content: ""; position: absolute; inset: -0.8125rem; border-radius: 50%; }
+.info::after { content: ""; position: absolute; inset: -0.875rem; border-radius: 50%; }
 .info:hover,
 .info:focus-visible { color: var(--ink); border-color: var(--ink); }
+.info[aria-expanded="true"] { color: var(--bg); background: var(--ink); border-color: var(--ink); }
 
+/* The note drops down from its (i), right where the word is, and goes away
+   when the (i) is pressed again or anything outside it is. The native
+   popover attribute does the opening, the closing and the light dismiss;
+   pages.js only places it under its button (.term-anchored). Without that
+   script it opens centred, which is still a working note. */
 .term {
   position: fixed;
   inset: 0;
-  width: min(26rem, calc(100vw - 2rem));
+  width: min(22rem, calc(100vw - 2rem));
   height: fit-content;
   margin: auto;
-  padding: var(--space-5);
-  border: 0;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-2);
   background: var(--bg);
   color: var(--ink);
-  box-shadow: 0 1.5rem 4rem rgb(22 24 29 / 0.22);
-}
-/* The note rises and fades in, and leaves the same way. allow-discrete lets
-   display and the top layer wait for the fade; a browser without it simply
-   shows and hides the note, as before. */
-.term {
+  box-shadow: var(--shadow-1), 0 12px 32px rgb(22 24 29 / 0.12);
   opacity: 0;
-  transform: translateY(8px) scale(0.98);
+  transform: translateY(-6px);
   transition: opacity var(--dur-2) var(--ease), transform var(--dur-2) var(--ease),
     overlay var(--dur-2) var(--ease) allow-discrete, display var(--dur-2) var(--ease) allow-discrete;
 }
+.term.term-anchored {
+  inset: auto;
+  top: var(--term-y, 0);
+  left: var(--term-x, 0);
+  margin: 0;
+}
+.term.term-above { transform: translateY(6px); }
 .term:popover-open { opacity: 1; transform: none; }
 @starting-style {
-  .term:popover-open { opacity: 0; transform: translateY(8px) scale(0.98); }
+  .term:popover-open { opacity: 0; transform: translateY(-6px); }
+  .term.term-above:popover-open { transform: translateY(6px); }
 }
-.term::backdrop {
-  background: rgb(22 24 29 / 0);
-  transition: background-color var(--dur-2) var(--ease),
-    overlay var(--dur-2) var(--ease) allow-discrete, display var(--dur-2) var(--ease) allow-discrete;
-}
-.term:popover-open::backdrop { background: rgb(22 24 29 / 0.35); }
-@starting-style {
-  .term:popover-open::backdrop { background: rgb(22 24 29 / 0); }
-}
+.term::backdrop { background: transparent; }
 
 .term p { margin: 0; }
 .term-name {
@@ -1371,35 +1365,21 @@ body {
   color: var(--signal);
 }
 .term-plain {
-  margin-top: var(--space-3) !important;
-  font-size: var(--step-1);
+  margin-top: var(--space-2) !important;
+  font-size: var(--step-0);
   line-height: 1.55;
-  color: var(--ink);
+  color: var(--ink-dim);
 }
-.term-foot {
-  margin-top: var(--space-5) !important;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-4);
+.term-foot { margin-top: var(--space-3) !important; }
+.term-foot a {
+  font-size: var(--step--1);
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 0.22em;
 }
-.term-foot a,
-.term-close {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--target);
-  padding: 0 1.125rem;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-pill);
-  background: none;
-  font-family: var(--sans);
-  font-size: 0.9375rem;
-  color: var(--ink);
-  text-decoration: none;
-  cursor: pointer;
-}
-.term-foot a:hover, .term-foot a:focus-visible,
-.term-close:hover, .term-close:focus-visible { background: var(--surface); }
+.term-foot a:hover,
+.term-foot a:focus-visible { color: var(--ink); text-decoration-color: var(--ink); }
 
 /* ------------------------------------------------------------- glossary -- */
 
@@ -1768,7 +1748,7 @@ body {
   .cta, .cta .arrow, .nav a, .theme-toggle, .prose a,
   .toc a, .foot-col a, .rail-src,
   .door .arrow, .info, .section p a, .section li a:not(.door),
-  .meta a, .foot-line a, .foot-bar a, .door, .term, .term::backdrop,
+  .meta a, .foot-line a, .foot-bar a, .door, .term,
   .globe-state .swatch { transition: none; }
   .door:hover .arrow { transform: none; }
   .cta:active { transform: none; }

@@ -68,7 +68,7 @@ const ctx = canvas && canvas.getContext ? canvas.getContext('2d', { alpha: false
 let W = 0, H = 0;
 
 /* ------------------------------------------------------------------- drag --
- * The visitor can turn the globe: drag or swipe it, or use the arrow keys.
+ * The visitor can turn the globe by dragging or swiping it.
  * Two offsets on top of the slow spin, in radians: longitude (unbounded) and
  * tilt (held within ±35°, so the station never rolls out of view). A flick
  * keeps turning and slows to a stop; under reduced motion the globe follows
@@ -385,17 +385,6 @@ function release() {
   root.classList.remove('globe-dragging');
 }
 
-/* The arrows turn the globe once it has settled. The page does not scroll, so
-   they have nothing else to do here. */
-function keyTurn(event) {
-  if (clock < SETTLE_MS || event.altKey || event.ctrlKey || event.metaKey) return false;
-  const step = { ArrowLeft: [-12, 0], ArrowRight: [12, 0], ArrowUp: [0, 6], ArrowDown: [0, -6] }[event.key];
-  if (!step) return false;
-  event.preventDefault();
-  turn(step[0] * DEG, step[1] * DEG);
-  return true;
-}
-
 /* -------------------------------------------------------------------- loop -- */
 
 let clock = 0;
@@ -461,7 +450,6 @@ window.addEventListener('click', (event) => {
 
 function skip(event) {
   if (event && event.type === 'keydown') {
-    if (keyTurn(event)) return;
     const k = event.key;
     if (k === 'Shift' || k === 'Control' || k === 'Alt' || k === 'Meta') return;
   }

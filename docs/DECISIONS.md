@@ -6882,16 +6882,16 @@ The site is read like a document: pages of explanation, read in daylight, on pho
 
 ## D-345 — The front page is one screen, and its globe can be turned
 
-**2026-11-03 · accepted** · *`site/index.html`; `site/main.js`; `site/style.css`; `site/motion.js`; `site/vendor/cube-motion-0.1.0/`. Amends D-342 and D-041.*
+**2026-11-03 · accepted** · *`site/index.html`; `site/main.js`; `site/style.css`; `site/pages.js`; `site/tools/shell.py`; `site/vendor/cube-motion-0.1.0/`. Amends D-342, D-041 and D-340.*
 
 D-342 gave the front page a second screen of five doors under the globe. Below the fold of a page whose first screen is a moving picture, it was found by scrolling, if at all, and every door it held is already in the navigation. The intro took 4.2 s before anything but the heading appeared, which is long enough to read as a slow page.
 
 **Decision.**
 - **One screen, no scroll** at 390×844, 1280×800, 1366×768 and 1920×1080: the masthead, the heading, one sentence, two actions, a metadata line and one caption. The heading's size also follows the screen's height, so a short laptop screen fits; a screen shorter still scrolls rather than clipping. The doors live in the navigation and on the other pages' footers.
 - **The intro takes 1.4 s**, from close-up to settled globe, and the content follows over 210 ms. The heading still paints first (D-042), and the intro is still skipped by any key or tap and replaced by a still frame under reduced motion.
-- **The globe can be turned.** A drag or a sideways swipe turns it and a flick coasts to a stop; the arrow keys turn it too. A press on a link, a button or the text column is never taken by the globe. Under reduced motion it follows the hand exactly and never coasts. Without script it is the still picture, and the hint to turn it is not shown.
+- **The globe can be turned.** A drag or a sideways swipe turns it and a flick coasts to a stop. Nothing on the page says so: the cursor changes over the globe, and a hint would be one more line on a screen kept to the essentials. A press on a link, a button or the text column is never taken by the globe. Under reduced motion it follows the hand exactly and never coasts. Without script it is the still picture.
 - **One caption says what the globe shows**, in words, in place of the legend: whether a satellite is above the station's horizon, so it can listen, or that the next pass is already predicted. It is written only when that changes.
-- **Every other page eases in.** The masthead holds still across a page change while the page beneath it fades and rises 8 px. Sections still below the fold rise into place as they scroll into view, using cube-motion's `reveal` (MIT, vendored unmodified under a versioned path). Nothing already on screen is hidden and shown again, and a blocked script costs the motion, never the content. A term's note rises and fades in.
+- **Every other page eases in.** The masthead holds still across a page change while the page beneath it fades and rises 8 px. Sections still below the fold rise into place as they scroll into view, using cube-motion's `reveal` (MIT, vendored unmodified under a versioned path). Nothing already on screen is hidden and shown again, and a blocked script costs the motion, never the content. A term's note drops down from its (i), under the word it explains, and goes away when the (i) is pressed again or anything else is; it has no close button and does not dim the page. The (i) itself is a small circle with a plain *i*.
 - **Links that stand alone draw an underline from the left on hover**: the footer, the contents list and the metadata line. Links inside a sentence keep a resting underline, which is how a reader knows they are links, and the navigation keeps its pill.
 
 *Rejected: keeping the doors below the globe.* A second screen on a page built around one picture asks for a scroll that nothing on the first screen invites.
@@ -7314,7 +7314,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-342 the front page's second screen | `site/index.html`; `site/sitemap.xml`; `site/tools/{stamp_assets,verify_site}.py` |
 | D-343 no sums; real payment details or none | `site/support/index.html`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py` |
 | D-344 light by default, a serif display, larger type, soft corners | `site/style.css`; `site/theme.js`; `site/fonts/`; `site/*/index.html` theme colour; `site/site.webmanifest`; `dashboard/src/app.css`; `tests/unit/test_site_dashboard_tokens.py` |
-| D-345 one screen; a globe to turn; easing in | `site/index.html`; `site/main.js`; `site/motion.js`; `site/style.css`; `site/vendor/cube-motion-0.1.0/`; `site/tools/stamp_assets.py`; `site/_headers`; `site/README.md`; `ATTRIBUTION.md` |
+| D-345 one screen; a globe to turn; easing in | `site/index.html`; `site/main.js`; `site/pages.js`; `site/tools/shell.py`; `site/style.css`; `site/vendor/cube-motion-0.1.0/`; `site/tools/stamp_assets.py`; `site/_headers`; `site/README.md`; `ATTRIBUTION.md` |
 
 **Landed 2026-11-03**, making the repository ready for contributors and sponsors.
 

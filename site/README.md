@@ -18,7 +18,7 @@ then open `http://127.0.0.1:8080/`.
 
 ## Pages
 
-Organised by what a visitor came for (D-340, D-345). The visitor pages are short, mark every technical term with an **(i)**, state status in words, and carry no rail. Their only scripts are `theme.js` and `motion.js`.
+Organised by what a visitor came for (D-340, D-345). The visitor pages are short, mark every technical term with an **(i)**, state status in words, and carry no rail. Their only scripts are `theme.js` and `pages.js`.
 
 | Path | |
 |---|---|
@@ -33,7 +33,7 @@ Organised by what a visitor came for (D-340, D-345). The visitor pages are short
 | `architecture/`, `protocol/`, `docs/`, `about/` | The document pages, under *Developers* in the nav. Layer diagram, MSP 0.1, the documents index, and what Meridian is. |
 | `404.html` | `noindex`. Shares the shell. |
 
-The document pages carry no intro, and `motion.js` moves only what is still below the fold, which is why they load instantly. Only `index.html` loads `main.js`, and only the four document pages load `rail.js`.
+The document pages carry no intro, and `pages.js` moves only what is still below the fold, which is why they load instantly. Only `index.html` loads `main.js`, and only the four document pages load `rail.js`.
 
 ## Shared regions and the (i) notes
 
@@ -54,7 +54,7 @@ python site/tools/shell.py --check   # exit 1 if any page is stale; CI runs this
 
 **Never edit inside a fence by hand.** Edit `shell_parts.py`, `terms.json` or `support.json` and run the tool, then `stamp_assets.py`.
 
-**An (i) is written as** `<button class="info" popovertarget="term-pass"></button>`, placed directly after the word it explains with no space. The tool fills in its label and its glyph, and writes the popover. The popover is the native `popover` attribute: no script, so nothing for the CSP to allow. A term `terms.json` does not define fails the run. Add a definition there first, in one or two sentences for someone who has never used a radio.
+**An (i) is written as** `<button class="info" popovertarget="term-pass"></button>`, placed directly after the word it explains with no space. The tool fills in its label and its glyph, and writes the popover. The popover is the native `popover` attribute, so opening it, closing it on a second press and closing it on a press anywhere else need no script. `pages.js` only places it under its (i); without it the note opens centred. A term `terms.json` does not define fails the run. Add a definition there first, in one or two sentences for someone who has never used a radio.
 
 **Payment details are real or absent.** `support.json`'s `upi_id` and `github_sponsors` are `null` until they exist, which renders *Opening shortly*. Setting `upi_id` also needs `support/upi-qr.svg`. A value that does not look like a real UPI ID or Sponsors URL fails both tools.
 
@@ -95,7 +95,7 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 | `orbit.js` | The projection, graticule, orbit model and elevation test. Imported by both canvases. No DOM except `readPalette()`. |
 | `main.js` | The home page's intro choreography. Home page only. |
 | `rail.js` | The document rail: contents scroll-spy and one still canvas frame. Document pages only. |
-| `motion.js` | Sections below the fold rise into place as they scroll into view. Every page but the front. Hides nothing that is already on screen, so a blocked script costs the motion, never the content. |
+| `pages.js` | Every page but the front. Sections below the fold rise into place as they scroll into view, and a term's note drops down from its (i). Hides nothing that is already on screen, so a blocked script costs the motion and the placement, never the content. |
 | `vendor/cube-motion-0.1.0/` | cube-motion's `rise` and `reveal`, MIT, unmodified. A versioned path, served immutable; an upgrade is a new directory. |
 | `.well-known/security.txt` | RFC 9116. Renew `Expires:` before it lapses — an expired file counts as none. |
 | `fonts/` | IBM Plex Sans and Mono, and Source Serif 4 for display, latin subsets, SIL OFL-1.1. `OFL.txt` and `SourceSerif4-OFL.txt` ship with them — see `ATTRIBUTION.md`. |
@@ -164,7 +164,7 @@ Two behaviours that are requirements, not niceties:
 
 - `prefers-reduced-motion: reduce` renders one static settled frame and never starts the loop. The globe can still be turned; it follows the hand exactly and never coasts.
 - Click, tap, `Escape` or any key skips the intro.
-- Once settled, a drag or a sideways swipe on the globe turns it, and a flick coasts to a stop. The arrow keys turn it too. A press on a link, a button or the text column is never taken by the globe. `html` carries `touch-action: pan-y pinch-zoom` on this page only, so a sideways swipe reaches the script and pinch zoom stays the browser's.
+- Once settled, a drag or a sideways swipe on the globe turns it, and a flick coasts to a stop. Nothing on the page tells the visitor so: the cursor changes over the globe, and that is enough. A press on a link, a button or the text column is never taken by the globe. `html` carries `touch-action: pan-y pinch-zoom` on this page only, so a sideways swipe reaches the script and pinch zoom stays the browser's.
 
 ### The `<h1>` is not in the reveal, and must not be put back into it
 

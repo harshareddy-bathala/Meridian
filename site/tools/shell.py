@@ -107,9 +107,7 @@ def popover(key: str, terms: dict[str, dict[str, str]]) -> str:
         f'    <div class="term" id="term-{key}" popover>\n'
         f'      <p class="term-name">{html.escape(entry["name"])}</p>\n'
         f'      <p class="term-plain">{html.escape(entry["plain"])}</p>\n'
-        f'      <p class="term-foot"><a href="/terms/#{key}">Every term</a>'
-        f'<button class="term-close" type="button" popovertarget="term-{key}" '
-        f'popovertargetaction="hide">Close</button></p>\n'
+        f'      <p class="term-foot"><a href="/terms/#{key}">All terms</a></p>\n'
         f"    </div>"
     )
 
