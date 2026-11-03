@@ -702,7 +702,7 @@ The mechanism is constrained by the CSP. `_headers` allows no `unsafe-inline`, w
 
 ## D-038 — The public site is five pages, and what it does not say
 
-**2026-08-05 · accepted**
+**2026-08-05 · accepted** · *its one-screen front page and its five pages superseded by D-342*
 
 `site/` was one page. It is now `/`, `/architecture/`, `/protocol/`, `/docs/`, `/about/` and a 404, sharing a masthead, nav and footer.
 
@@ -6785,6 +6785,75 @@ On the demonstration stack, every map tile came back as OpenStreetMap's "Access 
 
 ---
 
+## D-340 — The site starts from what a visitor came for, in plain words, with an (i) for every term
+
+**2026-11-03 · accepted** · *`site/` (every page); `site/terms.json`; `site/tools/shell.py`*
+
+The site was written for someone who already knew what a ground station was: architecture, protocol, documents, about. A visitor who wanted satellite images, wanted to watch a place, or had an antenna in a cupboard had to translate it first.
+
+**Decision.** Pages are organised by what a visitor came for: *how it works*, *data*, *watch an area*, *join with a station*, *support*. The technical pages stay, unchanged in substance, under *Developers*. Every page follows the same rules:
+
+- **It opens in words a non-specialist understands.** The precise term follows, with an **(i)** that opens a one- or two-sentence definition.
+- **Status is stated in words.** *Waiting for first light*, *Not open yet*, *Invite only, for now*. Never a blank, never a zero.
+- **Every picture says what it is.** The seven on *How it works* and the one on *Watch an area* are drawn for the page and captioned *Illustration · example values* or *Example · drawn, not data*. They are not dashboard captures: a capture is a picture of the simulated fleet, which would need its own SIM badge, would go stale with every dashboard change, and weighs hundreds of kilobytes where a drawing weighs a few. The live dashboard is linked instead, where every figure carries its label.
+- **Nothing is said about other projects.** Clarity is the comparison, never a claim (D-099).
+
+**The (i) is the native `popover` attribute.** It needs no script, so the CSP is untouched; the browser handles focus, Escape and tapping outside. It opens as a small centred sheet rather than beside the button, because anchoring it needs CSS anchor positioning, which two of the three engines do not ship. The definitions live once, in `site/terms.json`; `shell.py` writes the button and its note into each page and the full list into `/terms/`. A page naming an undefined term fails the run.
+
+**The masthead and footer have one copy.** Thirteen hand-written pages could no longer keep twelve identical copies of the nav. `shell.py` rewrites them between fence comments, as `make-images.py` already does for the still globe, and CI runs it with `--check`. The output is committed, so `site/` is still exactly what is served and D-036 still holds.
+
+*Rejected: a templating build step.* It would make `site/` an output rather than the deployment, which is what D-036 and D-042 decline.
+
+*Rejected: tooltips on hover.* A phone has no hover, and a definition that only a mouse can reach is not there for most visitors.
+
+---
+
+## D-341 — One look across the site and the dashboard: shared spacing, type and radii, and four breakpoints
+
+**2026-11-03 · accepted** · *`site/style.css`; `site/main.js`; `site/rail.js`; `site/tools/content_checks.py`*
+
+`style.css` tested ten different widths (480, 640, 720, 839, 840, 900, 1180 and 1800 px, among others), each chosen where one component happened to break. Every new component would have added another.
+
+**Decision.** One spacing scale (`--space-1` to `--space-8`), one fluid type scale (`--step--1` to `--step-3`), two radii, and four breakpoints: **40, 64, 80 and 120 rem**. A `max-width` query uses one sixteenth of a rem under, so the two sides of a breakpoint never overlap. `verify_site.py` fails on any other width. The dashboard adopts the same tokens once Stage 35's styles are on `main`.
+
+- **The globe moves above the content below 64rem**, not 840 px. `NARROW` in `main.js` and the still globe's query move together, as the README requires.
+- **The document rail appears from 80rem**, not 1180 px; `rail.js`'s `matchMedia` moves with it.
+- **The layer diagram's floor drops from 40rem to 36rem**, so it fits at 40rem with the page's padding, and its fade starts where it overflows.
+
+**A defect found on the way.** `.doc > h1` styled the heading of every document page, and stopped matching when the rail grid wrapped the heading in `.doc-head`. Every document page's `<h1>` has since been the browser's default bold heading. It now reads `.doc > h1, .doc-head > h1`.
+
+---
+
+## D-342 — The front page gains a second screen, and the site grows to twelve pages
+
+**2026-11-03 · accepted** · *supersedes D-038's one-screen front page and its five pages* · *`site/index.html`, `site/sitemap.xml`*
+
+D-038 kept the front page to one screen so the globe would be the whole impression. That still holds for the first screen, which is unchanged except for its words. It no longer holds for the visit: someone arriving from a search, an expo poster or a post does not know which of twelve pages they want.
+
+**Decision.** Below the globe, one more screen, *What brings you here?*, with five doors: data or images, watching an area, a station, code, support. It is opaque, so the fixed globe does not show through it, and its footer is the shared one. The heading is still outside the reveal (D-042).
+
+The front page's first sentence is now plain: *Satellites pass overhead for minutes at a time. Meridian makes each one count.* The `<title>` keeps the precise description for search.
+
+The site is now `/`, `/how-it-works/`, `/data/`, `/areas/`, `/stations/`, `/support/`, `/developers/`, `/terms/`, the four existing document pages and the 404. The visitor pages carry no rail and load no script but `theme.js`.
+
+*Rejected: a separate network page with committed figures for the next day.* A static file describing tomorrow is wrong by tomorrow. The live dashboard is linked from the front page, *Data* and *How it works* instead.
+
+---
+
+## D-343 — Support is described by what it keeps running, never by a sum, and payment details are real or absent
+
+**2026-11-03 · accepted** · *`site/support/`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py`*
+
+`PROJECT.md` §17 costs the station in tiers. That document is assessed and keeps its figures. A public page that quotes them reads as a fundraising target, and dates the moment a price changes.
+
+**Decision.** No public surface states a sum: not the site, the README, the Sponsors profile, `FUNDING.yml` or a post. Support is described the way any organisation describes its running costs: the platform and its link online, the data services and keys, the domain and site, upkeep. Anything beyond them goes, in order, to a tracking antenna (Tier 3), more stations, then new software. `verify_site.py` fails on a currency sign or code beside a number, and on the Indian number words a sum in rupees is usually written with.
+
+**Payment details are real or absent.** `support.json` holds the UPI ID and the Sponsors URL, both `null` until they exist, and `null` renders as *Opening shortly*. A value that is not shaped like a UPI ID or a Sponsors profile, or that contains a word like *example* or *your*, fails both `shell.py` and `verify_site.py`. A UPI ID also needs its QR code generated beside it. A placeholder that ships sends somebody's money to nobody, or to someone else.
+
+The page says plainly that Meridian is not a registered charity and that support is not tax-deductible. A sponsors list starts empty and says so.
+
+---
+
 ## D-350 — The repository is written for the people arriving at it: a plain README, and the files a contributor looks for
 
 **2026-11-03 · accepted** · *`README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CHANGELOG.md`, `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`*
@@ -7189,6 +7258,15 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
+
+**Landed 2026-11-03**, building the site for the people who use it.
+
+| Decision | Applied to |
+|---|---|
+| D-340 plain words, an (i) per term, one shell | `site/{how-it-works,data,areas,stations,support,developers,terms}/index.html`; `site/terms.json`; `site/tools/{shell,shell_parts}.py`; `ci.yml › site` |
+| D-341 one look, four breakpoints | `site/style.css`; `site/{main,rail}.js`; `site/tools/content_checks.py`; `site/README.md` |
+| D-342 the front page's second screen | `site/index.html`; `site/sitemap.xml`; `site/tools/{stamp_assets,verify_site}.py` |
+| D-343 no sums; real payment details or none | `site/support/index.html`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py` |
 
 **Landed 2026-11-03**, making the repository ready for contributors and sponsors.
 
