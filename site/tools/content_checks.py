@@ -8,6 +8,9 @@ terms        every (i) names a term site/terms.json defines
 breakpoints  style.css tests only the four shared widths (D-341)
 figures      every picture says what it is: an illustration, an example or
              simulated. None may pass for a measurement (CLAUDE.md rule 5).
+wording      no page talks about how the site itself is written, and none calls
+             Meridian a non-profit. A visitor reads what Meridian does, not
+             notes on the prose; and the project's status is not one to claim.
 """
 
 from __future__ import annotations
@@ -34,6 +37,13 @@ MEDIA_WIDTH = re.compile(r"\((min|max)-width:\s*([\d.]+)(rem|px|em)\)")
 FIGURE = re.compile(r'<figure class="fig[^"]*">(.*?)</figure>', re.S)
 CAPTION = re.compile(r"<figcaption>(.*?)</figcaption>", re.S)
 HONEST_CAPTION = re.compile(r"^(Illustration|Example|Simulated)\b")
+
+# Sentences about the site's own writing, and a status Meridian does not hold.
+WORDING = re.compile(
+    r"plain words|plain language|\(i\) beside|small \(i\)|every page starts"
+    r"|each technical term|non-?profit|not-for-profit",
+    re.I,
+)
 
 
 def visible_text(page_html: str) -> str:
@@ -108,6 +118,23 @@ def check_figures(site: Path, pages: list[str]) -> list[str]:
     return problems
 
 
+def check_wording(site: Path, pages: list[str]) -> list[str]:
+    """No page describes its own prose, or claims a status Meridian lacks.
+
+    Read from the whole page, JSON-LD and the head's metadata included, since a
+    title or a structured-data description is what a search result shows.
+    """
+    found = []
+    for name in pages:
+        page = (site / name).read_text(encoding="utf-8")
+        text = html.unescape(re.sub(r"<!--.*?-->", " ", page, flags=re.S))
+        found += [
+            f"{name}: says {match.group(0)!r}; say what Meridian does instead"
+            for match in WORDING.finditer(text)
+        ]
+    return found
+
+
 def check_content(site: Path, pages: list[str], css: str) -> list[str]:
     """Every check in this file."""
     return (
@@ -116,4 +143,5 @@ def check_content(site: Path, pages: list[str], css: str) -> list[str]:
         + check_terms(site, pages)
         + check_breakpoints(css)
         + check_figures(site, pages)
+        + check_wording(site, pages)
     )

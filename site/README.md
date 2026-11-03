@@ -56,7 +56,7 @@ python site/tools/shell.py --check   # exit 1 if any page is stale; CI runs this
 
 **An (i) is written as** `<button class="info" popovertarget="term-pass"></button>`, placed directly after the word it explains with no space. The tool fills in its label and its glyph, and writes the popover. The popover is the native `popover` attribute, so opening it, closing it on a second press and closing it on a press anywhere else need no script. `pages.js` only places it under its (i); without it the note opens centred. A term `terms.json` does not define fails the run. Add a definition there first, in one or two sentences for someone who has never used a radio.
 
-**Payment details are real or absent.** `support.json`'s `upi_id` and `github_sponsors` are `null` until they exist, which renders *Opening shortly*. Setting `upi_id` also needs `support/upi-qr.svg`. A value that does not look like a real UPI ID or Sponsors URL fails both tools.
+**Payment details are real or absent.** `support.json`'s `upi_id` and `github_sponsors` are `null` until they exist, which renders *being set up* with the contact address. Setting `upi_id` also needs `support/upi-qr.svg`. A value that does not look like a real UPI ID or Sponsors URL fails both tools.
 
 ## The document rail
 
@@ -106,7 +106,7 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 | `tools/make-images.py` | Regenerates all of the above, and the still globe inside `index.html`. Needs Pillow for everything except the globe. |
 | `tools/stamp_assets.py` | Puts `?v=<content hash>` on every CSS and JS reference. Run after editing one. Stdlib only. |
 | `tools/verify_site.py` | The invariants this file asserts, checked. Stdlib only. Runs in CI. |
-| `tools/content_checks.py` | The visitor pages' rules, which `verify_site.py` runs: no sums, real payment details, defined terms, four breakpoints, labelled pictures. |
+| `tools/content_checks.py` | The visitor pages' rules, which `verify_site.py` runs: no sums, real payment details, defined terms, four breakpoints, labelled pictures, and no notes about the prose. |
 | `tools/shell.py`, `tools/shell_parts.py` | The shared regions above. Stdlib only. Runs in CI with `--check`. |
 | `terms.json` | The plain definition behind every (i). |
 | `support.json` | The UPI ID and Sponsors URL, or `null`. |
@@ -243,6 +243,7 @@ The stamper only rewrites *quoted* references. `rail.js` opens with a paragraph 
 | terms | an (i) or popover names a term `terms.json` does not define |
 | breakpoints | `style.css` tests a width other than 40, 64, 80 or 120rem (D-341) |
 | figures | a `<figure class="fig">` caption does not begin *Illustration*, *Example* or *Simulated* |
+| wording | a page, its metadata or its structured data talks about how the site is written, or calls Meridian a non-profit |
 
 The link-styling check exists because the bug it catches shipped: `.foot-bar` styled the wide footer's bottom bar and nothing styled the anchor inside it, so the licence link was drawn in user-agent blue on all five document pages. It reads the styled contexts out of `style.css`, counting **only rules that set `color`** — `.nav a` appears twice in that file, once with a colour and once in the reduced-motion query with nothing but `transition: none`, and counting the second would let a stylesheet that had lost the first still pass.
 

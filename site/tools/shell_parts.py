@@ -59,7 +59,7 @@ def footer() -> str:
 
 # ------------------------------------------------------------ ways to give --
 # The support page's payment block, from site/support.json. A value that is not
-# set renders as "opening shortly", never as a placeholder: a published UPI ID
+# set renders as "being set up", never as a placeholder: a published UPI ID
 # that belongs to nobody, or to the wrong person, sends someone's money there.
 
 UPI_ID = re.compile(r"[a-z0-9][a-z0-9._-]{1,255}@[a-z][a-z0-9]{1,63}")
@@ -90,7 +90,7 @@ def support_problems(data: dict[str, object]) -> list[str]:
     return problems
 
 
-OPENING = """          <span class="pill pill-wait">Opening shortly</span>"""
+OPENING = """          <span class="pill pill-wait">Being set up</span>"""
 
 
 def give(data: dict[str, object], qr_present: bool) -> str:
@@ -98,8 +98,8 @@ def give(data: dict[str, object], qr_present: bool) -> str:
     upi, sponsors = data.get("upi_id"), data.get("github_sponsors")
     if upi is None and sponsors is None:
         return """      <div class="empty">
-        <p class="empty-t">Opening shortly.</p>
-        <p>GitHub Sponsors and UPI are being set up. Until they are, write to
+        <p class="empty-t">GitHub Sponsors and UPI are being set up.</p>
+        <p>They will appear here. Until then, to support Meridian, write to
         <a href="mailto:hello@meridian.org.in">hello@meridian.org.in</a>.</p>
       </div>"""
 

@@ -6789,15 +6789,15 @@ On the demonstration stack, every map tile came back as OpenStreetMap's "Access 
 
 ---
 
-## D-340 — The site starts from what a visitor came for, in plain words, with an (i) for every term
+## D-340 — The site starts from what a visitor came for, with a short definition behind every technical term
 
 **2026-11-03 · accepted** · *`site/` (every page); `site/terms.json`; `site/tools/shell.py`*
 
-The site was written for someone who already knew what a ground station was: architecture, protocol, documents, about. A visitor who wanted satellite images, wanted to watch a place, or had an antenna in a cupboard had to translate it first.
+The site was written for someone who already knew what a ground station was: architecture, protocol, documents, about. Visitors arrive with a goal (satellite images, a place to watch, an antenna in a cupboard) rather than a vocabulary, and had to translate the site before they could use it.
 
 **Decision.** Pages are organised by what a visitor came for: *how it works*, *data*, *watch an area*, *join with a station*, *support*. The technical pages stay, unchanged in substance, under *Developers*. Every page follows the same rules:
 
-- **It opens in words a non-specialist understands.** The precise term follows, with an **(i)** that opens a one- or two-sentence definition.
+- **It opens with what the visitor can do or see.** The precise term follows, with an **(i)** that opens a one- or two-sentence definition.
 - **Status is stated in words.** *Waiting for first light*, *Not open yet*, *Invite only, for now*. Never a blank, never a zero.
 - **Every picture says what it is.** The seven on *How it works* and the one on *Watch an area* are drawn for the page and captioned *Illustration · example values* or *Example · drawn, not data*. They are not dashboard captures: a capture is a picture of the simulated fleet, which would need its own SIM badge, would go stale with every dashboard change, and weighs hundreds of kilobytes where a drawing weighs a few. The live dashboard is linked instead, where every figure carries its label.
 - **Nothing is said about other projects.** Clarity is the comparison, never a claim (D-099).
@@ -6809,6 +6809,8 @@ The site was written for someone who already knew what a ground station was: arc
 *Rejected: a templating build step.* It would make `site/` an output rather than the deployment, which is what D-036 and D-042 decline.
 
 *Rejected: tooltips on hover.* A phone has no hover, and a definition that only a mouse can reach is not there for most visitors.
+
+*Amended by D-345 (2026-11-03).* A note now drops down under its (i) rather than opening as a centred sheet: `pages.js` places it, and without that script it still opens centred.
 
 ---
 
@@ -6850,11 +6852,11 @@ The site is now `/`, `/how-it-works/`, `/data/`, `/areas/`, `/stations/`, `/supp
 
 **2026-11-03 · accepted** · *`site/support/`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py`*
 
-`PROJECT.md` §17 costs the station in tiers. That document is assessed and keeps its figures. A public page that quotes them reads as a fundraising target, and dates the moment a price changes.
+`PROJECT.md` §17 describes the station in tiers. A public page that quotes a price for them reads as a fundraising target, and dates the moment the price changes.
 
 **Decision.** No public surface states a sum: not the site, the README, the Sponsors profile, `FUNDING.yml` or a post. Support is described the way any organisation describes its running costs: the platform and its link online, the data services and keys, the domain and site, upkeep. Anything beyond them goes, in order, to a tracking antenna (Tier 3), more stations, then new software. `verify_site.py` fails on a currency sign or code beside a number, and on the Indian number words a sum in rupees is usually written with.
 
-**Payment details are real or absent.** `support.json` holds the UPI ID and the Sponsors URL, both `null` until they exist, and `null` renders as *Opening shortly*. A value that is not shaped like a UPI ID or a Sponsors profile, or that contains a word like *example* or *your*, fails both `shell.py` and `verify_site.py`. A UPI ID also needs its QR code generated beside it. A placeholder that ships sends somebody's money to nobody, or to someone else.
+**Payment details are real or absent.** `support.json` holds the UPI ID and the Sponsors URL, both `null` until they exist, and `null` renders as *being set up*, with an address to write to meanwhile. A value that is not shaped like a UPI ID or a Sponsors profile, or that contains a word like *example* or *your*, fails both `shell.py` and `verify_site.py`. A UPI ID also needs its QR code generated beside it. A placeholder that ships sends somebody's money to nobody, or to someone else.
 
 The page says plainly that Meridian is not a registered charity and that support is not tax-deductible. A sponsors list starts empty and says so.
 
