@@ -468,20 +468,19 @@ Owner reports (§5.6) need a way to reach a station's owner, and a contact addre
 
 **Hosting:** the platform runs on the Pi, published to a public address through a secure tunnel — no static IP, works from behind the college network, no cost.
 
-| Tier | Contents | Cost |
-|---|---|---|
-| **1 — Core station** | Receiver, amplifier, antenna, feedline, surge protection, enclosure, mast | ₹24,300 |
-| **2 — Second station type** | Microcontroller station and antenna | ₹3,300 |
-| **3 — Tracking** *(optional)* | Rotator, motors, drivers, structure, UHF Yagi and amplifier | ₹15,900 |
+| Tier | Contents |
+|---|---|
+| **1 — Core station** | Receiver, amplifier, antenna, feedline, surge protection, enclosure, mast |
+| **2 — Second station type** | Microcontroller station and antenna |
+| **3 — Tracking** *(optional)* | Rotator, motors, drivers, structure, UHF Yagi and amplifier |
 
-**Requested: ₹27,600** (Tiers 1 and 2, including 15% contingency) — approximately ₹9,200 per member.
-**With tracking: ₹43,500.**
+Tiers 1 and 2 are the committed build. The team and its supporters cover the station and the running costs; support beyond running costs funds Tier 3, then more stations.
 
 Tier 3 is genuinely optional: every claim the project makes is provable with a fixed antenna. Tracking adds a second band, an antenna that moves under software control during the demonstration, and substantive use of the institute's machining facilities.
 
-The post-reception layer in §5.6 changes nothing here: it needs no hardware beyond Tiers 1 and 2, and the request stays at ₹27,600 (D-094).
+The post-reception layer in §5.6 changes nothing here: it needs no hardware beyond Tiers 1 and 2 (D-094).
 
-**Cloud hosting is not in this request and is not depended on.** Where a cloud tier is used it is funded by student credit, which may lapse before submission and cannot be renewed by the team. Nothing assessed may require it (D-130): the single-machine deployment stays supported and tested, and a lapse costs throughput rather than any claim, deliverable or criterion. No recurring cost is committed to.
+**Cloud hosting is optional and never depended on.** Where a cloud tier is used, its credit may lapse and may not be renewable. Nothing the project commits to may require it (D-130): the single-machine deployment stays supported and tested, and a lapse costs throughput rather than any claim, deliverable or criterion. No recurring cost is committed to.
 
 Nothing is purchased before the software that consumes it exists — with one exception, the receiver, bought early so that reception from our site is confirmed before any installation spend.
 
@@ -537,7 +536,7 @@ We are building the layer that fixes that — the protocol and the network for o
 
 - **Not a new target.** HRPT is a second transmitter row on satellites already in the catalogue, alongside their LRPT downlink.
 - **The same single SDR**, switched between antennas by the scheduler. A station declaring an L-band capability beside its VHF one is already a case the scheduler's per-station non-overlap rule covers (D-053).
-- **Hardware:** a DTH dish with a helix feed, a 1.7 GHz LNA, and the tracking tier — the dish's beam is too narrow to leave fixed. The tracking tier's 435 MHz Yagi and amplifier may be swapped for the L-band parts to stay within ₹43,500; **confirm with a bill of materials**, including that the receiver tunes 1.7 GHz at the sample rate HRPT needs.
+- **Hardware:** a DTH dish with a helix feed, a 1.7 GHz LNA, and the tracking tier — the dish's beam is too narrow to leave fixed. The tracking tier's 435 MHz Yagi and amplifier may be swapped for the L-band parts so the tier's contents stay the same size; **confirm with a bill of materials**, including that the receiver tunes 1.7 GHz at the sample rate HRPT needs.
 - **Still about 1 km per pixel.** HRPT's value is not sharper images: it is uncompressed data on all six channels, with calibrated temperature from onboard telemetry, which is what enables night-time thermal products.
 - **§17's statement would no longer hold for this path.** "Every claim the project makes is provable with a fixed antenna" is true of everything the project commits to and false of L-band reception, which needs a tracking dish.
 

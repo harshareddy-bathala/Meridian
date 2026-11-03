@@ -1207,7 +1207,7 @@ The trigger to revisit: the first time the platform is reachable from outside th
 
 *Amended by D-322 (proposed 2026-11-02).* An API call reading SatNOGS Network's public observation archive, from `meridian-ingest` and for training and evaluation only, is no longer excluded by the sentence above. Everything else it says about the reception path stands.
 
-**Hardware this assumes.** The full ₹43,500 build — `PROJECT.md` §17's Tiers 1, 2 **and 3** — so tracking is funded rather than optional. One Pi-and-SDR station receiving on **137 MHz** (Meteor-M LRPT, the primary target) through a fixed QFH, and **437 MHz** through the crossed Yagi on the workshop-built rotator, the latter being where the cubesat traffic SatNOGS carries mostly sits. Tier 3 buys the antenna, rotator, motors and amplifier — not the receiver, which already tunes both. Alongside it, an **ESP LoRa node as a second receiving path** for LoRa-modulated satellites — a receiver, not a controller, and not a replacement for anything: the Arduino Uno R4 WiFi remains the rotator controller exactly as `CLAUDE.md`'s stack section states. The LoRa node is TinyGS-class hardware by nature and is nonetheless ours, speaking MSP; that it *could* run TinyGS firmware and will not is the clearest illustration of this decision.
+**Hardware this assumes.** The full build — `PROJECT.md` §17's Tiers 1, 2 **and 3** — so tracking is funded rather than optional. One Pi-and-SDR station receiving on **137 MHz** (Meteor-M LRPT, the primary target) through a fixed QFH, and **437 MHz** through the crossed Yagi on the workshop-built rotator, the latter being where the cubesat traffic SatNOGS carries mostly sits. Tier 3 buys the antenna, rotator, motors and amplifier — not the receiver, which already tunes both. Alongside it, an **ESP LoRa node as a second receiving path** for LoRa-modulated satellites — a receiver, not a controller, and not a replacement for anything: the Arduino Uno R4 WiFi remains the rotator controller exactly as `CLAUDE.md`'s stack section states. The LoRa node is TinyGS-class hardware by nature and is nonetheless ours, speaking MSP; that it *could* run TinyGS firmware and will not is the clearest illustration of this decision.
 
 ---
 
@@ -2039,13 +2039,13 @@ This is coarsening, not a proof of privacy. A minute and a degree make the fit f
 
 **2026-09-14 · accepted** · *synopsis review*
 
-At the synopsis review the faculty panel asked what Meridian does with data after receiving it. The request already before the department is ₹27,600 for Tiers 1 and 2, and an answer that needed another purchase would be an answer to a different question.
+At the synopsis review the faculty panel asked what Meridian does with data after receiving it. The committed build is Tiers 1 and 2, and an answer that needed another purchase would be an answer to a different question.
 
 **The hardware for this work is what `PROJECT.md` §17 already requests: one SDR and a fixed 137 MHz antenna.** No L-band chain, no second SDR, no dish. Tier 3 tracking stays optional exactly as §17 states it, and nothing in modules 13–17 (D-095) depends on it — every one of them reads a reception the fixed antenna already produces, or a simulated one.
 
 The line is held here because the viva needs measured numbers. Each capability below is proven on data the funded station and the simulator produce; one that needed new hardware to prove would arrive after the week-15 hardware gate at best, and unproven at worst.
 
-*A tension this entry does not resolve.* D-053's closing paragraph, "Hardware this assumes", describes the full ₹43,500 build with tracking "funded rather than optional". §17, and D-066's zero turnaround for a fixed antenna, say otherwise. This entry relies on §17 and does not supersede D-053; which of the two describes the station the team intends to build is listed under Open (D-108).
+*A tension this entry does not resolve.* D-053's closing paragraph, "Hardware this assumes", describes the full build, Tiers 1 to 3, with tracking "funded rather than optional". §17, and D-066's zero turnaround for a fixed antenna, say otherwise. This entry relies on §17 and does not supersede D-053; which of the two describes the station the team intends to build is listed under Open (D-108).
 
 *Rejected: an L-band receiving path as part of this answer.* It is the obvious way to receive more from the same satellites, and it needs a dish, a feed, an LNA and tracking. It is recorded as a candidate for later work (D-101), not as a response to the panel.
 
@@ -2343,7 +2343,7 @@ Until the team decides, Stage 29 is built to option (b), which is the only one c
 **2026-09-14 · open**
 
 1. **Archive rows as runtime diagnosis evidence.** D-102 limits runtime evidence to Meridian's own data, because `CLAUDE.md` calls external data training input only. Archive observations already ingested locally are not a runtime dependency on an external service, and would make "satellite silent" attributable for a one-station network. Allowing it widens a hard rule's wording, so it is the team's call.
-2. **D-053 against `PROJECT.md` §17.** D-053 assumes the ₹43,500 build with tracking funded; §17 requests ₹27,600 with tracking optional, and D-066 relies on the fixed antenna. D-094 follows §17 for this work. The record should say once which station is being built.
+2. **D-053 against `PROJECT.md` §17.** D-053 assumes the full build with tracking funded; §17 commits to Tiers 1 and 2 with tracking optional, and D-066 relies on the fixed antenna. D-094 follows §17 for this work. The record should say once which station is being built.
 3. **"Phase 1" and "Phase 2" mean two different things** — §12's build phases, and the committed scope versus D-101's candidates. A rename of the second pair, such as "this project" and "follow-on candidates", would remove the clash.
 4. **Where Stages 25–30 fall in §12's weeks.** They need measured receptions, which exist only from Phase 4, and they follow Stage 24 in the roadmap only so that no stage number moves. Their calendar placement is not agreed.
 
