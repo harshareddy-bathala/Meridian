@@ -239,7 +239,7 @@ The stamper only rewrites *quoted* references. `rail.js` opens with a paragraph 
 | ways to give | `support.json` holds something that is not a real UPI ID or Sponsors URL |
 | terms | an (i) or popover names a term `terms.json` does not define |
 | breakpoints | `style.css` tests a width other than 40, 64, 80 or 120rem (D-341) |
-| figures | a `<figure class="fig">` caption does not say *Illustration*, *Example* or SIM |
+| figures | a `<figure class="fig">` caption does not begin *Illustration*, *Example* or *Simulated* |
 
 The link-styling check exists because the bug it catches shipped: `.foot-bar` styled the wide footer's bottom bar and nothing styled the anchor inside it, so the licence link was drawn in user-agent blue on all five document pages. It reads the styled contexts out of `style.css`, counting **only rules that set `color`** — `.nav a` appears twice in that file, once with a colour and once in the reduced-motion query with nothing but `transition: none`, and counting the second would let a stylesheet that had lost the first still pass.
 

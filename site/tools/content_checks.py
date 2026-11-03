@@ -33,7 +33,7 @@ MEDIA_WIDTH = re.compile(r"\((min|max)-width:\s*([\d.]+)(rem|px|em)\)")
 
 FIGURE = re.compile(r'<figure class="fig[^"]*">(.*?)</figure>', re.S)
 CAPTION = re.compile(r"<figcaption>(.*?)</figcaption>", re.S)
-HONEST_CAPTION = re.compile(r"^(Illustration|Example)\b|\bSIM\b")
+HONEST_CAPTION = re.compile(r"^(Illustration|Example|Simulated)\b")
 
 
 def visible_text(page_html: str) -> str:
@@ -103,7 +103,7 @@ def check_figures(site: Path, pages: list[str]) -> list[str]:
             if not HONEST_CAPTION.search(words):
                 problems.append(
                     f"{name}: a figure captioned {words!r} does not say it is an "
-                    "illustration, an example or SIM"
+                    "illustration, an example or simulated"
                 )
     return problems
 

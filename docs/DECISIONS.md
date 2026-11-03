@@ -6814,7 +6814,7 @@ The site was written for someone who already knew what a ground station was: arc
 
 `style.css` tested ten different widths (480, 640, 720, 839, 840, 900, 1180 and 1800 px, among others), each chosen where one component happened to break. Every new component would have added another.
 
-**Decision.** One spacing scale (`--space-1` to `--space-8`), one fluid type scale (`--step--1` to `--step-3`), two radii, and four breakpoints: **40, 64, 80 and 120 rem**. A `max-width` query uses one sixteenth of a rem under, so the two sides of a breakpoint never overlap. `verify_site.py` fails on any other width. The dashboard adopts the same tokens once Stage 35's styles are on `main`.
+**Decision.** One spacing scale (`--space-1` to `--space-8`), one fluid type scale (`--step--1` to `--step-3`), two radii, and four breakpoints: **40, 64, 80 and 120 rem**. A `max-width` query uses one sixteenth of a rem under, so the two sides of a breakpoint never overlap. `verify_site.py` fails on any other width. The spacing scale, the grounds, the ink, the rule and the simulated colour are the dashboard's own values, and `tests/unit/test_site_dashboard_tokens.py` holds them equal in both themes. The site's simulated badge now uses the dashboard's word, *Simulated*, and its colour, in place of an amber *SIM*: one label, one look, and a plain word.
 
 - **The globe moves above the content below 64rem**, not 840 px. `NARROW` in `main.js` and the still globe's query move together, as the README requires.
 - **The document rail appears from 80rem**, not 1180 px; `rail.js`'s `matchMedia` moves with it.
@@ -7264,7 +7264,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | Decision | Applied to |
 |---|---|
 | D-340 plain words, an (i) per term, one shell | `site/{how-it-works,data,areas,stations,support,developers,terms}/index.html`; `site/terms.json`; `site/tools/{shell,shell_parts}.py`; `ci.yml › site` |
-| D-341 one look, four breakpoints | `site/style.css`; `site/{main,rail}.js`; `site/tools/content_checks.py`; `site/README.md` |
+| D-341 one look, four breakpoints | `site/style.css`; `site/{main,rail}.js`; `site/tools/content_checks.py`; `site/README.md`; `tests/unit/test_site_dashboard_tokens.py` |
 | D-342 the front page's second screen | `site/index.html`; `site/sitemap.xml`; `site/tools/{stamp_assets,verify_site}.py` |
 | D-343 no sums; real payment details or none | `site/support/index.html`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py` |
 

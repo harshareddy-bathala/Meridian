@@ -38,8 +38,8 @@
       "plain": "A short message a station sends regularly to say what it is doing. It is how Meridian tells a station that was listening apart from one that was switched off."
     },
     "simulated": {
-      "name": "Simulated (SIM)",
-      "plain": "Produced by Meridian's simulator, a set of practice stations that behave like real ones, rather than by a real antenna. Always marked SIM, and never mixed with real results."
+      "name": "Simulated",
+      "plain": "Produced by Meridian's simulator, a set of practice stations that behave like real ones, rather than by a real antenna. Always marked as simulated, and never mixed with real results."
     },
     "reception-confidence": {
       "name": "Reception confidence",

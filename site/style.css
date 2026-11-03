@@ -60,7 +60,7 @@
   --space-5: 1.5rem;
   --space-6: 2rem;
   --space-7: 3rem;
-  --space-8: 4.5rem;
+  --space-8: 4rem;
 
   --step--1: 0.8125rem;
   --step-0: clamp(0.9375rem, 0.9rem + 0.18vw, 1.0625rem);
@@ -97,6 +97,9 @@
   --signal:  #2E7D51;
   --alert:   #A8332E;
   --trace:   #8A6320;
+
+  /* The dashboard's, so a simulated label looks the same on both surfaces. */
+  --simulated: #5B3FA0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -114,6 +117,7 @@
     --signal:  #6BB88A;
     --alert:   #C4635C;
     --trace:   #C99A4E;
+    --simulated: #B9A3EC;
   }
 }
 
@@ -138,6 +142,7 @@
   --signal:  #6BB88A;   /* above horizon — link acquired */
   --alert:   #C4635C;   /* below horizon — no link. 5.01:1; was 4.19 */
   --trace:   #C99A4E;   /* predicted / next pass */
+  --simulated: #B9A3EC;
 }
 
 /* ---------------------------------------------------------------- reset -- */
@@ -1186,11 +1191,12 @@ body {
 .pill-wait::before { background: var(--trace); }
 .pill-off::before  { background: var(--alert); }
 
-/* Every simulated figure carries this, at every layer (CLAUDE.md rule 5). */
+/* Every simulated figure carries this, at every layer (CLAUDE.md rule 5). The
+   word and the colour are the dashboard's badge, so the two surfaces agree. */
 .sim {
   display: inline-block;
   padding: 0.05rem 0.4rem;
-  border: 1px solid var(--trace);
+  border: 1px solid var(--simulated);
   border-radius: var(--radius-1);
   font-family: var(--mono);
   font-size: 0.625rem;
@@ -1198,7 +1204,7 @@ body {
   letter-spacing: 0.14em;
   line-height: 1.5;
   text-transform: uppercase;
-  color: var(--trace);
+  color: var(--simulated);
   vertical-align: 0.15em;
 }
 
