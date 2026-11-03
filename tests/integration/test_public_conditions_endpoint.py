@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 
 psycopg = pytest.importorskip("psycopg")
 
+from meridian.api import platform_clock  # noqa: E402
 from meridian.api.app import create_app  # noqa: E402
 from meridian.api.dependencies import get_connection  # noqa: E402
 from meridian.api.public.models.conditions import NO_KP_REASON  # noqa: E402
@@ -41,7 +42,7 @@ from meridian.store.ingest_sources import (  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
-NOW = datetime.now(UTC)
+NOW = datetime(2026, 11, 2, 9, 30, tzinfo=UTC)
 KP = "noaa_swpc_kp"
 CLOUD = "open_meteo_cloud"
 _DIGESTS = itertools.count(1)
@@ -54,7 +55,8 @@ def rollback(conn: Any) -> Iterator[Any]:
 
 
 @pytest.fixture
-def client(rollback: Any) -> Iterator[TestClient]:
+def client(rollback: Any, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    monkeypatch.setattr(platform_clock, "utc_now", lambda: NOW)
     app = create_app()
     app.dependency_overrides[get_connection] = lambda: rollback
     with TestClient(app, raise_server_exceptions=False) as started:
