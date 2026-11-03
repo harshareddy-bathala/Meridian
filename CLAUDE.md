@@ -88,6 +88,10 @@ meridian/
 ├── CLAUDE.md
 ├── README.md
 ├── ATTRIBUTION.md
+├── CONTRIBUTING.md       how a change is shaped, and the rules nothing may break
+├── CODE_OF_CONDUCT.md    Contributor Covenant 2.1
+├── SECURITY.md           reporting a vulnerability privately
+├── CHANGELOG.md          every release
 ├── LICENSE               Apache-2.0
 ├── docs/
 │   ├── ARCHITECTURE.md
