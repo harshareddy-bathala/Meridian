@@ -698,6 +698,8 @@ The mechanism is constrained by the CSP. `_headers` allows no `unsafe-inline`, w
 
 *Rejected:* relaxing the CSP to allow an inline theme script. It is the ordinary solution and it would work. It also means `script-src` gains `unsafe-inline`, or a nonce a static host cannot generate, and the claim that the site makes no third-party requests stops being enforced by a header and becomes a promise. A 400-byte file is cheaper than that.
 
+*Amended by D-344 (2026-11-03).* The site now opens light whatever the system prefers; dark is chosen with the toggle and remembered.
+
 ---
 
 ## D-038 — The public site is five pages, and what it does not say
@@ -6854,6 +6856,26 @@ The page says plainly that Meridian is not a registered charity and that support
 
 ---
 
+## D-344 — The site opens on paper: light by default, an editorial serif, larger type and soft corners
+
+**2026-11-03 · accepted** · *`site/style.css`; `site/theme.js`; `site/fonts/`; `dashboard/src/app.css`. Amends D-037 and D-039.*
+
+The site is read like a document: pages of explanation, read in daylight, on phones, and printed. Measured on every page, most of what was not a heading was set at 13 px, or in 10–11 px letter-spaced mono capitals (30 to 50 runs per page), and every box had a hard edge. That reads as an instrument panel, and it is hard to read at arm's length.
+
+**Decision.**
+- **Light by default, whatever the system prefers.** `theme.js` applies the stored choice or light; the toggle still offers dark and remembers it. The stylesheet no longer has a dark-by-preference block, so a visitor without script gets light too. The dashboard keeps following the system: it is an instrument, often watched at night.
+- **Warm paper and ink.** `--bg` `#F6F4EF`, `--ink` `#16181D`, `--ink-dim` 9.2:1 for what is read and `--muted` 5.8:1 for what is glanced at, as D-039 already split them. `--signal`, deepened to 5.6:1, doubles as the accent for focus and the primary action. The shared colours change on the dashboard too, so the two surfaces stay one product (D-341).
+- **Three faces, three jobs.** Source Serif 4 (SIL OFL-1.1, variable weight, latin subset, self-hosted) for display: headings, the front page's line, large numbers. IBM Plex Sans for reading and navigation. IBM Plex Mono for data and code only, no longer for labels.
+- **Nothing a visitor reads is under 14 px.** Body text is 17 to 19 px with a line height of 1.6, and display reaches 64 px.
+- **A thumb can hit everything.** Navigation, actions, the theme toggle, footer links and the (i) buttons all have 44 px targets, the (i) through an invisible hit area. Focus is a 2 px ring in the accent colour.
+- **Soft corners, fewer lines.** Space divides sections where hairlines used to. Cards, panels, code and notes sit on the surface colour with 16 px corners; buttons and badges are pills. The dashed frame stays only where a picture is still to come.
+
+*Rejected: following the system preference, as before.* A visitor whose system is dark landed on a dark document, which is the reading D-037 itself called wrong for documents.
+
+*Rejected: Inter for the body.* Plex Sans is already self-hosted on both surfaces, and changing it would buy a small difference at the cost of a second set of files.
+
+---
+
 ## D-350 — The repository is written for the people arriving at it: a plain README, and the files a contributor looks for
 
 **2026-11-03 · accepted** · *`README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CHANGELOG.md`, `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`*
@@ -7267,6 +7289,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-341 one look, four breakpoints | `site/style.css`; `site/{main,rail}.js`; `site/tools/content_checks.py`; `site/README.md`; `tests/unit/test_site_dashboard_tokens.py` |
 | D-342 the front page's second screen | `site/index.html`; `site/sitemap.xml`; `site/tools/{stamp_assets,verify_site}.py` |
 | D-343 no sums; real payment details or none | `site/support/index.html`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py` |
+| D-344 light by default, a serif display, larger type, soft corners | `site/style.css`; `site/theme.js`; `site/fonts/`; `site/*/index.html` theme colour; `site/site.webmanifest`; `dashboard/src/app.css`; `tests/unit/test_site_dashboard_tokens.py` |
 
 **Landed 2026-11-03**, making the repository ready for contributors and sponsors.
 
