@@ -6902,6 +6902,25 @@ D-342 gave the front page a second screen of five doors under the globe. Below t
 
 ---
 
+## D-346 — How it works can be played with
+
+**2026-11-03 · accepted** · *`site/how-it-works/index.html`; `site/style.css`; `site/pages.js`*
+
+Seven pictures, each with a paragraph beside it, explained Meridian well to someone who read every word, and to nobody else. Three of its ideas are comparisons, and a comparison is understood fastest by making it yourself.
+
+**Decision.**
+- **Step 1, predict:** the three passes are choices. Picking one shows why it ranks where it does; the highest pass is chosen first, because it is the one least likely to work.
+- **Step 2, choose:** the schedule switches between Meridian's plan and the obvious one, highest pass first, with what each catches, catches twice and misses.
+- **Step 3, receive:** the station switches between *heard it*, *heard nothing* and *switched off*, and says which of the three is a miss.
+- **Native controls, no script.** Each is a set of radio buttons in a fieldset, so it is reached and changed with the keyboard and read out as a choice; `:has()` shows what the checked one describes. Every picture is still captioned *Illustration · example values*.
+- **One or two sentences per step.** The picture carries the rest.
+- **On a wide screen a step's picture stays in view while its words scroll**, and the step being read is in full colour while the others step back. `pages.js` marks it; without that script every step is simply in full colour.
+- **On a phone the static pictures keep their drawn size** and scroll sideways inside their frame, rather than shrinking their labels below reading size.
+
+*Rejected: one sticky picture that swaps as the steps scroll past.* It needs script to move every figure into one frame, and without that script the page would lose its pictures; a picture that sticks within its own step does the same job with CSS alone.
+
+---
+
 ## D-350 — The repository is written for the people arriving at it: a plain README, and the files a contributor looks for
 
 **2026-11-03 · accepted** · *`README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CHANGELOG.md`, `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`*
@@ -7317,6 +7336,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-343 no sums; real payment details or none | `site/support/index.html`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py` |
 | D-344 light by default, a serif display, larger type, soft corners | `site/style.css`; `site/theme.js`; `site/fonts/`; `site/*/index.html` theme colour; `site/site.webmanifest`; `dashboard/src/app.css`; `tests/unit/test_site_dashboard_tokens.py` |
 | D-345 one screen; a globe to turn; easing in | `site/index.html`; `site/main.js`; `site/pages.js`; `site/tools/shell.py`; `site/style.css`; `site/vendor/cube-motion-0.1.0/`; `site/tools/stamp_assets.py`; `site/_headers`; `site/README.md`; `ATTRIBUTION.md` |
+| D-346 How it works can be played with | `site/how-it-works/index.html`; `site/style.css`; `site/pages.js`; `site/README.md` |
 
 **Landed 2026-11-03**, making the repository ready for contributors and sponsors.
 
