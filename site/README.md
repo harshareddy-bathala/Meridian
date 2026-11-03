@@ -96,7 +96,7 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 | `main.js` | The home page's intro choreography. Home page only. |
 | `rail.js` | The document rail: contents scroll-spy and one still canvas frame. Document pages only. |
 | `.well-known/security.txt` | RFC 9116. Renew `Expires:` before it lapses — an expired file counts as none. |
-| `fonts/` | IBM Plex Sans and Mono, latin-1 subset, SIL OFL-1.1. `OFL.txt` ships with them — see `ATTRIBUTION.md`. |
+| `fonts/` | IBM Plex Sans and Mono, and Source Serif 4 for display, latin subsets, SIL OFL-1.1. `OFL.txt` and `SourceSerif4-OFL.txt` ship with them — see `ATTRIBUTION.md`. |
 | `_headers` | Cloudflare Pages: CSP, HSTS and cache policy. |
 | `robots.txt`, `sitemap.xml`, `site.webmanifest` | Crawlers and installability. The sitemap lists exactly the twelve indexed URLs; `verify_site.py` fails if it does not. |
 | `og-image.png`, `apple-touch-icon.png`, `favicon.ico`, `icon-*.png` | Generated. Never loaded by a page — crawlers, iOS and the manifest only. |
@@ -111,11 +111,11 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 
 ## Themes
 
-`prefers-color-scheme` decides by default; the masthead toggle overrides it and persists in `localStorage` under `meridian-theme`.
+The site opens light, whatever the system prefers (D-344). The masthead toggle switches to dark and persists the choice in `localStorage` under `meridian-theme`.
 
 **`theme.js` must stay in `<head>`, before the stylesheet, with no `defer`.** It blocks parsing exactly long enough to set `data-theme` on the root element before the first paint. Deferring it, or moving it after `style.css`, reintroduces a flash of the wrong theme for every visitor whose stored preference differs from their system setting. The CSP allows no inline script, which is why this is a file rather than the usual three lines in the head — that is the whole reason it exists as a separate request.
 
-The stylesheet carries three sets of values: bare `:root` (light, the no-JS default), a `prefers-color-scheme: dark` media query (dark, the no-JS path), and `:root[data-theme="…"]` rules that outrank both by specificity. JS wins whenever it has run; the media queries carry the page when it has not.
+The stylesheet carries two sets of values: bare `:root` (light, also the no-JS page) and `:root[data-theme="dark"]`, which outranks it by specificity. There is no dark-by-preference block, and `tests/unit/test_site_dashboard_tokens.py` fails if one comes back.
 
 **The canvas reads its palette from CSS.** `main.js` has no colour constants: `readPalette()` pulls the custom properties from the computed root style, and `theme.js` dispatches a `themechange` event on `document` that triggers a re-read and a redraw. Add a colour by adding a custom property, never by adding a constant to `main.js`. `tools/make-images.py` is the exception — it is a build-time tool with no DOM.
 
@@ -123,28 +123,28 @@ The stylesheet carries three sets of values: bare `:root` (light, the no-JS defa
 
 Every text pair clears WCAG AA. Measured, not assumed — computed with the WCAG relative-luminance formula and checked in the DevTools picker. Four of these failed at some point and were found by computing the ratios, never by looking at the page.
 
-| Token | On dark `#08090D` | On light `#FAF9F7` | Used for |
+| Token | On dark `#08090D` | On light `#F6F4EF` | Used for |
 |---|---|---|---|
-| `--ink` | 15.96:1 | 17.20:1 | headings, links, emphasis, standfirst |
-| `--ink-dim` | 8.20:1 | 8.86:1 | **body text**, table cells, code, legend labels |
-| `--muted` | 4.88:1 | 6.03:1 | nav, metadata, contents list, list markers |
-| `--signal` | 8.39:1 | 4.79:1 | above horizon |
-| `--trace` | 7.79:1 | 5.14:1 | predicted / next pass |
-| `--alert` | 5.01:1 | 6.28:1 | below horizon |
-| `--ink-dim` on `--surface` | 7.66:1 | 8.18:1 | `<pre>` blocks |
+| `--ink` | 15.96:1 | 16.16:1 | headings, links, emphasis, the primary action |
+| `--ink-dim` | 8.20:1 | 9.20:1 | **body text**, standfirst, table cells, code |
+| `--muted` | 4.88:1 | 5.83:1 | metadata, captions, contents list, list markers |
+| `--signal` | 8.39:1 | 5.58:1 | above horizon; the accent: focus, eyebrows, the primary action's hover |
+| `--trace` | 7.79:1 | 5.65:1 | predicted / next pass |
+| `--alert` | 5.01:1 | 6.34:1 | below horizon |
+| `--ink-dim` on `--surface` | 7.66:1 | 8.42:1 | cards, notes, `<pre>` blocks |
 
-**`--muted` is for text that is glanced at; `--ink-dim` is for text that is read.** That distinction is the rule, not the ratio. `--muted` clears AA at 4.88:1 and prose set in it still reads as washed out — the threshold is a proxy for legibility, not the thing itself. Nav labels, timestamps and tracked uppercase mono are `--muted`; anything set as a paragraph is `--ink-dim`. See D-039.
+**`--muted` is for text that is glanced at; `--ink-dim` is for text that is read.** That distinction is the rule, not the ratio. `--muted` clears AA at 4.88:1 and prose set in it still reads as washed out — the threshold is a proxy for legibility, not the thing itself. Timestamps, captions and metadata are `--muted`; anything set as a paragraph is `--ink-dim`. See D-039.
 
 #### The two non-text colours
 
 | Token | On dark | On light | |
 |---|---|---|---|
-| `--rule` | 1.71:1 | 1.68:1 | hairline dividers, borders, underlines |
-| `--wire` | 1.25:1 | 1.87:1 | graticule and orbit strokes on canvas |
+| `--rule` | 1.71:1 | 1.51:1 | hairline dividers, outlines, underlines |
+| `--wire` | 1.25:1 | 1.73:1 | graticule and orbit strokes on canvas |
 
 These are **not text colours and must never be set on text** — `.legend dd` was, at about 1.3:1, and `.prose li::marker` was, which is what the `--ink-dim` / `--muted` split exists to fix.
 
-They are also not held to 4.5:1, because a decorative divider is exempt. They are held to about **1.7:1** instead, which is a judgement rather than a threshold: enough that a rule is unambiguously present, low enough that it stays a hairline and does not become a box. Both sat near 1.25:1 before D-039 and were effectively invisible on any panel without OLED blacks.
+They are also not held to 4.5:1, because a decorative divider is exempt. They are held to about **1.5 to 1.7:1** instead, which is a judgement rather than a threshold: enough that a rule is unambiguously present, low enough that it stays a hairline and does not become a box. Since D-344 most sections are divided by space and cards by the surface colour, so the light rule is the quieter one. Both sat near 1.25:1 before D-039 and were effectively invisible on any panel without OLED blacks.
 
 `--rule` and `--wire` are **deliberately different in the dark theme.** They were once the same value by coincidence. A divider between blocks of prose and a wireframe stroke on near-black do not want the same weight.
 
@@ -235,7 +235,7 @@ The stamper only rewrites *quoted* references. `rail.js` opens with a paragraph 
 | **link styling** | an `<a>` sits in no context the stylesheet colours |
 | inline assets | an inline `<style>`, `<script>` or `style=""` appears, which the CSP blocks |
 | shared regions | `shell.py --check`: a masthead, footer, (i) note, glossary or ways-to-give block differs from what the tool writes |
-| amounts | a currency sign or code beside a number, or a sum in lakh or crore, on any page or in either data file (D-343) |
+| amounts | a currency sign or code beside a number, or a sum in Indian units, on any page or in either data file (D-343) |
 | ways to give | `support.json` holds something that is not a real UPI ID or Sponsors URL |
 | terms | an (i) or popover names a term `terms.json` does not define |
 | breakpoints | `style.css` tests a width other than 40, 64, 80 or 120rem (D-341) |

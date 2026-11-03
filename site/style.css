@@ -1,7 +1,7 @@
 /* Meridian — meridian.org.in
-   Two themes. The instrument-panel dark is still the identity; light exists
-   because a document people are asked to read in daylight should not force
-   them into a dark room. See docs/DECISIONS.md D-037. */
+   Light by default, warm paper and ink, with dark one click away (D-037,
+   D-344). Editorial: a serif for display, a sans for reading, mono only for
+   data and code. Corners are soft everywhere; nothing is a sharp box. */
 
 /* ---------------------------------------------------------------- fonts --
    IBM Plex, latin-1 subset, self-hosted. No CDN, no Google Fonts, no
@@ -17,6 +17,15 @@
   font-family: "IBM Plex Sans";
   src: url("/fonts/IBMPlexSans-Medium.woff2") format("woff2");
   font-weight: 500; font-style: normal; font-display: swap;
+}
+/* Source Serif 4, variable weight, latin subset, SIL OFL-1.1. Display only:
+   headings, the front page's line and large numbers. Licence text in
+   /fonts/SourceSerif4-OFL.txt. */
+@font-face {
+  font-family: "Source Serif 4";
+  src: url("/fonts/SourceSerif4-Variable.woff2") format("woff2-variations"),
+       url("/fonts/SourceSerif4-Variable.woff2") format("woff2");
+  font-weight: 200 900; font-style: normal; font-display: swap;
 }
 @font-face {
   font-family: "IBM Plex Mono";
@@ -38,6 +47,7 @@
    that is not an OLED panel. See D-039.                                     */
 
 :root {
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
   --sans: "IBM Plex Sans", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
 
@@ -49,6 +59,11 @@
   --reveal-at: 4200ms;
   --reveal-dur: 600ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /* One curve and two durations for every transition. Motion moves transform
+     and opacity only. */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-1: 160ms;
+  --dur-2: 280ms;
 
   /* One spacing scale, one type scale and two radii, shared with the
      dashboard so the two surfaces read as one product (D-341). The type steps
@@ -62,14 +77,22 @@
   --space-7: 3rem;
   --space-8: 4rem;
 
-  --step--1: 0.8125rem;
-  --step-0: clamp(0.9375rem, 0.9rem + 0.18vw, 1.0625rem);
-  --step-1: clamp(1.0625rem, 1rem + 0.35vw, 1.25rem);
-  --step-2: clamp(1.375rem, 1.2rem + 0.8vw, 1.875rem);
-  --step-3: clamp(1.875rem, 1.5rem + 1.6vw, 2.75rem);
+  /* Nothing a visitor reads is under 14px. Body is 17px on a phone and 19px
+     on a large screen; display reaches 64px. */
+  --step--1: 0.875rem;
+  --step-0: clamp(1.0625rem, 1rem + 0.28vw, 1.1875rem);
+  --step-1: clamp(1.1875rem, 1.08rem + 0.48vw, 1.4375rem);
+  --step-2: clamp(1.625rem, 1.3rem + 1.4vw, 2.5rem);
+  --step-3: clamp(2.375rem, 1.6rem + 3.4vw, 4rem);
 
-  --radius-1: 3px;
-  --radius-2: 8px;
+  --radius-1: 8px;
+  --radius-2: 16px;
+  --radius-pill: 999px;
+
+  /* The smallest thing a thumb is asked to hit. */
+  --target: 2.75rem;
+
+  --shadow-1: 0 1px 2px rgb(22 24 29 / 0.04), 0 4px 16px rgb(22 24 29 / 0.05);
 
   /* Breakpoints, for reference only: a custom property cannot be read inside
      a media query. These four are the only widths style.css may test, and
@@ -77,48 +100,28 @@
      one sixteenth under each for a max-width. */
 }
 
-/* Light is the bare :root so that a visitor with JS disabled and no dark
-   system preference gets a sane page. The media query below supplies dark on
-   that same no-JS path; the [data-theme] rules outrank both by specificity,
-   which is how theme.js wins whenever it has run. */
+/* Light is the bare :root, so a visitor without script gets paper too. Dark
+   is chosen with the toggle only, never from the system preference: theme.js
+   sets data-theme="dark" and the rule below outranks the bare :root (D-344). */
 
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --bg:      #FAF9F7;   /* warm paper, never pure white */
-  --surface: #F2F0EB;
-  --rule:    #C9C2B6;   /* 1.68:1 — a hairline that is actually there */
-  --wire:    #BFB8AB;   /* 1.87:1 — graticule and orbit paths on canvas */
-  --ink:     #14161B;
-  --ink-dim: #43474F;
-  --muted:   #5A6069;
+  --bg:      #F6F4EF;   /* warm paper, never pure white */
+  --surface: #EDEAE3;   /* cards and panels sit on this, with soft corners */
+  --rule:    #CFC8BB;   /* 1.5:1 — a quiet hairline; space divides first */
+  --wire:    #C2BBAE;   /* 1.73:1 — graticule and orbit paths on canvas */
+  --ink:     #16181D;   /* 16.2:1 */
+  --ink-dim: #3D424A;   /* 9.2:1 — what is read */
+  --muted:   #5A5F69;   /* 5.8:1 — what is glanced at */
 
-  --signal:  #2E7D51;
-  --alert:   #A8332E;
-  --trace:   #8A6320;
+  --signal:  #1F6F47;   /* 5.6:1 — also the accent: focus, the primary action */
+  --alert:   #A3302B;   /* 6.3:1 */
+  --trace:   #7F5A1C;   /* 5.7:1 */
 
   /* The dashboard's, so a simulated label looks the same on both surfaces. */
   --simulated: #5B3FA0;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-
-    --bg:      #08090D;
-    --surface: #101319;
-    --rule:    #333944;
-    --wire:    #1E2229;
-    --ink:     #E8E6E1;   /* warm off-white, never pure white */
-    --ink-dim: #A9A6A0;
-    --muted:   #787E8A;
-
-    --signal:  #6BB88A;
-    --alert:   #C4635C;
-    --trace:   #C99A4E;
-    --simulated: #B9A3EC;
-  }
 }
 
 :root[data-theme="dark"] {
@@ -176,7 +179,9 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
+  font-size: var(--step-0);
   font-weight: 400;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -323,9 +328,9 @@ body {
   padding: 0.6rem 1rem;
   background: var(--bg);
   border: 1px solid var(--ink);
+  border-radius: var(--radius-pill);
   color: var(--ink);
-  font-family: var(--mono);
-  font-size: 0.75rem;
+  font-size: var(--step--1);
   text-decoration: none;
   z-index: 10;
 }
@@ -369,40 +374,35 @@ body {
 .nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
+  gap: 0.25rem;
 }
 
-/* min-height, and inline-flex to centre the text inside it: tracked mono at
-   this size draws a box about 17px tall, which is under the 24×24 CSS px floor
-   of WCAG 2.2 Target Size (Minimum) and is what Lighthouse's tap-target audit
-   measures. The nav is the one place on the site where several small targets
-   sit in a row, so it is the one that has to be sized deliberately. The same
-   floor is applied to .foot-col a and .rail-src below; .prose a and .meta a
-   are links inside a sentence and take the standard's inline exception. */
+/* Sentence case, the reading sans, and a 44px pill to hit: the nav is the
+   one place several targets sit in a row, so each one is a full thumb wide.
+   The current page sits on the surface colour rather than under a rule. The
+   same floor applies to .foot-col a and .rail-src below; .prose a and .meta a
+   are links inside a sentence and take WCAG's inline exception. */
 .nav a {
   display: inline-flex;
   align-items: center;
-  min-height: 1.5rem;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
+  min-height: var(--target);
+  padding: 0 0.875rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.9375rem;
+  color: var(--ink-dim);
   text-decoration: none;
-  padding-bottom: 0.2rem;
-  border-bottom: 1px solid transparent;
-  transition: color 180ms var(--ease-out), border-color 180ms var(--ease-out);
+  transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease);
 }
 
 .nav a:hover,
-.nav a:focus-visible { color: var(--ink); }
-.nav a[aria-current] { color: var(--ink); border-bottom-color: var(--rule); }
+.nav a:focus-visible { color: var(--ink); background: var(--surface); }
+.nav a[aria-current] { color: var(--ink); background: var(--surface); }
 
 /* The slot holds its size whether or not the button inside it is shown, so
    theme.js revealing the button on DOMContentLoaded shifts no layout. */
 .theme-slot {
-  width: 1.75rem;
-  height: 1.75rem;
+  width: var(--target);
+  height: var(--target);
   flex: none;
   display: flex;
   align-items: center;
@@ -413,19 +413,19 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: var(--target);
+  height: var(--target);
   padding: 0;
   background: none;
   border: 0;
   border-radius: 50%;
-  color: var(--muted);
+  color: var(--ink-dim);
   cursor: pointer;
-  transition: color 180ms var(--ease-out);
+  transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease);
 }
 .theme-toggle:hover,
-.theme-toggle:focus-visible { color: var(--ink); }
-.theme-toggle svg { width: 1rem; height: 1rem; display: block; }
+.theme-toggle:focus-visible { color: var(--ink); background: var(--surface); }
+.theme-toggle svg { width: 1.125rem; height: 1.125rem; display: block; }
 
 /* Show the icon of the theme the button would switch *to*. theme.js always
    sets data-theme before it unhides the button, so there is no third state. */
@@ -440,19 +440,20 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: clamp(1.25rem, 2.5vh, 2rem);
-  max-width: 34rem;
+  max-width: 44rem;
 }
 
 .content p { margin: 0; }
 
 .lede {
   margin: 0;
-  font-size: clamp(1.75rem, 3.6vw, 2.75rem);
-  font-weight: 400;
-  line-height: 1.12;
-  letter-spacing: -0.025em;
+  font-family: var(--serif);
+  font-size: var(--step-3);
+  font-weight: 420;
+  line-height: 1.06;
+  letter-spacing: -0.02em;
   text-wrap: balance;
-  max-width: 22ch;
+  max-width: 17ch;
 }
 
 /* --ink-dim, not --muted. --muted is the metadata colour — nav, timestamps,
@@ -461,8 +462,8 @@ body {
    that is meant to be *read* is --ink-dim; everything that is meant to be
    glanced at is --muted. See D-039. */
 .body {
-  font-size: clamp(0.9375rem, 1.1vw, 1.0625rem);
-  line-height: 1.65;
+  font-size: var(--step-1);
+  line-height: 1.55;
   color: var(--ink-dim);
   max-width: min(44ch, 100%);
 }
@@ -470,31 +471,35 @@ body {
 .cta-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem 2rem;
+  gap: 0.75rem;
 }
 
-/* Calls to action. Links, drawn as links — no button, no fill. */
+/* Calls to action: soft pills a thumb can hit. The first is filled in ink and
+   is the one thing the page asks; the quiet one is outlined. */
 .cta {
   display: inline-flex;
-  align-items: baseline;
-  min-height: 1.5rem;          /* the 24px floor — see .nav a */
-  gap: 0.6em;
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink);
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target);
+  gap: 0.55em;
+  padding: 0 1.375rem;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 1rem;
+  font-weight: 500;
   text-decoration: none;
-  padding-bottom: 0.45rem;
-  border-bottom: 1px solid var(--rule);
-  transition: border-color 180ms var(--ease-out), color 180ms var(--ease-out);
+  transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
 }
 .cta:hover,
-.cta:focus-visible { border-bottom-color: var(--ink); }
+.cta:focus-visible { background: var(--signal); border-color: var(--signal); }
+.cta:active { transform: scale(0.97); }
 
-.cta-quiet { color: var(--muted); }
+.cta-quiet { background: transparent; color: var(--ink); border-color: var(--rule); }
 .cta-quiet:hover,
-.cta-quiet:focus-visible { color: var(--ink); }
+.cta-quiet:focus-visible { background: var(--surface); color: var(--ink); border-color: var(--rule); }
 
 /* Guarded, unlike the colour hovers elsewhere in this file. A touch screen has
    no hover: it synthesises one on tap and leaves it applied until something
@@ -503,13 +508,14 @@ body {
    reads as "this is the thing you last touched" and does no harm; a shifted
    glyph reads as a rendering fault. */
 @media (hover: hover) {
-  .cta .arrow { transition: transform 220ms var(--ease-out); }
+  .cta .arrow { transition: transform var(--dur-2) var(--ease); }
   .cta:hover .arrow { transform: translateX(0.25em); }
 }
 
 :focus-visible {
-  outline: 1px solid var(--ink);
-  outline-offset: 5px;
+  outline: 2px solid var(--signal);
+  outline-offset: 3px;
+  border-radius: var(--radius-1);
 }
 
 /* ----------------------------------------------------------------- doc --
@@ -519,21 +525,21 @@ body {
 .doc { max-width: 46rem; }
 
 .eyebrow {
-  margin: 0 0 0.9rem;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
+  margin: 0 0 1rem;
+  font-size: var(--step--1);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--signal);
 }
 
 .doc > h1,
 .doc-head > h1 {
   margin: 0;
-  font-size: clamp(1.875rem, 4vw, 2.75rem);
-  font-weight: 400;
-  line-height: 1.12;
-  letter-spacing: -0.025em;
+  font-family: var(--serif);
+  font-size: var(--step-3);
+  font-weight: 420;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
@@ -541,10 +547,10 @@ body {
    copy once that moved to --ink-dim too; the size step alone is not enough of
    a hierarchy for a deck. */
 .standfirst {
-  margin: 1.25rem 0 0;
-  font-size: clamp(1.0625rem, 1.5vw, 1.25rem);
+  margin: 1.5rem 0 0;
+  font-size: var(--step-1);
   line-height: 1.5;
-  color: var(--ink);
+  color: var(--ink-dim);
   max-width: 52ch;
   text-wrap: pretty;
 }
@@ -557,13 +563,12 @@ body {
 .prose > * + * { margin-top: 1.15rem; }
 
 .prose h2 {
-  margin: clamp(2.5rem, 5vh, 3.5rem) 0 0;
-  padding-top: 1.1rem;
-  border-top: 1px solid var(--rule);
-  font-size: clamp(1.1875rem, 1.9vw, 1.4375rem);
-  font-weight: 500;
-  line-height: 1.25;
-  letter-spacing: -0.012em;
+  margin: clamp(3rem, 6vh, 4.5rem) 0 0;
+  font-family: var(--serif);
+  font-size: var(--step-2);
+  font-weight: 450;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
 }
 
 /* .prose already carries the space above the first section; the h2's own
@@ -572,7 +577,7 @@ body {
 
 .prose h3 {
   margin: 2rem 0 0;
-  font-size: 1rem;
+  font-size: var(--step-1);
   font-weight: 500;
   line-height: 1.35;
 }
@@ -581,8 +586,8 @@ body {
 
 .prose p,
 .prose li {
-  font-size: clamp(0.9375rem, 1.05vw, 1rem);
-  line-height: 1.68;
+  font-size: var(--step-0);
+  line-height: 1.65;
   color: var(--ink-dim);
   max-width: 68ch;
 }
@@ -614,10 +619,10 @@ body {
   margin-top: 1.25rem;
   padding: 1.1rem 1.25rem;
   background: var(--surface);
-  border-left: 1px solid var(--rule);
+  border-radius: var(--radius-2);
   overflow-x: auto;          /* wide blocks scroll themselves, never the page */
   font-family: var(--mono);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   line-height: 1.6;
   color: var(--ink-dim);
   -webkit-overflow-scrolling: touch;
@@ -635,7 +640,7 @@ body {
 }
 .prose dd {
   margin: 0.4rem 0 0;
-  font-size: clamp(0.9375rem, 1.05vw, 1rem);
+  font-size: var(--step-0);
   line-height: 1.68;
   color: var(--ink-dim);
   max-width: 68ch;
@@ -647,7 +652,7 @@ body {
   border-collapse: collapse;
   width: 100%;
   min-width: 28rem;
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
 }
 .prose th, .prose td {
   padding: 0.6rem 1rem 0.6rem 0;
@@ -658,12 +663,9 @@ body {
   line-height: 1.55;
 }
 .prose th {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  font-weight: 400;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--ink);
 }
 
 /* The layer diagram. Painted from the theme tokens, so one file serves both.
@@ -713,7 +715,7 @@ body {
 
 .index-row h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--step-1);
   font-weight: 500;
   line-height: 1.3;
 }
@@ -747,10 +749,8 @@ body {
 
 .index-row .where {
   font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
+  font-size: var(--step--1);
+  color: var(--muted);
 }
 
 /* ---------------------------------------------------------------- rail --
@@ -776,11 +776,9 @@ body {
 
 .rail-h {
   margin: 0 0 0.85rem;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--ink);
 }
 
 .toc ol {
@@ -795,8 +793,8 @@ body {
 
 .toc a {
   display: block;
-  padding: 0.3rem 0;
-  font-size: 0.875rem;
+  padding: 0.4rem 0;
+  font-size: 0.9375rem;
   line-height: 1.4;
   color: var(--muted);
   text-decoration: none;
@@ -821,25 +819,19 @@ body {
 .rail-note,
 .rail-src {
   margin: 0.75rem 0 0;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
+  font-size: var(--step--1);
   line-height: 1.5;
-  letter-spacing: 0.1em;
 }
 
-.rail-status { text-transform: uppercase; letter-spacing: 0.16em; color: var(--ink-dim); }
-.rail-note   { color: var(--muted); letter-spacing: 0.04em; text-transform: none; }
+.rail-status { font-weight: 500; color: var(--ink-dim); }
+.rail-note   { color: var(--muted); }
 
 .rail-src {
   display: inline-flex;
   align-items: center;
-  min-height: 1.5rem;          /* the 24px floor — see .nav a */
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
+  min-height: var(--target);
+  color: var(--ink-dim);
   text-decoration: none;
-  border-bottom: 1px solid var(--rule);
-  padding-bottom: 0.15rem;
 }
 .rail-src:hover,
 .rail-src:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
@@ -909,9 +901,7 @@ body {
 .guide .doc-head { max-width: 46rem; }
 
 .section {
-  margin-top: var(--space-8);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--rule);
+  margin-top: clamp(4rem, 10vh, 7rem);
 }
 .doc-head + .section { margin-top: var(--space-7); }
 
@@ -929,8 +919,9 @@ body {
 
 .section > h2 {
   margin: 0;
+  font-family: var(--serif);
   font-size: var(--step-2);
-  font-weight: 400;
+  font-weight: 450;
   line-height: 1.2;
   letter-spacing: -0.015em;
   text-wrap: balance;
@@ -990,10 +981,9 @@ body {
   padding: var(--space-4) var(--space-5);
   overflow-x: auto;
   background: var(--surface);
-  border: 1px solid var(--rule);
   border-radius: var(--radius-2);
   font-family: var(--mono);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   line-height: 1.7;
   color: var(--ink-dim);
 }
@@ -1008,17 +998,22 @@ body {
 
 .doors { list-style: none; margin: var(--space-5) 0 0; padding: 0; }
 
+.doors { display: grid; gap: var(--space-2); }
+
 .door {
   display: grid;
   grid-template-columns: 2.25rem minmax(0, 1fr) auto;
   gap: var(--space-1) var(--space-4);
   align-items: baseline;
-  padding: var(--space-5) 0;
-  border-bottom: 1px solid var(--rule);
+  padding: var(--space-5);
+  border-radius: var(--radius-2);
+  background: var(--surface);
   color: var(--ink);
   text-decoration: none;
+  transition: background-color var(--dur-1) var(--ease), transform var(--dur-2) var(--ease);
 }
-.doors li:first-child .door { border-top: 1px solid var(--rule); }
+.door:hover,
+.door:focus-visible { background: color-mix(in srgb, var(--surface) 70%, var(--rule)); }
 
 /* A door with no number: the "where next" rows at the foot of a page. */
 .door-plain { grid-template-columns: minmax(0, 1fr) auto; }
@@ -1028,17 +1023,16 @@ body {
 .door-n {
   grid-row: 1 / span 2;
   font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
+  font-size: var(--step--1);
   color: var(--muted);
 }
-.door-t { font-size: var(--step-1); line-height: 1.3; }
-.door-d { grid-column: 2; font-size: var(--step--1); line-height: 1.55; color: var(--ink-dim); }
-.door .arrow { grid-row: 1; grid-column: 3; color: var(--muted); transition: color 180ms var(--ease-out); }
+.door-t { font-size: var(--step-1); font-weight: 500; line-height: 1.3; }
+.door-d { grid-column: 2; font-size: var(--step-0); line-height: 1.55; color: var(--ink-dim); }
+.door .arrow { grid-row: 1; grid-column: 3; color: var(--muted); transition: color var(--dur-1) var(--ease); }
 .door:hover .arrow,
 .door:focus-visible .arrow { color: var(--ink); }
 @media (hover: hover) {
-  .door .arrow { transition: transform 220ms var(--ease-out), color 180ms var(--ease-out); }
+  .door .arrow { transition: transform var(--dur-2) var(--ease), color var(--dur-1) var(--ease); }
   .door:hover .arrow { transform: translateX(0.25em); }
 }
 
@@ -1052,24 +1046,21 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-5);
-  margin-top: var(--space-8);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--rule);
+  margin-top: clamp(4rem, 10vh, 7rem);
 }
 .doc-head + .journey .step:first-child { margin-top: var(--space-7); }
 
 .step-n {
   margin: 0 0 var(--space-3);
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--signal);
 }
 .step h2 {
   margin: 0;
+  font-family: var(--serif);
   font-size: var(--step-2);
-  font-weight: 400;
+  font-weight: 450;
   line-height: 1.2;
   letter-spacing: -0.015em;
   text-wrap: balance;
@@ -1095,17 +1086,16 @@ body {
 /* A "what this means" line: the plain-language reading of whatever sits
    above it, set apart so a skimming visitor can read only these. */
 .means {
-  padding-left: var(--space-3);
-  border-left: 1px solid var(--trace);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-2);
+  background: var(--surface);
 }
 .means-k {
   display: block;
   margin-bottom: var(--space-1);
-  font-family: var(--mono);
-  font-size: 0.625rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--trace);
 }
 
 /* -------------------------------------------------------------- figures --
@@ -1122,14 +1112,11 @@ body {
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
-  font-family: var(--mono);
-  font-size: 0.625rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: var(--step--1);
   color: var(--muted);
 }
 
-.fig .f-frame  { fill: var(--surface); stroke: var(--rule); stroke-width: 1; }
+.fig .f-frame  { fill: var(--surface); stroke: none; }
 .fig .f-rule   { fill: none; stroke: var(--rule); stroke-width: 1; }
 .fig .f-line   { fill: none; stroke: var(--muted); stroke-width: 1.25; }
 .fig .f-ink    { fill: none; stroke: var(--ink); stroke-width: 1.5; }
@@ -1168,13 +1155,11 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.5em;
-  padding: 0.2rem 0.6rem;
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  padding: 0.3rem 0.8rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: var(--step--1);
+  font-weight: 500;
   line-height: 1.4;
   color: var(--ink-dim);
   white-space: nowrap;
@@ -1195,13 +1180,13 @@ body {
    word and the colour are the dashboard's badge, so the two surfaces agree. */
 .sim {
   display: inline-block;
-  padding: 0.05rem 0.4rem;
+  padding: 0.1rem 0.5rem;
   border: 1px solid var(--simulated);
-  border-radius: var(--radius-1);
+  border-radius: var(--radius-pill);
   font-family: var(--mono);
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   font-weight: 400;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.1em;
   line-height: 1.5;
   text-transform: uppercase;
   color: var(--simulated);
@@ -1223,9 +1208,9 @@ body {
 @media (min-width: 40rem) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 64rem) { .tiles-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
-.tile { padding-top: var(--space-4); border-top: 1px solid var(--rule); }
+.tile { padding: var(--space-5); border-radius: var(--radius-2); background: var(--surface); }
 .tile h3 { margin: 0; }
-.tile p { margin: var(--space-2) 0 0; font-size: var(--step--1); line-height: 1.6; color: var(--ink-dim); }
+.tile p { margin: var(--space-2) 0 0; font-size: var(--step-0); line-height: 1.6; color: var(--ink-dim); }
 .tile .pill { margin-top: var(--space-3); }
 
 .ordered { counter-reset: tier; }
@@ -1235,8 +1220,7 @@ body {
   display: block;
   margin-bottom: var(--space-2);
   font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
+  font-size: var(--step--1);
   color: var(--muted);
 }
 
@@ -1259,7 +1243,7 @@ body {
 .empty {
   margin-top: var(--space-6);
   padding: var(--space-6) var(--space-5);
-  border: 1px dashed var(--rule);
+  border: 1.5px dashed var(--rule);
   border-radius: var(--radius-2);
   display: grid;
   gap: var(--space-3);
@@ -1280,25 +1264,25 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.0625rem;
-  height: 1.0625rem;
+  width: 1.125rem;
+  height: 1.125rem;
   margin: 0 0.1em 0 0.25em;
   padding: 0;
   border: 1px solid var(--muted);
   border-radius: 50%;
   background: none;
   color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.625rem;
+  font-family: var(--serif);
+  font-size: 0.75rem;
   font-style: italic;
   line-height: 1;
   vertical-align: 0.12em;
   cursor: pointer;
   transition: color 180ms var(--ease-out), border-color 180ms var(--ease-out);
 }
-/* The glyph is 17px; the target is 26px. The 24px floor without a 24px
-   circle sitting in every sentence. */
-.info::after { content: ""; position: absolute; inset: -0.3rem; }
+/* The glyph is 18px; the target is 44px, by an invisible hit area, so a thumb
+   finds it without a large circle sitting in every sentence. */
+.info::after { content: ""; position: absolute; inset: -0.8125rem; border-radius: 50%; }
 .info:hover,
 .info:focus-visible { color: var(--ink); border-color: var(--ink); }
 
@@ -1309,21 +1293,19 @@ body {
   height: fit-content;
   margin: auto;
   padding: var(--space-5);
-  border: 1px solid var(--rule);
+  border: 0;
   border-radius: var(--radius-2);
   background: var(--bg);
   color: var(--ink);
-  box-shadow: 0 1.25rem 3rem rgb(0 0 0 / 0.28);
+  box-shadow: 0 1.5rem 4rem rgb(22 24 29 / 0.22);
 }
-.term::backdrop { background: rgb(8 9 13 / 0.45); }
+.term::backdrop { background: rgb(22 24 29 / 0.35); }
 
 .term p { margin: 0; }
 .term-name {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--signal);
 }
 .term-plain {
   margin-top: var(--space-3) !important;
@@ -1342,18 +1324,19 @@ body {
 .term-close {
   display: inline-flex;
   align-items: center;
-  min-height: 1.5rem;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
+  min-height: var(--target);
+  padding: 0 1.125rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-pill);
+  background: none;
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+  color: var(--ink);
   text-decoration: none;
-  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
 }
-.term-close { padding: 0; background: none; border-top: 0; border-left: 0; border-right: 0; cursor: pointer; }
 .term-foot a:hover, .term-foot a:focus-visible,
-.term-close:hover, .term-close:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
+.term-close:hover, .term-close:focus-visible { background: var(--surface); }
 
 /* ------------------------------------------------------------- glossary -- */
 
@@ -1366,7 +1349,6 @@ body {
   border-top: 1px solid var(--rule);
   scroll-margin-top: var(--space-6);
 }
-.gloss-row:last-child { border-bottom: 1px solid var(--rule); }
 .gloss dt { font-size: var(--step-1); color: var(--ink); }
 .gloss dd { margin: 0; font-size: var(--step-0); line-height: 1.65; color: var(--ink-dim); max-width: 60ch; }
 .gloss-row:target dt { color: var(--signal); }
@@ -1392,8 +1374,9 @@ body {
 .more-head { max-width: 46rem; }
 .more-head h2 {
   margin: 0;
+  font-family: var(--serif);
   font-size: var(--step-3);
-  font-weight: 400;
+  font-weight: 420;
   line-height: 1.12;
   letter-spacing: -0.025em;
   text-wrap: balance;
@@ -1422,10 +1405,7 @@ body {
 
 .meta,
 .legend {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-size: var(--step--1);
   color: var(--muted);
 }
 
@@ -1453,7 +1433,7 @@ body {
 .foot-line {
   margin: 1rem 0 0;
   font-family: var(--sans);
-  font-size: 0.8125rem;
+  font-size: var(--step--1);
   line-height: 1.6;
   letter-spacing: 0;
   text-transform: none;
@@ -1465,23 +1445,21 @@ body {
 .foot-line a:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
 
 .foot-h {
-  margin: 0 0 0.9rem;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
+  margin: 0 0 0.5rem;
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--ink);
 }
 
 .foot-col ul { margin: 0; padding: 0; list-style: none; }
-.foot-col li + li { margin-top: 0.5rem; }
+.foot-col li + li { margin-top: 0; }
 
 .foot-col a {
   display: inline-flex;
   align-items: center;
-  min-height: 1.5rem;          /* the 24px floor — see .nav a */
+  min-height: var(--target);
   font-family: var(--sans);
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   line-height: 1.5;
   letter-spacing: 0;
   text-transform: none;
@@ -1497,10 +1475,7 @@ body {
   margin: 0;
   padding-top: 1.5rem;
   border-top: 1px solid var(--rule);
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: var(--step--1);
   color: var(--muted);
 }
 
@@ -1686,11 +1661,6 @@ body {
      and would otherwise reset its gap — equal specificity, later in source. */
   .colophon:not(.colophon-wide) { flex-direction: column; align-items: flex-start; gap: 1.25rem; }
 
-  /* Tracked uppercase mono is what runs out of room first. At 360px the
-     content box is 312px, and at the wide setting the metadata line measures
-     343px and a legend row with its gloss about 350px. Tightened here they
-     come to 295px and 245px. Measured, not guessed. */
-  .meta, .legend { font-size: 0.625rem; letter-spacing: 0.1em; }
   .meta .dot { padding-inline: 0.2em; }
 
   /* The nav is not measured with them any more. Those two are single lines

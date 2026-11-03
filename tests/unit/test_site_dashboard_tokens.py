@@ -47,9 +47,11 @@ def test_the_light_colours_are_the_same_on_both_surfaces() -> None:
 def test_the_dark_colours_are_the_same_on_both_surfaces() -> None:
     dashboard = block(DASHBOARD_CSS, "@media (prefers-color-scheme: dark) {\n  :root {")
     expected = {k: dashboard[k] for k in COLOURS}
-    # The site sets dark twice: for a visitor without script, from the system
-    # preference, and from its toggle. Both have to agree with the dashboard.
-    by_preference = block(SITE_CSS, "@media (prefers-color-scheme: dark) {\n  :root {")
+    # The site sets dark from its toggle only: it opens light whatever the
+    # system prefers (D-344), so it has no dark-by-preference block to compare.
     by_toggle = block(SITE_CSS, ':root[data-theme="dark"] {')
-    assert {k: by_preference[k] for k in COLOURS} == expected
     assert {k: by_toggle[k] for k in COLOURS} == expected
+
+
+def test_the_site_never_takes_dark_from_the_system() -> None:
+    assert "prefers-color-scheme: dark" not in SITE_CSS

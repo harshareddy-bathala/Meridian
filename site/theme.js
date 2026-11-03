@@ -20,7 +20,6 @@
 (function () {
   var KEY = 'meridian-theme';
   var root = document.documentElement;
-  var media = window.matchMedia('(prefers-color-scheme: dark)');
 
   /* Storage throws rather than returning null in some privacy modes, so every
      access is guarded. A visitor who blocks storage still gets a working
@@ -39,17 +38,11 @@
     document.dispatchEvent(new CustomEvent('themechange', { detail: theme }));
   }
 
-  function system() {
-    return media.matches ? 'dark' : 'light';
-  }
-
-  apply(stored() || system());
-
-  /* Follow the operating system only while the visitor has expressed no
-     preference of their own. Once they have, their choice outranks it. */
-  media.addEventListener('change', function () {
-    if (!stored()) apply(system());
-  });
+  /* Light unless the visitor has chosen dark with the toggle. The site is
+     read like a document, in daylight and on paper, so it opens on paper
+     whatever the operating system prefers; dark stays one click away and is
+     remembered (D-344). */
+  apply(stored() || 'light');
 
   /* ---------------------------------------------------------- intro gate --
    * The home page's content is hidden for 4.2 s while the globe resolves.
