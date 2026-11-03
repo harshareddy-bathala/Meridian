@@ -1663,13 +1663,6 @@ body {
 
   .meta .dot { padding-inline: 0.2em; }
 
-  /* The nav is not measured with them any more. Those two are single lines
-     that have to fit 312px intact; the nav takes its own row below 40rem and
-     wraps freely above it, so it was being shrunk to 10px to solve a problem
-     it does not have — and 10px of tracked uppercase mono is the smallest
-     type on the site, on a phone, on the one control people use to navigate.
-     It keeps 11px and only tightens its tracking. */
-  .nav { letter-spacing: 0.1em; }
 
   /* The gloss on each legend label is what goes: the colour and the label
      already carry the meaning, and keeping it is what breaks 312px.
@@ -1702,7 +1695,8 @@ body {
 /* The nav needs its own line before the brand and the toggle start colliding
    with it. Ordered so the toggle stays on the masthead's first row. */
 @media (max-width: 39.9375rem) {
-  .nav { order: 3; flex-basis: 100%; gap: 0.5rem 1.25rem; }
+  .nav { order: 3; flex-basis: 100%; gap: 0; margin-inline: -0.625rem; }
+  .nav a { padding: 0 0.625rem; font-size: 0.875rem; }
   .theme-slot { order: 2; }
   .prose table { min-width: 20rem; }
 }
