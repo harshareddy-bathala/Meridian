@@ -183,4 +183,14 @@ file exists to document.
                   ours and are recorded as D-060. No SGP4 implementation was
                   read or written — propagation is the sgp4/skyfield libraries'.
             Copied: none — two published measurements, cited
+
+2026-11-03  The Code of Conduct
+            Read: Contributor Covenant 2.1, from its canonical source
+                  repository, EthicalSource/contributor_covenant (CC BY 4.0)
+            Wrote: nothing of our own; CODE_OF_CONDUCT.md adopts it whole, as
+                  the Covenant intends, with its reporting placeholder filled in
+                  with hello@meridian.org.in
+            Copied: the Covenant's text, verbatim apart from that contact. CC BY
+                  4.0 permits it with credit, which the file's own Attribution
+                  section gives, linking the original
 ```

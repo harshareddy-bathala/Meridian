@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A security problem
+    url: https://github.com/harshareddy-bathala/Meridian/blob/main/SECURITY.md
+    about: Please report it privately, as SECURITY.md describes, not in a public issue.
+  - name: What Meridian is, in plain words
+    url: https://meridian.org.in/how-it-works/
+    about: How one satellite pass is predicted, scheduled, received, checked and reported.

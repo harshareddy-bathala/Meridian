@@ -1,0 +1,19 @@
+name: A document or page is unclear
+description: Something in docs/, a README or meridian.org.in confused you, or is out of date.
+labels: ["documentation"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The file and section, or the page's address.
+      placeholder: docs/OPERATIONS.md § Going public, or https://meridian.org.in/data/
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What is unclear or wrong
+      description: Quote the sentence if you can, and say what you expected it to tell you.
+    validations:
+      required: true

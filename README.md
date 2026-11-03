@@ -7,88 +7,78 @@
   </picture>
 </p>
 
-Predictive scheduling and reliability for satellite ground stations, and an open protocol for stations to join a network.
+<p align="center">
+  <a href="https://github.com/harshareddy-bathala/Meridian/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/harshareddy-bathala/Meridian/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="LICENSE"><img alt="Licence: Apache-2.0" src="https://img.shields.io/badge/licence-Apache--2.0-blue"></a>
+  <a href="https://meridian.org.in"><img alt="Site: meridian.org.in" src="https://img.shields.io/badge/site-meridian.org.in-14161b"></a>
+</p>
 
-Satellites in low Earth orbit are visible for eight to fifteen minutes at a time, a few times a day. A pass that is missed is lost permanently — there is no retry. Yet the decision of which pass to receive is almost universally made on geometry alone: whichever satellite goes highest.
+**Satellites pass overhead for a few minutes at a time, and a missed pass never comes back. Meridian decides which passes are worth catching, catches them, checks the result, and tells you what happened.**
 
-Meridian predicts which reception opportunities are worth taking, schedules them, monitors the stations doing the work, and reports measured reliability. It also measures something nobody publishes: how wrong public orbital data actually is, and what that costs.
+It is open software for satellite ground stations, and **MSP**, an open protocol any receiving station can implement to join the network. One physical station is being built by the team as the network's first member. The software is the contribution; the station is the proof.
 
-**The software is the contribution. The station is the proof.**
-
----
-
-## Status
-
-**Phase 1 — Foundations.** Data model, orbit service, MSP draft, station registry, first simulated station.
-
-Done when a virtual station is visible on the public site from outside the college network.
-
-Built so far:
-- **Platform core:** the store and its migrations, the orbit service and element-set archive, all four MSP endpoints, the station registry, pass generation, the two baseline schedulers and the constrained optimiser.
-- **Observations and simulation:** append-only observations, and a deterministic fleet of virtual stations that speaks MSP through the reference client.
-- **Public read API** under `/api/v1`: stations, satellites, upcoming passes, scheduling decisions with their reasons, observations and simulator runs.
-- **Dashboard**, served from the platform: a station map, liveness, simulated badges, and each station's listening state and next assignments.
-- **Deployment and monitoring:**
-  - scheduling that runs by itself every five minutes;
-  - Prometheus metrics and ten tested alert rules, Alertmanager and a provisioned Grafana dashboard;
-  - capped logs and healthchecks on every service;
-  - host backup and restore tools, with a restore proven on a second machine in CI;
-  - a dashboard that still renders, labelled with its age, with the platform down, and a station that receives on schedule with the platform unreachable: `EVALUATION.md` §12's two drills, run as tests;
-  - amd64 and arm64 images on GHCR.
-
-  `docs/OPERATIONS.md` is the runbook.
-
-**The exit criterion was met on 2026-09-14.** A virtual station was served on `dash.meridian.org.in` through the Cloudflare tunnel, and `deploy/tools/verify_public_surface.py` passed every check from a mobile network outside the college, the edge rate limit included (D-088). The host was a laptop, because there is no Pi yet, so the dashboard is online only while a host runs the `public` profile.
-
-The yield model is built (Stage 17): `meridian model fit`, `evaluate` and `show`. It is waiting for enough measured passes to fit on, since simulated ones never train it. The constrained scheduler is built (Stage 18). The `jobs` service schedules with an optimiser under the configuration it is given, every decision records why, declined and offline work is decided again, and `meridian schedule evaluate` compares A to D against the baselines and an oracle. The reliability layer is built (Stage 20): every settled pass is classified with its evidence, and `meridian reliability report` counts capture rate, confirmed misses and the loss budget from it, for measured and simulated stations apart. Failure injection and scale simulation are built (Stage 21): every fault the roadmap names can be injected into a simulated fleet or the platform, `meridian reliability faults` judges a run from the platform's own records, and fifty stations run through real MSP in CI; `docs/SCALE-AND-FAULTS.md` has the results, all simulated. Not yet started: hardware. `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` says which stage each belongs to.
-
-[**meridian.org.in**](https://meridian.org.in) — the static public site, in `site/`: the front page plus the architecture, protocol, documentation and about pages. It is deliberately not the dashboard: the exit criterion above is met by the live dashboard on `dash.meridian.org.in`, tunnelled from the station, which is a separate surface with a separate uptime story. See D-036, D-037 and D-038 for the two-theme system and the move to five pages, and D-039 and D-040 for the contrast pass and the document rail.
-
-Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](https://github.com/harshareddy-bathala/Meridian/issues) and [discussions](https://github.com/harshareddy-bathala/Meridian/discussions) for anything technical.
+[**meridian.org.in**](https://meridian.org.in) explains it in plain words · [**the live dashboard**](https://dash.meridian.org.in) shows it running
 
 ---
 
-## What's here
+## What you can do with it
 
-| Path | Contents |
+| If you want to… | Start here |
 |---|---|
-| `docs/MSP-SPEC.md` | The protocol. Read this first — every module depends on it. |
-| `docs/ARCHITECTURE.md` | Module boundaries and data flow |
-| `docs/DATA-MODEL.md` | Schema |
-| `docs/EVALUATION.md` | Methodology. Read before writing any model code. |
-| `docs/DECISIONS.md` | Decisions taken during implementation, and why |
-| `docs/THREAT-MODEL.md` | What is protected, from whom, and which code or decision answers each threat |
-| `docs/OPERATIONS.md` | Running a deployment: bring-up, operator commands, backup and restore, and what to do when each alert fires |
-| `docs/GLOSSARY.md` | Domain terms |
-| `docs/PROJECT.md` | The full project document — problem, method, phases, budget |
-| `docs/GIT-WORKFLOW.md` | Commit, branch and review rules |
-| `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` | The staged build order, and what each stage's completion gate is |
-| `CLAUDE.md` | Context for AI coding assistants |
-| `ATTRIBUTION.md` | Log of ideas read from other projects |
-| `site/` | The static site at `meridian.org.in`. No build step — the directory is what gets served. |
-| `site/brand/` | Logo exports for marketing. Generated; see `site/brand/README.md`. |
-| `dashboard/` | The live dashboard: TypeScript, Vite and React, built into the platform image and served at the API's own origin (D-081, D-091). |
+| get satellite data or images | [Data and images](https://meridian.org.in/data/): weather images, the result of every pass, and an open dataset |
+| watch an area over time | [Watch an area](https://meridian.org.in/areas/): fires, crops, night lights and cloud over a place you care about |
+| run a station, or build one | [Join with a station](https://meridian.org.in/stations/), then [the protocol](docs/MSP-SPEC.md) |
+| run the platform yourself | [Quick start](#quick-start), below |
+| contribute code | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| support the project | [Support](https://meridian.org.in/support/) |
+
+## What happens to one pass
+
+1. **Predict.** Each upcoming pass is scored by how likely it is to return usable data, not only by how high it climbs. Elevation is one feature among several, with element-set age, station history and the station's own learned horizon.
+2. **Choose.** One schedule for every station at once, solved as a constrained assignment problem, and reported against baselines that do the obvious thing.
+3. **Receive.** The station records, and its heartbeat proves it was listening: right target, right frequency, right time. **Absence is not a miss** unless the heartbeat says it was listening.
+4. **Check.** Every reception gets a **calibrated** confidence that its data is usable, tested against what happened with a reliability diagram and a Brier score.
+5. **Explain.** Every loss gets a cause (obstruction, interference, timing, receiver, satellite silent) or *undetermined* when the evidence does not support one.
+6. **Warn.** A station drifting from its own baseline raises a health warning before it fails.
+7. **Tell and share.** The owner gets a plain report, and every published figure can be regenerated from a sealed dataset, a config file and a seed.
+
+The site's [How it works](https://meridian.org.in/how-it-works/) page walks through the same seven steps with pictures.
+
+## Where it stands
+
+- **The software is built and tested.** Of the 42 conditions in [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) that define it as complete, 41 are proven on every change. The last is a 72-hour run on the station's own computer.
+- **A practice fleet of 50 simulated stations** runs the whole pipeline, faults included, for the demonstration. Everything it produces is labelled simulated, at every layer.
+- **Station 001 is being built.** Until it has received, no measured result is published, because there is none.
+- **The protocol is frozen at MSP 0.1.**
+
+[`docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md`](docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md) says which stage comes next, and [`CHANGELOG.md`](CHANGELOG.md) what each release contains.
 
 ---
 
 ## Quick start
 
 ```bash
-git clone <repo> && cd meridian
+git clone https://github.com/harshareddy-bathala/Meridian.git && cd Meridian
 cp deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.yml up -d --build
-curl http://localhost:8000/healthz
 ```
+
+Then open `http://localhost:8080/` for the dashboard, or `curl http://localhost:8000/healthz` for the API.
 
 The env file goes in `deploy/`, beside the compose file: compose reads it from there whatever directory the command runs in (D-114). On a Pi, `docker compose -f deploy/docker-compose.yml pull` fetches the prebuilt image instead of building.
 
-The default profile runs the database, migrations, the API on `:8000`, the jobs process that generates passes and schedules them every five minutes, and the front on `:8080`, which serves the dashboard's last good copy when the API is down (D-282). The database is deliberately not published — nothing outside the compose network needs it.
+The default profile runs the database, migrations, the API on `:8000`, the jobs process that generates passes and schedules them every five minutes, and the front on `:8080`, which serves the dashboard's last good copy when the API is down (D-282). The database is deliberately not published.
 
-Optional profiles: `--profile metrics` for Prometheus, Alertmanager and Grafana on `:3001` (copy `deploy/prometheus/metrics_token.example` to `metrics_token` first) and `--profile sim` for a simulated station. The tunnel is an override file, `-f deploy/docker-compose.public.yml`, which also takes the API's port off the host; `docs/OPERATIONS.md` § Going public is the runbook.
+**Bringing the whole platform up on a clean machine in under ten minutes is a hard requirement.** CI measures it on every pull request: a cold `docker compose --profile metrics up --build` on a clean runner, timed until every service reports healthy, failing over 600 seconds. On a laptop it takes about five minutes cold and twenty seconds warm.
 
-Bringing the whole platform up on a clean machine in under ten minutes is a hard requirement, not an aspiration. If it takes longer, that is a bug. Measured: about five minutes cold on a laptop including image pulls and the image build, twenty seconds warm. On a Pi, pull a prebuilt image rather than building on the device.
+**Optional profiles:**
 
-CI measures it on every pull request rather than taking the figure on trust — a cold `docker compose --profile metrics up --build` on a clean runner, timed from before the build until every service with a healthcheck reports healthy, failing over 600 seconds.
+| Add | For |
+|---|---|
+| `--profile sim` | one simulated station |
+| `-f deploy/docker-compose.demo.yml --profile demo` | the 50-station demonstration fleet (D-330); see `docs/OPERATIONS.md` § The demonstration |
+| `--profile metrics` | Prometheus, Alertmanager and Grafana on `:3001`; copy `deploy/prometheus/metrics_token.example` to `metrics_token` first |
+| `-f deploy/docker-compose.public.yml` | the Cloudflare tunnel; `docs/OPERATIONS.md` § Going public |
 
 ## Development
 
@@ -99,7 +89,7 @@ uv run mypy platform/src client/src simulator/src
 uv run pytest -m "not integration and not e2e and not msp_conformance"
 ```
 
-The dashboard needs Node 24. `npm run dev` proxies `/api` and `/healthz` to a platform on `:8000` (or `MERIDIAN_PLATFORM_URL`), so development is same-origin just as production is:
+The dashboard needs Node 24. `npm run dev` proxies `/api` and `/healthz` to a platform on `:8000`, so development is same-origin just as production is:
 
 ```bash
 cd dashboard && npm ci
@@ -107,85 +97,91 @@ npm run lint && npm run typecheck && npm run build
 npm run dev
 ```
 
-Tests are organised by what they need to run, one directory per marker:
+Tests are organised by what they need, one marker each:
 
-| Command | Needs | Populated |
-|---|---|---|
-| `uv run pytest -m "not integration and not e2e and not msp_conformance"` | nothing | yes |
-| `uv run pytest -m integration` | TimescaleDB | yes |
-| `uv run pytest -m msp_conformance` | nothing — it drives the app in-process | yes, from `GET /msp/v0/time` |
-| `uv run pytest -m e2e` | TimescaleDB — it drives the platform and the simulator in-process | yes, from Stage 10's completion gate |
+| Command | Needs |
+|---|---|
+| `uv run pytest -m "not integration and not e2e and not msp_conformance"` | nothing |
+| `uv run pytest -m integration` | TimescaleDB, never SQLite |
+| `uv run pytest -m msp_conformance` | nothing; it drives the app in-process |
+| `uv run pytest -m e2e` | TimescaleDB |
 
-The one end-to-end test runs Stage 10's gate for real, from catalogue load through pass generation, scheduling, MSP delivery and the reference client to a stored observation, with only the platform's clock stubbed. CI still tolerates exit `5` on that marker, a leftover from when the directory was empty.
-
-Conformance tests assert the **bytes** `docs/MSP-SPEC.md` promises — field names, exact error bodies, status codes, version handling — rather than that an operation works. They are what a third-party station implementation would be tested against, which is why they spell out expected bodies in full instead of computing them from the code under test.
-
-Integration tests need a real TimescaleDB — never SQLite. The schema uses hypertables, arrays, `CHECK` constraints and generated columns, so a suite that passes on SQLite says nothing about what runs on the Pi.
+Conformance tests assert the **bytes** `docs/MSP-SPEC.md` promises, field names and exact error bodies included. They are what a third-party station implementation would be tested against.
 
 ```bash
 docker run -d --name meridian-test -p 5433:5432 \
     -e POSTGRES_USER=meridian -e POSTGRES_PASSWORD=meridian \
     -e POSTGRES_DB=meridian_test timescale/timescaledb:2.29.0-pg16
 
-# One DATABASE_URL serves both Alembic and psycopg — meridian.config adds and
-# strips the +psycopg driver suffix as each needs it. See docs/DECISIONS.md D-033.
+# One DATABASE_URL serves both Alembic and psycopg (D-033).
 export DATABASE_URL=postgresql://meridian:meridian@localhost:5433/meridian_test
 uv run alembic -c deploy/alembic.ini upgrade head
 uv run pytest -m integration
 ```
 
----
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rest: how a change is shaped, the decision log, and the rules nothing may break.
 
 ## Running a simulated station
 
-A station needs three things before it can do anything: a catalogue to be
-scheduled against, an invite to join with, and somewhere to keep its identity.
-
 ```bash
-# What this deployment tracks. Idempotent — running it twice writes nothing.
+# What this deployment tracks. Idempotent: running it twice writes nothing.
 uv run meridian catalogue load --file deploy/catalogue/development.json
 
 # One invite per station. Tokens go to stdout, one per line.
 uv run meridian invite create --label sim --count 1 > invites.txt
 
-# Passes can only be generated for stations that already exist, so this comes
-# after the first run registers them.
 uv run python -m meridian_sim.station --count 1 --seed 4471 \
     --invites invites.txt --state-dir ./sim-state
 ```
 
-Or let compose do all of it: `docker compose -f deploy/docker-compose.yml
---profile sim up` brings up the seeding and the fleet, and the default
-profile's jobs process keeps generating passes for it and scheduling them.
+Or `docker compose -f deploy/docker-compose.yml --profile sim up`, which does all of it. Simulated stations speak real MSP to the real platform, through the same client a physical station runs, and are labelled as simulated in every record, response and display. Everything about a run is derived from its seed, and `--scenario` injects faults as reproducibly as a clean run (D-077).
 
-Simulated stations speak real MSP to the real platform, through the same client
-a physical station runs. They are indistinguishable from physical stations at
-the protocol level — and labelled as simulated in every record, response and
-display.
+---
 
-Everything about a run is derived from its seed: the same seed produces the same
-stations in the same places hearing the same things, and `--scenario` injects
-faults that are as reproducible as a clean run. What that claim does and does not
-cover is `docs/DECISIONS.md` D-077.
+## Repository map
+
+| Path | Contents |
+|---|---|
+| `platform/` | The platform: orbit service, prediction, scheduler, registry, observation store, reliability, public API and MSP endpoints |
+| `client/` | The reference station client, which installs on a Pi without the database or web server |
+| `simulator/` | Virtual stations that speak MSP |
+| `ingest/` | External archive adapters, which nothing at runtime imports (D-138) |
+| `dashboard/` | The live dashboard: TypeScript, Vite and React, served from the platform's own origin |
+| `site/` | [meridian.org.in](https://meridian.org.in). No build step: the directory is what gets served |
+| `deploy/` | Compose, migrations, the front, Prometheus rules, Grafana, backup and drill tools |
+| `docs/MSP-SPEC.md` | The protocol. Read it first: every module depends on it |
+| `docs/ARCHITECTURE.md` | Module boundaries and data flow |
+| `docs/EVALUATION.md` | Methodology. Read it before writing any model code |
+| `docs/DECISIONS.md` | Every decision taken during implementation, what was rejected and why |
+| `docs/OPERATIONS.md` | The runbook: bring-up, commands, backup and restore, what to do when each alert fires |
+| `docs/THREAT-MODEL.md` | What is protected, from whom, and what answers each threat |
+| `docs/` | Also the data model, glossary, Git workflow, acceptance list and the full project document |
 
 ---
 
 ## Principles
 
-**Software first.** The platform is proven before hardware is purchased.
+- **Software first.** The platform is proven before hardware is bought.
+- **Open by default.** MSP is published, and the reference client is released.
+- **Independent.** If every external service went offline tomorrow, Meridian would still schedule, receive, decode, monitor and report with its own stations.
+- **Measurable.** Every claim carries a number, produced by a stated method and regenerable from a seed and a config file.
+- **Honest about simulation.** Simulated data is labelled as simulated everywhere, and never mixed with measured results.
+- **Receive only.** The station never transmits.
 
-**Open by default.** MSP is published; the reference client is released.
+## Support this project
 
-**Independent.** If every external service disappeared tomorrow, Meridian would still schedule, receive, decode, monitor and report.
+Meridian is free and open, and like any organisation it has running costs: the platform and its link online, the data services and keys it uses, the domain, and upkeep. Support keeps those running. Anything beyond them goes to a tracking antenna, so the station can follow each satellite across the sky, then more stations, then new software.
 
-**Measurable.** Every claim carries a number, produced by a stated method, reproducible from a seed and a config file.
+[**meridian.org.in/support**](https://meridian.org.in/support/) has the ways to give. Meridian is not a registered charity, and support is not tax-deductible.
 
-**Receive only.** The station never transmits.
+## Contributing
 
----
+Contributions are welcome, from a typo to a station implementation. Start with [CONTRIBUTING.md](CONTRIBUTING.md), and see the [good first issues](https://github.com/harshareddy-bathala/Meridian/labels/good%20first%20issue). Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Security problems go to [SECURITY.md](SECURITY.md), not to a public issue.
+
+Contact: [hello@meridian.org.in](mailto:hello@meridian.org.in), or [issues](https://github.com/harshareddy-bathala/Meridian/issues) for anything technical.
 
 ## Licence
 
-Apache-2.0. Permissive, with an explicit patent grant — the right fit for a published protocol and a reference client we want other people to implement.
+Apache-2.0: permissive, with an explicit patent grant, which suits a published protocol and a reference client meant for others to implement.
 
-GPL-licensed decoders are invoked as separate processes over defined interfaces, never linked, so no copyleft obligation propagates into this repository. See `ATTRIBUTION.md`.
+GPL-licensed decoders are run as separate processes over defined interfaces, never linked, so no copyleft obligation reaches this repository. Work informed by reading other projects is logged in [`ATTRIBUTION.md`](ATTRIBUTION.md).

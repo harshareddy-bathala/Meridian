@@ -6783,6 +6783,41 @@ On the demonstration stack, every map tile came back as OpenStreetMap's "Access 
 
 ---
 
+## D-350 — The repository is written for the people arriving at it: a plain README, and the files a contributor looks for
+
+**2026-11-03 · accepted** · *`README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CHANGELOG.md`, `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`*
+
+The README still opened with *Phase 1 — Foundations*, two months after it ended, and made two claims D-099 rules out: that pass choice is "almost universally made on geometry alone", and that Meridian "measures something nobody publishes". A contributor arriving from a post found no contributing guide, no code of conduct and no security policy, the three files GitHub's community profile looks for first.
+
+**Decision.**
+- **The README leads with one plain sentence**, then what a reader can do with Meridian, the seven steps of one pass, and where it honestly stands: 41 of 42 acceptance conditions proven, station 001 not yet receiving, the practice fleet labelled simulated. Badges are only for what is real: CI, the licence, the site. There is no release badge until there is a release.
+- **`CONTRIBUTING.md`** gives the set-up, the checks a pull request must pass, the commit convention CI enforces, the decision log, and `CLAUDE.md`'s hard rules in contributors' words.
+- **`CODE_OF_CONDUCT.md` is the Contributor Covenant 2.1, adopted whole**, reported to `hello@meridian.org.in` (`ATTRIBUTION.md`).
+- **`SECURITY.md`** asks for private reports, by email or GitHub's private advisories, and names what is in scope, the MSP endpoints and the public API's privacy boundary (`THREAT-MODEL.md` §7) above all.
+- **Issue forms** for a bug, a station, a document and an idea, with existing labels only. The station form makes the reporter confirm that a station never transmits. The pull request template's checklist is the hard rules.
+- **`FUNDING.yml` points at the site's support page**, which says what support pays for and states no sum (D-343). The Sponsors entry joins it when the profile is live.
+- **`CODEOWNERS` names one owner** until the team's handles are added.
+
+*Rejected: a README that keeps the build history.* What each stage built is in the roadmap and `CHANGELOG.md`. A README that narrates it goes stale the day the next stage lands, which is how it came to say Phase 1.
+
+---
+
+## D-351 — The dashboard's lint tools take minimatch 11 by an override, ahead of their own releases
+
+**2026-11-03 · accepted** · *`dashboard/package.json` (`overrides`), `dashboard/package-lock.json`*
+
+Dependabot alert 18: minimatch below 11.0.1 can be made to do exponential work by a crafted pattern (its advisory: "potential denial of service via globparts amplification"). It reaches the dashboard only through `eslint` and `typescript-eslint`, which pin `^10.2.x` and have no release that accepts 11. The alert had no upstream fix.
+
+**Decision.** An npm `overrides` entry forces `minimatch` to `^11.0.1` everywhere in the dashboard's tree. With it, `npm run lint` passes at zero warnings, the type check, all 98 tests and the build pass, and `npm audit` reports nothing.
+
+It is a development dependency, and it is not in the served bundle. The patterns it matches are this repository's own lint configuration. So the risk was small either way, and an override that the tools tolerate is cheaper than carrying an open alert that trains people to ignore the security tab.
+
+**Remove the override** when `eslint` and `typescript-eslint` both accept minimatch 11 themselves: delete it, run `npm install`, and check `npm ls minimatch`.
+
+*Rejected: dismissing the alert as tolerable.* It was the fallback if the tools had broken under 11. They did not.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7152,6 +7187,13 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
+
+**Landed 2026-11-03**, making the repository ready for contributors and sponsors.
+
+| Decision | Applied to |
+|---|---|
+| D-350 the README and the contributor files | `README.md`; `CONTRIBUTING.md`; `CODE_OF_CONDUCT.md`; `SECURITY.md`; `CHANGELOG.md`; `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`; `ATTRIBUTION.md`; `CLAUDE.md` (the layout) |
+| D-351 minimatch 11 by override | `dashboard/package.json`; `dashboard/package-lock.json` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 
