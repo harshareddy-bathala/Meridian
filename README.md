@@ -19,7 +19,7 @@ It is open software for satellite ground stations, and **MSP**, an open protocol
 
 Meridian began as a final-year engineering project, built by a team of three, and is written to outlast it.
 
-[**meridian.org.in**](https://meridian.org.in) explains it in plain words · [**the live dashboard**](https://dash.meridian.org.in) shows it running
+[**meridian.org.in**](https://meridian.org.in) explains how it works · [**the live dashboard**](https://dash.meridian.org.in) shows it running
 
 ---
 
