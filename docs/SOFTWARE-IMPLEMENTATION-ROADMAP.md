@@ -59,8 +59,8 @@ flowchart TD
 - **Found on the way, fixed:**
   - compose never passed `MERIDIAN_RELIABILITY_CONFIG` to the api or the jobs service, though `OPERATIONS.md` said to set it for both (D-333);
   - two integration tests read SQL `now()`, the start of a transaction an earlier test can leave open, against the wall clock. Both are fixed; others in the suite still do, unflaked so far.
+- **Offline from cold, with Wi-Fi off:** the demo profile came up in 23 s from images already on the machine, and the dashboard loaded (`docs/SCALE-AND-FAULTS.md` § The demonstration fleet).
 - **Owed, not done:**
-  - the clean-machine bring-up with Wi-Fi off, timed, by an operator;
   - a demonstration trial on `meridian catalogue export`'s live element sets. The two trials flew the development catalogue, 83 days old, and the schedule view says so beside every pass.
 - **Known limits:**
   - a silence shorter than D-276's ±45 minutes can be left *undetermined* when a pass after it hears the satellite. The second trial met it twice;

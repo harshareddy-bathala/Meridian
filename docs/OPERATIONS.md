@@ -1149,6 +1149,8 @@ The demonstration fleet is fifty simulated stations under the `demo` scenario. A
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --profile demo up -d
 ```
 
+**Give a second checkout its own project name** with `-p`, such as `-p meridian-demo`, on every command. Without it, compose takes the default project, `meridian`, and attaches to whatever database volume that project already holds.
+
 Open `http://localhost:8080/#/kiosk` on the screen it is shown on. The kiosk cycles the network, a station's schedule, the losses and the insights every 20 seconds, and holds for a minute after a touch.
 
 **What a cold start shows, and when.**
