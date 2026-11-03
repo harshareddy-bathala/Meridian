@@ -8,6 +8,8 @@ The specification documents state *what* the system does. This file records *why
 
 **Status values:** `accepted` · `open` · `superseded`
 
+**Wording revised for publication, 2026-11-03.** Entries are amended in place for wording only: sums, the names of review meetings, and phrasing that recorded who asked were replaced by the reason. No decision, status or date changed.
+
 ---
 
 ## D-001 — Licence: Apache-2.0
@@ -5358,7 +5360,7 @@ D-106 asked what label the reception verdict is calibrated against, and required
 - **agreement with another reception** is sparse while the network has one physical station;
 - **SatNOGS vetting** rates *with signal*, not *usable*, on another network's receptions.
 
-A person who looks at the product and says whether it can be used answers the question SC-7 asks and reads none of the verdict's inputs. The user chose it on 2026-10-01; the team confirms it at review, with SC-7's target.
+A person who looks at the product and says whether it can be used answers the question SC-7 asks and reads none of the verdict's inputs. It is the label from 2026-10-01; the team confirms it at review, with SC-7's target.
 
 **The rules.**
 - **A revision with no product is unusable, unrated.** Nothing exists to look at or to use. This is the one part of the label that follows from what the station reported, since a reception that decoded nothing declares no product. So SC-7 is reported twice: on every labelled reception, and on rated receptions only. The second is the hard question, and the easy cases cannot inflate it.
@@ -7124,7 +7126,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | — the completion gate | `tests/integration/test_verdict_gate.py`: 150 receptions stored, the decoded ones rated, a snapshot exported, the verdict fitted from it and applied, every measured reception then holding a versioned verdict; `tests/unit/test_report_verdict.py`: SC-7 built and verified through `meridian report`, with every socket refused |
 | — D-102 enforced | `tests/unit/test_prediction_boundaries.py`: no module on the yield path reads a rating or a verdict |
 
-**Landed 2026-10-02**, building Stage 27's loss diagnosis, before D-105's review of the fault specification, by the team's choice (D-270).
+**Landed 2026-10-02**, building Stage 27's loss diagnosis, before D-105's review of the fault specification, with the specification pinned so the review reads what the diagnosis was built against (D-270).
 
 | Decision | Applied to |
 |---|---|

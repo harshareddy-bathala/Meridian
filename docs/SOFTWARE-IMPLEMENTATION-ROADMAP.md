@@ -141,7 +141,7 @@ flowchart TD
   - a chain that degrades before its first baseline, or slowly enough that thirty days pass unwarned, has the loss trained in;
   - the simulated decode fails only after about 11 dB of loss, which is the simulator's margin, not a real chain's.
 
-**Stage 27's software is built** (2026-10-02), **before D-105's review of the fault specification**, by the team's choice (D-270). The specification is pinned so the review can still read exactly what the diagnosis was built against. Its decisions are D-270 through D-278, `docs/OPERATIONS.md` § Loss diagnosis is its runbook, and its migration is `0029`. Stage 24 merged before it, and its seventy-two hour run on the Pi is still owed. Stage 28 was next in order; Stages 29, 30 and 33 now wait only on stages after this one.
+**Stage 27's software is built** (2026-10-02), **before D-105's review of the fault specification** (D-270). The specification is pinned so the review can still read exactly what the diagnosis was built against. Its decisions are D-270 through D-278, `docs/OPERATIONS.md` § Loss diagnosis is its runbook, and its migration is `0029`. Stage 24 merged before it, and its seventy-two hour run on the Pi is still owed. Stage 28 was next in order; Stages 29, 30 and 33 now wait only on stages after this one.
 - **The completion gate passes, in two halves.** *SC-8's confusion matrix, per-cause recall, wrong-cause fraction and undetermined fraction regenerate from the simulator's seeds, labelled as simulated and reported apart from any real labelled cases.*
   - `tests/integration/test_diagnosis_gate.py` flies a faulted fleet of four stations for twelve hours through the harness SC-8's runs are made with. It asserts:
     - every loss is diagnosed;
