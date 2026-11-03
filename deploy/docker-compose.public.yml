@@ -49,7 +49,7 @@ services:
 
   tunnel:
     # Outbound-only over 443: no static IP, no inbound port, and no firewall
-    # exception to request from college IT — which is the actual constraint SC-6
+    # exception to request from the network's owner — which is the actual constraint SC-6
     # runs into. TLS terminates at the edge, so the origin stays plain HTTP
     # inside this network, which MSP §3 already anticipates.
     image: cloudflare/cloudflared:2026.10.5@sha256:1b1d34d0a9c0bfca9de72db8460d328db3f19edd2b96169114e3e893a97bbe53

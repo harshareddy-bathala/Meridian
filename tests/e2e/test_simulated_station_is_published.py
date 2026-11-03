@@ -1,7 +1,7 @@
 """The Phase 1 exit criterion, as far as a test can reach it.
 
-*A virtual station is visible on the public site from outside the college
-network.* "From outside" is an operator's check against the deployed hostname
+*A virtual station is visible on the public site from outside the network
+it runs on.* "From outside" is an operator's check against the deployed hostname
 (D-088's ``verify_public_surface.py``). Everything before that is here: a station
 brought up by the real simulator, through the real reference client, over real
 MSP, appears in the public read API the dashboard draws — labelled simulated,

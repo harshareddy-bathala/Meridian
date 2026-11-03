@@ -64,7 +64,7 @@ Where silent bugs live. These are not interchangeable, and converting between th
 
 **Yagi** — a directional antenna. More gain, but must be pointed, which is why the rotator exists.
 
-**Rotator** — the motorised mount that points a directional antenna. Ours is built in the college workshop and driven by an Arduino over the network.
+**Rotator** — the motorised mount that points a directional antenna. Ours is built in a workshop and driven by an Arduino over the network.
 
 **Slew** — moving the antenna from one bearing to another. Takes time, so the scheduler must leave room for it between passes; a schedule that ignores slew time is not executable.
 

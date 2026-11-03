@@ -10,7 +10,7 @@
 #
 # Bringing the whole platform up on a clean machine in under ten minutes is a hard
 # requirement, not an aspiration. Profiles are how that survives contact with a
-# Raspberry Pi on college wifi: the default `up` starts only what is needed to
+# Raspberry Pi on shared wifi: the default `up` starts only what is needed to
 # serve the platform. Metrics and the simulator are opt-in.
 #
 #   --profile metrics   Prometheus, Alertmanager and Grafana

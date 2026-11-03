@@ -43,7 +43,7 @@ ASSIGNMENT_ID_HEX_LENGTH = 12
 """Twelve hex characters — 48 bits, the same width as an observation id.
 
 Enough that a collision across every decision this project will ever make is
-not worth reasoning about, and short enough to read out loud in a viva.
+not worth reasoning about, and short enough to read out loud.
 """
 
 

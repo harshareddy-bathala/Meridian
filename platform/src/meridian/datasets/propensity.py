@@ -2,7 +2,7 @@
 
 ``EVALUATION.md`` §4.2 weights outcomes by the inverse of P(attempted | what
 was known before the pass). Stage 17 owns the numerical dependencies, and a
-propensity that a viva can check by eye is worth more here than a smooth one,
+propensity that a reader can check by eye is worth more here than a smooth one,
 so this estimate is a ratio of two counts.
 
 **A cell is station × satellite × maximum-elevation band × local-solar-hour

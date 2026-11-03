@@ -2,7 +2,7 @@
 
 Decisions taken during implementation, with the reasoning behind each.
 
-The specification documents state *what* the system does. This file records *why* it does it that way, and what the alternative was. In a viva the second question always follows the first.
+The specification documents state *what* the system does. This file records *why* it does it that way, and what the alternative was. The second question always follows the first.
 
 **Rules.** One entry per decision, appended never rewritten. A decision that is later reversed gets a new entry marked `Supersedes: D-NNN`; the original stays, because the fact that we changed our minds is part of the record. Every entry carries a date and a status.
 
@@ -93,7 +93,7 @@ This flag propagates to every derived record, every API response and every dashb
 
 `POST /msp/v0/register` requires an invite token issued out-of-band by the platform operator.
 
-Open registration with rate limiting is a **growth decision, not a Phase 1 decision**. Phase 1 ends with the platform publicly reachable from outside the college network, and shipping an unauthenticated write endpoint to a public address is not a defensible position in a viva or anywhere else.
+Open registration with rate limiting is a **growth decision, not a Phase 1 decision**. Phase 1 ends with the platform publicly reachable from outside the network it runs on, and shipping an unauthenticated write endpoint to a public address is not a defensible position.
 
 Nothing here forecloses open registration later. Reversing this is a policy change at one endpoint, not a protocol change.
 
@@ -163,7 +163,7 @@ The five values are written into the schema as a constrained type, and `DATA-MOD
 
 `PROJECT.md` §9 lists SC-1 through SC-6. `EVALUATION.md` §1 lists only SC-1 through SC-5, dropping **SC-6 — station registered, online, publicly visible**.
 
-SC-6 is restored to `EVALUATION.md`. It is the one criterion that is pass/fail rather than measured, and it is effectively the Phase 1 exit criterion, so its omission from the methodology document is the wrong way round: it is the easiest to verify and the most visible to an examiner.
+SC-6 is restored to `EVALUATION.md`. It is the one criterion that is pass/fail rather than measured, and it is effectively the Phase 1 exit criterion, so its omission from the methodology document is the wrong way round: it is the easiest to verify and the most visible to anyone checking.
 
 ---
 
@@ -263,7 +263,7 @@ order by assignment_id, revision desc;
 
 `MSP-SPEC.md` §6 is amended to say "supersedes rather than duplicates". **The client-visible behaviour is unchanged** — a station that resubmits still sees one current observation and no duplicate — so this is a wording change at the protocol level and a real change only inside the platform.
 
-Append-only wins because the observation store is the system of record for every reliability figure in the project. An overwrite silently destroys the evidence that a station reported something different the first time, and "we overwrote it" is not an answer in a viva. It also preserves the distinction between `started_at` and `submitted_at` that MSP §6 relies on to record submission delay for queued observations.
+Append-only wins because the observation store is the system of record for every reliability figure in the project. An overwrite silently destroys the evidence that a station reported something different the first time, and "we overwrote it" is not an answer anyone should accept. It also preserves the distinction between `started_at` and `submitted_at` that MSP §6 relies on to record submission delay for queued observations.
 
 ---
 
@@ -488,7 +488,7 @@ observation_id text generated always as (
 
 **Derived rather than allocated.** An idempotent retry — the queued-reconnection case of MSP §6 — must return the *same* `observation_id` as the original submission. A derived id has that property by construction; a random one requires reading the existing row back before answering, on the exact path D-015 optimised for writing nothing. It is also regenerable from a dataset snapshot, which `CLAUDE.md` rule 8 requires of every number in a report.
 
-`generated … stored` rather than computed in Python, so the relationship is enforced by the database and cannot drift between the ingest path and the public API, and so the column is indexable for the Stage 11 read endpoints. Twelve hex characters is 48 bits — collision-free across any observation volume this network will produce, and short enough to read aloud in a viva.
+`generated … stored` rather than computed in Python, so the relationship is enforced by the database and cannot drift between the ingest path and the public API, and so the column is indexable for the Stage 11 read endpoints. Twelve hex characters is 48 bits — collision-free across any observation volume this network will produce, and short enough to read aloud.
 
 *Rejected:* `ob_<assignment_id>_<revision>`. It is derived and stable too, but it publishes the internal key structure in a public identifier, so the format can never change without breaking clients that parsed it.
 
@@ -662,7 +662,7 @@ This is the honest fix for Phase 1. Real pagination needs per-assignment deliver
 | `meridian.org.in` | a static page describing the project | Cloudflare Pages | `site/` |
 | `dash.meridian.org.in` | the live dashboard — stations, passes, reliability | cloudflared tunnel → the Pi | `dashboard/` |
 
-The separation is about what each is allowed to depend on. The dashboard is a view onto the observation store and is therefore only up when the platform is up — that is correct, and SC-6 is stated against it: "a virtual station is visible on the public site from outside the college network" is satisfied by the tunnelled dashboard, not by `site/`. The description of the project has no such dependency and must not acquire one. A page that explains what Meridian is should not go dark because a Raspberry Pi on a roof lost power, and during Phase 1 that Pi does not exist at all.
+The separation is about what each is allowed to depend on. The dashboard is a view onto the observation store and is therefore only up when the platform is up — that is correct, and SC-6 is stated against it: "a virtual station is visible on the public site from outside the network it runs on" is satisfied by the tunnelled dashboard, not by `site/`. The description of the project has no such dependency and must not acquire one. A page that explains what Meridian is should not go dark because a Raspberry Pi on a roof lost power, and during Phase 1 that Pi does not exist at all.
 
 `site/` is therefore plain HTML, CSS and vanilla JS with no build step and no npm — the whole directory is what gets served. This is deliberately not a stack decision. `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md` asks for the dashboard's front end to be chosen and recorded; that question stays open, and nothing here constrains the answer. Choosing a framework for a page with one heading and one link would have prejudged it.
 
@@ -909,7 +909,7 @@ rather than a record made at the time — which is the same objection this file
 raises against editing an accepted decision instead of amending it.
 
 **The load-bearing rule is unchanged, and it is not this one.** Rule 10's first
-paragraph — never commit code you cannot explain line by line — is what the viva
+paragraph — never commit code you cannot explain line by line — is what review
 actually tests. A trailer is provenance, not comprehension, and marking a commit
 does not license committing something its author cannot walk a reviewer through.
 
@@ -1161,9 +1161,9 @@ A malformed length — `64K`, `1.5`, empty, negative — is refused for the same
 - **Keying on `CF-Connecting-IP` instead is worse.** The compose file also publishes the API on the host, so a request that did not come through the tunnel can set that header to anything. An attacker rotates it per request and is never limited; an operator on a fixed address is. The limiter would then be a control that fails open for the case it exists for and closed for the case it does not.
 - **In-process state is the wrong lifetime.** It resets on every restart and does not survive a second worker, which is the shape the deployment takes on the Pi.
 
-The correct place is the edge — Cloudflare's own rate limiting on the tunnel hostname — with the platform-side limiter, if one is still wanted, keyed on the invite token rather than on any address. **That is a deployment-stage decision and it needs the deployment to exist.** Recorded here so that the gap between "the protocol defines `rate_limited`" and "nothing can produce it" is a decision on the record rather than an omission somebody finds in a viva.
+The correct place is the edge — Cloudflare's own rate limiting on the tunnel hostname — with the platform-side limiter, if one is still wanted, keyed on the invite token rather than on any address. **That is a deployment-stage decision and it needs the deployment to exist.** Recorded here so that the gap between "the protocol defines `rate_limited`" and "nothing can produce it" is a decision on the record rather than an omission somebody finds later.
 
-The trigger to revisit: the first time the platform is reachable from outside the college network for longer than a demonstration, which is Stage 10's exit condition rather than Phase 1's.
+The trigger to revisit: the first time the platform is reachable from outside the network it runs on for longer than a demonstration, which is Stage 10's exit condition rather than Phase 1's.
 
 ---
 
@@ -1792,7 +1792,7 @@ MSP is `/msp/v0` with a required `MSP-Version` header because it is a published 
 
 Not `/public/v0`: "public" describes who may call it, not what it is, and a `v0` alongside `/msp/v0` invites a reader to assume MSP's promise applies here too.
 
-No version header, for a reason specific to this deployment: the dashboard is shipped *by* the platform, from the same image, so a header would encode a version skew that same-origin deployment makes impossible. It would also break `curl https://dash.meridian.org.in/api/v1/stations`, which is a thing an examiner does, and the version stays in the path so it survives being pasted into a chat window.
+No version header, for a reason specific to this deployment: the dashboard is shipped *by* the platform, from the same image, so a header would encode a version skew that same-origin deployment makes impossible. It would also break `curl https://dash.meridian.org.in/api/v1/stations`, which is a thing a visitor does, and the version stays in the path so it survives being pasted into a chat window.
 
 ---
 
@@ -1868,7 +1868,7 @@ Stage 11 fixes the public URL surface, but `meridian.reliability` and `meridian.
 
 **2026-08-13 · accepted** · *`deploy/tools/verify_public_surface.py`, Stage 11* · *Resolves D-051*
 
-D-051 deferred rate limiting and named its own revisit trigger: "the first time the platform is reachable from outside the college network for longer than a demonstration." Stage 11 is that moment.
+D-051 deferred rate limiting and named its own revisit trigger: "the first time the platform is reachable from outside the network it runs on for longer than a demonstration." Stage 11 is that moment.
 
 **A rate-limit rule on the tunnel hostname, in Cloudflare, and nothing in the process.** Every argument D-051 made against an in-process limiter still holds and now serves as the justification rather than the deferral: the client address is the tunnel's, `CF-Connecting-IP` is forgeable on the port compose also publishes, and the edge is the only place that sees the real caller.
 
@@ -1876,7 +1876,7 @@ D-051 deferred rate limiting and named its own revisit trigger: "the first time 
 
 It cannot run in CI — a fork PR has no public hostname — so it is an operator tool, run against a deployment, and re-running it is one command.
 
-**Rehearsal, 2026-09-14 — against `localhost`, not the public hostname.** A cold `docker compose --profile sim up --build` from the Stage 11 branch, then the verifier. It proves the checks and the platform agree; it is **not** the transcript this entry asks for, which must come from outside the college network with the edge rule on and `--burst` given.
+**Rehearsal, 2026-09-14 — against `localhost`, not the public hostname.** A cold `docker compose --profile sim up --build` from the Stage 11 branch, then the verifier. It proves the checks and the platform agree; it is **not** the transcript this entry asks for, which must come from outside the network it runs on with the edge rule on and `--burst` given.
 
 ```
 verifying http://localhost:8000
@@ -1890,7 +1890,7 @@ rate limited       SKIP  not attempted; rerun with --burst N once the edge rule 
 every check that can run passed
 ```
 
-**Public run, 2026-09-14 — the transcript this entry asks for.** Run against `https://dash.meridian.org.in`, from a mobile network outside the college, with the stack on a laptop behind the tunnel.
+**Public run, 2026-09-14 — the transcript this entry asks for.** Run against `https://dash.meridian.org.in`, from a mobile network outside the one the stack ran on, with the stack on a laptop behind the tunnel.
 
 The edge rule, as applied. The free plan allows one rule, matched on path only, counted per IP, over 10 seconds:
 
@@ -2039,23 +2039,23 @@ This is coarsening, not a proof of privacy. A minute and a degree make the fit f
 
 ## D-094 — The post-reception layer adds no hardware and no budget
 
-**2026-09-14 · accepted** · *synopsis review*
+**2026-09-14 · accepted** · *design review*
 
-At the synopsis review the faculty panel asked what Meridian does with data after receiving it. The committed build is Tiers 1 and 2, and an answer that needed another purchase would be an answer to a different question.
+A design review asked what Meridian does with data after receiving it. The committed build is Tiers 1 and 2, and an answer that needed another purchase would be an answer to a different question.
 
 **The hardware for this work is what `PROJECT.md` §17 already requests: one SDR and a fixed 137 MHz antenna.** No L-band chain, no second SDR, no dish. Tier 3 tracking stays optional exactly as §17 states it, and nothing in modules 13–17 (D-095) depends on it — every one of them reads a reception the fixed antenna already produces, or a simulated one.
 
-The line is held here because the viva needs measured numbers. Each capability below is proven on data the funded station and the simulator produce; one that needed new hardware to prove would arrive after the week-15 hardware gate at best, and unproven at worst.
+The line is held here because every capability needs a measured number. Each capability below is proven on data the funded station and the simulator produce; one that needed new hardware to prove would arrive after the week-15 hardware gate at best, and unproven at worst.
 
 *A tension this entry does not resolve.* D-053's closing paragraph, "Hardware this assumes", describes the full build, Tiers 1 to 3, with tracking "funded rather than optional". §17, and D-066's zero turnaround for a fixed antenna, say otherwise. This entry relies on §17 and does not supersede D-053; which of the two describes the station the team intends to build is listed under Open (D-108).
 
-*Rejected: an L-band receiving path as part of this answer.* It is the obvious way to receive more from the same satellites, and it needs a dish, a feed, an LNA and tracking. It is recorded as a candidate for later work (D-101), not as a response to the panel.
+*Rejected: an L-band receiving path as part of this answer.* It is the obvious way to receive more from the same satellites, and it needs a dish, a feed, an LNA and tracking. It is recorded as a candidate for later work (D-101), not as part of this answer.
 
 ---
 
 ## D-095 — After reception: five capabilities, numbered 13 to 17
 
-**2026-09-14 · accepted** · *synopsis review*
+**2026-09-14 · accepted** · *design review*
 
 The panel's question found a real gap, not a presentational one. The platform predicts, schedules, and from Stage 20 counts misses — but an observation that arrives is stored and nothing further is concluded from it. A station owner cannot tell whether last night's pass was usable, why the one before it failed, or that their cable is going.
 
@@ -2072,7 +2072,7 @@ The panel's question found a real gap, not a presentational one. The platform pr
 The answer had to meet three requirements, and these five meet them for stated reasons:
 
 - **Any data type, including nothing.** None of the five reads image content. The verdict reads decoder statistics and signal measurements that an LRPT image, a LoRa telemetry frame and an empty pass all produce. A pass that received nothing still has an outcome, heartbeat evidence and a noise floor, and those are what loss diagnosis reads.
-- **A measured number in the viva.** The verdict has a reliability diagram and a Brier score; diagnosis has a per-cause confusion matrix; the health watch has detection delay and false-alarm rate; the evidence dataset regenerates to an identical hash. **Owner reports are the exception** and are proven by working end to end in the demonstration. That is said plainly rather than dressed up with a metric nobody would defend.
+- **A measured number for each.** The verdict has a reliability diagram and a Brier score; diagnosis has a per-cause confusion matrix; the health watch has detection delay and false-alarm rate; the evidence dataset regenerates to an identical hash. **Owner reports are the exception** and are proven by working end to end in the demonstration. That is said plainly rather than dressed up with a metric nobody would defend.
 - **No hardware and no budget** (D-094).
 
 **In prose they are lowercase — the reception verdict, loss diagnosis — and never proper nouns.** `CLAUDE.md` permits two. The numbers belong to the submission module list, which is kept outside this repository, and appear only where that list is referenced.
@@ -2083,7 +2083,7 @@ They extend planned work rather than sitting beside it: the verdict uses `EVALUA
 
 ## D-096 — The microcontroller station stays a LoRa satellite receiver
 
-**2026-09-14 · accepted** · *synopsis review*
+**2026-09-14 · accepted** · *design review*
 
 The earlier proposal would have turned Tier 2 into a field sensor product. It stays what `PROJECT.md` §5.3 and D-053 describe: an ESP32-class station with a LoRa transceiver, receiving LoRa-modulated satellite telemetry and speaking MSP.
 
@@ -2097,7 +2097,7 @@ It also serves the post-reception layer directly: a LoRa telemetry pass is the s
 
 ## D-097 — What was dropped from the earlier proposal
 
-**2026-09-14 · accepted** · *synopsis review*
+**2026-09-14 · accepted** · *design review*
 
 Recorded so that none of these is later found in a draft and taken for planned work. None is documented anywhere as planned:
 
@@ -2118,7 +2118,7 @@ Area-change detection returns only as a gated, validated candidate in D-101, aft
 
 ## D-098 — Owner reports are templates, sent by email or Telegram
 
-**2026-09-14 · accepted** · *synopsis review*
+**2026-09-14 · accepted** · *design review*
 
 After each pass, the station's owner receives a plain-language message: what was received and its verdict, or the diagnosed cause of the loss. Once a week, a station health summary. **Every message is rendered from a versioned template filled with stored results. There is no language model anywhere on this path.**
 
@@ -2136,9 +2136,9 @@ Where the owner's address comes from is not settled — it is personal data, and
 
 ## D-099 — The novelty claim is narrow, and is written narrowly
 
-**2026-09-14 · accepted** · *synopsis review*
+**2026-09-14 · accepted** · *design review*
 
-SatNOGS already rates observations — manually, as *with signal*, *without signal* or *unknown*, and through automatic rating rules. A claim that nobody assesses receptions would be false, and it is the kind of claim an examiner checks.
+SatNOGS already rates observations — manually, as *with signal*, *without signal* or *unknown*, and through automatic rating rules. A claim that nobody assesses receptions would be false, and it is the kind of claim a reader checks.
 
 **Meridian claims two things:**
 
@@ -2173,7 +2173,7 @@ A label is not a probability, and a rule is not a calibrated one. That differenc
 
 ## D-101 — Phase 2 is a list of candidates, not a commitment
 
-**2026-09-14 · accepted** · *synopsis review*
+**2026-09-14 · accepted** · *design review*
 
 `PROJECT.md` §21, "Phase 2 candidates — not committed", records two directions: HRPT reception from the Meteor-M satellites already in the catalogue, and area alerts for people who do not run a station. **Nothing in it is planned work.** It has no roadmap stage, no success criterion and no line in the budget.
 
@@ -2181,7 +2181,7 @@ A label is not a probability, and a rule is not a calibrated one. That differenc
 
 **Every alert type needs an external validation source before it is built** — NASA FIRMS detections for fire, MODIS or Sentinel-2 vegetation indices for greenness change. They are used offline to score alerts and never sit on the path that raises one, which is the independence test applied in advance to a product that does not exist.
 
-**A naming clash, stated rather than left to be found.** "Phase 1" and "Phase 2" here mean this project's committed scope and what may follow it. They are not `PROJECT.md` §12's Phase 1 (Foundations, weeks 1–7) and Phase 2 (Intelligence, weeks 8–14). The terms came from the synopsis response and §21 says so in its first paragraph; a rename is listed under Open (D-108).
+**A naming clash, stated rather than left to be found.** "Phase 1" and "Phase 2" here mean this project's committed scope and what may follow it. They are not `PROJECT.md` §12's Phase 1 (Foundations, weeks 1–7) and Phase 2 (Intelligence, weeks 8–14). The terms came from the design review's answer and §21 says so in its first paragraph; a rename is listed under Open (D-108).
 
 ---
 
@@ -2898,9 +2898,9 @@ Which host, on whose account, and how long a station retains an unacknowledged r
 
 **2026-09-18 · accepted** · *`PROJECT.md` §9, §17; `EVALUATION.md` §12; every roadmap completion gate*
 
-Cloud hosting here is funded by student credit. It may expire before submission, and it is not something the project can renew.
+Cloud hosting here runs on credit. It may expire, and it is not something the project can renew.
 
-**Nothing assessed depends on it.** No success criterion, no demonstration step and no roadmap completion gate may require a cloud host to be reachable. SC-1 to SC-10 are unchanged by D-129 and every one of them is measurable on a single machine. A stage whose gate can only be met in a cloud is a stage written wrongly, and is rewritten rather than excused.
+**Nothing the project commits to depends on it.** No success criterion, no demonstration step and no roadmap completion gate may require a cloud host to be reachable. SC-1 to SC-10 are unchanged by D-129 and every one of them is measurable on a single machine. A stage whose gate can only be met in a cloud is a stage written wrongly, and is rewritten rather than excused.
 
 **The single-machine path stays supported and tested.** `docker compose up` on a clean machine producing a working platform in under ten minutes remains the deployment of record, and CI keeps measuring it on every pull request. The cloud tier is an addition that must never become the only path that works.
 
@@ -2979,7 +2979,7 @@ A tile has been through a colour map, a projection, resampling and lossy compres
 
 **Consequence for exports.** A source whose terms forbid redistribution can still be used as a feature input; its records are then referenced in an export by identifier and checksum rather than bundled — the same treatment products already get (D-104).
 
-*Rejected: a licences section in the ingest code.* It would be read by nobody outside the module, and the file that answers "did you take this fairly?" in a viva is this one.
+*Rejected: a licences section in the ingest code.* It would be read by nobody outside the module, and the file that answers "did you take this fairly?" is this one.
 
 ---
 
@@ -3302,7 +3302,7 @@ The sensitivity table is what lets a reader judge the threshold rather than trus
 
 **2026-09-23 · accepted** · *`meridian.datasets.propensity`, `EVALUATION.md` §4.2, Stage 16*
 
-`EVALUATION.md` §4.2 asks for P(observed | pass features) under the historical policy. Stage 17 owns the numerical dependencies, and a propensity fitted here has to be one a viva can read by eye. So it is estimated by counting.
+`EVALUATION.md` §4.2 asks for P(observed | pass features) under the historical policy. Stage 17 owns the numerical dependencies, and a propensity fitted here has to be one a reader can check by eye. So it is estimated by counting.
 
 **The estimate is observed ÷ available within a cell** of station × satellite × maximum-elevation band × local-solar-hour band. The default bands are elevation 0–15, 15–30, 30–60 and 60–90°, and hours in blocks of four. Local solar hour is UTC hour plus longitude ÷ 15, so it needs no timezone database and moves with the sun rather than a government.
 
@@ -3368,7 +3368,7 @@ Stage 17 is where the roadmap allows numerical dependencies. Fitting a model nee
 
 **Scoring is plain Python all the same,** in `meridian.prediction.score`, and no prediction module but `fit` imports numpy. `tests/unit/test_prediction_boundaries.py` checks both lines. The reason is not image size: a fitted model is a JSON file of coefficients (D-163), and a scorer that is a dot product and a sigmoid in the standard library gives the same probability from that file whichever numpy version is installed, or none. What the Pi reads is data, not a pickled object from a library it does not have.
 
-**The model is L2-regularised logistic regression.** The roadmap asks for a simple interpretable model first, and a coefficient per feature is something a viva can read. A more complex model is a later decision, taken if the ablation shows this one leaves signal on the table.
+**The model is L2-regularised logistic regression.** The roadmap asks for a simple interpretable model first, and a coefficient per feature is something a reader can check. A more complex model is a later decision, taken if the ablation shows this one leaves signal on the table.
 
 *Rejected: scikit-learn as an ordinary dependency.* About 100 MB of scipy and scikit-learn in an image whose job is to receive, for a computation that is ten lines of Python. *Rejected: our own IRLS on numpy.* It would be an optimiser to write and test that a library already provides, which fails `CLAUDE.md`'s build-or-use test.
 
@@ -5001,7 +5001,7 @@ The roadmap sketches Stage 22 as scripts under an `analysis/` tree:
 - configs, snapshots, features, models, scheduler, reliability, reports and tests;
 - deterministic commands for the final figures.
 
-**The code is a platform module instead**, `meridian.reports`, behind `meridian report`. A figure the viva defends is then computed by code that is typed, linted, reviewed and tested like the rest of the platform. It also calls the same functions `meridian model evaluate` and `meridian schedule evaluate` call, rather than a second copy of them that can drift. `reports` joins the scope list and the `conventions` pattern, as `regions` did (D-228).
+**The code is a platform module instead**, `meridian.reports`, behind `meridian report`. A published figure is then computed by code that is typed, linted, reviewed and tested like the rest of the platform. It also calls the same functions `meridian model evaluate` and `meridian schedule evaluate` call, rather than a second copy of them that can drift. `reports` joins the scope list and the `conventions` pattern, as `regions` did (D-228).
 
 **`analysis/` holds what a person writes:**
 - `README.md`;
@@ -5546,7 +5546,7 @@ The refusal names both versions and says to fit again. `meridian model show` rea
 
 **Nothing published moves.** No model of real data exists yet (D-155), so the models that change are the ones tests fit.
 
-*Rejected: the version as a hash of the source, computed at fit time.* Any reformat would then orphan every model, and a version nobody chose explains nothing in a viva. The digest decides only *when* the version must change; a person decides *that* it changes.
+*Rejected: the version as a hash of the source, computed at fit time.* Any reformat would then orphan every model, and a version nobody chose explains nothing. The digest decides only *when* the version must change; a person decides *that* it changes.
 
 *Rejected: bumping `MODEL_VERSION` for a feature change.* That names the fitting procedure, which a feature change does not alter, and it would not stop a model being scored by other feature code.
 

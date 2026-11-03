@@ -17,6 +17,8 @@
 
 It is open software for satellite ground stations, and **MSP**, an open protocol any receiving station can implement to join the network. One physical station is being built by the team as the network's first member. The software is the contribution; the station is the proof.
 
+Meridian began as a final-year engineering project, built by a team of three, and is written to outlast it.
+
 [**meridian.org.in**](https://meridian.org.in) explains it in plain words · [**the live dashboard**](https://dash.meridian.org.in) shows it running
 
 ---

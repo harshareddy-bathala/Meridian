@@ -626,7 +626,7 @@ The dashboard is served from the platform's own origin (D-081, D-091). It shows:
 
 **The Phase 1 exit criterion was met on 2026-09-14.**
 - **Deployment:** `dash.meridian.org.in` is routed through a Cloudflare tunnel to `api:8000`, with the edge rate-limit rule on.
-- **Check:** `deploy/tools/verify_public_surface.py --burst 150` passed all five checks from a mobile network outside the college. Its transcript is in D-088.
+- **Check:** `deploy/tools/verify_public_surface.py --burst 150` passed all five checks from a mobile network outside the one the stack ran on. Its transcript is in D-088.
 - **Host:** a laptop running `docker compose --profile public --profile sim`, because there is no Pi yet. The dashboard is online only while a host runs that profile; moving it to the station is hardware work.
 - **Bug found:** the public run exposed a platform bug. A request's writes were committed only after its response was sent, so a newly registered station's first heartbeat was refused. It is fixed and tested, and the re-run shows that heartbeat accepted.
 
@@ -638,7 +638,7 @@ The rest of this section is the 2026-08-12 snapshot, left as written.
 
 **The simulator is real, and something finally produces observations.** A deterministic fleet registers over MSP through the reference client, is scheduled real passes over real orbital geometry, and reports what it heard — with five faults that can be injected as reproducibly as a clean run. D-075 through D-080 record what that took, including the correction to this document's own seed formula: a station's identity comes from its index, not from a `station_id` the platform has not minted yet. `meridian catalogue load` arrived with it, because nothing could put a satellite in the database before.
 
-**Stage 11 is next** — the public read API and the dashboard, and with them the Phase 1 exit criterion: a virtual station visible on the public site from outside the college network. `meridian.prediction` and `meridian.reliability` are still interfaces and nothing else, which is deliberate: `CLAUDE.md` asks that they not be scaffolded ahead of the stage that needs them. The receiver and decoder behind the client's execution seam remain Stage 13 — `execution.NullExecutor` still has no radio and still reports nothing.
+**Stage 11 is next** — the public read API and the dashboard, and with them the Phase 1 exit criterion: a virtual station visible on the public site from outside the network it runs on. `meridian.prediction` and `meridian.reliability` are still interfaces and nothing else, which is deliberate: `CLAUDE.md` asks that they not be scaffolded ahead of the stage that needs them. The receiver and decoder behind the client's execution seam remain Stage 13 — `execution.NullExecutor` still has no radio and still reports nothing.
 
 ---
 

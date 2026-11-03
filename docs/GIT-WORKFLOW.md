@@ -12,7 +12,7 @@ Three reasons, in order of how much they matter to us:
 
 2. **Three people share one codebase.** A readable history is how we stay out of each other's way and understand what changed while we weren't looking.
 
-3. **We will need to explain decisions months later.** In the viva, in the report, and to ourselves in week 28 when something breaks and nobody remembers why it was built that way.
+3. **We will need to explain decisions months later.** In review, to contributors, and to ourselves months later when something breaks and nobody remembers why it was built that way.
 
 ---
 
@@ -219,7 +219,7 @@ Approving a PR means you understood it. If you did not, say so instead of approv
 
 **Migrations are never edited once merged.** A migration that has run somewhere is history. Fix forward with a new migration.
 
-**Decisions get recorded before the code that depends on them.** If you are about to implement something the docs do not settle, stop and add a `D-` entry to `docs/DECISIONS.md` first. A decision made in code and never written down is a decision nobody can defend in a viva.
+**Decisions get recorded before the code that depends on them.** If you are about to implement something the docs do not settle, stop and add a `D-` entry to `docs/DECISIONS.md` first. A decision made in code and never written down is a decision nobody can defend later.
 
 ---
 
@@ -227,7 +227,7 @@ Approving a PR means you understood it. If you did not, say so instead of approv
 
 We use AI coding assistants and we are not hiding it. Two things follow:
 
-**Never commit code you cannot explain.** This is the only rule that matters here. If you cannot walk a teammate through it line by line, it does not get committed, no matter how well it works. You will be asked about arbitrary lines in the viva, and "the AI wrote that part" is the one answer that cannot be recovered from.
+**Never commit code you cannot explain.** This is the only rule that matters here. If you cannot walk a teammate through it line by line, it does not get committed, no matter how well it works. You will be asked about arbitrary lines in review, and "the AI wrote that part" is the one answer that cannot be recovered from.
 
 **AI-assisted commits carry a `Co-Authored-By` trailer.** Decided in `docs/DECISIONS.md` D-043, which records the argument both ways — trailers are transparent but appear on nearly every commit and add little signal — and why the answer went the way it did. It applies from D-043 forward; commits already on `main` are left as they are rather than rewritten.
 
