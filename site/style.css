@@ -56,8 +56,8 @@
   /* Content reveal. SETTLE_MS in main.js must match --reveal-at.
      Home page only — a document page that waits four seconds to appear is
      just a slow document page. */
-  --reveal-at: 4200ms;
-  --reveal-dur: 600ms;
+  --reveal-at: 1400ms;
+  --reveal-dur: 640ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   /* One curve and two durations for every transition. Motion moves transform
      and opacity only. */
@@ -313,6 +313,48 @@ body {
 }
 
 .page > *, .colophon > *, .content > * { min-width: 0; }
+
+/* The front page is one screen. The heading scales with the height as well as
+   the width, so a short laptop screen still fits everything without
+   scrolling; a screen too short even for that scrolls rather than clipping. */
+:root[data-intro] .lede { font-size: min(var(--step-3), 6.6svh); max-width: 19ch; }
+:root[data-intro] .page {
+  gap: clamp(1.25rem, 4svh, 3.5rem);
+  padding-block: clamp(1rem, 3.5svh, 2.5rem);
+}
+:root[data-intro] .content { gap: clamp(1rem, 2.6svh, 1.75rem); }
+
+/* Horizontal swipes on the front page turn the globe; vertical ones and
+   pinch zoom stay the browser's. */
+:root[data-intro] { touch-action: pan-y pinch-zoom; }
+:root.globe-hover { cursor: grab; }
+:root.globe-dragging,
+:root.globe-dragging * { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+
+/* What the globe shows, in words, under the drawing it describes. */
+.globe-note {
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
+  justify-items: end;
+  text-align: right;
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+.globe-state { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--ink-dim); }
+.globe-state .swatch { transition: background-color var(--dur-2) var(--ease); }
+/* The hint is only true once main.js is drawing: without it the globe is a
+   still picture and cannot be turned. */
+.globe-hint { display: none; }
+:root.intro-ready .globe-hint { display: block; }
+.hint-touch { display: none; }
+@media (hover: none) {
+  .hint-fine { display: none; }
+  .hint-touch { display: inline; }
+}
+@media (max-width: 63.9375rem) {
+  .globe-note { justify-items: start; text-align: left; }
+}
 
 /* Document pages stack from the top and are as tall as they need to be. */
 .page-doc { grid-template-rows: auto auto auto; gap: clamp(2rem, 5vh, 3.5rem); }
@@ -1299,7 +1341,28 @@ body {
   color: var(--ink);
   box-shadow: 0 1.5rem 4rem rgb(22 24 29 / 0.22);
 }
-.term::backdrop { background: rgb(22 24 29 / 0.35); }
+/* The note rises and fades in, and leaves the same way. allow-discrete lets
+   display and the top layer wait for the fade; a browser without it simply
+   shows and hides the note, as before. */
+.term {
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
+  transition: opacity var(--dur-2) var(--ease), transform var(--dur-2) var(--ease),
+    overlay var(--dur-2) var(--ease) allow-discrete, display var(--dur-2) var(--ease) allow-discrete;
+}
+.term:popover-open { opacity: 1; transform: none; }
+@starting-style {
+  .term:popover-open { opacity: 0; transform: translateY(8px) scale(0.98); }
+}
+.term::backdrop {
+  background: rgb(22 24 29 / 0);
+  transition: background-color var(--dur-2) var(--ease),
+    overlay var(--dur-2) var(--ease) allow-discrete, display var(--dur-2) var(--ease) allow-discrete;
+}
+.term:popover-open::backdrop { background: rgb(22 24 29 / 0.35); }
+@starting-style {
+  .term:popover-open::backdrop { background: rgb(22 24 29 / 0); }
+}
 
 .term p { margin: 0; }
 .term-name {
@@ -1356,43 +1419,6 @@ body {
   .gloss-row { grid-template-columns: 14rem minmax(0, 1fr); }
 }
 
-/* ----------------------------------------------------------- home, more --
-   Below the globe screen. D-038 kept the front page to one screen; D-342
-   gives it a second, for the visitor who arrives not knowing which page they
-   want. Opaque, so the fixed globe does not show through it.               */
-
-.page-more {
-  position: relative;
-  z-index: 1;
-  background: var(--bg);
-  padding: var(--space-8) var(--pad) var(--pad);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-8);
-}
-.page-more > * { min-width: 0; }
-.more-head { max-width: 46rem; }
-.more-head h2 {
-  margin: 0;
-  font-family: var(--serif);
-  font-size: var(--step-3);
-  font-weight: 420;
-  line-height: 1.12;
-  letter-spacing: -0.025em;
-  text-wrap: balance;
-}
-.more-head p {
-  margin: var(--space-4) 0 0;
-  font-size: var(--step-1);
-  line-height: 1.55;
-  color: var(--ink-dim);
-  max-width: 52ch;
-}
-.more-doors { max-width: 64rem; }
-@media (min-width: 120rem) {
-  .page-more { max-width: 120rem; margin-inline: auto; }
-}
-
 /* ------------------------------------------------------------ colophon -- */
 
 .colophon {
@@ -1403,17 +1429,16 @@ body {
   gap: 1.5rem 3rem;
 }
 
-.meta,
-.legend {
+.meta {
   font-size: var(--step--1);
   color: var(--muted);
 }
 
 .meta { margin: 0; }
 .meta .dot { color: var(--rule); padding-inline: 0.35em; }
-.meta a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--rule); }
+.meta a { color: var(--muted); text-decoration: none; }
 .meta a:hover,
-.meta a:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
+.meta a:focus-visible { color: var(--ink); }
 
 /* ------------------------------------------------------- colophon, wide --
    The document pages' footer. It was the masthead nav a second time, which
@@ -1440,9 +1465,9 @@ body {
   color: var(--muted);
   max-width: 30ch;
 }
-.foot-line a { color: var(--ink-dim); text-decoration: none; border-bottom: 1px solid var(--rule); }
+.foot-line a { color: var(--ink-dim); text-decoration: none; }
 .foot-line a:hover,
-.foot-line a:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
+.foot-line a:focus-visible { color: var(--ink); }
 
 .foot-h {
   margin: 0 0 0.5rem;
@@ -1485,9 +1510,49 @@ body {
    The wide footer is the home page colophon's second form, so it takes the
    same treatment .meta does rather than a third one of its own. */
 .foot-bar .dot { color: var(--rule); padding-inline: 0.35em; }
-.foot-bar a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--rule); }
+.foot-bar a { color: var(--muted); text-decoration: none; }
 .foot-bar a:hover,
-.foot-bar a:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
+.foot-bar a:focus-visible { color: var(--ink); }
+
+/* ------------------------------------------------------ hover underline --
+   Links that stand alone (footer, contents, metadata) draw an underline from
+   the left on hover, in the text's own colour. Links inside a sentence keep a
+   resting underline instead (.prose a), because there the line is how a
+   reader knows it is a link at all; the nav keeps its pill. A drawn line is
+   a background, not a border, so it adds no height and moves nothing. */
+.foot-col a,
+.toc a,
+.rail-src,
+.meta a,
+.foot-line a,
+.foot-bar a {
+  background: linear-gradient(currentColor, currentColor) no-repeat;
+  background-size: 0 1px;
+  background-position: 0 100%;
+  transition: background-size var(--dur-2) var(--ease), color var(--dur-1) var(--ease);
+}
+.foot-col a,
+.rail-src { background-position: 0 calc(50% + 0.8em); }
+.toc a { background-position: 0 calc(100% - 0.3rem); }
+.foot-col a:hover, .foot-col a:focus-visible,
+.toc a:hover, .toc a:focus-visible,
+.rail-src:hover, .rail-src:focus-visible,
+.meta a:hover, .meta a:focus-visible,
+.foot-line a:hover, .foot-line a:focus-visible,
+.foot-bar a:hover, .foot-bar a:focus-visible { background-size: 100% 1px; }
+
+/* The metadata line's links sit among plain words, so they keep a faint
+   resting line under the drawn one. */
+.meta a,
+.foot-line a,
+.foot-bar a {
+  background-image: linear-gradient(currentColor, currentColor), linear-gradient(var(--rule), var(--rule));
+  background-size: 0 1px, 100% 1px;
+  background-position: 0 100%, 0 100%;
+}
+.meta a:hover, .meta a:focus-visible,
+.foot-line a:hover, .foot-line a:focus-visible,
+.foot-bar a:hover, .foot-bar a:focus-visible { background-size: 100% 1px, 100% 1px; }
 
 @media (max-width: 63.9375rem) {
   .colophon-wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1498,29 +1563,6 @@ body {
   .colophon-wide { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
   .foot-brand { grid-column: auto; }
 }
-
-/* The legend is the key to the animation's colours, and the only place on
-   the page besides the canvas where those three colours appear. */
-.legend {
-  margin: 0;
-  display: grid;
-  gap: 0.4rem;
-}
-
-.legend-row {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.legend dt,
-.legend dd { margin: 0; }
-
-/* Was --rule, a hairline colour, at about 1.3:1 — text that could not be
-   read at all. Both roles are now real text colours. */
-.legend dt { display: flex; align-items: center; gap: 0.55rem; color: var(--ink-dim); }
-.legend dd { color: var(--muted); }
-.legend dd::before { content: "— "; }
 
 /* Drawn as a 1px line, because that is exactly what it labels. */
 .swatch {
@@ -1534,7 +1576,7 @@ body {
 .swatch-trace  { background: var(--trace); }
 
 /* --------------------------------------------------------------- reveal --
-   Home page only. The content waits 4.2 s while the globe resolves.
+   Home page only. The content waits 1.4 s while the globe resolves.
 
    This is opt-in, and that matters more than it looks. It used to be
    unconditional, with JS able only to cancel it — which meant that when
@@ -1554,12 +1596,12 @@ body {
    nothing visually: the content was already fully transparent.             */
 
 @keyframes reveal {
-  from { opacity: 0; transform: translateY(0.75rem); visibility: hidden; }
+  from { opacity: 0; transform: translateY(12px); visibility: hidden; }
   to   { opacity: 1; transform: none; visibility: visible; }
 }
 
 :root.intro .reveal {
-  animation: reveal var(--reveal-dur) var(--ease-out) var(--reveal-at) both;
+  animation: reveal var(--reveal-dur) var(--ease) var(--reveal-at) both;
 }
 
 /* The heading is not in this list, and its absence is the point. It carries no
@@ -1570,9 +1612,9 @@ body {
    about 110 ms, and everything below still waits out the globe. The stagger
    keeps its shape; it simply starts one element later. See D-042. */
 :root.intro .masthead.reveal  { animation-delay: var(--reveal-at); }
-:root.intro .content .body    { animation-delay: calc(var(--reveal-at) + 240ms); }
-:root.intro .content .cta-row { animation-delay: calc(var(--reveal-at) + 360ms); }
-:root.intro .colophon.reveal  { animation-delay: calc(var(--reveal-at) + 480ms); }
+:root.intro .content .body    { animation-delay: calc(var(--reveal-at) + 70ms); }
+:root.intro .content .cta-row { animation-delay: calc(var(--reveal-at) + 140ms); }
+:root.intro .colophon.reveal  { animation-delay: calc(var(--reveal-at) + 210ms); }
 
 /* Intro skipped, or never ran. Content is simply present. Same specificity as
    the rules above and later in the file, which is what lets it win. */
@@ -1647,8 +1689,16 @@ body {
 
 @view-transition { navigation: auto; }
 
-::view-transition-old(root),
-::view-transition-new(root) { animation-duration: 220ms; }
+/* The masthead stays put while the page under it changes: the old page fades
+   out and the new one rises 8px into place. */
+.masthead { view-transition-name: masthead; }
+
+@keyframes vt-out { to   { opacity: 0; } }
+@keyframes vt-in  { from { opacity: 0; transform: translateY(8px); } }
+
+::view-transition-old(root) { animation: vt-out var(--dur-1) var(--ease) both; }
+::view-transition-new(root) { animation: vt-in var(--dur-2) var(--ease) var(--dur-1) both; }
+::view-transition-group(masthead) { animation-duration: var(--dur-2); }
 
 /* ---------------------------------------------------------- responsive --
    Below this width the globe sits above the content at reduced scale
@@ -1664,39 +1714,27 @@ body {
   .meta .dot { padding-inline: 0.2em; }
 
 
-  /* The gloss on each legend label is what goes: the colour and the label
-     already carry the meaning, and keeping it is what breaks 312px.
-
-     Hidden from the screen only. display: none took it out of the
-     accessibility tree as well, which is the wrong trade — the gloss is
-     dropped because 312px has no room for it, not because it stopped being
-     the definition of the term beside it. A screen reader has no width
-     problem and should still hear "above horizon, link acquired".
-
-     clip is the legacy form and clip-path the current one; both are declared
-     because Safari below 16 honours only the first. */
-  .legend dd {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
-  /* The em dash separates two things that are now visually adjacent to
-     nothing, and a screen reader would announce it as punctuation. */
-  .legend dd::before { content: ""; }
 }
 
 /* The nav needs its own line before the brand and the toggle start colliding
    with it. Ordered so the toggle stays on the masthead's first row. */
 @media (max-width: 39.9375rem) {
-  .nav { order: 3; flex-basis: 100%; gap: 0; margin-inline: -0.625rem; }
-  .nav a { padding: 0 0.625rem; font-size: 0.875rem; }
+  /* One row that scrolls sideways, rather than two rows that push the page
+     down. The right edge fades so the row reads as continuing. */
+  .nav {
+    order: 3;
+    flex-basis: 100%;
+    flex-wrap: nowrap;
+    gap: 0;
+    margin-inline: calc(-1 * var(--pad));
+    padding-inline: calc(var(--pad) - 0.625rem);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to right, #000 85%, transparent);
+    mask-image: linear-gradient(to right, #000 85%, transparent);
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav a { flex: none; padding: 0 0.625rem; font-size: 0.9375rem; }
   .theme-slot { order: 2; }
   .prose table { min-width: 20rem; }
 }
@@ -1729,8 +1767,11 @@ body {
   .reveal { animation: none; }
   .cta, .cta .arrow, .nav a, .theme-toggle, .prose a,
   .toc a, .foot-col a, .rail-src,
-  .door .arrow, .info, .section p a, .section li a:not(.door) { transition: none; }
+  .door .arrow, .info, .section p a, .section li a:not(.door),
+  .meta a, .foot-line a, .foot-bar a, .door, .term, .term::backdrop,
+  .globe-state .swatch { transition: none; }
   .door:hover .arrow { transform: none; }
+  .cta:active { transform: none; }
 
   /* The 404's acquisition sweep stops where it stands. */
   .sweep-arm, .sweep-arc { animation: none; }
@@ -1760,7 +1801,7 @@ body {
   .skip,
   .theme-slot,
   .rail,
-  .legend { display: none; }
+  .globe-note { display: none; }
 
   .page { min-height: 0; padding: 0; gap: 1.5rem; }
   .doc { max-width: none; display: block; }

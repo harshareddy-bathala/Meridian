@@ -18,11 +18,11 @@ then open `http://127.0.0.1:8080/`.
 
 ## Pages
 
-Organised by what a visitor came for (D-340, D-342). The visitor pages open in plain words, mark every technical term with an **(i)**, state status in words, and carry no rail and no script but `theme.js`.
+Organised by what a visitor came for (D-340, D-345). The visitor pages are short, mark every technical term with an **(i)**, state status in words, and carry no rail. Their only scripts are `theme.js` and `motion.js`.
 
 | Path | |
 |---|---|
-| `index.html` | The front page. The globe screen (canvas, one heading, one paragraph, two links, the legend), then a second screen, *What brings you here?*, with five doors and the wide footer. |
+| `index.html` | The front page: one screen that never scrolls (D-345). The globe, which a visitor can turn, one heading, one sentence, two actions, a metadata line and one caption that says what the globe is showing. |
 | `how-it-works/` | The journey of one pass in seven steps, each with a drawn illustration. The page to show an evaluator. |
 | `data/` | What Meridian publishes, the empty state where real images will be, the live dashboard and the public API. |
 | `areas/` | Watching a place over time. Closed until D-326 is accepted; its one picture is labelled as an example. |
@@ -33,7 +33,7 @@ Organised by what a visitor came for (D-340, D-342). The visitor pages open in p
 | `architecture/`, `protocol/`, `docs/`, `about/` | The document pages, under *Developers* in the nav. Layer diagram, MSP 0.1, the documents index, and what Meridian is. |
 | `404.html` | `noindex`. Shares the shell. |
 
-The document pages carry no intro and no reveal, which is why they load instantly. Only `index.html` loads `main.js`, and only the four document pages load `rail.js`.
+The document pages carry no intro, and `motion.js` moves only what is still below the fold, which is why they load instantly. Only `index.html` loads `main.js`, and only the four document pages load `rail.js`.
 
 ## Shared regions and the (i) notes
 
@@ -95,6 +95,8 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 | `orbit.js` | The projection, graticule, orbit model and elevation test. Imported by both canvases. No DOM except `readPalette()`. |
 | `main.js` | The home page's intro choreography. Home page only. |
 | `rail.js` | The document rail: contents scroll-spy and one still canvas frame. Document pages only. |
+| `motion.js` | Sections below the fold rise into place as they scroll into view. Every page but the front. Hides nothing that is already on screen, so a blocked script costs the motion, never the content. |
+| `vendor/cube-motion-0.1.0/` | cube-motion's `rise` and `reveal`, MIT, unmodified. A versioned path, served immutable; an upgrade is a new directory. |
 | `.well-known/security.txt` | RFC 9116. Renew `Expires:` before it lapses — an expired file counts as none. |
 | `fonts/` | IBM Plex Sans and Mono, and Source Serif 4 for display, latin subsets, SIL OFL-1.1. `OFL.txt` and `SourceSerif4-OFL.txt` ship with them — see `ATTRIBUTION.md`. |
 | `_headers` | Cloudflare Pages: CSP, HSTS and cache policy. |
@@ -160,18 +162,19 @@ The satellite constants (`SAT0`) are the solution to an offline search, not arbi
 
 Two behaviours that are requirements, not niceties:
 
-- `prefers-reduced-motion: reduce` renders one static settled frame and never starts the loop.
+- `prefers-reduced-motion: reduce` renders one static settled frame and never starts the loop. The globe can still be turned; it follows the hand exactly and never coasts.
 - Click, tap, `Escape` or any key skips the intro.
+- Once settled, a drag or a sideways swipe on the globe turns it, and a flick coasts to a stop. The arrow keys turn it too. A press on a link, a button or the text column is never taken by the globe. `html` carries `touch-action: pan-y pinch-zoom` on this page only, so a sideways swipe reaches the script and pinch zoom stays the browser's.
 
 ### The `<h1>` is not in the reveal, and must not be put back into it
 
-Everything in the content column carries `class="reveal"` except the heading. That is deliberate and load-bearing for search: the `<h1>` is the page's largest contentful paint, and holding it behind the 4.2 s delay made **LCP 4 400 ms** — a failing Core Web Vital on the one page that has to rank, and a heading Google's renderer may sample while it is still `visibility: hidden`.
+Everything in the content column carries `class="reveal"` except the heading. That is deliberate and load-bearing for search: the `<h1>` is the page's largest contentful paint, and holding it behind what was then a 4.2 s delay made **LCP 4 400 ms** — a failing Core Web Vital on the one page that has to rank, and a heading Google's renderer may sample while it is still `visibility: hidden`.
 
 It now paints with the canvas at about 110 ms. The animation is unchanged and everything else still waits out the globe; the stagger simply starts one element later. Adding `reveal` back to that `<h1>` silently reintroduces the problem, and nothing will fail — the page will just stop ranking. See D-042.
 
 ### The intro is opt-in, and that is the important part
 
-`theme.js` adds `intro` to the root element before the first paint, and takes it away again after 900 ms unless `main.js` has added `intro-ready` from its first painted frame. **The 4.2 s delay only applies when the globe is actually running.**
+`theme.js` adds `intro` to the root element before the first paint, and takes it away again after 900 ms unless `main.js` has added `intro-ready` from its first painted frame. **The 1.4 s delay only applies when the globe is actually running.**
 
 It used to be unconditional, with JS able only to cancel it — so a `main.js` that was blocked, stale or broken produced the full blank wait *and* no globe. Test the failure, not the success: block `/main.js` in DevTools and reload, then block `/orbit.js`. Content must be immediate in both cases. If you change any of this, that is the check that matters.
 
@@ -179,7 +182,7 @@ The gate is keyed off `data-intro` on `<html>`, which only the home page carries
 
 **`visibility: hidden` is in the reveal keyframe on purpose.** `opacity: 0` leaves an element hit-tested, focusable and in the accessibility tree, so the invisible header and links responded to hover and click for the whole intro. With `fill-mode: both` the `from` state holds through the delay and `visibility` steps to visible on the animation's first frame, so it costs nothing visually. Do not remove it.
 
-**On the front page's Lighthouse Performance score.** It reports 100. **That is not a speed result and must not be quoted as one.** Real LCP, measured with a `PerformanceObserver`, is **4 400 ms** — the `.lede`, exactly as designed. Lighthouse's simulator models when the element's resources are ready and does not model an animation delay, so it returns 0.4 s. FCP, which is real, is 108 ms and comes from the canvas. D-038 recorded this as null; D-041 explains why the number appeared and why it means nothing. The four subpages score 100 in all four categories on desktop and 99 on mobile, and those are real.
+**On the front page's Lighthouse Performance score.** It reports 100. **That is not a speed result and must not be quoted as one.** Real LCP, measured with a `PerformanceObserver` before D-345 shortened the intro, was **4 400 ms**; re-measure it before quoting any figure. Lighthouse's simulator models when the element's resources are ready and does not model an animation delay, so it returns 0.4 s. FCP, which is real, is 108 ms and comes from the canvas. D-038 recorded this as null; D-041 explains why the number appeared and why it means nothing. The four subpages score 100 in all four categories on desktop and 99 on mobile, and those are real.
 
 ## Regenerating the images
 

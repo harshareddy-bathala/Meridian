@@ -66,7 +66,7 @@ PAGES = [
 ]
 
 # Referenced from HTML by absolute path.
-HTML_ASSETS = ["style.css", "theme.js", "main.js", "rail.js", "orbit.js"]
+HTML_ASSETS = ["style.css", "theme.js", "main.js", "rail.js", "orbit.js", "motion.js"]
 
 # Referenced from JavaScript by relative specifier, which is why orbit.js is
 # not in the list above alone.

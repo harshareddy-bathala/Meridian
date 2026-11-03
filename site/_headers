@@ -40,6 +40,11 @@
 /fonts/*
   Cache-Control: public, max-age=31536000, immutable
 
+# Vendored code lives under a versioned directory and is never edited in
+# place, so its URLs are immutable by construction: an upgrade is a new path.
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable
+
 /brand/*
   Cache-Control: public, max-age=604800
 
