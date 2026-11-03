@@ -18,6 +18,7 @@ import random
 from dataclasses import dataclass
 
 from meridian_sim.clock_faults import CLOCK_STEP_CYCLE, step_for
+from meridian_sim.fault_choice import station_faults
 from meridian_sim.faults import (
     CLOCK_DRIFT,
     CLOCK_STEP,
@@ -32,7 +33,6 @@ from meridian_sim.faults import (
     SLOW_API,
     TOKEN_REVOKED,
     UPLOAD_BLOCKED,
-    station_faults,
 )
 from meridian_sim.sky_faults import SkyFault, sky_faults_for
 

@@ -14,16 +14,14 @@ import pytest
 
 from meridian_sim.clock_faults import step_for
 from meridian_sim.config import seed_for_station
+from meridian_sim.fault_choice import FLEET_FAULTS, ONE_FAULT_SHARE, station_faults
 from meridian_sim.fault_schedule import schedule_for
 from meridian_sim.faults import (
     CLOCK_STEP,
-    FLEET_FAULTS,
-    ONE_FAULT_SHARE,
     SATELLITE_SILENT,
     SCENARIOS,
     SIGNAL_DEGRADATION,
     SKY_FAULTS,
-    station_faults,
 )
 from meridian_sim.sky_faults import sky_faults_for
 

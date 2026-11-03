@@ -28,8 +28,9 @@ from meridian.store.invites import hash_invite_token
 from meridian_client import transport as transport_module
 from meridian_sim import supervisor as supervisor_module
 from meridian_sim.config import RunConfig, seed_for_station
+from meridian_sim.fault_choice import FLEET_FAULTS
 from meridian_sim.fault_schedule import partition_for, schedule_for
-from meridian_sim.faults import FLEET_FAULTS, PARTITION, SATELLITE_SILENT
+from meridian_sim.faults import PARTITION, SATELLITE_SILENT
 from meridian_sim.ledger import FaultLedger, read_ledger
 from meridian_sim.sky_faults import silence_for
 from meridian_sim.supervisor import Supervisor
