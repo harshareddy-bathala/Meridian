@@ -23,7 +23,7 @@ Organised by what a visitor came for (D-340, D-345). The visitor pages are short
 | Path | |
 |---|---|
 | `index.html` | The front page: one screen that never scrolls (D-345). The globe, which a visitor can turn, one heading, one sentence, two actions, a metadata line and one caption that says what the globe is showing. |
-| `how-it-works/` | The journey of one pass in seven steps, each with a drawn illustration. The page to show an evaluator. |
+| `how-it-works/` | The journey of one pass in seven steps, one or two sentences each. Steps 1 to 3 can be played with: pick a pass, switch the plan, switch what the station did. The controls are radio buttons and `:has()`, so they need no script. On a wide screen each step's picture stays in view while its words scroll. |
 | `data/` | What Meridian publishes, the empty state where real images will be, the live dashboard and the public API. |
 | `areas/` | Watching a place over time. Closed until D-326 is accepted; its one picture is labelled as an example. |
 | `stations/` | What a station needs, what it gets back, receive-only, and MSP in one paragraph. |
