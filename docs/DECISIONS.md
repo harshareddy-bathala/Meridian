@@ -827,6 +827,8 @@ The animation itself is unchanged — same phases, same 4.2 s, same composition.
 
 *Rejected:* adding `static.cloudflareinsights.com` to `script-src` to make the injected beacon work. That would trade an enforced guarantee for a broken one to enable analytics nobody asked for.
 
+*Amended by D-345 (2026-11-03).* The intro now takes 1.4 s, not 4.2 s; the gate and its fuse are unchanged.
+
 ---
 
 ## D-042 — Asset URLs carry a content hash, and the site's invariants are enforced rather than written down
@@ -6840,6 +6842,8 @@ The site is now `/`, `/how-it-works/`, `/data/`, `/areas/`, `/stations/`, `/supp
 
 *Rejected: a separate network page with committed figures for the next day.* A static file describing tomorrow is wrong by tomorrow. The live dashboard is linked from the front page, *Data* and *How it works* instead.
 
+*Amended by D-345 (2026-11-03).* The second screen is removed; the front page is one screen, and its doors are the navigation.
+
 ---
 
 ## D-343 — Support is described by what it keeps running, never by a sum, and payment details are real or absent
@@ -6873,6 +6877,26 @@ The site is read like a document: pages of explanation, read in daylight, on pho
 *Rejected: following the system preference, as before.* A visitor whose system is dark landed on a dark document, which is the reading D-037 itself called wrong for documents.
 
 *Rejected: Inter for the body.* Plex Sans is already self-hosted on both surfaces, and changing it would buy a small difference at the cost of a second set of files.
+
+---
+
+## D-345 — The front page is one screen, and its globe can be turned
+
+**2026-11-03 · accepted** · *`site/index.html`; `site/main.js`; `site/style.css`; `site/motion.js`; `site/vendor/cube-motion-0.1.0/`. Amends D-342 and D-041.*
+
+D-342 gave the front page a second screen of five doors under the globe. Below the fold of a page whose first screen is a moving picture, it was found by scrolling, if at all, and every door it held is already in the navigation. The intro took 4.2 s before anything but the heading appeared, which is long enough to read as a slow page.
+
+**Decision.**
+- **One screen, no scroll** at 390×844, 1280×800, 1366×768 and 1920×1080: the masthead, the heading, one sentence, two actions, a metadata line and one caption. The heading's size also follows the screen's height, so a short laptop screen fits; a screen shorter still scrolls rather than clipping. The doors live in the navigation and on the other pages' footers.
+- **The intro takes 1.4 s**, from close-up to settled globe, and the content follows over 210 ms. The heading still paints first (D-042), and the intro is still skipped by any key or tap and replaced by a still frame under reduced motion.
+- **The globe can be turned.** A drag or a sideways swipe turns it and a flick coasts to a stop; the arrow keys turn it too. A press on a link, a button or the text column is never taken by the globe. Under reduced motion it follows the hand exactly and never coasts. Without script it is the still picture, and the hint to turn it is not shown.
+- **One caption says what the globe shows**, in words, in place of the legend: whether a satellite is above the station's horizon, so it can listen, or that the next pass is already predicted. It is written only when that changes.
+- **Every other page eases in.** The masthead holds still across a page change while the page beneath it fades and rises 8 px. Sections still below the fold rise into place as they scroll into view, using cube-motion's `reveal` (MIT, vendored unmodified under a versioned path). Nothing already on screen is hidden and shown again, and a blocked script costs the motion, never the content. A term's note rises and fades in.
+- **Links that stand alone draw an underline from the left on hover**: the footer, the contents list and the metadata line. Links inside a sentence keep a resting underline, which is how a reader knows they are links, and the navigation keeps its pill.
+
+*Rejected: keeping the doors below the globe.* A second screen on a page built around one picture asks for a scroll that nothing on the first screen invites.
+
+*Rejected: a motion library with a timeline, such as GSAP.* Two entrances do not need one, and the site loads no code it does not use.
 
 ---
 
@@ -7290,6 +7314,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-342 the front page's second screen | `site/index.html`; `site/sitemap.xml`; `site/tools/{stamp_assets,verify_site}.py` |
 | D-343 no sums; real payment details or none | `site/support/index.html`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py` |
 | D-344 light by default, a serif display, larger type, soft corners | `site/style.css`; `site/theme.js`; `site/fonts/`; `site/*/index.html` theme colour; `site/site.webmanifest`; `dashboard/src/app.css`; `tests/unit/test_site_dashboard_tokens.py` |
+| D-345 one screen; a globe to turn; easing in | `site/index.html`; `site/main.js`; `site/motion.js`; `site/style.css`; `site/vendor/cube-motion-0.1.0/`; `site/tools/stamp_assets.py`; `site/_headers`; `site/README.md`; `ATTRIBUTION.md` |
 
 **Landed 2026-11-03**, making the repository ready for contributors and sponsors.
 
