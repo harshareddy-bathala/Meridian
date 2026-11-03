@@ -42,7 +42,7 @@ const SETTLE_MS = PHASES.settle;
 
 const ZOOM_START   = 26;     // globe radius multiplier at t=0; the limb reads flat
 const HORIZON_FRAC = 0.72;   // where the horizon sits during the close-up
-const NARROW       = 840;    // px; below this the globe moves above the content
+const NARROW       = 1024;   // px, 64rem; below this the globe moves above the content
 
 let COLOUR = readPalette();
 

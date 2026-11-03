@@ -113,11 +113,19 @@ jobs:
         # A stale stamp here means the guarantee is not in effect.
         run: python site/tools/stamp_assets.py --check
 
+      - name: Shared page regions are current
+        # The masthead, the footer and the (i) notes are written into every page
+        # by site/tools/shell.py from one copy, and committed. Stale means a page
+        # was edited by hand and now differs from the other twelve.
+        run: python site/tools/shell.py --check
+
       - name: Site invariants hold
         # Fragment links resolve, orbit.js is preloaded only where it is
         # imported statically, the sitemap matches the pages that exist, every
-        # anchor sits in a context the stylesheet actually colours, and nothing
-        # relies on inline CSS or JS that the CSP forbids.
+        # anchor sits in a context the stylesheet actually colours, nothing
+        # relies on inline CSS or JS that the CSP forbids, and the visitor pages
+        # state no sums, publish no placeholder payment details, define every
+        # (i), use the four breakpoints and label every picture.
         run: python site/tools/verify_site.py
 
   dashboard:

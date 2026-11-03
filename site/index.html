@@ -41,8 +41,8 @@
 <link rel="modulepreload" href="/orbit.js?v=847a79e8">
 
 <script src="/theme.js?v=bb99dcad"></script>
-<link rel="stylesheet" href="/style.css?v=f68a70f3">
-<script src="/main.js?v=4b4fdb01" type="module"></script>
+<link rel="stylesheet" href="/style.css?v=0b91aa5f">
+<script src="/main.js?v=0f229700" type="module"></script>
 
 <script type="application/ld+json">
 {
@@ -117,6 +117,7 @@
 
 <div class="page">
 
+  <!-- shell:masthead -->
   <header class="masthead reveal">
     <a class="brand" href="/" aria-label="Meridian — home">
       <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
@@ -127,10 +128,11 @@
     </a>
 
     <nav class="nav" aria-label="Primary">
-      <a href="/architecture/">Architecture</a>
-      <a href="/protocol/">Protocol</a>
-      <a href="/docs/">Docs</a>
-      <a href="/about/">About</a>
+      <a href="/how-it-works/">How it works</a>
+      <a href="/data/">Data</a>
+      <a href="/stations/">Stations</a>
+      <a href="/support/">Support</a>
+      <a href="/developers/">Developers</a>
     </nav>
 
     <div class="theme-slot">
@@ -145,21 +147,21 @@
       </button>
     </div>
   </header>
+  <!-- /shell:masthead -->
 
   <main class="content" id="content">
     <!-- No `reveal` class, deliberately. This is the page's largest contentful
          paint, and holding it for 4.2 s made LCP 4 400 ms on the one page that
          has to rank. It now paints with the canvas at about 110 ms and the
          intro is otherwise untouched — everything else still waits. See D-042. -->
-    <h1 class="lede">Predictive scheduling and reliability for satellite ground stations.</h1>
+    <h1 class="lede">Satellites pass overhead for minutes at a time. Meridian makes each one count.</h1>
 
-    <p class="body reveal">A satellite pass lasts minutes and never repeats. Meridian predicts which
-    reception opportunities are worth taking, schedules them, and measures whether it worked — over
-    MSP, an open protocol any receiving station can implement.</p>
+    <p class="body reveal">It decides which passes are worth catching, catches them, checks the result
+    and tells you what happened, over an open protocol any receiving station can join.</p>
 
     <p class="cta-row reveal">
-      <a class="cta" href="/architecture/">How it works <span class="arrow" aria-hidden="true">→</span></a>
-      <a class="cta cta-quiet" href="https://github.com/harshareddy-bathala/Meridian">View on GitHub <span class="arrow" aria-hidden="true">→</span></a>
+      <a class="cta" href="/how-it-works/">How it works <span class="arrow" aria-hidden="true">→</span></a>
+      <a class="cta cta-quiet" href="https://dash.meridian.org.in/">Live dashboard <span class="arrow" aria-hidden="true">↗</span></a>
     </p>
   </main>
 
@@ -182,6 +184,76 @@
     </dl>
   </footer>
 
+</div>
+
+<!-- Below the globe. D-038 kept the front page to one screen; D-342 adds this
+     second one, for a visitor who does not yet know which page they want. -->
+<div class="page-more">
+  <section class="more-head" aria-labelledby="doors-h">
+    <h2 id="doors-h">What brings you here?</h2>
+    <p>Pick the closest. Every page starts in plain words, and each technical term has a small (i) beside
+    it that explains it.</p>
+  </section>
+
+  <ul class="doors more-doors">
+    <li><a class="door" href="/data/"><span class="door-n">01</span><span class="door-t">I want satellite data or images</span><span class="door-d">Weather images, the result of every pass, and an open dataset.</span><span class="arrow" aria-hidden="true">→</span></a></li>
+    <li><a class="door" href="/areas/"><span class="door-n">02</span><span class="door-t">I want to watch an area</span><span class="door-d">Follow a farm, a forest or a town over time.</span><span class="arrow" aria-hidden="true">→</span></a></li>
+    <li><a class="door" href="/stations/"><span class="door-n">03</span><span class="door-t">I have, or want to build, a station</span><span class="door-d">What you need, and what the network gives back.</span><span class="arrow" aria-hidden="true">→</span></a></li>
+    <li><a class="door" href="/developers/"><span class="door-n">04</span><span class="door-t">I want to contribute code</span><span class="door-d">Run the whole platform on one machine, then see how it is built.</span><span class="arrow" aria-hidden="true">→</span></a></li>
+    <li><a class="door" href="/support/"><span class="door-n">05</span><span class="door-t">I want to support this</span><span class="door-d">What support keeps running, and what it builds next.</span><span class="arrow" aria-hidden="true">→</span></a></li>
+  </ul>
+
+  <!-- shell:footer -->
+  <footer class="colophon colophon-wide">
+    <div class="foot-brand">
+      <a class="brand" href="/" aria-label="Meridian — home">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+          <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="4"/>
+          <path d="M 32 10 A 10.5 22 0 0 0 32 54" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+        </svg>
+        <span class="wordmark">Meridian</span>
+      </a>
+      <p class="foot-line">Open software that decides which satellite passes are worth catching,
+      catches them, checks the result and says what happened.</p>
+      <p class="foot-line"><a href="mailto:hello@meridian.org.in">hello@meridian.org.in</a></p>
+    </div>
+
+    <nav class="foot-col" aria-label="Use Meridian">
+      <p class="foot-h">Use Meridian</p>
+      <ul>
+        <li><a href="/how-it-works/">How it works</a></li>
+        <li><a href="/data/">Data and images</a></li>
+        <li><a href="/areas/">Watch an area</a></li>
+        <li><a href="/stations/">Join with a station</a></li>
+        <li><a href="/support/">Support the project</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="For developers">
+      <p class="foot-h">For developers</p>
+      <ul>
+        <li><a href="/developers/">Start here</a></li>
+        <li><a href="/architecture/">Architecture</a></li>
+        <li><a href="/protocol/">Protocol</a></li>
+        <li><a href="/docs/">All documents</a></li>
+        <li><a href="/terms/">Every term</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="Project">
+      <p class="foot-h">Project</p>
+      <ul>
+        <li><a href="/about/">About</a></li>
+        <li><a href="https://dash.meridian.org.in/">Live dashboard ↗</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian">GitHub ↗</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/ATTRIBUTION.md">Attribution</a></li>
+      </ul>
+    </nav>
+
+    <p class="foot-bar">© 2026 Meridian <span class="dot" aria-hidden="true">·</span>
+    <a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a></p>
+  </footer>
+  <!-- /shell:footer -->
 </div>
 
 </body>

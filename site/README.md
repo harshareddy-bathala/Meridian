@@ -4,7 +4,7 @@ The static site at **meridian.org.in**. Plain HTML, CSS and vanilla JS — no fr
 
 Two scripts in `tools/` edit files in here and their output is committed, so what is deployed is still what is in the repository. `make-images.py` generates the icons, the social card and the still globe; `stamp_assets.py` puts a content hash on every CSS and JS reference. Both are checked in CI — see **Asset stamps** below.
 
-It is not the dashboard. See `docs/DECISIONS.md` D-036 for why the public site and the live dashboard are separate surfaces, and D-037 and D-038 for the two-theme system and the move to five pages.
+It is not the dashboard. See `docs/DECISIONS.md` D-036 for why the public site and the live dashboard are separate surfaces, D-037 and D-038 for the two-theme system and the first five pages, and D-340 to D-343 for the visitor pages that followed.
 
 ## Running it locally
 
@@ -18,20 +18,49 @@ then open `http://127.0.0.1:8080/`.
 
 ## Pages
 
+Organised by what a visitor came for (D-340, D-342). The visitor pages open in plain words, mark every technical term with an **(i)**, state status in words, and carry no rail and no script but `theme.js`.
+
 | Path | |
 |---|---|
-| `index.html` | The front page. One non-scrolling screen — canvas globe, one heading, one paragraph, two links, footer. |
-| `architecture/` | The layer diagram as inline SVG, the six modules, the rules, deployment. |
-| `protocol/` | MSP 0.1: constraints, model, the four endpoints, message shapes, errors, versioning. |
-| `docs/` | Index of every specification, linking to the canonical Markdown on GitHub. |
-| `about/` | What Meridian is, what it will not do, where things stand, how to take part. |
+| `index.html` | The front page. The globe screen (canvas, one heading, one paragraph, two links, the legend), then a second screen, *What brings you here?*, with five doors and the wide footer. |
+| `how-it-works/` | The journey of one pass in seven steps, each with a drawn illustration. The page to show an evaluator. |
+| `data/` | What Meridian publishes, the empty state where real images will be, the live dashboard and the public API. |
+| `areas/` | Watching a place over time. Closed until D-326 is accepted; its one picture is labelled as an example. |
+| `stations/` | What a station needs, what it gets back, receive-only, and MSP in one paragraph. |
+| `support/` | What support keeps running and what it builds next. No sums (D-343). Ways to give come from `support.json`. |
+| `developers/` | Running the platform, and the doors to the four document pages. |
+| `terms/` | Every (i) definition in one list, generated from `terms.json`. |
+| `architecture/`, `protocol/`, `docs/`, `about/` | The document pages, under *Developers* in the nav. Layer diagram, MSP 0.1, the documents index, and what Meridian is. |
 | `404.html` | `noindex`. Shares the shell. |
 
-The subpages carry no intro and no reveal, which is why they load instantly. Only `index.html` loads `main.js`.
+The document pages carry no intro and no reveal, which is why they load instantly. Only `index.html` loads `main.js`, and only the four document pages load `rail.js`.
+
+## Shared regions and the (i) notes
+
+`tools/shell.py` owns four regions, each between two fence comments, and rewrites them in place:
+
+| Region | On | From |
+|---|---|---|
+| `shell:masthead` | every page | `tools/shell_parts.py`, with the current nav entry marked |
+| `shell:footer` | every page | `tools/shell_parts.py` |
+| `shell:terms` | any page with an (i) | `terms.json`, one popover per term the page names |
+| `shell:glossary` | `/terms/` | `terms.json` |
+| `shell:give` | `/support/` | `support.json` |
+
+```
+python site/tools/shell.py           # rewrite in place
+python site/tools/shell.py --check   # exit 1 if any page is stale; CI runs this
+```
+
+**Never edit inside a fence by hand.** Edit `shell_parts.py`, `terms.json` or `support.json` and run the tool, then `stamp_assets.py`.
+
+**An (i) is written as** `<button class="info" popovertarget="term-pass"></button>`, placed directly after the word it explains with no space. The tool fills in its label and its glyph, and writes the popover. The popover is the native `popover` attribute: no script, so nothing for the CSP to allow. A term `terms.json` does not define fails the run. Add a definition there first, in one or two sentences for someone who has never used a radio.
+
+**Payment details are real or absent.** `support.json`'s `upi_id` and `github_sponsors` are `null` until they exist, which renders *Opening shortly*. Setting `upi_id` also needs `support/upi-qr.svg`. A value that does not look like a real UPI ID or Sponsors URL fails both tools.
 
 ## The document rail
 
-Above **1180px**, `.doc` becomes a three-track grid — prose, an elastic spacer, then the rail — so the prose stays on the left margin and the rail lands on the right, under the theme toggle. Below that width the rail falls back into normal flow between the standfirst and the prose, as a two-column list of links.
+Above **80rem (1280px)**, `.doc` becomes a three-track grid — prose, an elastic spacer, then the rail — so the prose stays on the left margin and the rail lands on the right, under the theme toggle. Below that width the rail falls back into normal flow between the standfirst and the prose, as a two-column list of links.
 
 **There is one contents list, not two.** Forcing a `<details>` open on wide screens would need `::details-content`, which is too new to rely on, and a second list is a list that can disagree with the first.
 
@@ -39,7 +68,7 @@ Above **1180px**, `.doc` becomes a three-track grid — prose, an elastic spacer
 
 **`position: sticky` works only because the body is `overflow-x: clip`, not `hidden`.** `hidden` would make the body a scroll container and pin the rail in place with no error anywhere. If that property is ever changed, the rail stops sticking.
 
-**Below 1180px the rail costs nothing at all.** `orbit.js` is a **dynamic** `import()` behind `matchMedia('(min-width: 1180px)')`, together with the settled-moment search and the scroll-spy. A phone loading a document page makes zero requests for it. It was a static import with a `modulepreload` hint, so every phone fetched and parsed 12 KB and ran a 2 400-iteration search to feed a canvas that `display: none` was going to hide — the `offsetParent` guard only ever stopped the drawing. Deferred, not deleted: crossing the breakpoint activates both.
+**Below 80rem the rail costs nothing at all.** `orbit.js` is a **dynamic** `import()` behind `matchMedia('(min-width: 80rem)')`, together with the settled-moment search and the scroll-spy. A phone loading a document page makes zero requests for it. It was a static import with a `modulepreload` hint, so every phone fetched and parsed 12 KB and ran a 2 400-iteration search to feed a canvas that `display: none` was going to hide — the `offsetParent` guard only ever stopped the drawing. Deferred, not deleted: crossing the breakpoint activates both.
 
 **Never add `<link rel="modulepreload" href="/orbit.js">` to a document page.** It defeats the whole arrangement. `verify_site.py` fails the build if it reappears there, and fails if it goes missing from `index.html`, where `main.js` imports statically and genuinely needs it.
 
@@ -69,12 +98,16 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 | `.well-known/security.txt` | RFC 9116. Renew `Expires:` before it lapses — an expired file counts as none. |
 | `fonts/` | IBM Plex Sans and Mono, latin-1 subset, SIL OFL-1.1. `OFL.txt` ships with them — see `ATTRIBUTION.md`. |
 | `_headers` | Cloudflare Pages: CSP, HSTS and cache policy. |
-| `robots.txt`, `sitemap.xml`, `site.webmanifest` | Crawlers and installability. The sitemap lists exactly the five indexed URLs; update it when a page is added. |
+| `robots.txt`, `sitemap.xml`, `site.webmanifest` | Crawlers and installability. The sitemap lists exactly the twelve indexed URLs; `verify_site.py` fails if it does not. |
 | `og-image.png`, `apple-touch-icon.png`, `favicon.ico`, `icon-*.png` | Generated. Never loaded by a page — crawlers, iOS and the manifest only. |
 | `brand/` | Marketing exports. Generated. See `brand/README.md`. |
 | `tools/make-images.py` | Regenerates all of the above, and the still globe inside `index.html`. Needs Pillow for everything except the globe. |
 | `tools/stamp_assets.py` | Puts `?v=<content hash>` on every CSS and JS reference. Run after editing one. Stdlib only. |
-| `tools/verify_site.py` | The invariants this file asserts, checked. Stdlib only. Both run in CI. |
+| `tools/verify_site.py` | The invariants this file asserts, checked. Stdlib only. Runs in CI. |
+| `tools/content_checks.py` | The visitor pages' rules, which `verify_site.py` runs: no sums, real payment details, defined terms, four breakpoints, labelled pictures. |
+| `tools/shell.py`, `tools/shell_parts.py` | The shared regions above. Stdlib only. Runs in CI with `--check`. |
+| `terms.json` | The plain definition behind every (i). |
+| `support.json` | The UPI ID and Sponsors URL, or `null`. |
 
 ## Themes
 
@@ -170,7 +203,7 @@ It is hidden two ways, and both are needed. `theme.js` adds `intro` before the f
 
 Inline, not `<img src="…">`: an external SVG document cannot read the page's theme custom properties, so it could not follow the masthead's toggle. Every stroke is coloured by a `.scene-still .gs-*` rule in `style.css`.
 
-**`.scene-still`'s position mirrors `layout()` in `main.js` and has to keep mirroring it.** Centre at 82% / 22% with radius `min(24vw, 40vh)`, and 52% / 21% with `min(38vw, 21vh)` below 840px. `#scene` is fixed and inset to zero, so its box *is* the layout viewport — which is what `vw` and `vh` measure, and why the two can be written in different units and land in the same place.
+**`.scene-still`'s position mirrors `layout()` in `main.js` and has to keep mirroring it.** Centre at 82% / 22% with radius `min(24vw, 40vh)`, and 52% / 21% with `min(38vw, 21vh)` below 64rem (1024px). `#scene` is fixed and inset to zero, so its box *is* the layout viewport — which is what `vw` and `vh` measure, and why the two can be written in different units and land in the same place.
 
 ## Asset stamps
 
@@ -201,6 +234,12 @@ The stamper only rewrites *quoted* references. `rail.js` opens with a paragraph 
 | sitemap | it lists a page that does not exist, or omits one that does |
 | **link styling** | an `<a>` sits in no context the stylesheet colours |
 | inline assets | an inline `<style>`, `<script>` or `style=""` appears, which the CSP blocks |
+| shared regions | `shell.py --check`: a masthead, footer, (i) note, glossary or ways-to-give block differs from what the tool writes |
+| amounts | a currency sign or code beside a number, or a sum in lakh or crore, on any page or in either data file (D-343) |
+| ways to give | `support.json` holds something that is not a real UPI ID or Sponsors URL |
+| terms | an (i) or popover names a term `terms.json` does not define |
+| breakpoints | `style.css` tests a width other than 40, 64, 80 or 120rem (D-341) |
+| figures | a `<figure class="fig">` caption does not say *Illustration*, *Example* or SIM |
 
 The link-styling check exists because the bug it catches shipped: `.foot-bar` styled the wide footer's bottom bar and nothing styled the anchor inside it, so the licence link was drawn in user-agent blue on all five document pages. It reads the styled contexts out of `style.css`, counting **only rules that set `color`** — `.nav a` appears twice in that file, once with a colour and once in the reduced-motion query with nothing but `transition: none`, and counting the second would let a stylesheet that had lost the first still pass.
 

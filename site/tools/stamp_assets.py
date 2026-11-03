@@ -52,6 +52,13 @@ STAMP_CHARS = 8
 PAGES = [
     "index.html",
     "404.html",
+    "how-it-works/index.html",
+    "data/index.html",
+    "areas/index.html",
+    "stations/index.html",
+    "support/index.html",
+    "developers/index.html",
+    "terms/index.html",
     "about/index.html",
     "architecture/index.html",
     "docs/index.html",

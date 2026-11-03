@@ -1,0 +1,69 @@
+{
+  "_about": "The plain definitions behind every (i) on the site, and the /terms/ page. One sentence or two, for someone who has never used a radio. tools/shell.py writes them into the pages; edit them here, then run it.",
+  "terms": {
+    "pass": {
+      "name": "Pass",
+      "plain": "The few minutes a satellite spends above a station's horizon. Each pass happens once. If it is missed, its data is gone."
+    },
+    "ground-station": {
+      "name": "Ground station",
+      "plain": "A receiver on the ground (an antenna, a radio and a small computer) that listens to satellites as they fly over."
+    },
+    "element-set": {
+      "name": "Element set",
+      "plain": "The published numbers that describe a satellite's orbit, used to predict where it will be. They age: a week-old set predicts less accurately than yesterday's."
+    },
+    "elevation": {
+      "name": "Elevation",
+      "plain": "How high a satellite climbs above the horizon during a pass, in degrees, from 0 at the horizon to 90 straight overhead. Higher usually means a cleaner signal, but it is one clue among several."
+    },
+    "predicted-yield": {
+      "name": "Predicted yield",
+      "plain": "Meridian's estimate of how likely a pass is to return usable data. It answers 'will this work?', not just 'will the satellite be visible?'."
+    },
+    "schedule": {
+      "name": "Schedule",
+      "plain": "Which station listens to which pass, decided for all stations at once, so the most promising passes are covered and no station is asked to be in two places."
+    },
+    "lrpt": {
+      "name": "LRPT",
+      "plain": "The digital picture signal sent by the Meteor-M weather satellites on 137 MHz. It is what Meridian's first station is built to receive."
+    },
+    "decode": {
+      "name": "Decode",
+      "plain": "Turning a raw radio recording into the satellite's actual data. For a weather satellite, that means an image."
+    },
+    "heartbeat": {
+      "name": "Heartbeat",
+      "plain": "A short message a station sends regularly to say what it is doing. It is how Meridian tells a station that was listening apart from one that was switched off."
+    },
+    "simulated": {
+      "name": "Simulated (SIM)",
+      "plain": "Produced by Meridian's simulator, a set of practice stations that behave like real ones, rather than by a real antenna. Always marked SIM, and never mixed with real results."
+    },
+    "reception-confidence": {
+      "name": "Reception confidence",
+      "plain": "How sure Meridian is that a reception's data is usable, as a percentage. It is checked against what really happened: of the passes marked 80%, about 80 in 100 should turn out good."
+    },
+    "loss-cause": {
+      "name": "Loss cause",
+      "plain": "When a pass returns nothing useful, Meridian's best explanation: view blocked, radio interference, clock wrong, receiver off or satellite silent. When the evidence does not point anywhere, it says 'undetermined' instead of guessing."
+    },
+    "health-warning": {
+      "name": "Health warning",
+      "plain": "An early notice that a station is slowly getting worse, sent to its owner before it fails outright."
+    },
+    "area": {
+      "name": "Area",
+      "plain": "A place someone wants to keep an eye on, such as a farm, a forest or a town, followed over time with public satellite data."
+    },
+    "msp": {
+      "name": "MSP",
+      "plain": "Meridian Station Protocol: the open, published rules a station follows to join the network. Any station that follows them can take part, whatever software it runs."
+    },
+    "evidence-dataset": {
+      "name": "Evidence dataset",
+      "plain": "A sealed, downloadable copy of every pass and its result, with the settings used, so anyone can check Meridian's figures for themselves."
+    }
+  }
+}

@@ -49,6 +49,32 @@
   --reveal-at: 4200ms;
   --reveal-dur: 600ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* One spacing scale, one type scale and two radii, shared with the
+     dashboard so the two surfaces read as one product (D-341). The type steps
+     are fluid between a 360px phone and a 1280px screen. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+
+  --step--1: 0.8125rem;
+  --step-0: clamp(0.9375rem, 0.9rem + 0.18vw, 1.0625rem);
+  --step-1: clamp(1.0625rem, 1rem + 0.35vw, 1.25rem);
+  --step-2: clamp(1.375rem, 1.2rem + 0.8vw, 1.875rem);
+  --step-3: clamp(1.875rem, 1.5rem + 1.6vw, 2.75rem);
+
+  --radius-1: 3px;
+  --radius-2: 8px;
+
+  /* Breakpoints, for reference only: a custom property cannot be read inside
+     a media query. These four are the only widths style.css may test, and
+     verify_site.py fails on any other: 40rem, 64rem, 80rem and 120rem, or
+     one sixteenth under each for a max-width. */
 }
 
 /* Light is the bare :root so that a visitor with JS disabled and no dark
@@ -174,7 +200,7 @@ body {
 
    These numbers mirror layout() in main.js and have to keep mirroring it:
    centre at 82%/22% of the viewport with radius min(24vw, 40vh), and 52%/21%
-   with min(38vw, 21vh) below the 840px breakpoint. #scene is fixed and inset
+   with min(38vw, 21vh) below the 64rem (1024px) breakpoint. #scene is fixed and inset
    to zero, so its box *is* the layout viewport — which is what vw and vh
    measure, and why the two can be written in different units and still land in
    the same place.
@@ -195,7 +221,7 @@ body {
   pointer-events: none;
 }
 
-@media (max-width: 839px) {
+@media (max-width: 63.9375rem) {
   .scene-still {
     left: 52%;
     top: 21%;
@@ -365,7 +391,7 @@ body {
 
 .nav a:hover,
 .nav a:focus-visible { color: var(--ink); }
-.nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--rule); }
+.nav a[aria-current] { color: var(--ink); border-bottom-color: var(--rule); }
 
 /* The slot holds its size whether or not the button inside it is shown, so
    theme.js revealing the button on DOMContentLoaded shifts no layout. */
@@ -496,7 +522,8 @@ body {
   color: var(--muted);
 }
 
-.doc > h1 {
+.doc > h1,
+.doc-head > h1 {
   margin: 0;
   font-size: clamp(1.875rem, 4vw, 2.75rem);
   font-weight: 400;
@@ -648,7 +675,7 @@ body {
 .diagram {
   display: block;
   width: 100%;
-  min-width: 40rem;
+  min-width: 36rem;
   height: auto;
 }
 .diagram text {
@@ -722,7 +749,7 @@ body {
 }
 
 /* ---------------------------------------------------------------- rail --
-   The document rail. Above 1180px it is a sticky column to the right of the
+   The document rail. Above 80rem (1280px) it is a sticky column to the right of the
    prose; below, it falls back into normal flow between the standfirst and the
    body as a two-column list of links.
 
@@ -817,8 +844,10 @@ body {
    is drawn into a canvas that is not on screen. */
 .rail-panel { display: none; margin-top: 1.75rem; }
 
-@media (min-width: 1180px) {
-  .doc {
+@media (min-width: 80rem) {
+  /* Only pages with a rail. A visitor page (.guide) has none, and in this
+     grid its sections would each take one 46rem track and wrap down the page. */
+  .doc:not(.guide) {
     max-width: none;
     display: grid;
     /* Three tracks, and the middle one is empty. Two capped columns would
@@ -864,6 +893,515 @@ body {
     transition: color 180ms var(--ease-out), border-color 180ms var(--ease-out);
   }
   .toc a[aria-current="true"] { border-left-color: var(--ink); }
+}
+
+/* ---------------------------------------------------------------- guide --
+   The visitor pages (D-342): how it works, data, areas, stations, support,
+   developers and terms. Same head as a document page; the body is a run of
+   sections, one idea each, instead of continuous prose.                    */
+
+.guide { max-width: 64rem; }
+.guide .doc-head { max-width: 46rem; }
+
+.section {
+  margin-top: var(--space-8);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--rule);
+}
+.doc-head + .section { margin-top: var(--space-7); }
+
+/* One line under the standfirst that says what is real today. */
+.status-line {
+  margin: var(--space-5) 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  font-size: var(--step--1);
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+.section > h2 {
+  margin: 0;
+  font-size: var(--step-2);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+  max-width: 32ch;
+}
+
+.section h3 {
+  margin: 0;
+  font-size: var(--step-1);
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.section p,
+.section li {
+  font-size: var(--step-0);
+  line-height: 1.65;
+  color: var(--ink-dim);
+  text-wrap: pretty;
+}
+.section > p { margin: var(--space-4) 0 0; max-width: 62ch; }
+.section strong { color: var(--ink); font-weight: 500; }
+
+.section ul.plain { margin: var(--space-4) 0 0; padding-left: 1.15rem; max-width: 62ch; }
+.section ul.plain li + li { margin-top: var(--space-2); }
+.section ul.plain li::marker { color: var(--muted); }
+
+/* Links inside a sentence take the prose treatment: full ink against dimmer
+   copy, underlined in the hairline colour. */
+.section p a,
+.section li a:not(.door),
+.status-line a,
+.empty a,
+.tile p a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 0.22em;
+  transition: text-decoration-color 180ms var(--ease-out);
+}
+.section p a:hover, .section p a:focus-visible,
+.section li a:not(.door):hover, .section li a:not(.door):focus-visible,
+.status-line a:hover, .status-line a:focus-visible,
+.empty a:hover, .empty a:focus-visible,
+.tile p a:hover, .tile p a:focus-visible { text-decoration-color: var(--ink); }
+
+.section code {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* A command to copy. The one place a visitor page shows code. */
+.cmd {
+  margin: var(--space-5) 0 0;
+  padding: var(--space-4) var(--space-5);
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-2);
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: var(--ink-dim);
+}
+.cmd code { font-family: inherit; font-size: inherit; color: inherit; }
+
+/* The small print under a section: what support is not. */
+.section .fine { margin-top: var(--space-5); font-size: var(--step--1); color: var(--muted); }
+
+/* ---------------------------------------------------------------- doors --
+   "What did you come for?" The home page ends on five of these, and each
+   visitor page ends on the next one. A row, not a card: hairlines divide.  */
+
+.doors { list-style: none; margin: var(--space-5) 0 0; padding: 0; }
+
+.door {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-4);
+  align-items: baseline;
+  padding: var(--space-5) 0;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink);
+  text-decoration: none;
+}
+.doors li:first-child .door { border-top: 1px solid var(--rule); }
+
+/* A door with no number: the "where next" rows at the foot of a page. */
+.door-plain { grid-template-columns: minmax(0, 1fr) auto; }
+.door-plain .door-d { grid-column: 1; }
+.door-plain .arrow { grid-column: 2; }
+
+.door-n {
+  grid-row: 1 / span 2;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+.door-t { font-size: var(--step-1); line-height: 1.3; }
+.door-d { grid-column: 2; font-size: var(--step--1); line-height: 1.55; color: var(--ink-dim); }
+.door .arrow { grid-row: 1; grid-column: 3; color: var(--muted); transition: color 180ms var(--ease-out); }
+.door:hover .arrow,
+.door:focus-visible .arrow { color: var(--ink); }
+@media (hover: hover) {
+  .door .arrow { transition: transform 220ms var(--ease-out), color 180ms var(--ease-out); }
+  .door:hover .arrow { transform: translateX(0.25em); }
+}
+
+/* ------------------------------------------------------------- journey --
+   How it works: seven steps, each one sentence, one picture and one (i).
+   Text and picture side by side from 64rem; stacked below.                */
+
+.journey { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+
+.step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  margin-top: var(--space-8);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--rule);
+}
+.doc-head + .journey .step:first-child { margin-top: var(--space-7); }
+
+.step-n {
+  margin: 0 0 var(--space-3);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.step h2 {
+  margin: 0;
+  font-size: var(--step-2);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.step-text p:not(.step-n) {
+  margin: var(--space-4) 0 0;
+  font-size: var(--step-0);
+  line-height: 1.65;
+  color: var(--ink-dim);
+  max-width: 52ch;
+  text-wrap: pretty;
+}
+.step-text strong { color: var(--ink); font-weight: 500; }
+
+@media (min-width: 64rem) {
+  .step {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: var(--space-7);
+    align-items: center;
+  }
+}
+
+/* A "what this means" line: the plain-language reading of whatever sits
+   above it, set apart so a skimming visitor can read only these. */
+.means {
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--trace);
+}
+.means-k {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* -------------------------------------------------------------- figures --
+   Pictures drawn for these pages as inline SVG, coloured from the theme so
+   they follow the toggle. Each is labelled for what it is: an illustration
+   or an example, never a measurement.                                      */
+
+.fig { margin: 0; }
+.section .fig-wide { margin-top: var(--space-6); max-width: 46rem; }
+.fig svg { display: block; width: 100%; height: auto; overflow: visible; }
+.fig figcaption {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fig .f-frame  { fill: var(--surface); stroke: var(--rule); stroke-width: 1; }
+.fig .f-rule   { fill: none; stroke: var(--rule); stroke-width: 1; }
+.fig .f-line   { fill: none; stroke: var(--muted); stroke-width: 1.25; }
+.fig .f-ink    { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+.fig .f-sig    { fill: none; stroke: var(--signal); stroke-width: 2; }
+.fig .f-trace  { fill: none; stroke: var(--trace); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.fig .f-alert  { fill: none; stroke: var(--alert); stroke-width: 2; }
+.fig .f-band  { fill: var(--signal); opacity: 0.12; }
+.fig .f-region { fill: var(--signal); fill-opacity: 0.1; stroke: var(--signal); stroke-width: 1.5; }
+.fig .f-block { fill: var(--alert); fill-opacity: 0.16; stroke: var(--alert); stroke-width: 1; }
+.fig .f-dot-sig   { fill: var(--signal); }
+.fig .f-dot-alert { fill: var(--alert); }
+.fig .f-dot-trace { fill: var(--trace); }
+.fig .f-dot-ink   { fill: var(--ink); }
+.fig .f-dot-muted { fill: var(--muted); }
+.fig .f-bar-sig   { fill: var(--signal); opacity: 0.85; }
+.fig .f-bar-muted { fill: var(--rule); }
+.fig text {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  fill: var(--ink-dim);
+}
+.fig .t-strong { fill: var(--ink); font-family: var(--sans); font-size: 13px; letter-spacing: 0; }
+.fig .t-big    { fill: var(--ink); font-family: var(--sans); font-size: 44px; letter-spacing: -0.02em; }
+.fig .t-muted  { fill: var(--muted); }
+.fig .t-sig    { fill: var(--signal); }
+.fig .t-alert  { fill: var(--alert); }
+.fig .t-trace  { fill: var(--trace); }
+
+/* --------------------------------------------------------------- status --
+   Status in words, never a blank or a zero (D-340). The dot carries the
+   colour; the word carries the meaning, so the colour is never the only
+   signal.                                                                  */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.pill::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+.pill-live::before { background: var(--signal); }
+.pill-wait::before { background: var(--trace); }
+.pill-off::before  { background: var(--alert); }
+
+/* Every simulated figure carries this, at every layer (CLAUDE.md rule 5). */
+.sim {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--trace);
+  border-radius: var(--radius-1);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  color: var(--trace);
+  vertical-align: 0.15em;
+}
+
+/* ---------------------------------------------------------------- tiles --
+   A short grid of facts: what you need, what you get, what the money keeps
+   running. Hairline-topped, not boxed.                                     */
+
+.tiles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5) var(--space-6);
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  list-style: none;
+}
+@media (min-width: 40rem) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 64rem) { .tiles-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.tile { padding-top: var(--space-4); border-top: 1px solid var(--rule); }
+.tile h3 { margin: 0; }
+.tile p { margin: var(--space-2) 0 0; font-size: var(--step--1); line-height: 1.6; color: var(--ink-dim); }
+.tile .pill { margin-top: var(--space-3); }
+
+.ordered { counter-reset: tier; }
+.ordered .tile::before {
+  counter-increment: tier;
+  content: counter(tier, decimal-leading-zero);
+  display: block;
+  margin-bottom: var(--space-2);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+/* The UPI code, drawn dark on light in both themes: a scanner needs the
+   contrast the code was generated for, whatever the page around it is. */
+.qr {
+  display: block;
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  background: #FFFFFF;
+  border-radius: var(--radius-2);
+}
+
+/* ---------------------------------------------------------------- empty --
+   What a page shows where real data will be. It says what is missing and
+   when it will arrive, and never fills the space with borrowed or invented
+   content (D-322). Dashed: the one box on the site, because it is a frame
+   waiting for its picture.                                                 */
+
+.empty {
+  margin-top: var(--space-6);
+  padding: var(--space-6) var(--space-5);
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius-2);
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+.empty p { margin: 0; font-size: var(--step-0); line-height: 1.6; color: var(--ink-dim); max-width: 56ch; }
+.empty .empty-t { font-size: var(--step-1); color: var(--ink); }
+
+/* -------------------------------------------------------------- (i) note --
+   A plain definition, one tap away. The native popover attribute: no
+   script, so nothing for the CSP to allow, and the browser handles focus,
+   Escape and tapping outside. Opened as a small centred sheet rather than
+   anchored to the button, because anchoring needs CSS anchor positioning,
+   which two of the three engines do not ship yet.                          */
+
+.info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.0625rem;
+  height: 1.0625rem;
+  margin: 0 0.1em 0 0.25em;
+  padding: 0;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-style: italic;
+  line-height: 1;
+  vertical-align: 0.12em;
+  cursor: pointer;
+  transition: color 180ms var(--ease-out), border-color 180ms var(--ease-out);
+}
+/* The glyph is 17px; the target is 26px. The 24px floor without a 24px
+   circle sitting in every sentence. */
+.info::after { content: ""; position: absolute; inset: -0.3rem; }
+.info:hover,
+.info:focus-visible { color: var(--ink); border-color: var(--ink); }
+
+.term {
+  position: fixed;
+  inset: 0;
+  width: min(26rem, calc(100vw - 2rem));
+  height: fit-content;
+  margin: auto;
+  padding: var(--space-5);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-2);
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: 0 1.25rem 3rem rgb(0 0 0 / 0.28);
+}
+.term::backdrop { background: rgb(8 9 13 / 0.45); }
+
+.term p { margin: 0; }
+.term-name {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.term-plain {
+  margin-top: var(--space-3) !important;
+  font-size: var(--step-1);
+  line-height: 1.55;
+  color: var(--ink);
+}
+.term-foot {
+  margin-top: var(--space-5) !important;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+}
+.term-foot a,
+.term-close {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule);
+}
+.term-close { padding: 0; background: none; border-top: 0; border-left: 0; border-right: 0; cursor: pointer; }
+.term-foot a:hover, .term-foot a:focus-visible,
+.term-close:hover, .term-close:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
+
+/* ------------------------------------------------------------- glossary -- */
+
+.gloss { margin: var(--space-6) 0 0; }
+.gloss-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2) var(--space-6);
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--rule);
+  scroll-margin-top: var(--space-6);
+}
+.gloss-row:last-child { border-bottom: 1px solid var(--rule); }
+.gloss dt { font-size: var(--step-1); color: var(--ink); }
+.gloss dd { margin: 0; font-size: var(--step-0); line-height: 1.65; color: var(--ink-dim); max-width: 60ch; }
+.gloss-row:target dt { color: var(--signal); }
+@media (min-width: 40rem) {
+  .gloss-row { grid-template-columns: 14rem minmax(0, 1fr); }
+}
+
+/* ----------------------------------------------------------- home, more --
+   Below the globe screen. D-038 kept the front page to one screen; D-342
+   gives it a second, for the visitor who arrives not knowing which page they
+   want. Opaque, so the fixed globe does not show through it.               */
+
+.page-more {
+  position: relative;
+  z-index: 1;
+  background: var(--bg);
+  padding: var(--space-8) var(--pad) var(--pad);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-8);
+}
+.page-more > * { min-width: 0; }
+.more-head { max-width: 46rem; }
+.more-head h2 {
+  margin: 0;
+  font-size: var(--step-3);
+  font-weight: 400;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.more-head p {
+  margin: var(--space-4) 0 0;
+  font-size: var(--step-1);
+  line-height: 1.55;
+  color: var(--ink-dim);
+  max-width: 52ch;
+}
+.more-doors { max-width: 64rem; }
+@media (min-width: 120rem) {
+  .page-more { max-width: 120rem; margin-inline: auto; }
 }
 
 /* ------------------------------------------------------------ colophon -- */
@@ -970,12 +1508,12 @@ body {
 .foot-bar a:hover,
 .foot-bar a:focus-visible { color: var(--ink); border-bottom-color: var(--ink); }
 
-@media (max-width: 900px) {
+@media (max-width: 63.9375rem) {
   .colophon-wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .foot-brand { grid-column: 1 / -1; }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 39.9375rem) {
   .colophon-wide { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
   .foot-brand { grid-column: auto; }
 }
@@ -1135,7 +1673,7 @@ body {
    Below this width the globe sits above the content at reduced scale
    (main.js repositions it). It is never hidden.                           */
 
-@media (max-width: 840px) {
+@media (max-width: 63.9375rem) {
   .page { gap: clamp(2rem, 5vh, 3rem); }
   .lede { max-width: 20ch; }
   /* :not(.colophon-wide) because this rule sits after the wide footer's own
@@ -1150,7 +1688,7 @@ body {
   .meta .dot { padding-inline: 0.2em; }
 
   /* The nav is not measured with them any more. Those two are single lines
-     that have to fit 312px intact; the nav takes its own row below 640px and
+     that have to fit 312px intact; the nav takes its own row below 40rem and
      wraps freely above it, so it was being shrunk to 10px to solve a problem
      it does not have — and 10px of tracked uppercase mono is the smallest
      type on the site, on a phone, on the one control people use to navigate.
@@ -1187,7 +1725,7 @@ body {
 
 /* The nav needs its own line before the brand and the toggle start colliding
    with it. Ordered so the toggle stays on the masthead's first row. */
-@media (max-width: 640px) {
+@media (max-width: 39.9375rem) {
   .nav { order: 3; flex-basis: 100%; gap: 0.5rem 1.25rem; }
   .theme-slot { order: 2; }
   .prose table { min-width: 20rem; }
@@ -1199,9 +1737,9 @@ body {
    this way" without adding a line of instructions to every table.
 
    Only below the width where they actually overflow — the diagram has a
-   40rem floor and the tables 20rem, so above this they fit and a fade would
+   36rem floor and the tables 20rem, so above this they fit and a fade would
    be decoration over nothing. */
-@media (max-width: 720px) {
+@media (max-width: 39.9375rem) {
   .diagram-scroll,
   .table-scroll {
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
@@ -1209,8 +1747,8 @@ body {
   }
 }
 
-@media (min-width: 1800px) {
-  .page { max-width: 1800px; margin-inline: auto; }
+@media (min-width: 120rem) {
+  .page { max-width: 120rem; margin-inline: auto; }
 }
 
 /* ------------------------------------------------------ reduced motion --
@@ -1220,7 +1758,9 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .reveal { animation: none; }
   .cta, .cta .arrow, .nav a, .theme-toggle, .prose a,
-  .toc a, .foot-col a, .rail-src { transition: none; }
+  .toc a, .foot-col a, .rail-src,
+  .door .arrow, .info, .section p a, .section li a:not(.door) { transition: none; }
+  .door:hover .arrow { transform: none; }
 
   /* The 404's acquisition sweep stops where it stands. */
   .sweep-arm, .sweep-arc { animation: none; }

@@ -14,7 +14,7 @@
  *    anchors and work with this file blocked; the canvas is decorative and
  *    aria-hidden. This only ever adds.
  *
- * 3. Below 1180px it costs nothing. Both features are hidden there — the
+ * 3. Below 80rem (1280px) it costs nothing. Both features are hidden there — the
  *    canvas by display: none, the contents highlight by the list having
  *    scrolled off the top of the page — so neither is set up. The orbit maths
  *    is 12 KB and is fetched by dynamic import only once the rail is real.
@@ -26,7 +26,7 @@
 /* The rail's breakpoint, and the same number as in style.css. The two have to
    agree: this decides whether the work happens, that decides whether anyone
    would see it. */
-const WIDE = window.matchMedia('(min-width: 1180px)');
+const WIDE = window.matchMedia('(min-width: 80rem)');
 
 /* Bound once ./orbit.js has been imported, which is why these are `let` and
    not an import list. Everything below reads them only from inside a function

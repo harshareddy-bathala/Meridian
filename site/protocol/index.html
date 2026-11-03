@@ -37,8 +37,8 @@
 <link rel="preload" href="/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
 
 <script src="/theme.js?v=bb99dcad"></script>
-<link rel="stylesheet" href="/style.css?v=f68a70f3">
-<script src="/rail.js?v=d28dfb5e" type="module"></script>
+<link rel="stylesheet" href="/style.css?v=0b91aa5f">
+<script src="/rail.js?v=4999dcfd" type="module"></script>
 
 <script type="application/ld+json">
 {
@@ -73,6 +73,7 @@
 
 <div class="page page-doc">
 
+  <!-- shell:masthead -->
   <header class="masthead">
     <a class="brand" href="/" aria-label="Meridian — home">
       <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
@@ -83,10 +84,11 @@
     </a>
 
     <nav class="nav" aria-label="Primary">
-      <a href="/architecture/">Architecture</a>
-      <a href="/protocol/" aria-current="page">Protocol</a>
-      <a href="/docs/">Docs</a>
-      <a href="/about/">About</a>
+      <a href="/how-it-works/">How it works</a>
+      <a href="/data/">Data</a>
+      <a href="/stations/">Stations</a>
+      <a href="/support/">Support</a>
+      <a href="/developers/" aria-current="true">Developers</a>
     </nav>
 
     <div class="theme-slot">
@@ -101,6 +103,7 @@
       </button>
     </div>
   </header>
+  <!-- /shell:masthead -->
 
   <main class="doc" id="content">
     <div class="doc-head">
@@ -404,6 +407,7 @@ GET  /msp/v0/time           → server time, for clock offset estimation</code><
     </div>
   </main>
 
+  <!-- shell:footer -->
   <footer class="colophon colophon-wide">
     <div class="foot-brand">
       <a class="brand" href="/" aria-label="Meridian — home">
@@ -413,35 +417,39 @@ GET  /msp/v0/time           → server time, for clock offset estimation</code><
         </svg>
         <span class="wordmark">Meridian</span>
       </a>
-      <p class="foot-line">Open scheduling, monitoring and measured reliability for satellite
-      ground stations, and MSP — an open protocol any receiving station can implement.</p>
+      <p class="foot-line">Open software that decides which satellite passes are worth catching,
+      catches them, checks the result and says what happened.</p>
       <p class="foot-line"><a href="mailto:hello@meridian.org.in">hello@meridian.org.in</a></p>
     </div>
+
+    <nav class="foot-col" aria-label="Use Meridian">
+      <p class="foot-h">Use Meridian</p>
+      <ul>
+        <li><a href="/how-it-works/">How it works</a></li>
+        <li><a href="/data/">Data and images</a></li>
+        <li><a href="/areas/">Watch an area</a></li>
+        <li><a href="/stations/">Join with a station</a></li>
+        <li><a href="/support/">Support the project</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="For developers">
+      <p class="foot-h">For developers</p>
+      <ul>
+        <li><a href="/developers/">Start here</a></li>
+        <li><a href="/architecture/">Architecture</a></li>
+        <li><a href="/protocol/">Protocol</a></li>
+        <li><a href="/docs/">All documents</a></li>
+        <li><a href="/terms/">Every term</a></li>
+      </ul>
+    </nav>
 
     <nav class="foot-col" aria-label="Project">
       <p class="foot-h">Project</p>
       <ul>
-        <li><a href="/architecture/">Architecture</a></li>
-        <li><a href="/protocol/">Protocol</a></li>
         <li><a href="/about/">About</a></li>
-      </ul>
-    </nav>
-
-    <nav class="foot-col" aria-label="Documentation">
-      <p class="foot-h">Documentation</p>
-      <ul>
-        <li><a href="/docs/">All documents</a></li>
-        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">MSP specification</a></li>
-        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/DATA-MODEL.md">Data model</a></li>
-        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/EVALUATION.md">Evaluation method</a></li>
-      </ul>
-    </nav>
-
-    <nav class="foot-col" aria-label="Source">
-      <p class="foot-h">Source</p>
-      <ul>
-        <li><a href="https://github.com/harshareddy-bathala/Meridian">GitHub</a></li>
-        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a></li>
+        <li><a href="https://dash.meridian.org.in/">Live dashboard ↗</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian">GitHub ↗</a></li>
         <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/ATTRIBUTION.md">Attribution</a></li>
       </ul>
     </nav>
@@ -449,6 +457,7 @@ GET  /msp/v0/time           → server time, for clock offset estimation</code><
     <p class="foot-bar">© 2026 Meridian <span class="dot" aria-hidden="true">·</span>
     <a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a></p>
   </footer>
+  <!-- /shell:footer -->
 
 </div>
 

@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>How Meridian Works — The Journey of One Satellite Pass</title>
+<meta name="description" content="What happens to one satellite pass, from deciding it is worth catching to telling the station's owner what happened.">
+<link rel="canonical" href="https://meridian.org.in/how-it-works/">
+
+<meta name="theme-color" content="#08090D" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#FAF9F7" media="(prefers-color-scheme: light)">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://meridian.org.in/how-it-works/">
+<meta property="og:site_name" content="Meridian">
+<meta property="og:locale" content="en">
+<meta property="og:title" content="How Meridian Works — The Journey of One Satellite Pass">
+<meta property="og:description" content="What happens to one satellite pass, from deciding it is worth catching to telling the station's owner what happened.">
+<meta property="og:image" content="https://meridian.org.in/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="The Meridian wordmark over a wireframe globe with a satellite link line.">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="How Meridian Works — The Journey of One Satellite Pass">
+<meta name="twitter:description" content="What happens to one satellite pass, from deciding it is worth catching to telling the station's owner what happened.">
+<meta name="twitter:image" content="https://meridian.org.in/og-image.png">
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+
+<link rel="preload" href="/fonts/IBMPlexSans-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+
+<script src="/theme.js?v=bb99dcad"></script>
+<link rel="stylesheet" href="/style.css?v=0b91aa5f">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "url": "https://meridian.org.in/how-it-works/",
+      "name": "How Meridian Works — The Journey of One Satellite Pass",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@id": "https://meridian.org.in/#website"
+      },
+      "publisher": {
+        "@id": "https://meridian.org.in/#organization"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Meridian",
+          "item": "https://meridian.org.in/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "How it works",
+          "item": "https://meridian.org.in/how-it-works/"
+        }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+
+<body>
+
+<a class="skip" href="#content">Skip to content</a>
+
+<div class="page page-doc">
+
+  <!-- shell:masthead -->
+  <header class="masthead">
+    <a class="brand" href="/" aria-label="Meridian — home">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="4"/>
+        <path d="M 32 10 A 10.5 22 0 0 0 32 54" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+      </svg>
+      <span class="wordmark">Meridian</span>
+    </a>
+
+    <nav class="nav" aria-label="Primary">
+      <a href="/how-it-works/" aria-current="page">How it works</a>
+      <a href="/data/">Data</a>
+      <a href="/stations/">Stations</a>
+      <a href="/support/">Support</a>
+      <a href="/developers/">Developers</a>
+    </nav>
+
+    <div class="theme-slot">
+      <button id="theme-toggle" class="theme-toggle" type="button" hidden aria-label="Switch theme">
+        <svg class="icon-to-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="4.25"/>
+          <path d="M12 1.75v2.5M12 19.75v2.5M4.22 4.22l1.77 1.77M18.01 18.01l1.77 1.77M1.75 12h2.5M19.75 12h2.5M4.22 19.78l1.77-1.77M18.01 5.99l1.77-1.77" stroke-linecap="round"/>
+        </svg>
+        <svg class="icon-to-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+          <path d="M20.5 14.75A8.75 8.75 0 0 1 9.25 3.5a8.75 8.75 0 1 0 11.25 11.25Z" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+  <!-- /shell:masthead -->
+
+  <main class="doc guide" id="content">
+    <div class="doc-head">
+      <p class="eyebrow">How it works</p>
+      <h1>What happens to one satellite pass.</h1>
+      <p class="standfirst">A pass lasts a few minutes and never comes back. Here is everything Meridian
+      does with one, from deciding it is worth catching to telling the station's owner what happened.</p>
+      <p class="status-line"><span class="pill pill-wait">Practice fleet</span> Today these steps run on
+      50 practice stations <span class="sim">SIM</span>. The first real station is being built.</p>
+    </div>
+
+    <ol class="journey">
+
+      <li class="step" id="predict">
+        <div class="step-text">
+          <p class="step-n">1 · Predict</p>
+          <h2>Pick the passes worth catching.</h2>
+          <p>A satellite clears a station's horizon several times a day, and not every
+          pass<button class="info" type="button" popovertarget="term-pass" aria-label="What “Pass” means">i</button> gives usable data. Meridian scores each
+          one by how likely it is to work, its predicted
+          yield<button class="info" type="button" popovertarget="term-predicted-yield" aria-label="What “Predicted yield” means">i</button>, from how high it
+          climbs<button class="info" type="button" popovertarget="term-elevation" aria-label="What “Elevation” means">i</button>, how fresh the orbit numbers
+          are<button class="info" type="button" popovertarget="term-element-set" aria-label="What “Element set” means">i</button> and what this station has
+          managed before.</p>
+          <p class="means"><span class="means-k">What you see</span>A short list of passes, each with its
+          chance of working and the reasons behind it.</p>
+        </div>
+        <figure class="fig">
+          <svg viewBox="0 0 480 270" role="img" aria-labelledby="f1-t">
+            <title id="f1-t">Three upcoming passes. The highest, at 71 degrees, is the least likely to work, at 34 percent, because its orbit numbers are old.</title>
+            <rect class="f-frame" x="0.5" y="0.5" width="479" height="269" rx="8"/>
+            <text x="24" y="38" class="t-muted">NEXT PASSES · ONE STATION</text>
+            <text x="200" y="68" class="t-muted">HIGHEST</text>
+            <text x="276" y="68" class="t-muted">LIKELY TO WORK</text>
+            <line class="f-rule" x1="24" y1="82" x2="456" y2="82"/>
+
+            <text x="24" y="112" class="t-strong">Meteor-M N2-3</text>
+            <text x="24" y="130">09:41</text>
+            <text x="200" y="118">38°</text>
+            <rect class="f-bar-muted" x="276" y="108" width="140" height="10" rx="2"/>
+            <rect class="f-bar-sig" x="276" y="108" width="109" height="10" rx="2"/>
+            <text x="426" y="118">78%</text>
+
+            <text x="24" y="166" class="t-strong">Meteor-M N2-4</text>
+            <text x="24" y="184" class="t-trace">14:02 · old orbit numbers</text>
+            <text x="200" y="172">71°</text>
+            <rect class="f-bar-muted" x="276" y="162" width="140" height="10" rx="2"/>
+            <rect class="f-bar-sig" x="276" y="162" width="48" height="10" rx="2"/>
+            <text x="426" y="172">34%</text>
+
+            <text x="24" y="220" class="t-strong">Meteor-M N2-3</text>
+            <text x="24" y="238">21:15</text>
+            <text x="200" y="226">54°</text>
+            <rect class="f-bar-muted" x="276" y="216" width="140" height="10" rx="2"/>
+            <rect class="f-bar-sig" x="276" y="216" width="123" height="10" rx="2"/>
+            <text x="426" y="226">88%</text>
+          </svg>
+          <figcaption>Illustration · example values</figcaption>
+        </figure>
+      </li>
+
+      <li class="step" id="choose">
+        <div class="step-text">
+          <p class="step-n">2 · Choose</p>
+          <h2>Plan every station at once.</h2>
+          <p>With several stations and more passes than time, something has to decide who listens to
+          what. Meridian makes one schedule<button class="info" type="button" popovertarget="term-schedule" aria-label="What “Schedule” means">i</button> for the
+          whole network: the most promising passes are covered, no station is booked twice, and two
+          stations do not spend a pass on the same satellite unless that helps.</p>
+          <p>It is measured against simpler plans, such as always taking the highest pass, so the gain is
+          a number rather than a claim.</p>
+        </div>
+        <figure class="fig">
+          <svg viewBox="0 0 480 270" role="img" aria-labelledby="f2-t">
+            <title id="f2-t">A day's schedule for three stations. Each pass is given to one station; a pass another station already covers is left to it.</title>
+            <rect class="f-frame" x="0.5" y="0.5" width="479" height="269" rx="8"/>
+            <text x="24" y="38" class="t-muted">TODAY · THREE STATIONS</text>
+
+            <text x="24" y="86">Station A</text>
+            <text x="24" y="136">Station B</text>
+            <text x="24" y="186">Station C</text>
+            <line class="f-rule" x1="112" y1="82" x2="456" y2="82"/>
+            <line class="f-rule" x1="112" y1="132" x2="456" y2="132"/>
+            <line class="f-rule" x1="112" y1="182" x2="456" y2="182"/>
+
+            <rect class="f-bar-sig" x="150" y="71" width="26" height="22" rx="3"/>
+            <rect class="f-bar-sig" x="330" y="71" width="30" height="22" rx="3"/>
+            <rect class="f-trace" x="150.75" y="121.75" width="24.5" height="20.5" rx="3"/>
+            <rect class="f-bar-sig" x="248" y="121" width="28" height="22" rx="3"/>
+            <rect class="f-bar-sig" x="206" y="171" width="24" height="22" rx="3"/>
+            <rect class="f-bar-sig" x="404" y="171" width="28" height="22" rx="3"/>
+
+            <line class="f-rule" x1="112" y1="210" x2="456" y2="210"/>
+            <text x="112" y="228" class="t-muted">00</text>
+            <text x="198" y="228" class="t-muted">06</text>
+            <text x="284" y="228" class="t-muted">12</text>
+            <text x="370" y="228" class="t-muted">18</text>
+            <text x="440" y="228" class="t-muted">24</text>
+
+            <rect class="f-bar-sig" x="24" y="244" width="14" height="10" rx="2"/>
+            <text x="46" y="253">scheduled</text>
+            <rect class="f-trace" x="150.75" y="244.75" width="12.5" height="8.5" rx="2"/>
+            <text x="172" y="253">left to another station</text>
+          </svg>
+          <figcaption>Illustration · example values</figcaption>
+        </figure>
+      </li>
+
+      <li class="step" id="receive">
+        <div class="step-text">
+          <p class="step-n">3 · Receive</p>
+          <h2>Listen, and prove it.</h2>
+          <p>At the right moment the station tunes to the satellite and records. All the while it sends a
+          heartbeat<button class="info" type="button" popovertarget="term-heartbeat" aria-label="What “Heartbeat” means">i</button> saying what it is doing. That
+          is what tells "the station heard nothing" apart from "the station was switched off", two very
+          different problems that would otherwise look the same.</p>
+          <p class="means"><span class="means-k">Why it matters</span>A station that was off has not missed a
+          pass, and is not counted as having missed one.</p>
+        </div>
+        <figure class="fig">
+          <svg viewBox="0 0 480 270" role="img" aria-labelledby="f3-t">
+            <title id="f3-t">A station's heartbeats over half an hour. During the pass they report the right satellite, the right frequency and that it is listening.</title>
+            <rect class="f-frame" x="0.5" y="0.5" width="479" height="269" rx="8"/>
+            <text x="24" y="38" class="t-muted">HEARTBEATS · ONE STATION</text>
+
+            <rect class="f-band" x="176" y="70" width="168" height="110" rx="4"/>
+            <text x="186" y="92" class="t-sig">PASS · 12 MIN</text>
+
+            <line class="f-rule" x1="24" y1="140" x2="456" y2="140"/>
+            <circle class="f-dot-muted" cx="40" cy="140" r="4"/>
+            <circle class="f-dot-muted" cx="72" cy="140" r="4"/>
+            <circle class="f-dot-muted" cx="104" cy="140" r="4"/>
+            <circle class="f-dot-muted" cx="136" cy="140" r="4"/>
+            <circle class="f-dot-sig" cx="192" cy="140" r="5"/>
+            <circle class="f-dot-sig" cx="224" cy="140" r="5"/>
+            <circle class="f-dot-sig" cx="256" cy="140" r="5"/>
+            <circle class="f-dot-sig" cx="288" cy="140" r="5"/>
+            <circle class="f-dot-sig" cx="320" cy="140" r="5"/>
+            <circle class="f-dot-muted" cx="376" cy="140" r="4"/>
+            <circle class="f-dot-muted" cx="408" cy="140" r="4"/>
+            <circle class="f-dot-muted" cx="440" cy="140" r="4"/>
+
+            <text x="40" y="168" class="t-muted">waiting</text>
+            <text x="376" y="168" class="t-muted">waiting</text>
+
+            <line class="f-rule" x1="24" y1="204" x2="456" y2="204"/>
+            <text x="24" y="228">Each dot is one heartbeat. During the pass they say:</text>
+            <text x="24" y="248" class="t-sig">listening · Meteor-M N2-4 · 137 MHz</text>
+          </svg>
+          <figcaption>Illustration · example values</figcaption>
+        </figure>
+      </li>
+
+      <li class="step" id="check">
+        <div class="step-text">
+          <p class="step-n">4 · Check</p>
+          <h2>Say how sure we are the data is usable.</h2>
+          <p>The recording is decoded<button class="info" type="button" popovertarget="term-decode" aria-label="What “Decode” means">i</button> into the
+          satellite's data, which for the Meteor-M weather satellites' LRPT<button class="info" type="button" popovertarget="term-lrpt" aria-label="What “LRPT” means">i</button>
+          signal is an image. Then Meridian says how likely the result is to be usable, its reception
+          confidence<button class="info" type="button" popovertarget="term-reception-confidence" aria-label="What “Reception confidence” means">i</button>.</p>
+          <p>That percentage is tested against what really happened, so "80%" means about eight times in
+          ten, not a feeling.</p>
+        </div>
+        <figure class="fig">
+          <svg viewBox="0 0 480 270" role="img" aria-labelledby="f4-t">
+            <title id="f4-t">One reception judged 87 percent likely usable, beside a chart showing that past confidence values matched how often receptions really were usable.</title>
+            <rect class="f-frame" x="0.5" y="0.5" width="479" height="269" rx="8"/>
+            <text x="24" y="38" class="t-muted">THIS RECEPTION</text>
+            <text x="24" y="98" class="t-big">87%</text>
+            <text x="24" y="124">likely usable</text>
+            <rect class="f-bar-muted" x="24" y="140" width="168" height="8" rx="2"/>
+            <rect class="f-bar-sig" x="24" y="140" width="146" height="8" rx="2"/>
+            <text x="24" y="190" class="t-muted">Checked: when we said 80%,</text>
+            <text x="24" y="208" class="t-muted">it happened about 80%.</text>
+
+            <rect class="f-rule" x="260" y="58" width="178" height="178"/>
+            <line class="f-trace" x1="260" y1="236" x2="440" y2="56"/>
+            <circle class="f-dot-sig" cx="278" cy="222" r="4"/>
+            <circle class="f-dot-sig" cx="314" cy="180" r="4"/>
+            <circle class="f-dot-sig" cx="350" cy="150" r="4"/>
+            <circle class="f-dot-sig" cx="386" cy="104" r="4"/>
+            <circle class="f-dot-sig" cx="422" cy="78" r="4"/>
+            <text x="260" y="256" class="t-muted">we said →</text>
+            <text x="260" y="48" class="t-muted">it was ↑</text>
+          </svg>
+          <figcaption>Illustration · example values</figcaption>
+        </figure>
+      </li>
+
+      <li class="step" id="explain">
+        <div class="step-text">
+          <p class="step-n">5 · Explain</p>
+          <h2>When a pass fails, say why.</h2>
+          <p>A lost pass gets a cause<button class="info" type="button" popovertarget="term-loss-cause" aria-label="What “Loss cause” means">i</button>, worked out
+          from the evidence: the patch of sky the station can see, its recent passes, its heartbeats and
+          its clock. When the evidence does not support a cause, the answer is "undetermined", not a
+          guess.</p>
+          <p class="means"><span class="means-k">What you see</span>"Lost: the satellite set behind something
+          to the north-east. Four of the last five passes there were lost too."</p>
+        </div>
+        <figure class="fig">
+          <svg viewBox="0 0 480 280" role="img" aria-labelledby="f5-t">
+            <title id="f5-t">A sky map seen from the station. The pass ends in a blocked patch of sky to the north-east, and the cause chosen is the view being blocked.</title>
+            <rect class="f-frame" x="0.5" y="0.5" width="479" height="279" rx="8"/>
+            <circle class="f-rule" cx="130" cy="140" r="100"/>
+            <circle class="f-rule" cx="130" cy="140" r="66.7"/>
+            <circle class="f-rule" cx="130" cy="140" r="33.3"/>
+            <path class="f-block" d="M180 53.4 A100 100 0 0 1 226.6 114.1 L205.1 119.9 A77.8 77.8 0 0 0 168.9 72.6 Z"/>
+            <path class="f-ink" d="M59.3 210.7 Q178 178 206.6 75.7"/>
+            <path class="f-alert" d="M197.6 101.3 Q202.9 89.1 206.6 75.7"/>
+            <circle class="f-dot-alert" cx="206.6" cy="75.7" r="4"/>
+            <text x="126" y="32" class="t-muted">N</text>
+            <text x="236" y="144" class="t-muted">E</text>
+            <text x="127" y="256" class="t-muted">S</text>
+            <text x="16" y="144" class="t-muted">W</text>
+
+            <text x="272" y="44" class="t-muted">WHY IT WAS LOST</text>
+            <circle class="f-dot-alert" cx="278" cy="76" r="4"/>
+            <text x="292" y="80" class="t-strong">View blocked</text>
+            <text x="292" y="108" class="t-muted">Radio interference</text>
+            <text x="292" y="132" class="t-muted">Clock wrong</text>
+            <text x="292" y="156" class="t-muted">Receiver off</text>
+            <text x="292" y="180" class="t-muted">Satellite silent</text>
+            <text x="292" y="204" class="t-muted">Undetermined</text>
+            <text x="272" y="244">4 of the last 5 passes</text>
+            <text x="272" y="262">in that patch were lost.</text>
+          </svg>
+          <figcaption>Illustration · example values</figcaption>
+        </figure>
+      </li>
+
+      <li class="step" id="warn">
+        <div class="step-text">
+          <p class="step-n">6 · Warn</p>
+          <h2>Catch a station getting worse.</h2>
+          <p>Antennas loosen, cables corrode and trees grow into the view. Meridian learns what normal looks
+          like for each station and sends a health
+          warning<button class="info" type="button" popovertarget="term-health-warning" aria-label="What “Health warning” means">i</button> when it starts to slip,
+          before the station fails outright.</p>
+        </div>
+        <figure class="fig">
+          <svg viewBox="0 0 480 270" role="img" aria-labelledby="f6-t">
+            <title id="f6-t">A station's signal quality over a month. It stays inside its normal band, then drifts below it; a warning is sent at the first drift, well before it would have failed.</title>
+            <rect class="f-frame" x="0.5" y="0.5" width="479" height="269" rx="8"/>
+            <text x="24" y="38" class="t-muted">SIGNAL QUALITY · 30 DAYS</text>
+            <rect class="f-band" x="40" y="70" width="416" height="34" rx="3"/>
+            <text x="48" y="64" class="t-sig">normal for this station</text>
+            <polyline class="f-ink" points="40,88 70,84 100,90 130,86 160,92 190,85 220,89 250,94 280,101 300,112 330,126 360,140 390,158 420,176 450,196"/>
+            <circle class="f-dot-trace" cx="300" cy="112" r="5"/>
+            <text x="246" y="170" class="t-trace">warning sent</text>
+            <line class="f-trace" x1="300" y1="118" x2="300" y2="156"/>
+            <circle class="f-dot-alert" cx="450" cy="196" r="4"/>
+            <text x="290" y="224" class="t-alert">would have failed here</text>
+            <line class="f-rule" x1="40" y1="240" x2="456" y2="240"/>
+            <text x="40" y="258" class="t-muted">day 1</text>
+            <text x="418" y="258" class="t-muted">day 30</text>
+          </svg>
+          <figcaption>Illustration · example values</figcaption>
+        </figure>
+      </li>
+
+      <li class="step" id="tell">
+        <div class="step-text">
+          <p class="step-n">7 · Tell and share</p>
+          <h2>Tell the owner, and publish the evidence.</h2>
+          <p>The station's owner gets a plain report: what was planned, what worked, what was lost and why.
+          Passes the station never listened to are reported as that, and are not counted as misses.</p>
+          <p>Everything behind the figures goes into an evidence
+          dataset<button class="info" type="button" popovertarget="term-evidence-dataset" aria-label="What “Evidence dataset” means">i</button> that anyone can
+          download, rerun and check.</p>
+        </div>
+        <figure class="fig">
+          <svg viewBox="0 0 480 270" role="img" aria-labelledby="f7-t">
+            <title id="f7-t">A weekly report: 41 passes planned, 36 usable, 3 lost with their causes, and 2 not counted because the station was off. Beside it, the open dataset the figures come from.</title>
+            <rect class="f-frame" x="0.5" y="0.5" width="479" height="269" rx="8"/>
+            <text x="24" y="38" class="t-muted">WEEKLY REPORT · ONE STATION</text>
+            <text x="24" y="78" class="t-strong">41 passes planned</text>
+            <circle class="f-dot-sig" cx="30" cy="106" r="4"/>
+            <text x="44" y="110">36 usable</text>
+            <circle class="f-dot-alert" cx="30" cy="134" r="4"/>
+            <text x="44" y="138">3 lost: 2 view blocked,</text>
+            <text x="44" y="156">1 undetermined</text>
+            <circle class="f-dot-muted" cx="30" cy="184" r="4"/>
+            <text x="44" y="188">2 not counted:</text>
+            <text x="44" y="206">station was off</text>
+
+            <path class="f-line" d="M324 64 h80 l24 24 v120 h-104 Z M404 64 v24 h24"/>
+            <text x="340" y="124" class="t-strong">Dataset</text>
+            <text x="340" y="146">passes</text>
+            <text x="340" y="162">settings</text>
+            <text x="340" y="178">seed</text>
+            <text x="324" y="236" class="t-sig">open · CC BY 4.0</text>
+          </svg>
+          <figcaption>Illustration · example values</figcaption>
+        </figure>
+      </li>
+
+    </ol>
+
+    <section class="section" aria-labelledby="next-h">
+      <h2 id="next-h">See it for yourself.</h2>
+      <ul class="doors">
+        <li><a class="door door-plain" href="https://dash.meridian.org.in/"><span class="door-t">Open the live dashboard</span><span class="door-d">The practice fleet, running now. Everything on it is marked SIM.</span><span class="arrow" aria-hidden="true">→</span></a></li>
+        <li><a class="door door-plain" href="/data/"><span class="door-t">Get the data</span><span class="door-d">Images, pass results and the evidence dataset.</span><span class="arrow" aria-hidden="true">→</span></a></li>
+        <li><a class="door door-plain" href="/stations/"><span class="door-t">Join with a station</span><span class="door-d">What you need, and what you get back.</span><span class="arrow" aria-hidden="true">→</span></a></li>
+      </ul>
+    </section>
+
+    <!-- shell:terms -->
+    <div class="term" id="term-pass" popover>
+      <p class="term-name">Pass</p>
+      <p class="term-plain">The few minutes a satellite spends above a station&#x27;s horizon. Each pass happens once. If it is missed, its data is gone.</p>
+      <p class="term-foot"><a href="/terms/#pass">Every term</a><button class="term-close" type="button" popovertarget="term-pass" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-predicted-yield" popover>
+      <p class="term-name">Predicted yield</p>
+      <p class="term-plain">Meridian&#x27;s estimate of how likely a pass is to return usable data. It answers &#x27;will this work?&#x27;, not just &#x27;will the satellite be visible?&#x27;.</p>
+      <p class="term-foot"><a href="/terms/#predicted-yield">Every term</a><button class="term-close" type="button" popovertarget="term-predicted-yield" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-elevation" popover>
+      <p class="term-name">Elevation</p>
+      <p class="term-plain">How high a satellite climbs above the horizon during a pass, in degrees, from 0 at the horizon to 90 straight overhead. Higher usually means a cleaner signal, but it is one clue among several.</p>
+      <p class="term-foot"><a href="/terms/#elevation">Every term</a><button class="term-close" type="button" popovertarget="term-elevation" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-element-set" popover>
+      <p class="term-name">Element set</p>
+      <p class="term-plain">The published numbers that describe a satellite&#x27;s orbit, used to predict where it will be. They age: a week-old set predicts less accurately than yesterday&#x27;s.</p>
+      <p class="term-foot"><a href="/terms/#element-set">Every term</a><button class="term-close" type="button" popovertarget="term-element-set" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-schedule" popover>
+      <p class="term-name">Schedule</p>
+      <p class="term-plain">Which station listens to which pass, decided for all stations at once, so the most promising passes are covered and no station is asked to be in two places.</p>
+      <p class="term-foot"><a href="/terms/#schedule">Every term</a><button class="term-close" type="button" popovertarget="term-schedule" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-heartbeat" popover>
+      <p class="term-name">Heartbeat</p>
+      <p class="term-plain">A short message a station sends regularly to say what it is doing. It is how Meridian tells a station that was listening apart from one that was switched off.</p>
+      <p class="term-foot"><a href="/terms/#heartbeat">Every term</a><button class="term-close" type="button" popovertarget="term-heartbeat" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-decode" popover>
+      <p class="term-name">Decode</p>
+      <p class="term-plain">Turning a raw radio recording into the satellite&#x27;s actual data. For a weather satellite, that means an image.</p>
+      <p class="term-foot"><a href="/terms/#decode">Every term</a><button class="term-close" type="button" popovertarget="term-decode" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-lrpt" popover>
+      <p class="term-name">LRPT</p>
+      <p class="term-plain">The digital picture signal sent by the Meteor-M weather satellites on 137 MHz. It is what Meridian&#x27;s first station is built to receive.</p>
+      <p class="term-foot"><a href="/terms/#lrpt">Every term</a><button class="term-close" type="button" popovertarget="term-lrpt" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-reception-confidence" popover>
+      <p class="term-name">Reception confidence</p>
+      <p class="term-plain">How sure Meridian is that a reception&#x27;s data is usable, as a percentage. It is checked against what really happened: of the passes marked 80%, about 80 in 100 should turn out good.</p>
+      <p class="term-foot"><a href="/terms/#reception-confidence">Every term</a><button class="term-close" type="button" popovertarget="term-reception-confidence" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-loss-cause" popover>
+      <p class="term-name">Loss cause</p>
+      <p class="term-plain">When a pass returns nothing useful, Meridian&#x27;s best explanation: view blocked, radio interference, clock wrong, receiver off or satellite silent. When the evidence does not point anywhere, it says &#x27;undetermined&#x27; instead of guessing.</p>
+      <p class="term-foot"><a href="/terms/#loss-cause">Every term</a><button class="term-close" type="button" popovertarget="term-loss-cause" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-health-warning" popover>
+      <p class="term-name">Health warning</p>
+      <p class="term-plain">An early notice that a station is slowly getting worse, sent to its owner before it fails outright.</p>
+      <p class="term-foot"><a href="/terms/#health-warning">Every term</a><button class="term-close" type="button" popovertarget="term-health-warning" popovertargetaction="hide">Close</button></p>
+    </div>
+    <div class="term" id="term-evidence-dataset" popover>
+      <p class="term-name">Evidence dataset</p>
+      <p class="term-plain">A sealed, downloadable copy of every pass and its result, with the settings used, so anyone can check Meridian&#x27;s figures for themselves.</p>
+      <p class="term-foot"><a href="/terms/#evidence-dataset">Every term</a><button class="term-close" type="button" popovertarget="term-evidence-dataset" popovertargetaction="hide">Close</button></p>
+    </div>
+    <!-- /shell:terms -->
+  </main>
+
+  <!-- shell:footer -->
+  <footer class="colophon colophon-wide">
+    <div class="foot-brand">
+      <a class="brand" href="/" aria-label="Meridian — home">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+          <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="4"/>
+          <path d="M 32 10 A 10.5 22 0 0 0 32 54" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+        </svg>
+        <span class="wordmark">Meridian</span>
+      </a>
+      <p class="foot-line">Open software that decides which satellite passes are worth catching,
+      catches them, checks the result and says what happened.</p>
+      <p class="foot-line"><a href="mailto:hello@meridian.org.in">hello@meridian.org.in</a></p>
+    </div>
+
+    <nav class="foot-col" aria-label="Use Meridian">
+      <p class="foot-h">Use Meridian</p>
+      <ul>
+        <li><a href="/how-it-works/">How it works</a></li>
+        <li><a href="/data/">Data and images</a></li>
+        <li><a href="/areas/">Watch an area</a></li>
+        <li><a href="/stations/">Join with a station</a></li>
+        <li><a href="/support/">Support the project</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="For developers">
+      <p class="foot-h">For developers</p>
+      <ul>
+        <li><a href="/developers/">Start here</a></li>
+        <li><a href="/architecture/">Architecture</a></li>
+        <li><a href="/protocol/">Protocol</a></li>
+        <li><a href="/docs/">All documents</a></li>
+        <li><a href="/terms/">Every term</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="Project">
+      <p class="foot-h">Project</p>
+      <ul>
+        <li><a href="/about/">About</a></li>
+        <li><a href="https://dash.meridian.org.in/">Live dashboard ↗</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian">GitHub ↗</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/ATTRIBUTION.md">Attribution</a></li>
+      </ul>
+    </nav>
+
+    <p class="foot-bar">© 2026 Meridian <span class="dot" aria-hidden="true">·</span>
+    <a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a></p>
+  </footer>
+  <!-- /shell:footer -->
+
+</div>
+
+</body>
+</html>

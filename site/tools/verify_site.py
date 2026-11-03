@@ -15,6 +15,10 @@ there, and each one exists because breaking it is silent:
                  inline <script> or a style="" attribute is a blank element in
                  production and a working one on localhost
 
+and, from content_checks.py, the visitor pages' rules: no sums of money, no
+placeholder payment details, every (i) defined, four breakpoints, and no
+picture that could pass for a measurement.
+
 Run:  python site/tools/verify_site.py
 """
 
@@ -25,11 +29,20 @@ import sys
 from html.parser import HTMLParser
 from pathlib import Path
 
+from content_checks import check_content
+
 SITE = Path(__file__).resolve().parent.parent
 
 # The pages the sitemap is expected to list, and the one that must not appear.
 INDEXED = [
     "index.html",
+    "how-it-works/index.html",
+    "data/index.html",
+    "areas/index.html",
+    "stations/index.html",
+    "support/index.html",
+    "developers/index.html",
+    "terms/index.html",
     "about/index.html",
     "architecture/index.html",
     "docs/index.html",
@@ -243,7 +256,7 @@ def check_modulepreload(pages: dict[str, Page]) -> list[str]:
         if name != "index.html" and preloads_orbit:
             problems.append(
                 f"{name}: modulepreload for orbit.js. Document pages import it "
-                "dynamically above 1180px only; preloading it makes every phone "
+                "dynamically above 80rem only; preloading it makes every phone "
                 "fetch 12 KB it will not use."
             )
     return problems
@@ -311,6 +324,7 @@ def main() -> int:
         + check_sitemap()
         + check_link_styling(pages, css)
         + check_no_inline(pages)
+        + check_content(SITE, INDEXED + NOINDEX, css)
     )
 
     for problem in problems:
