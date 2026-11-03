@@ -192,6 +192,6 @@ def test_element_sets_for_different_objects_are_refused(
 def test_a_naive_datetime_is_refused_at_this_boundary(
     service: SkyfieldOrbitService, iss: ElementSet, iss_refitted: ElementSet
 ) -> None:
-    """CLAUDE.local.md section 6: a naive datetime is a bug, not a tolerance."""
+    """CODE-STANDARDS.md section 6: a naive datetime is a bug, not a tolerance."""
     with pytest.raises(ValueError, match="naive"):
         service.element_set_divergence(iss, iss_refitted, EPOCH.replace(tzinfo=None))

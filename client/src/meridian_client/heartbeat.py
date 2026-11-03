@@ -77,7 +77,7 @@ class StationState:
     """Everything about this heartbeat that is not the held set.
 
     A parameter object rather than six arguments to
-    :func:`build_heartbeat_body`, per CLAUDE.local.md §2 — and it groups the
+    :func:`build_heartbeat_body`, per CODE-STANDARDS.md §2 — and it groups the
     things a station knows about itself, which is a real grouping rather than a
     way of getting under a limit.
     """

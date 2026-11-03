@@ -34,7 +34,7 @@
 
 **Two tiers, one architecture** (D-129). The boxes above are modules, not machines. The **station tier** — the station client, its receiver and its decoder — and the **platform tier** may share one Pi, as they do today, or the platform tier may run on a cloud host for archive processing, model training and public service. The split changes where processes run and nothing about what they are: the same image, the same compose file, the same schema.
 
-**A station is authoritative for its own receptions.** A reception exists first on the station and the platform's row is a copy; after a disconnection the station re-sends what was not acknowledged, and ingest is idempotent (D-027, D-015), so reconciliation is resend rather than merge. The platform stays authoritative for what it assigned. **Nothing assessed depends on a cloud host being reachable** (D-130), and the drills that prove it are `EVALUATION.md` §12.
+**A station is authoritative for its own receptions.** A reception exists first on the station and the platform's row is a copy; after a disconnection the station re-sends what was not acknowledged, and ingest is idempotent (D-027, D-015), so reconciliation is resend rather than merge. The platform stays authoritative for what it assigned. **Nothing the project commits to depends on a cloud host being reachable** (D-130), and the drills that prove it are `EVALUATION.md` §12.
 
 ---
 
@@ -210,9 +210,9 @@ One subsystem, whatever the payload. Every source records the same provenance �
 
 ## Deployment
 
-Everything in Docker Compose. Postgres + TimescaleDB on the Pi's NVMe. Public access via a secure tunnel — no static IP, works from behind the college network.
+Everything in Docker Compose. Postgres + TimescaleDB on the Pi's NVMe. Public access via a secure tunnel — no static IP, works from behind a restrictive network.
 
-**The single machine is the deployment of record** (D-130). A cloud tier may be added for archive processing, model training and public service, funded by student credit that may lapse before submission — so no success criterion, demonstration step or roadmap completion gate may depend on it, and the one-machine path stays supported and measured by CI. What a lapse costs is throughput, never a claim. Which host, on whose account, is open (D-135).
+**The single machine is the deployment of record** (D-130). A cloud tier may be added for archive processing, model training and public service, on credit that may lapse — so no success criterion, demonstration step or roadmap completion gate may depend on it, and the one-machine path stays supported and measured by CI. What a lapse costs is throughput, never a claim. Which host, on whose account, is open (D-135).
 
 **Custody.** Who holds each record on either tier, for how long, and what loses it is one table, `OPERATIONS.md` § Custody and retention (D-281). A station's unacknowledged report is deliverable for thirty days, the platform's acceptance window, and its decoded products exist only on the station.
 

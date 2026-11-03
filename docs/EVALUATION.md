@@ -21,7 +21,7 @@ How every claim in this project is tested, and the threats to validity, stated b
 
 **SC-5's detection** is checked fault by fault, from the platform's own records, by `meridian reliability faults` against a run's fault ledger (D-192). Stage 21's gate runs it over every station fault at once, and the alert latency, SC-5's measured half, is read from Prometheus when one is running. `docs/SCALE-AND-FAULTS.md` records the faults, the scale runs and what each found, all simulated.
 
-SC-6 is the only criterion that is pass/fail rather than measured, and it is effectively the Phase 1 exit criterion. It is listed here because a methodology document that omits the easiest criterion to verify — and the most visible to an examiner — has the omission the wrong way round.
+SC-6 is the only criterion that is pass/fail rather than measured, and it is effectively the Phase 1 exit criterion. It is listed here because a methodology document that omits the easiest criterion to verify — and the most visible to anyone checking — has the omission the wrong way round.
 
 ### Proposed — to agree with the team
 

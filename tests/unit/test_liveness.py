@@ -90,7 +90,7 @@ def test_a_heartbeat_stamped_in_the_future_is_online() -> None:
 
 
 def test_a_naive_now_is_refused() -> None:
-    """CLAUDE.local.md §6: a naive datetime anywhere is a bug.
+    """CODE-STANDARDS.md §6: a naive datetime anywhere is a bug.
 
     Subtracted as though it were UTC, it would misreport a station in another
     timezone by whole hours — silently, and in the direction that looks like a

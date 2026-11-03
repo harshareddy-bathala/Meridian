@@ -322,7 +322,7 @@ def generate_passes(
 
     Raises:
         ValueError: ``horizon.start`` or ``horizon.end`` is naive or not UTC.
-            CLAUDE.local.md §6 makes that a bug rather than something to
+            CODE-STANDARDS.md §6 makes that a bug rather than something to
             normalise, and this is the boundary where a caller's timestamp
             enters the platform.
 

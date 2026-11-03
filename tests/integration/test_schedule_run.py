@@ -578,7 +578,7 @@ def test_another_configuration_s_model_is_refused(
 
 
 def test_a_naive_horizon_is_refused(rollback: Any, network: dict[str, int]) -> None:
-    """CLAUDE.local.md section 6: a naive datetime is a bug, not a tolerance."""
+    """CODE-STANDARDS.md section 6: a naive datetime is a bug, not a tolerance."""
     assert network
     naive = ScheduleRequest(
         start=HORIZON_START.replace(tzinfo=None),

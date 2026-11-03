@@ -62,7 +62,7 @@ class NewHeartbeat:
     """One MSP §4.2 heartbeat, in insertable form.
 
     Bundled rather than passed as separate parameters — past
-    CLAUDE.local.md's cap of four (five, hard), the same reason
+    CODE-STANDARDS.md's cap of four (five, hard), the same reason
     ``store.stations.NewStation`` exists.
     """
 

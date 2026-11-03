@@ -7,7 +7,7 @@ using our own station alone.* Propagation is the first place that could quietly
 stop being true, because Skyfield's loader downloads data files when it is asked
 to and the request would succeed on every developer machine and in CI.
 
-It would then fail on a Pi in a college building on the one night the network
+It would then fail on a Pi on a borrowed network on the one night the network
 was down, during a pass that does not repeat — which is the failure this project
 is least able to explain and least able to afford.
 

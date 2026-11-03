@@ -221,7 +221,7 @@ python deploy/tools/long_run.py --hours 2 --seed 4471 --sample-every-minutes 15 
 
 *Stage 25, D-253. This section is the **specification of the four faults' effects**, written before Stage 27's diagnosis exists. D-105 asks for it to be reviewed by a team member who is not the diagnosis author, to guard against the two agreeing by construction.*
 
-**Review:** pending. Record here who reviewed it and when. **Stage 27 was begun on 2026-10-01 without it**, by the team's choice (D-270). The review is still owed, and it reviews exactly the bytes `tests/unit/test_fault_spec_pin.py` pins, so a reviewer reads the specification the diagnosis was built against and not a later one.
+**Review:** pending. Record here who reviewed it and when. **Stage 27 was begun on 2026-10-01 without it** (D-270). The review is still owed, and it reviews exactly the bytes `tests/unit/test_fault_spec_pin.py` pins, so a reviewer reads the specification the diagnosis was built against and not a later one.
 
 Each fault is injected into a virtual station's receiver, `meridian_sim/sky_effects.py`, and changes what that station *measures*. Nothing about the fault travels anywhere else:
 - the MSP body carries only the evidence it changed;

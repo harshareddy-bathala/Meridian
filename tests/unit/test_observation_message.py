@@ -103,7 +103,7 @@ def test_a_non_utc_instant_is_converted_or_refused_but_never_sent_raw() -> None:
 
 
 def test_a_naive_instant_is_refused() -> None:
-    """CLAUDE.local.md §6: a naive datetime is a bug, not a tolerance."""
+    """CODE-STANDARDS.md §6: a naive datetime is a bug, not a tolerance."""
     result = ObservationResult(
         assignment_id="as_44b2",
         started_at=datetime(2026, 8, 14, 9, 41, 18),  # noqa: DTZ001

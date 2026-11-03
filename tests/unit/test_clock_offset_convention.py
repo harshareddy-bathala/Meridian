@@ -7,7 +7,7 @@ A station whose clock runs fast reports a NEGATIVE offset.
 This is worth a test file of its own because a sign error here is invisible.
 Nothing crashes, no constraint fires, every number still has plausible
 magnitude — and `docs/EVALUATION.md` §6.1's timing-error figure comes out
-inverted, in a report, in a viva.
+inverted, in a published report.
 
 **These assertions predate the code they now check.** The file was written at
 Stage 0 against a local copy of the estimator, so that the convention was fixed

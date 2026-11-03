@@ -312,7 +312,7 @@ def _register(
 class _Wiring:
     """Where one station's files are, where its bytes go, and what is broken.
 
-    Bundled so :func:`_assemble` stays inside CLAUDE.local.md §2's parameter
+    Bundled so :func:`_assemble` stays inside CODE-STANDARDS.md §2's parameter
     limit, and because the three genuinely travel together: they are everything
     about a station that is not derived from its seed.
     """

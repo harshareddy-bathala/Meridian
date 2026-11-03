@@ -2,7 +2,7 @@
 
 Everything else in that module talks to Postgres and is covered by
 ``tests/integration/test_store_invites.py``; these two functions don't, and
-CLAUDE.local.md §3 asks that computation be separated from I/O for exactly
+CODE-STANDARDS.md §3 asks that computation be separated from I/O for exactly
 this reason — so it can be tested without one.
 """
 

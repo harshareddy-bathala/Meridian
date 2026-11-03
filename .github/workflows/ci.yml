@@ -38,7 +38,7 @@ jobs:
         run: uv lock --check
 
       - name: No module over 400 lines
-        # CLAUDE.local.md section 2 caps a module at 400 lines, and ruff has no
+        # CODE-STANDARDS.md section 2 caps a module at 400 lines, and ruff has no
         # rule for it — so without this the one size limit that most reliably
         # predicts an unreviewable file was the one nothing checked.
         #
@@ -61,7 +61,7 @@ jobs:
               done)
           if [ -n "$over" ]; then
             echo "$over" | while read -r line; do echo "::error::$line"; done
-            echo "CLAUDE.local.md section 2: 400 lines is the limit. Extract a named helper, do not compress."
+            echo "CODE-STANDARDS.md section 2: 400 lines is the limit. Extract a named helper, do not compress."
             exit 1
           fi
 

@@ -120,7 +120,7 @@ def derive_liveness(last_heartbeat_at: datetime | None, *, now: datetime) -> Liv
     Raises:
         ValueError: If either instant is naive. A naive datetime would be
             subtracted as though it were UTC and would silently misreport a
-            station in another timezone by whole hours — CLAUDE.local.md §6
+            station in another timezone by whole hours — CODE-STANDARDS.md §6
             makes this a bug rather than a tolerance.
     """
     if now.tzinfo is None:

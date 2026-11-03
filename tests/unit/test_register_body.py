@@ -102,7 +102,7 @@ def test_declaring_a_precision_does_not_coarsen_the_coordinates_sent() -> None:
 def test_location_uses_the_short_wire_names() -> None:
     """§4.1 names them `lat` and `lon`, not `lat_deg` and `lon_deg`.
 
-    The units live in the Python names, per CLAUDE.local.md §4, and the wire uses
+    The units live in the Python names, per CODE-STANDARDS.md §4, and the wire uses
     the specification's spelling. Translating in one place is the point of having
     this function at all.
     """

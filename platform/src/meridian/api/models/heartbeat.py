@@ -81,7 +81,7 @@ class HeartbeatRequestBody(BaseModel):
 
     # AwareDatetime, not datetime: a naive `sent_at` would be stored as though
     # it were UTC and would misreport a station in another timezone by whole
-    # hours. CLAUDE.local.md §6 makes that a bug rather than a tolerance, and
+    # hours. CODE-STANDARDS.md §6 makes that a bug rather than a tolerance, and
     # pydantic rejecting it here turns it into a `400 malformed` a station can
     # act on instead of a wrong row nobody notices.
     sent_at: AwareDatetime

@@ -16,7 +16,7 @@ Context for AI coding assistants working in this repository. Read this before wr
 
 One physical station is built by the team. It is the network's first member and the instrument that validates the software. **The software is the contribution; the station is the proof.**
 
-Built by a team of 3 across two semesters, and assessed academically — it is defended in a viva. **Scope is decided as a product, not as coursework.** The code is written to be picked up by outside contributors after submission, the protocol is open for anyone to implement, and every published number is regenerable by someone who was not in the room. Where an academic deadline and a durable design disagree, say so explicitly rather than quietly shipping the shortcut.
+Built by a team of 3, and every line of it must be explainable by the people who wrote it. **Scope is decided as a product, not to a deadline.** The code is written to be picked up by outside contributors, the protocol is open for anyone to implement, and every published number is regenerable by someone who was not in the room. Where a deadline and a durable design disagree, say so explicitly rather than quietly shipping the shortcut.
 
 ---
 
@@ -100,6 +100,7 @@ meridian/
 │   ├── EVALUATION.md
 │   ├── DECISIONS.md      decisions taken during implementation
 │   ├── GIT-WORKFLOW.md   branching, commits, migration rules
+│   ├── CODE-STANDARDS.md size, names, units, time and the lint set
 │   ├── OPERATIONS.md     the runbook: bring-up, commands, backups, alerts
 │   ├── SCALE-AND-FAULTS.md   Stage 21's fault and scale results, simulated
 │   ├── ACCEPTANCE.md     every clause of Stage 24, its status and what proves it
@@ -180,7 +181,7 @@ Key points that constrain implementation:
 
 ## Current phase
 
-**Phase 1 — Foundations — is done.** Its exit criterion, a virtual station visible on the public site from outside the college network, was met on 2026-09-14 (D-088).
+**Phase 1 — Foundations — is done.** Its exit criterion, a virtual station visible on the public site from outside the network it runs on, was met on 2026-09-14 (D-088).
 
 Work now follows the stage order in `docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md`, whose "Where the build has got to" section says which stage is next. Do not scaffold a module ahead of the stage that builds it: hardware stays an empty stub with documented interfaces until its stages arrive.
 

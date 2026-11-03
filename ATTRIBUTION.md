@@ -7,8 +7,8 @@ Every idea, algorithm or approach in this repository that was learned by reading
 Three separate reasons, all of them serious:
 
 1. **Licence.** The open ground station projects we learn from are licensed under GPL-3.0 and AGPL-3.0. Copying their source into this repository would impose those terms on us and require preserving their notices. We do not copy source. This file records that we read and reimplemented.
-2. **Academic integrity.** Unacknowledged reuse in a submitted project is plagiarism, and consequences for it are more severe than for any technical shortfall.
-3. **Defence.** In a viva, "did you copy this?" is a fair question. This file turns an accusation into a demonstration of professional practice. Its absence is what looks bad.
+2. **Integrity.** Unacknowledged reuse is plagiarism, and it costs an open project more trust than any technical shortfall.
+3. **Defence.** For any open project, "did you copy this?" is a fair question. This file turns an accusation into a demonstration of professional practice. Its absence is what looks bad.
 
 ## Rules
 

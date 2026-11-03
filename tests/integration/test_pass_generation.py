@@ -462,7 +462,7 @@ def test_a_newer_element_set_writes_a_second_prediction(
 def test_a_naive_horizon_is_refused_before_anything_is_read(
     rollback: Any, network: dict[str, int]
 ) -> None:
-    """CLAUDE.local.md §6: a naive datetime is a bug, not a tolerance."""
+    """CODE-STANDARDS.md §6: a naive datetime is a bug, not a tolerance."""
     assert network
     naive = GenerationHorizon(start=HORIZON.start.replace(tzinfo=None), end=HORIZON.end)
 

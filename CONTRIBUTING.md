@@ -41,7 +41,7 @@ The [README](README.md#development) shows how to run the integration suite again
   - Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`, `ci`, `spec`.
   - Scopes: the module you touched, such as `scheduler`, `api`, `client`, `simulator`, `dashboard`, `site`, `deploy` or `ingest`. `docs` is for documents and `repo` is for the repository itself. The full list is in `.github/workflows/ci.yml` › `conventions`.
 - **Tests come with the change.** A fix arrives with the test that would have caught it.
-- **A module stays under 400 lines.** CI enforces it on the platform, client and simulator.
+- **The code follows [`docs/CODE-STANDARDS.md`](docs/CODE-STANDARDS.md):** modules under 400 lines, units in names, UTC everywhere. CI checks most of it.
 - **One review, minimum, before merge.**
 
 ## Decisions are written down

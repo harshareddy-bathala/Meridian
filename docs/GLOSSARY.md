@@ -64,7 +64,7 @@ Where silent bugs live. These are not interchangeable, and converting between th
 
 **Yagi** — a directional antenna. More gain, but must be pointed, which is why the rotator exists.
 
-**Rotator** — the motorised mount that points a directional antenna. Ours is built in the college workshop and driven by an Arduino over the network.
+**Rotator** — the motorised mount that points a directional antenna. Ours is built in a workshop and driven by an Arduino over the network.
 
 **Slew** — moving the antenna from one bearing to another. Takes time, so the scheduler must leave room for it between passes; a schedule that ignores slew time is not executable.
 
@@ -192,7 +192,7 @@ What the platform reads from outside, and where each record lives — modules 18
 
 ## Conventional short names in code
 
-Not domain terms, but recorded so the "no abbreviations outside this glossary" rule in `CLAUDE.local.md` §4 is honest in both directions. These are permitted as local variable names only, never as part of a public name.
+Not domain terms, but recorded so the "no abbreviations outside this glossary" rule in `CODE-STANDARDS.md` §4 is honest in both directions. These are permitted as local variable names only, never as part of a public name.
 
 `conn` connection · `cur` cursor · `exc` a caught exception · `argv` / `args` command-line arguments · `raw` an unparsed string straight from the environment
 

@@ -249,7 +249,7 @@ def test_an_empty_or_reversed_interval_yields_nothing(
 def test_a_naive_datetime_is_refused_at_this_boundary(
     service: SkyfieldOrbitService, iss: ElementSet
 ) -> None:
-    """CLAUDE.local.md section 6: a naive datetime is a bug, not a tolerance.
+    """CODE-STANDARDS.md section 6: a naive datetime is a bug, not a tolerance.
 
     Refused here rather than deeper, where the offset would already have been
     silently taken as UTC and the whole pass shifted by the local timezone.

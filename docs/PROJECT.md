@@ -3,7 +3,7 @@
 
 **Project document — problem, design, method, and plan**
 
-Department of Computer Technology · Final Year Project · Team of 3 · Two semesters
+A final-year engineering project, built by a team of three
 Document version 3.0
 
 ---
@@ -177,7 +177,7 @@ Receiving a pass is not the end of the work. Before this layer, an observation t
 | 19 | **regional monitoring** | For a registered area of interest, what the ingested products say about it over time, and which of the network's own receptions cover it | An area registered in the demonstration, its record built from snapshots alone |
 | 20 | **deployment and data custody** | Who holds which record and what survives a disconnection: the station authoritative for its own receptions, reconciliation on reconnect, and backup, restore and retention across both tiers (D-129) | Both independence drills pass, and a restore is proven on a machine other than the one backed up |
 
-**It works on whatever was received** — an LRPT image, a LoRa telemetry frame, or nothing at all. None of the first five reads image content; a pass that received nothing still has an outcome, heartbeat evidence and a noise floor, which is what loss diagnosis reads. **It adds no hardware and no cost** (D-094): modules 13 to 17 run on the funded station and the simulator. **Modules 18 to 20 add no hardware either, and no committed cost** — the data they read is published, and the cloud tier module 20 permits is funded by student credit that **nothing assessed may depend on** (D-130). A tile from any of these sources is shown, never sampled for a number (D-133).
+**It works on whatever was received** — an LRPT image, a LoRa telemetry frame, or nothing at all. None of the first five reads image content; a pass that received nothing still has an outcome, heartbeat evidence and a noise floor, which is what loss diagnosis reads. **It adds no hardware and no cost** (D-094): modules 13 to 17 run on the funded station and the simulator. **Modules 18 to 20 add no hardware either, and no committed cost** — the data they read is published, and the cloud tier module 20 permits runs on credit that **nothing the project commits to may depend on** (D-130). A tile from any of these sources is shown, never sampled for a number (D-133).
 
 **Who benefits, and how.**
 
@@ -373,7 +373,7 @@ Thirty-six weeks planned against roughly thirty-two working weeks, the differenc
 
 | Phase | Weeks | Content | Done when |
 |---|---|---|---|
-| **1 — Foundations** | 1–7 | Data model and store. Orbit service and pass prediction. MSP drafted and published. Station registry. First simulated station end to end. | A virtual station is visible on our public site from outside the college network |
+| **1 — Foundations** | 1–7 | Data model and store. Orbit service and pass prediction. MSP drafted and published. Station registry. First simulated station end to end. | A virtual station is visible on our public site from outside the network it runs on |
 | **2 — Intelligence** | 8–14 | Archive import. Obstruction inference. Uncertainty model. Prediction model. Ablation A–D. Scheduler. | The ablation result is written down, whatever it is |
 | **3 — Operations** | 12–18 | Reliability layer, service targets, alerting, loss budget. Failure injection. Fifty-station simulator. Dashboard in full. | Platform runs unattended 72 hours; an injected failure is detected without anyone watching |
 | **4 — Hardware** | 15–24 | Antenna, receiver, amplifier, cabling. Rotator with controller firmware. Station client on the Pi. Installation. | Station 001 receives on a schedule the platform produced |
@@ -386,9 +386,9 @@ Phases overlap deliberately: hardware procurement runs during Phase 3, and valid
 
 ## 13. Demonstration scenario
 
-What an examiner sees, end to end, in about twelve minutes.
+What a visitor sees, end to end, in about twelve minutes.
 
-1. **Open the website** — on their own phone, from outside the college network. The map shows Station 001 online, with simulated stations elsewhere.
+1. **Open the website** — on their own phone, from outside the network the platform runs on. The map shows Station 001 online, with simulated stations elsewhere.
 2. **Look at the pass queue.** Six satellites approaching. Each carries a predicted yield. One near the top has a *lower* maximum elevation than one below it.
 3. **Ask why.** The platform explains: the higher pass crosses an obstructed azimuth and its element set is six days old, beyond the learned uncertainty threshold. The lower pass is clean and fresh. **This one screen is the entire project.**
 4. **The scheduler commits.** Three minutes before acquisition the plan is issued over MSP; the station acknowledges.
@@ -444,9 +444,9 @@ Every step runs on our own infrastructure.
    Internet  →  PLATFORM
 ```
 
-**Primary reception target at 137 MHz** is the digital LRPT downlink from the Meteor-M series. The older analogue APT service is no longer operating, so guidance written before 2025 is out of date on this point — a detail worth stating because it is the first thing a knowledgeable examiner will ask.
+**Primary reception target at 137 MHz** is the digital LRPT downlink from the Meteor-M series. The older analogue APT service is no longer operating, so guidance written before 2025 is out of date on this point — a detail worth stating because it is the first thing a knowledgeable reader will ask.
 
-The rotator is built in the college workshop: printed structure with the worm gear machined in metal, driven by stepper motors under an Arduino controller taking pointing commands over the network.
+The rotator is built in a workshop: printed structure with the worm gear machined in metal, driven by stepper motors under an Arduino controller taking pointing commands over the network.
 
 **The station never transmits.** Reception only, which avoids the licensing that transmission would require.
 
@@ -464,24 +464,23 @@ Owner reports (§5.6) need a way to reach a station's owner, and a contact addre
 
 ## 17. Budget
 
-**Already available, no cost:** Raspberry Pi 5 with power supply, active cooling and 256 GB NVMe; Arduino Uno R4 WiFi as rotator controller; three laptops; college 3D printing, tool and die laboratory, mechanical workshop, rooftop space.
+**Already available, no cost:** Raspberry Pi 5 with power supply, active cooling and 256 GB NVMe; Arduino Uno R4 WiFi as rotator controller; three laptops; access to 3D printing, tool and die laboratory, mechanical workshop, rooftop space.
 
-**Hosting:** the platform runs on the Pi, published to a public address through a secure tunnel — no static IP, works from behind the college network, no cost.
+**Hosting:** the platform runs on the Pi, published to a public address through a secure tunnel — no static IP, works from behind a restrictive network, no cost.
 
-| Tier | Contents | Cost |
-|---|---|---|
-| **1 — Core station** | Receiver, amplifier, antenna, feedline, surge protection, enclosure, mast | ₹24,300 |
-| **2 — Second station type** | Microcontroller station and antenna | ₹3,300 |
-| **3 — Tracking** *(optional)* | Rotator, motors, drivers, structure, UHF Yagi and amplifier | ₹15,900 |
+| Tier | Contents |
+|---|---|
+| **1 — Core station** | Receiver, amplifier, antenna, feedline, surge protection, enclosure, mast |
+| **2 — Second station type** | Microcontroller station and antenna |
+| **3 — Tracking** *(optional)* | Rotator, motors, drivers, structure, UHF Yagi and amplifier |
 
-**Requested: ₹27,600** (Tiers 1 and 2, including 15% contingency) — approximately ₹9,200 per member.
-**With tracking: ₹43,500.**
+Tiers 1 and 2 are the committed build. The team and its supporters cover the station and the running costs; support beyond running costs funds Tier 3, then more stations.
 
 Tier 3 is genuinely optional: every claim the project makes is provable with a fixed antenna. Tracking adds a second band, an antenna that moves under software control during the demonstration, and substantive use of the institute's machining facilities.
 
-The post-reception layer in §5.6 changes nothing here: it needs no hardware beyond Tiers 1 and 2, and the request stays at ₹27,600 (D-094).
+The post-reception layer in §5.6 changes nothing here: it needs no hardware beyond Tiers 1 and 2 (D-094).
 
-**Cloud hosting is not in this request and is not depended on.** Where a cloud tier is used it is funded by student credit, which may lapse before submission and cannot be renewed by the team. Nothing assessed may require it (D-130): the single-machine deployment stays supported and tested, and a lapse costs throughput rather than any claim, deliverable or criterion. No recurring cost is committed to.
+**Cloud hosting is optional and never depended on.** Where a cloud tier is used, its credit may lapse and may not be renewable. Nothing the project commits to may require it (D-130): the single-machine deployment stays supported and tested, and a lapse costs throughput rather than any claim, deliverable or criterion. No recurring cost is committed to.
 
 Nothing is purchased before the software that consumes it exists — with one exception, the receiver, bought early so that reception from our site is confirmed before any installation spend.
 
@@ -489,9 +488,9 @@ Nothing is purchased before the software that consumes it exists — with one ex
 
 ## 18. Team and individual contributions
 
-Each member owns a separable, individually assessable deliverable, and each must be able to explain the whole system.
+Each member owns a separable deliverable, and each must be able to explain the whole system.
 
-| Member | Owns | Individually assessable contribution |
+| Member | Owns | Main contribution |
 |---|---|---|
 | **1 — Platform & reliability** *(lead)* | Observation store, public API, dashboard, deployment, monitoring, service targets, failure injection | Design and evaluation of the reliability layer, including the loss-budget formulation and measured failure-detection performance |
 | **2 — Orbit & prediction** | Propagation, uncertainty model, timing-error analysis, prediction model, scheduler, simulator | The orbital uncertainty model and the ablation study, with calibration analysis |
@@ -537,7 +536,7 @@ We are building the layer that fixes that — the protocol and the network for o
 
 - **Not a new target.** HRPT is a second transmitter row on satellites already in the catalogue, alongside their LRPT downlink.
 - **The same single SDR**, switched between antennas by the scheduler. A station declaring an L-band capability beside its VHF one is already a case the scheduler's per-station non-overlap rule covers (D-053).
-- **Hardware:** a DTH dish with a helix feed, a 1.7 GHz LNA, and the tracking tier — the dish's beam is too narrow to leave fixed. The tracking tier's 435 MHz Yagi and amplifier may be swapped for the L-band parts to stay within ₹43,500; **confirm with a bill of materials**, including that the receiver tunes 1.7 GHz at the sample rate HRPT needs.
+- **Hardware:** a DTH dish with a helix feed, a 1.7 GHz LNA, and the tracking tier — the dish's beam is too narrow to leave fixed. The tracking tier's 435 MHz Yagi and amplifier may be swapped for the L-band parts so the tier's contents stay the same size; **confirm with a bill of materials**, including that the receiver tunes 1.7 GHz at the sample rate HRPT needs.
 - **Still about 1 km per pixel.** HRPT's value is not sharper images: it is uncompressed data on all six channels, with calibrated temperature from onboard telemetry, which is what enables night-time thermal products.
 - **§17's statement would no longer hold for this path.** "Every claim the project makes is provable with a fixed antenna" is true of everything the project commits to and false of L-band reception, which needs a tracking dish.
 

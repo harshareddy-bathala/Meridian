@@ -241,7 +241,7 @@ def test_the_scan_does_not_look_past_its_own_end() -> None:
 
 
 def test_a_naive_datetime_is_refused_at_this_boundary() -> None:
-    """CLAUDE.local.md section 6: a naive datetime is a bug, not a tolerance."""
+    """CODE-STANDARDS.md section 6: a naive datetime is a bug, not a tolerance."""
     naive = ElevationScan(
         at_seconds(-300).replace(tzinfo=None), at_seconds(900), coarse_step_s=30.0
     )

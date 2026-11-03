@@ -89,7 +89,7 @@ class DecodeStatistics:
 class NewObservation:
     """One MSP §4.4 observation, in insertable form.
 
-    Bundled rather than passed as parameters, past CLAUDE.local.md's cap of four,
+    Bundled rather than passed as parameters, past CODE-STANDARDS.md's cap of four,
     for the same reason as ``store.heartbeats.NewHeartbeat``.
 
     ``satellite_id`` and ``simulated`` are derived by the caller — the first from
