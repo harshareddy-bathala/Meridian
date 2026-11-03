@@ -90,3 +90,56 @@ export function describeCapture(capture: Proportion): string {
   const span = interval === null ? "" : ` [${interval[0].toFixed(2)}, ${interval[1].toFixed(2)}]`;
   return `${estimate.toFixed(2)}${span}, ${passes}`;
 }
+
+/** A population's figures for the network view: simulated and measured apart. */
+export interface PopulationSummary {
+  simulated: boolean;
+  passes: number;
+  capture: Proportion;
+  budget: { allowed: number; spent: number; remaining: number; exhausted: boolean };
+}
+
+export interface NetworkReliability {
+  windowStart: string;
+  windowEnd: string;
+  measured: PopulationSummary;
+  simulated: PopulationSummary;
+}
+
+function decodePopulation(value: unknown, path: string): PopulationSummary {
+  const fields = asObject(value, path);
+  const budget = asObject(fields.loss_budget, `${path}.loss_budget`);
+  const at = `${path}.loss_budget`;
+  return {
+    simulated: path.endsWith("simulated"),
+    passes: asNumber(fields, "passes", path),
+    capture: decodeProportion(fields.capture_rate, `${path}.capture_rate`),
+    budget: {
+      allowed: asNumber(budget, "allowed", at),
+      spent: asNumber(budget, "spent", at),
+      remaining: asNumber(budget, "remaining", at),
+      exhausted: budget.exhausted === true,
+    },
+  };
+}
+
+export function decodeNetworkReliability(body: unknown): NetworkReliability {
+  const fields = asObject(body, "reliability");
+  return {
+    windowStart: asString(fields, "window_start", "reliability"),
+    windowEnd: asString(fields, "window_end", "reliability"),
+    measured: decodePopulation(fields.measured, "reliability.measured"),
+    simulated: decodePopulation(fields.simulated, "reliability.simulated"),
+  };
+}
+
+/** Both populations' figures, from the same read the station panel uses. */
+export async function fetchNetworkReliability(fetcher: Fetcher, signal: AbortSignal): Promise<NetworkReliability> {
+  return decodeNetworkReliability(await getJson(fetcher, "/api/v1/reliability", "the reliability summary", signal));
+}
+
+/** "3 of 12.5 lost passes spent", or that the budget is exhausted. */
+export function describeBudget(budget: PopulationSummary["budget"]): string {
+  const spent = `${String(budget.spent)} of ${budget.allowed.toFixed(1)} allowed lost passes spent`;
+  return budget.exhausted ? `${spent}: the budget is exhausted` : spent;
+}

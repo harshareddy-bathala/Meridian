@@ -252,6 +252,14 @@ SCENARIOS: dict[str, tuple[str, ...]] = {
         INTERFERENCE,
         SATELLITE_SILENT,
     ),
+    "demo": (
+        RECEIVER_DOWN,
+        DECODER_DEGRADED,
+        CLOCK_STEP,
+        OBSTRUCTION,
+        INTERFERENCE,
+        SATELLITE_SILENT,
+    ),
 }
 """Which faults each named scenario may inject.
 
@@ -270,6 +278,14 @@ decoder as its control, in one fleet (D-278): a dead receiver for a station not
 listening, the stepped clock for timing, and Stage 25's obstruction,
 interference and silence. Stage 25's degradation is left out: it is SC-9's, and
 its loss on every pass would hide the others.
+
+``demo`` is the diagnosis set spread thin, for a fleet people watch on the wall
+clock (D-330): most stations carry nothing, and each of the rest carries one of
+its station faults (:data:`~meridian_sim.fault_choice.ONE_FAULT_SHARE`).
+Degradation is left out here too, for a reason of its own: a fleet started cold
+trains its first baselines on whatever its chains already do (D-293), so a
+degradation present from the first hour would be learned as normal and never
+warned of.
 """
 
 

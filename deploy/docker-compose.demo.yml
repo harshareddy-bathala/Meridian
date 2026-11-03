@@ -1,0 +1,18 @@
+# The demonstration fleet (D-330, D-333), with the settings it is judged under:
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml \
+#     --profile demo up -d
+#
+# An override file rather than the profile alone, because a profile can add
+# services but cannot change the api's and the jobs service's settings. Both
+# read reliability.demo.toml, a one-hour settle margin, because the api counts
+# the figures from classifications the jobs service wrote, found by the hash of
+# the same table.
+
+services:
+  api:
+    environment:
+      MERIDIAN_RELIABILITY_CONFIG: /app/deploy/reliability.demo.toml
+  jobs:
+    environment:
+      MERIDIAN_RELIABILITY_CONFIG: /app/deploy/reliability.demo.toml

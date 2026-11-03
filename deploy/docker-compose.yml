@@ -168,6 +168,23 @@ services:
       # an older .env still counts, so upgrading never makes a deployment that
       # considered itself public stop doing so.
       MERIDIAN_PUBLIC: ${CLOUDFLARE_TUNNEL_TOKEN:+1}
+      # A sealed model run's summary under /published, for /api/v1/insights/model;
+      # empty answers not_yet_computed (D-332).
+      REPORT_SUMMARY: ${REPORT_SUMMARY:-}
+      # The areas summary under /published, served by /api/v1/areas only while
+      # AREAS_PUBLISHED is true; until the team settles D-137 it stays false
+      # and the read answers not_yet_computed (D-227, D-326).
+      AREAS_PUBLISHED: ${AREAS_PUBLISHED:-false}
+      AREAS_SUMMARY: ${AREAS_SUMMARY:-}
+      # A reliability.toml inside the container; empty uses the defaults. The
+      # jobs service must name the same file: the figures here are counted from
+      # classifications it wrote, found by their configuration's hash.
+      MERIDIAN_RELIABILITY_CONFIG: ${RELIABILITY_CONFIG:-}
+    # What the public API may serve from files: published summaries, and nothing
+    # else. Not the datasets directory, so the process that faces the internet
+    # never holds a snapshot it could be made to read (D-332).
+    volumes:
+      - ${PUBLISHED_DIR:-../data/published}:/published:ro
     # For a laptop and for CI. docker-compose.public.yml removes it: with the
     # port published, a request that never crossed Cloudflare could name any
     # address in CF-Connecting-IP (D-051, D-206).
@@ -290,6 +307,8 @@ services:
       # A notifications.toml inside the container, usually under /datasets;
       # empty queues no owner reports. It holds no address (D-300).
       MERIDIAN_NOTIFICATIONS_CONFIG: ${NOTIFICATIONS_CONFIG:-}
+      # The same reliability.toml as the api's; empty uses the defaults.
+      MERIDIAN_RELIABILITY_CONFIG: ${RELIABILITY_CONFIG:-}
       MERIDIAN_DATASETS_ROOT: /datasets
       # Its metrics listener requires the same token as the API's /metrics,
       # and the same placeholder refusal applies when the deployment is public.
@@ -451,7 +470,7 @@ services:
   # order the chain actually has: something must load a catalogue and mint
   # invites before a station can register, and passes can only be generated for
   # stations that already exist. See docs/DECISIONS.md D-079.
-  sim-seed:
+  sim-seed: &sim-seed
     profiles: ["sim"]
     <<: *platform
     depends_on:
@@ -461,8 +480,16 @@ services:
       # meridian_api may read and write rows and nothing else (D-207).
       DATABASE_URL: postgresql://meridian_api:${API_DATABASE_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
       SIMULATOR_STATION_COUNT: ${SIMULATOR_STATION_COUNT:-1}
+      # Catalogue files, as paths inside this container, of which the first
+      # that exists is loaded: /catalogue is deploy/catalogue/, /data is data/.
+      SIMULATOR_CATALOGUE: ${SIMULATOR_CATALOGUE:-/catalogue/development.json}
     volumes:
       - sim-state:/var/lib/meridian-sim
+      # The checkout's catalogue directory rather than the image's copy, so a
+      # catalogue written after the image was built is the one loaded; and the
+      # data directory, where `meridian catalogue export` writes an offline one.
+      - ./catalogue:/catalogue:ro
+      - ../data:/data:ro
     # One invite per station, written where the simulator will look for them.
     #
     # Re-running is safe, and both halves of that matter. The catalogue load is
@@ -480,7 +507,16 @@ services:
       - -c
       - |
         set -e
-        meridian catalogue load --file deploy/catalogue/development.json
+        catalogue=
+        for path in $${SIMULATOR_CATALOGUE:-/catalogue/development.json}; do
+          if [ -f "$$path" ]; then catalogue="$$path"; break; fi
+        done
+        if [ -z "$$catalogue" ]; then
+          echo "none of SIMULATOR_CATALOGUE exists: $$SIMULATOR_CATALOGUE" >&2
+          exit 1
+        fi
+        echo "loading $$catalogue"
+        meridian catalogue load --file "$$catalogue"
         invites=/var/lib/meridian-sim/invites.txt
         have=0
         if [ -f "$$invites" ]; then have=$$(wc -l < "$$invites"); fi
@@ -491,7 +527,7 @@ services:
         fi
     restart: "no"
 
-  simulator:
+  simulator: &simulator
     profiles: ["sim"]
     <<: *platform
     depends_on:
@@ -518,6 +554,57 @@ services:
       - meridian_sim.station
     restart: unless-stopped
 
+  # `--profile demo` is a fleet to watch on the wall clock (D-330): fifty
+  # stations under the `demo` scenario, where about one in five carries a single
+  # fault and the rest are clean, on the freshest catalogue there is. It is the
+  # sim profile's two services with other settings and a state volume of its
+  # own, so its stations, invites and fault ledger never mix with a sim fleet's.
+  # Run one profile or the other, not both: both fleets talk to one platform.
+  demo-seed:
+    <<: *sim-seed
+    profiles: ["demo"]
+    environment:
+      DATABASE_URL: postgresql://meridian_api:${API_DATABASE_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+      SIMULATOR_STATION_COUNT: ${DEMO_STATION_COUNT:-50}
+      # data/catalogue/live.json is the held catalogue with each satellite's
+      # current element set, exported by `meridian catalogue export` for an
+      # offline machine; development.json is the fallback that is always there.
+      # Only one is loaded: two catalogues in one database can name one
+      # satellite's downlink twice.
+      SIMULATOR_CATALOGUE: /data/catalogue/live.json /catalogue/development.json
+    volumes:
+      - demo-state:/var/lib/meridian-sim
+      - ./catalogue:/catalogue:ro
+      - ../data:/data:ro
+
+  demo-simulator:
+    <<: *simulator
+    profiles: ["demo"]
+    depends_on:
+      api:
+        condition: service_healthy
+      demo-seed:
+        condition: service_completed_successfully
+    environment:
+      MERIDIAN_BASE_URL: http://api:8000
+      SIMULATOR_SEED: ${SIMULATOR_SEED:-4471}
+      SIMULATOR_STATION_COUNT: ${DEMO_STATION_COUNT:-50}
+      SIMULATOR_SCENARIO: demo
+      # The satellite the scenario's one fleet-wide silence switches off. It
+      # must be in the loaded catalogue; Meteor-M2-3 is in both.
+      SIMULATOR_SILENT_SATELLITE: ${DEMO_SILENT_SATELLITE:-norad:57166}
+      SIMULATOR_STATE_DIR: /var/lib/meridian-sim
+      SIMULATOR_INVITES_FILE: /var/lib/meridian-sim/invites.txt
+    volumes:
+      - demo-state:/var/lib/meridian-sim
+    # Its own run id, so a demo station never claims a sim run's.
+    command:
+      - python
+      - -m
+      - meridian_sim.station
+      - --run-id
+      - demo-${SIMULATOR_SEED:-4471}
+
 volumes:
   db-data:
   front-cache:
@@ -525,4 +612,5 @@ volumes:
   alertmanager-data:
   grafana-data:
   sim-state:
+  demo-state:
   report-sink:

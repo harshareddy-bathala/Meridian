@@ -39,6 +39,10 @@ export interface Explanation {
   priorityWeighted: boolean;
   /** For a skip, what took its slot; for a selection, the best it displaced. */
   alternative: Weighed | null;
+  /** Every pass it could not share the station with, best first (D-170). */
+  weighedAgainst: Weighed[];
+  /** For a skip, the constraint that decided it (D-166). */
+  rule: "overlap" | "eligible_cap" | null;
   runStatus: (typeof RUN_STATUSES)[number];
 }
 
@@ -102,6 +106,18 @@ function decodeWeighed(value: unknown, path: string): Weighed | null {
   };
 }
 
+const RULES = ["overlap", "eligible_cap"] as const;
+
+function decodeWeighedList(value: unknown, path: string): Weighed[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${path}: expected an array`);
+  }
+  return value.flatMap((one, index) => {
+    const weighed = decodeWeighed(one, `${path}[${String(index)}]`);
+    return weighed === null ? [] : [weighed];
+  });
+}
+
 export function decodeExplanation(value: unknown, path: string): Explanation | null {
   if (value === null) {
     return null;
@@ -118,6 +134,8 @@ export function decodeExplanation(value: unknown, path: string): Explanation | n
     priority: asNumber(terms, "priority", `${path}.terms`),
     priorityWeighted: asBoolean(terms, "priority_weighted", `${path}.terms`),
     alternative: decodeWeighed(fields.alternative, `${path}.alternative`),
+    weighedAgainst: decodeWeighedList(fields.weighed_against, `${path}.weighed_against`),
+    rule: fields.rule === null ? null : asOneOf(fields, "rule", RULES, path),
     runStatus: asOneOf(run, "status", RUN_STATUSES, `${path}.run`),
   };
 }

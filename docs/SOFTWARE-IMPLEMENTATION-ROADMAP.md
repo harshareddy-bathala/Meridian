@@ -48,6 +48,24 @@ flowchart TD
 
 *Snapshot taken 2026-11-02. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
+**Stage 35's software is built** (2026-11-02), after Stage 34 merged. Its decisions are D-330 through D-335, `docs/OPERATIONS.md` § The demonstration and § The network's public views are its runbook, `docs/SCALE-AND-FAULTS.md` § The demonstration fleet records its trials, and it added no migration.
+- **The completion gate passes, in two halves** (D-335). *A rehearsal against the `demo` profile steps through `PROJECT.md` §13's software steps.*
+  - **The platform's**, `tests/integration/test_demo_rehearsal.py`, on every build: the `demo` fleet flown and settled; the fleet visible and simulated; a pass explained with its orbit; every loss diagnosed with every cause tested; a report that regenerates; every result simulated.
+  - **The browser's**, `deploy/tools/demo_rehearsal.py`, by hand against a live stack: 24 checks passed. Every view rendered under the real policy with no violation, the probe was shown to catch one, and with the api stopped every view said *Not live*.
+- **A demonstration fleet** (D-330): fifty stations, a fifth of them with one fault each, from the station's seed alone; the pinned fault specification untouched (D-270).
+- **Losses settle in an hour on the demonstration** (D-333), because its scenario injects nothing that queues a report. The first trial, under the default day, showed no loss at all. Warnings are not brought forward: a cold fleet has no baseline to warn against (D-293), and the view says so.
+- **Six public reads** (D-331, D-332): losses with every cause tested and a reviewed set of findings; the network's warnings; a station's schedule with each decision's orbit; the latest round, its gain over a baseline *not measured* live; credited conditions; and a sealed model run's summary.
+- **Four dashboard views and a kiosk** (D-334), every simulated figure badged and every absence said in words, warmed through the front.
+- **Found on the way, fixed:**
+  - compose never passed `MERIDIAN_RELIABILITY_CONFIG` to the api or the jobs service, though `OPERATIONS.md` said to set it for both (D-333);
+  - two integration tests read SQL `now()`, the start of a transaction an earlier test can leave open, against the wall clock. Both are fixed; others in the suite still do, unflaked so far.
+- **Offline from cold, with Wi-Fi off:** the demo profile came up in 23 s from images already on the machine, and the dashboard loaded (`docs/SCALE-AND-FAULTS.md` § The demonstration fleet).
+- **Owed, not done:**
+  - a demonstration trial on `meridian catalogue export`'s live element sets. The two trials flew the development catalogue, 83 days old, and the schedule view says so beside every pass.
+- **Known limits:**
+  - a silence shorter than D-276's ±45 minutes can be left *undetermined* when a pass after it hears the satellite. The second trial met it twice;
+  - two hours settle only the first hour's passes, so a fault's own losses seldom reach the losses view in that time.
+
 **Stage 34's software is built** (2026-11-02), beside Stage 35. Its decisions are D-320 through D-326, its migration is `0032`, and `docs/OPERATIONS.md` § Element sets and the archive, and every source live, § The real-data model run, from the SatNOGS archive, and § Publishing areas, once D-137 is settled are its runbook. External data had only ever reached Meridian as fixtures; now it can arrive for real.
 - **The completion gate passes.** *External data reaches every module that reads it, through `meridian-ingest` alone and labelled with its source, and the platform keeps scheduling from what it last stored when every source is unreachable.* `tests/integration/test_external_data_flow.py` loads `deploy/catalogue/meteor.json`, then a CelesTrak fetch through the raw store, and generates passes on the real propagator. It asserts:
   - every pass names a fetched set and its artefact;
@@ -2807,6 +2825,12 @@ Added with Stage 34, when external data first reached Meridian for real (D-320).
 
 - external data reaches every module that reads it through meridian-ingest alone, and scheduling continues from what is stored when every source is unreachable.
 
+## Demonstration
+
+Added with Stage 35, when the dashboard first showed what the platform decides and why (D-330).
+
+- a rehearsal of the demonstration shows every software step from the platform's own records, with every simulated figure labelled.
+
 ---
 
 # Stage 25 — Reception evidence and ground-truth faults
@@ -3336,6 +3360,47 @@ A decision proposes D-137's answer. Areas are registered and reported, and nothi
 ## Completion gate
 
 External data reaches every module that reads it, through `meridian-ingest` alone and labelled with its source, and the platform keeps scheduling from what it last stored when every source is unreachable.
+
+---
+
+# Stage 35 — Demonstration fleet and dashboard views
+
+Depends on Stages 18, 20, 21, 25, 27, 28 and 33. Uses Stage 34's live element sets when they are loaded, and runs without them.
+
+## Learn
+
+- what a fleet looks like when most of it works, and why a demonstration that breaks everything at once demonstrates the fault injector;
+- presenting a decision with its reasons: a schedule that says why a pass was chosen and what it displaced;
+- stating an absence plainly: *undetermined*, *not computed* and *none open* are answers, not gaps to fill;
+- labelling every simulated figure on a screen people photograph.
+
+## Implement
+
+### A demonstration fleet on the wall clock
+
+- A **`demo` compose profile**: the sim profile's two services with their own state volume, fifty stations, and the freshest catalogue in `deploy/catalogue/` (an exported live one, then a curated one, then the development file).
+- A **`demo` scenario**: the faults SC-8 scores a cause against, spread so that most stations are clean and about one in five carries one fault, drawn from the station's seed alone. The fault ledger stays out of the platform (D-189).
+- The jobs service runs its usual round. Nothing about the demonstration changes a threshold, a training interval or a decision rule: what it shows is what the platform does. The one setting it changes is the settle margin, which its own faults bound (D-333).
+- **A wall-clock trial** of the profile, judged by `meridian reliability faults` against its ledger, with every loss diagnosed and no false confirmed miss, reported as simulated.
+
+### Public endpoints the views need
+
+Under `/api/v1`, following the existing rules (D-082, D-085, D-086, D-093, D-187, D-210, D-283): losses with their diagnoses, open receive-chain warnings, a station's next hours of schedule with each decision's explanation and each candidate's predicted yield and element-set age, the latest scheduling round against configuration A's, the latest published conditions, and a sealed model summary when one is configured.
+
+### Dashboard views
+
+Network, schedule, losses and insights, routed by fragment (D-091), in the site's tokens, with one SIM badge on every figure drawn from simulated rows, and a kiosk mode that cycles them.
+
+## Tests
+
+- each station under `demo` carries at most one fault of its own, from its seed alone, and the ledger a fleet writes is the schedule that was printed;
+- every new endpoint's body is pinned by the privacy review, and answers `not_yet_computed` where nothing is computed;
+- every view renders its SIM badge with simulated data, and says *not live* when served from the front's copy;
+- the content-security policy reports nothing on any view.
+
+## Completion gate
+
+A rehearsal against the `demo` profile, in a browser, steps through `PROJECT.md` §13's software steps: the fleet is visible, a pass is explained, a loss is diagnosed, a report is delivered and regenerates to its hash, every simulated figure carries SIM, and with the api stopped every view is served marked stale.
 
 ---
 

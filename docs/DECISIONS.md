@@ -6618,6 +6618,171 @@ D-137 asks who may register an area of interest and whether a registration is pu
 
 ---
 
+## D-330 — The demonstration fleet: fifty stations, one fault to a fifth of them, and nothing tuned for the audience
+
+**2026-11-02 · accepted** · *`meridian_sim/{faults,fault_schedule}.py` (`station_faults`, scenario `demo`); `deploy/docker-compose.yml` (`--profile demo`, `SIMULATOR_CATALOGUE`); `deploy/.env.example`; Stage 35. Applies D-075, D-189, D-253 and D-270.*
+
+A fleet somebody watches on the wall clock has to look like a network: most stations working, and a few failing in ways the platform can be seen to explain. Every existing scenario gives each station every fault it names, so a fleet under `diagnosis` breaks everywhere at once.
+
+**The `demo` scenario** names `diagnosis`'s six faults. A station carries the fleet's faults and **at most one of its own**:
+- about one station in five carries one (`ONE_FAULT_SHARE`), and the rest carry none;
+- the choice is drawn from the station's seed alone, on a stream of its own, so it never depends on the fleet's size (D-075) and a restart keeps it;
+- seed 4471's fifty stations give eleven faulty ones: three clock steps, three degraded decoders, three dead receivers, one obstruction and one interference source. A unit test pins that fleet, so a change to the draw shows there rather than as a trial of a different fleet;
+- the silent satellite is the fleet's (D-253), so every station sees it, once, in the run's first hour or so. The profile names Meteor-M2-3, which every shipped catalogue holds.
+
+Every other scenario draws exactly what it drew before: `station_faults` returns a scenario's whole list unless it is in `ONE_FAULT_SHARE`. The pinned digest of the earlier scenarios' schedules holds.
+
+**The fault specification is untouched** (D-270). `sky_faults.py` and `clock_faults.py` still draw every kind the scenario names, and `schedule_for` keeps from their draws only the one the station carries. A carried fault therefore has the very shape and onset the pinned code drew, and the review D-105 owes reads the same text it did. The choice of which fault a station carries is `fault_choice.py`'s, which is not part of the specification.
+
+**Degradation is left out, and nothing is tuned to bring a warning on screen.** A receive-chain warning needs a baseline, trained from complete UTC days over fourteen days (D-293), and then the median of three receptions 3 dB short (D-294). A fleet started cold trains its first baselines on whatever its chains do, so a degradation from the first hour would be learned as normal and never warned of. Shortening the training interval for the demonstration, or flying weeks of history into its database, would show a warning that the deployed rules would not have raised. The demonstration shows what the platform does: an open warning when one arises, and *none open* otherwise. SC-9's sealed fleets are the evidence that warnings work (D-296).
+
+**A profile, not an override file.** Everything the demonstration changes is the simulator's: its count, scenario, run id and catalogue. The jobs service already schedules with the optimiser under its defaults (D-170). So `demo-seed` and `demo-simulator` are the sim services with other settings, merged from the same anchors, and a state volume of their own. Their stations, invites and ledger never meet a sim fleet's (D-080), and the run id is `demo-<seed>`.
+
+**The catalogue is chosen, not fixed.** `sim-seed` loads the first path of `SIMULATOR_CATALOGUE` that exists. `deploy/catalogue/` and `data/` are mounted from the checkout, so a file written after the image was built is the one loaded. The sim profile's default is `development.json`, as before. The demo's list is `data/catalogue/live.json`, then `development.json`. The first is the held catalogue with each satellite's current element set, as fetched by `meridian-ingest` and exported for an offline machine (D-079, D-225). The second is always there. Only one is loaded, because two catalogues in one database can name one satellite's downlink twice.
+
+*Rejected: a share drawn per fleet* (exactly ten faulty stations of fifty). It would make a station's fault depend on the count, which D-075 rules out.
+
+*Rejected: a `demo` mode in the platform.* The platform does not know it is being demonstrated, which is the point of demonstrating it.
+
+---
+
+## D-331 — Six public reads for the network's views, each saying what it cannot give
+
+**2026-11-02 · accepted** · *`meridian/api/public/{losses,chain_warnings,schedule,conditions}.py` and their models; `meridian/store/{loss_reads,schedule_run_reads,conditions_reads}.py`, `find_network_warnings`, `find_station_schedule`; `THREAT-MODEL.md` §7; Stage 35. Applies D-085, D-086, D-093, D-134, D-172, D-177, D-187 and D-210.*
+
+The dashboard's network, schedule, losses and insights views need reads the public API did not have. Each is thin, as every public endpoint is, and each states an absence in words.
+
+**`/losses` lists each diagnosed loss, where the budget only counts its debits.** D-187 counts the loss budget's debits and does not list them, because a debit names the exact instant a window closed. A loss here names its window widened to whole minutes, like every published window (D-093), so listing it gives away nothing D-187 protects. Only the deployment's own diagnosis method and `[diagnosis]` hash are read, and only an assignment's latest revision, so no pass appears diagnosed twice.
+
+**What a cause's test found is published from a list.** `candidates_json` is free-form and written for an operator. It holds exact angles, a station's raw noise floor and the sectors its own history marks as blocked. `PUBLISHED_FINDINGS` names each finding the API states and its rounding: angles to the degree, decibels and seconds to a tenth, shares and supports to a hundredth. Everything else is withheld, and `meridian diagnosis explain` prints the whole record. Every cause tested is published, fired or not (D-273).
+
+**`/receive-chain-warnings`** gathers each station's warnings into one list, open ones by default, coarsened as the station's own response coarsens them (D-295).
+
+**`/schedule` is a station's decisions over the next 1 to 24 hours.** They are the decisions `/assignments` lists, each with its pass's peak to the degree and the epoch of the element set that predicted it. Element-set age is a first-class figure, and this puts it beside every decision without anything new being stored.
+
+**`/schedule-runs/latest` is the run's own record, and its gain over a baseline is not measured live.** The jobs service records only the configuration it scheduled with. Configuration A on another round is a different problem, and a gain computed against it would be a number no snapshot regenerates (rule 8). So `baseline_gain` is `not_measured`, and its reason names `meridian schedule evaluate` (D-172). What became of a run's assignments stays `scheduler_performance`'s, an operator's read (D-177). The run's decisions are counted by population, so a round over simulated stations says so. Before any round has decided anything the answer is `not_yet_computed`, not a 404: the front keeps no copy of a 404, so the view would have nothing to show in an outage (D-086, D-282).
+
+**`/conditions` is the latest Kp and each point's cloud cover, credited to its source** (D-134), read for display only. The scheduler's conditions come from a snapshot (D-224). A point is published to one decimal of a degree. Points are usually stations, and one decimal is MSP's coarsest declared precision, so it is never finer than a station chose (D-082). No Kp is `not_measured`, never a null.
+
+**`/insights/model` serves a sealed run's summary, or `not_yet_computed`.** The API may not read a snapshot or a report's package (D-143's boundary), so it reads a summary file the run writes. D-332 settles its format and where it is mounted.
+
+**The front's warmed routes are not changed here.** `snapshot-routes.txt` lists exactly the requests the dashboard makes, and a test holds the two equal (D-283). The new reads join it with the views that request them.
+
+*Rejected: recording configuration A's objective on every round,* to publish a live gain. It needs a migration and a second solve per round, and would still compare a round's schedule with a counterfactual nobody flew. The replay compares them properly.
+
+---
+
+## D-332 — The model insight is a published summary file, checked whole, in a directory of its own
+
+**2026-11-02 · accepted** · *`meridian/api/public/{conditions,models/model_insights}.py`; `meridian/config.py` (`REPORT_SUMMARY`); the api service's `/published` mount; Stage 35. Settles the format D-331 left to Stage 34. Applies D-086, D-143 and D-206.*
+
+`/api/v1/insights/model` publishes a sealed model run's figures: each configuration's Brier score against the base rate, its skill, its calibration bins, and the completeness ratio, with the label that says who measured the receptions behind them.
+
+**A summary file, written by the sealed run.** The API may not read a snapshot or a report's directory (D-143's boundary). So Stage 34's run writes a summary beside its seal, `model-summary-1`, every figure copied from the report's prediction rows and named by the run's hash. Its shape was agreed with that stage, which writes it. Nothing is computed on a request.
+
+**Checked whole, and refused whole.** The schema string must match exactly, no key may be unknown and nothing is coerced from another type. A computable configuration carries ten bins, empty ones kept with nulls. One the archive cannot support carries a reason and no number at all, never a zero (D-086). A file that fails any of this is a `server_error` naming the setting, with the reason in the log, never part of a body. Unnamed, the answer is `not_yet_computed`. The response is one schema, discriminated on `status`.
+
+**A directory of its own.** The api container mounts `PUBLISHED_DIR` read-only at `/published`, and `REPORT_SUMMARY` names a file there. It is not given the datasets directory, so the process that faces the internet never holds a snapshot it could be made to read (D-206).
+
+*Rejected: reading `prediction.jsonl` from the sealed run directly.* It couples the public surface to a report's internal rows, which a new method version may reshape (D-235), and it puts the run directory, with its configuration and environment, inside the api container.
+
+---
+
+## D-333 — The demonstration fleet settles its passes after an hour, because none of its faults queues a report
+
+**2026-11-02 · accepted** · *`deploy/reliability.demo.toml`, `deploy/docker-compose.demo.yml`; `RELIABILITY_CONFIG` for the api and the jobs service in `deploy/docker-compose.yml`; `tests/unit/test_demo_reliability.py`; Stage 35. Amends D-330. Applies D-146 and D-182.*
+
+The first trial of the `demo` profile flew fifty stations for 3 h 53 min, and `meridian reliability faults` judged its 74 faults with none failed. It showed **no loss at all**. A pass is classified, and so diagnosed, only once its window has closed by the settle margin, 24 hours by default (D-146, D-182). The margin waits for a report a station queued through an outage, and without it a report still on its way would be read as absence (rule 7).
+
+**The demonstration's margin is an hour, and the reason is its own fault set.** The `demo` scenario injects no outage, partition, stalled upload, restart, delayed heartbeat, slow platform or revoked token, so no virtual station ever holds a finished observation in its queue. Each reports within a tick of its window closing. An hour waits for every report the fleet can owe, many times over. A test holds the scenario to that: a fault that queues a report added to `demo` fails it, and the margin has to be argued again.
+
+**This is not the warning case.** D-330 refused to shorten the watch's training interval, because a baseline trained on hours would raise warnings the deployed rule would not. A shorter margin changes when a pass is classified, not what it is classified as, for a fleet whose reports have all arrived. Every classification records the hash of its `[classification]` table, so the demonstration's are never counted with the default's, and the figures say which table they came from.
+
+**An override file after all.** D-330 chose a profile alone because everything it changed was the simulator's. The margin is the api's and the jobs service's, and both must read the same file: the api counts the figures from classifications the jobs service wrote, found by that table's hash. A profile cannot change a default service's settings, so `docker-compose.demo.yml` names the file for both. The base file now passes `RELIABILITY_CONFIG` to both as well. `OPERATIONS.md` already told operators to set it for the two together, and compose never passed it.
+
+*Rejected: keeping 24 hours and starting the demonstration a day early.* It is correct, and it makes the fleet's first day show nothing. That is a cost paid by every contributor who brings it up to see what Meridian does.
+
+---
+
+## D-334 — The dashboard's views: one per question, each saying what it cannot show
+
+**2026-11-02 · accepted** · *`dashboard/src/{route,useRoute,Nav,Network,ScheduleTimeline,Losses,Insights,Kiosk,SimBadge,usePolled}.ts(x)` and their data modules; `dashboard/src/fonts/`; `deploy/front/snapshot-routes.txt`; Stage 35. Applies D-081, D-091, D-208, D-283, D-284, D-331 and D-332.*
+
+The dashboard was one page: the station map and list, and a station's panel. Stage 35 gives it four more views, each answering one question a reader brings.
+
+**One fragment per view** (D-091): `#/network`, `#/stations[/<id>]`, `#/schedule[/<id>]`, `#/losses`, `#/insights` and `#/kiosk`. Anything else lands on the network view, so an old link to `#/stations/<id>` still opens that station. The route is parsed by a pure function with its own tests, and the hook that followed only a station id is gone.
+
+**What each shows:**
+- **Network:** the fleet by liveness and on the map, each population's capture rate and loss budget apart, and every open receive-chain warning.
+- **Schedule:** one station's next six hours as a timeline. Choosing a pass, by pointer or from a keyboard-reachable list, opens what the scheduler recorded: its value as the product of its terms, what it displaced or lost to, its peak and its orbit's age. The latest round sits below, with its gain over a baseline stated as not measured live (D-331).
+- **Losses:** every diagnosed loss with its cause, or *undetermined* and why, and every cause tested beside it.
+- **Insights:** the latest conditions, credited to their sources, and the sealed model run's calibration with its label (D-332).
+- **Kiosk:** the four in turn every 20 seconds, held for a minute by a touch or a key. Each step is the view itself, with its own snapshot note and badges, so the kiosk can say nothing the view would not.
+
+**Every absence is said in words.** No settled pass, no open warning, no round yet, no Kp ingested, no model published: each is a sentence, never an empty chart or a zero (D-086).
+
+**One simulated badge.** The two local copies became `SimBadge`, and a test renders each view's parts with simulated data to static markup and counts the badges. It also checks that a measured population and a measured model run carry none.
+
+**One refresh, one watch.** Each view polls through `usePolled`, which runs every refresh through a new snapshot watch, as the station panel does. So a view drawn from the front's copy says so until the platform answers again (D-284). Every request the views make is in `snapshot-routes.txt`, and the test that holds the two equal now runs the new fetch functions too (D-283).
+
+**The site's typeface, self-hosted.** The dashboard carries the same unmodified IBM Plex files as the site. `font-src 'self'` already allowed them, so the policy is unchanged (D-208), and no font is fetched from anywhere else.
+
+**Seen in a browser,** on the demonstration fleet through Vite's proxy, at 1280 and 360 pixels: every view rendered, with no console error and no horizontal scroll. The schedule's explanation pane showed a decision's value, its rival, its peak, and an 83-day-old orbit flagged as such. The development catalogue's elements are that old.
+
+*Rejected: a client-side router library.* Six fragments are a function of twenty lines, and a router would add a dependency to do what `hashchange` already does.
+
+---
+
+## D-335 — The rehearsal is two halves: the platform's in CI, the browser's against a running stack
+
+**2026-11-02 · accepted** · *`tests/integration/test_demo_rehearsal.py`; `deploy/tools/demo_rehearsal.py`; `docs/OPERATIONS.md` § The demonstration; Stage 35's completion gate. Applies D-198, D-283 and D-333.*
+
+Stage 35's gate is a rehearsal of `PROJECT.md` §13's software steps against the demo profile. They are two kinds of claim, and each is tested where it can be.
+
+**The platform's half runs on every build.** `test_demo_rehearsal.py` flies the `demo` scenario's own seed, four of its stations over twelve hours, through the harness SC-8's runs use, against the real application. It settles under `reliability.demo.toml` and delivers reports to the sink. It then asks `/api/v1` what the views would show:
+- every station listed, and simulated;
+- a station's decisions with their explanations and orbit epochs;
+- the latest round with its gain not measured;
+- the reliability figures counting the fleet as simulated and nothing as measured;
+- every loss diagnosed, with all five causes tested;
+- a delivered report that regenerates to its hash;
+- `simulated` true on every result in every body.
+
+It takes about five minutes. An eight-station fleet took over fifteen, which every build cannot afford.
+
+**The browser's half runs against a live stack.** It needs one, and Chromium, which CI's runners have neither of for a fifty-station fleet. `demo_rehearsal.py` drives a browser through the front, as a visitor meets it:
+- every view renders, with no console error and no content-security-policy violation, recorded by a listener the page installs before its own code;
+- the fleet and a station's decision carry the simulated badge;
+- a chosen pass is explained with its orbit's age;
+- with the api stopped, every view says *Not live*;
+- with the api started again, whatever happened, the marks clear.
+
+It is a host tool, like the front drill it imports from (D-282), and exits non-zero on any failure.
+
+**Playwright is not a dependency.** Only this tool uses it, so `uvx --with playwright` brings it for the run, and `--chromium` names a browser already installed.
+
+**Run on 2 November 2026**, against a fresh fifty-station demo stack on this branch's image: 24 checks, none failed. Every view rendered with no violation and no console error. The fleet and a decision carried the badge, and a chosen pass was explained with its orbit's age. With the api stopped, the network, losses and insights views each said *Not live*, and after it started again each cleared. **The probe was proven to see a violation:** an image requested from a foreign origin on the same page was recorded as `img-src https://example.invalid/x.png`. Without that control, a probe that recorded nothing would read as a policy that held.
+
+*Rejected: the browser half in CI.* It would need a compose stack of fifty simulated stations and a browser on a runner, for a check whose failure modes (a view that does not render, a missing note) the dashboard's own tests and the front drill already cover in parts. It is run before a showing, by hand, and its result is recorded.
+
+---
+
+## D-336 — The map's tiles send the dashboard's origin, because OpenStreetMap refuses a browser that sends none
+
+**2026-11-02 · accepted** · *`dashboard/src/StationMap.tsx` (`TILE_REFERRER_POLICY`); `tests/msp_conformance/test_security_headers.py`; Stage 35. Narrows D-208 for tile images; D-092's tile choice unchanged.*
+
+On the demonstration stack, every map tile came back as OpenStreetMap's "Access blocked" image: *App is not following the tile usage policy*. The map drew those images, because a refusal sent as a picture is not a failed tile, so D-092's fallback to the graticule never ran. **The cause is ours.** D-208 sends `Referrer-Policy: no-referrer` on every response, so the browser's tile requests named no referrer, and OSM's tile policy refuses a browser app that sends none. Requests from `curl` were served, which is why it had not been seen. Through Vite's dev server, which sends no such header, the tiles loaded.
+
+**The tile layer alone sends `strict-origin`.** Leaflet sets the policy as an attribute on each tile image, and an element's own policy takes precedence over the document's. A tile request now names the dashboard's origin, `https://dash.meridian.org.in/`, and never a path or a fragment. Every other request from the page still sends no referrer.
+
+**What it discloses** is the dashboard's hostname, to the one tile server the policy already lets the page load images from. That hostname is public: it is the address a visitor typed. A test holds the tile layer's policy and the page's `no-referrer` together.
+
+**Seen in a browser** on this branch's image: 16 tiles, all `200`, each naming `http://localhost:8080/` and nothing more; the map drawn on its base layer.
+
+*Rejected: `strict-origin-when-cross-origin` for the whole page.* It would fix the tiles and send our origin with every other cross-origin request the page might make, where nothing needs it. *Rejected: dropping the tiles.* D-092 kept them because a graticule alone tells a reader nothing about where a station is. Its alternatives, a self-hosted tile set or a bundled coastline, remain the answer if the tile policy ever refuses us for volume.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

@@ -97,6 +97,11 @@ class Settings:
     empty for none: the jobs service then writes no verdicts (D-263). Last and
     defaulted, so every settings object built before Stage 26 still builds."""
 
+    report_summary: str = ""
+    """A sealed model run's published summary, as the API container sees it, or
+    empty for none: ``/api/v1/insights/model`` then answers ``not_yet_computed``
+    (D-332). Defaulted, for the reason ``verdict_model`` is."""
+
     @property
     def psycopg_url(self) -> str:
         """``database_url`` in the form ``psycopg.connect`` accepts (D-033)."""
@@ -302,6 +307,7 @@ def load_settings(*, secrets_held: frozenset[str] = EVERY_SECRET) -> Settings:
         simulator_seed=_int_env("SIMULATOR_SEED", 4471),
         simulator_station_count=_int_env("SIMULATOR_STATION_COUNT", 1),
         verdict_model=os.environ.get("VERDICT_MODEL", "").strip(),
+        report_summary=os.environ.get("REPORT_SUMMARY", "").strip(),
     )
 
     check_settings(settings, secrets_held)

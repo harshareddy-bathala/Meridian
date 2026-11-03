@@ -56,7 +56,9 @@ def station(rollback: Any, schedule_rows: Any) -> str:
         " case when n %% 3 = 0 then 137100000 end,"
         " case when n %% 3 = 0 then 'lrpt' end, true"
         " from generate_series(0, 59) as n,"
-        " lateral (select date_trunc('hour', now()) - interval '1 hour'"
+        # The wall clock, which the read counts hours by; now() is when the
+        # session's transaction began, which an earlier test may have opened.
+        " lateral (select date_trunc('hour', clock_timestamp()) - interval '1 hour'"
         "  + n * interval '1 minute' as t) as instant",
         (STATION,),
     )

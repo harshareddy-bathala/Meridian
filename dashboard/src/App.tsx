@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
 
 import { fetchPlatformHealth, type PlatformHealth } from "./health";
+import { InsightsView } from "./Insights";
+import { Kiosk } from "./Kiosk";
+import { LossesView } from "./Losses";
+import { Nav } from "./Nav";
+import { Network } from "./Network";
+import type { Route } from "./route";
+import { ScheduleView } from "./ScheduleTimeline";
 import { StationDetail } from "./StationDetail";
 import { StationList } from "./StationList";
 import { snapshotClass } from "./snapshot";
 import { SnapshotNote } from "./SnapshotNote";
 import { StationMap } from "./StationMap";
-import { useHashSelection } from "./useHashSelection";
+import { useRoute } from "./useRoute";
 import { useStations } from "./useStations";
 
 type Load =
@@ -50,9 +57,11 @@ function PlatformStatus({ load }: { load: Load }) {
   }
 }
 
-function Stations() {
+function Stations({ selectedId, go }: { selectedId: string | null; go: (route: Route) => void }) {
   const { stations, fetchedAt, snapshot, error } = useStations();
-  const [selectedId, select] = useHashSelection();
+  const select = (stationId: string | null) => {
+    go({ view: "stations", stationId });
+  };
   const selected = stations?.find((station) => station.stationId === selectedId) ?? null;
   return (
     <>
@@ -92,15 +101,34 @@ function Stations() {
   );
 }
 
+function View({ route, go }: { route: Route; go: (route: Route) => void }) {
+  switch (route.view) {
+    case "network":
+      return <Network go={go} />;
+    case "stations":
+      return <Stations selectedId={route.stationId} go={go} />;
+    case "schedule":
+      return <ScheduleView stationId={route.stationId} go={go} />;
+    case "losses":
+      return <LossesView go={go} />;
+    case "insights":
+      return <InsightsView />;
+    case "kiosk":
+      return <Kiosk go={go} />;
+  }
+}
+
 export function App() {
   const load = usePlatformHealth();
+  const [route, go] = useRoute();
   return (
-    <main>
+    <main className={route.view === "kiosk" ? "kiosk-main" : undefined}>
       <header>
         <h1>Meridian</h1>
         <PlatformStatus load={load} />
+        <Nav route={route} />
       </header>
-      <Stations />
+      <View route={route} go={go} />
     </main>
   );
 }

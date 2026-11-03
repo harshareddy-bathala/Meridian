@@ -151,7 +151,7 @@ def test_the_step_is_drawn_from_the_seed_signed_and_in_range() -> None:
     assert any(one > 0 for one in steps)
     assert any(one < 0 for one in steps)
     assert all(step_for(STATION_SEED, name) == 0.0 for name in EARLIER)
-    assert set(SCENARIOS) - set(EARLIER) == {"clock", "diagnosis"}
+    assert set(SCENARIOS) - set(EARLIER) == {"clock", "diagnosis", "demo"}
 
 
 def test_the_clock_is_off_by_the_step_while_it_holds_and_right_otherwise() -> None:

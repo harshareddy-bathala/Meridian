@@ -19,10 +19,11 @@ Every read is the station's own: a baseline is a station's past, never another
 station's (D-291).
 
 **Of the watch:** each chain of a station with its current baseline and its
-latest warnings, for the public API; and, for Prometheus, how many chains each
+latest warnings, for the public API; every station's warnings in one list,
+newest first, for the network's view (D-331); and, for Prometheus, how many chains each
 population has a baseline for and how many warnings are open (D-295).
 
-Reference: docs/DECISIONS.md D-272, D-290, D-291, D-293, D-295.
+Reference: docs/DECISIONS.md D-272, D-290, D-291, D-293, D-295, D-331.
 """
 
 from __future__ import annotations
@@ -39,10 +40,12 @@ from meridian.store.stations import Connection
 __all__ = [
     "ChainReception",
     "ChainWatch",
+    "NetworkWarning",
     "WatchCount",
     "WatchUnder",
     "count_watched",
     "find_chain_receptions",
+    "find_network_warnings",
     "find_station_watch",
 ]
 
@@ -244,6 +247,110 @@ def _latest_warnings(
             (station_id, capability_id, under.watch_method, under.watch_sha256, latest),
         )
         return cur.fetchall()
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkWarning:
+    """One receive-chain warning, with the station and chain it was raised on."""
+
+    warning: StoredWarning
+    band: str
+    freq_min_hz: int
+    freq_max_hz: int
+
+
+@dataclass(frozen=True, slots=True)
+class _NetworkRow:
+    id: int
+    station_id: str
+    capability_id: int
+    baseline_id: int
+    raised_at: datetime
+    shortfall_db: float
+    affected_bins_json: list[dict[str, object]]
+    evidence_json: dict[str, object]
+    cleared_at: datetime | None
+    cleared_shortfall_db: float | None
+    method: str
+    config_sha256: bytes
+    simulated: bool
+    band: str
+    freq_min_hz: int
+    freq_max_hz: int
+
+
+def find_network_warnings(
+    conn: Connection,
+    *,
+    under: WatchUnder,
+    open_only: bool,
+    before_id: int | None,
+    limit: int,
+) -> list[NetworkWarning]:
+    """One page of every station's warnings, the most recently raised first.
+
+    Args:
+        conn: An open connection. Read-only.
+        under: The methods and configurations the deployment watches under;
+            another configuration's warnings are its own record, not this one's.
+        open_only: Only warnings not yet cleared.
+        before_id: The last warning on the previous page, or ``None``.
+        limit: The most rows to return; callers ask for one more than they need.
+
+    Returns:
+        Warnings in descending id order, which is the order they were raised
+        in. A soft-deleted station's are excluded, as every public list
+        excludes them.
+    """
+    with conn.cursor(row_factory=class_row(_NetworkRow)) as cur:
+        cur.execute(
+            """
+            select w.id, w.station_id, w.capability_id, w.baseline_id, w.raised_at,
+                   w.shortfall_db, w.affected_bins_json, w.evidence_json,
+                   w.cleared_at, w.cleared_shortfall_db, w.method, w.config_sha256,
+                   w.simulated, c.band, c.freq_min_hz, c.freq_max_hz
+            from receive_chain_warnings w
+            join station_capabilities c on c.id = w.capability_id
+            join stations s on s.station_id = w.station_id
+            where s.deleted_at is null
+              and w.method = %(method)s and w.config_sha256 = %(sha)s
+              and (not %(open_only)s or w.cleared_at is null)
+              and (%(before)s::bigint is null or w.id < %(before)s)
+            order by w.id desc
+            limit %(limit)s
+            """,
+            {
+                "method": under.watch_method,
+                "sha": under.watch_sha256,
+                "open_only": open_only,
+                "before": before_id,
+                "limit": limit,
+            },
+        )
+        rows = cur.fetchall()
+    return [
+        NetworkWarning(
+            warning=StoredWarning(
+                id=row.id,
+                station_id=row.station_id,
+                capability_id=row.capability_id,
+                baseline_id=row.baseline_id,
+                raised_at=row.raised_at,
+                shortfall_db=row.shortfall_db,
+                affected_bins_json=row.affected_bins_json,
+                evidence_json=row.evidence_json,
+                cleared_at=row.cleared_at,
+                cleared_shortfall_db=row.cleared_shortfall_db,
+                method=row.method,
+                config_sha256=row.config_sha256,
+                simulated=row.simulated,
+            ),
+            band=row.band,
+            freq_min_hz=row.freq_min_hz,
+            freq_max_hz=row.freq_max_hz,
+        )
+        for row in rows
+    ]
 
 
 @dataclass(frozen=True, slots=True)

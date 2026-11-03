@@ -24,13 +24,19 @@ function drawGraticule(map: L.Map): void {
   }
 }
 
+/** What a tile request tells the tile server about us: the origin, and no more. */
+export const TILE_REFERRER_POLICY = "strict-origin";
+
 function addTiles(map: L.Map, setStatus: (status: TileStatus) => void): void {
   const url = tileUrl();
   if (url === "") {
     return;
   }
   let loaded = false;
-  L.tileLayer(url, { attribution: OSM_ATTRIBUTION, maxZoom: 12 })
+  // The page sends no referrer (D-208), and OpenStreetMap refuses a browser's
+  // tile request without one, answering each with an "access blocked" image.
+  // So the tiles alone send the dashboard's origin, never a path (D-336).
+  L.tileLayer(url, { attribution: OSM_ATTRIBUTION, maxZoom: 12, referrerPolicy: TILE_REFERRER_POLICY })
     .on("tileload", () => {
       loaded = true;
       setStatus("loaded");

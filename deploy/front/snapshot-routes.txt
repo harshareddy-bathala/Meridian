@@ -20,3 +20,9 @@
 /api/v1/stations/{station}/uptime?hours=48
 /api/v1/observations?limit=10&station_id={station}
 /api/v1/stations/{station}/receive-chain
+/api/v1/receive-chain-warnings?limit=50
+/api/v1/losses?limit=50
+/api/v1/schedule?station_id={station}&hours=6
+/api/v1/schedule-runs/latest
+/api/v1/conditions
+/api/v1/insights/model

@@ -56,6 +56,7 @@ The platform image is `ghcr.io/harshareddy-bathala/meridian:main`, published for
 | *(default)* | `db`, `migrate`, `api` on `:8000`, `jobs` | `deploy/.env` |
 | `metrics` | Prometheus, Alertmanager, Grafana on `:3001` | `deploy/prometheus/metrics_token` |
 | `sim` | catalogue and invite seeding, a simulated fleet | nothing more |
+| `demo` | the same two services for a fifty-station fleet under the `demo` scenario, in a state volume of its own (D-330) | `-f deploy/docker-compose.demo.yml`, which gives the api and jobs the demonstration's one-hour settle margin (D-333); not together with `sim` |
 
 ```bash
 compose --profile metrics up -d
@@ -155,7 +156,9 @@ The platform's CLI is in the image, so `compose exec api meridian …` runs it a
 | How recent schedule runs fared | `compose exec api meridian schedule runs [--limit 20]` — § Stored measurements and profiles |
 | Pass timing error, clock-corrected | `compose exec api meridian passes timing [--station <id>]` — § Stored measurements and profiles |
 | Build the horizon and interference profiles now | `compose exec jobs meridian profiles build` — the jobs service does it each round |
-| Run the simulator | `compose --profile sim up -d` — `SIMULATOR_*` in `deploy/.env` set count, seed and scenario |
+| Run the simulator | `compose --profile sim up -d` — `SIMULATOR_*` in `deploy/.env` set count, seed, scenario and catalogue |
+| Run the demonstration fleet | `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --profile demo up -d` — fifty stations, about one in five with one fault, losses diagnosed an hour after each pass; `DEMO_*` in `deploy/.env` (D-330, D-333) |
+| Judge the demonstration fleet's faults | `compose exec -T demo-simulator cat /var/lib/meridian-sim/faults.jsonl \| compose exec -T api meridian reliability faults --ledger -` |
 | Check the public surface | `python deploy/tools/verify_public_surface.py https://<hostname>` |
 | Fetch and load an external archive | `uv run meridian-ingest …` — its own binary, not in the image; § External archive ingest |
 | Freeze the database into a raw snapshot | `compose run --rm --no-deps … api meridian snapshot export --since <ISO-8601 Z>` — § Dataset snapshots |
@@ -1114,6 +1117,56 @@ diff one.txt two.txt                                                          # 
 `tests/integration/test_scheduler_gate.py` asserts the database half: every decision a round stores, under A to D and with the solver failing, names a recorded run and explains itself, and no antenna is given two passes at once.
 
 ---
+
+## The network's public views
+
+Stage 35 adds six reads to the public API for the dashboard's network, schedule, losses and insights views (D-331). Each follows the surface's rules: windows to whole minutes and angles to whole degrees (D-093), keyset cursors (D-085), `simulated` on every body that has results, and a stated absence rather than a zero (D-086).
+
+| Read | What it answers |
+|---|---|
+| `GET /api/v1/losses[?station_id=]` | every diagnosed loss under the deployment's `[diagnosis]`, newest first: its cause or *undetermined*, and every cause tested with its support and a listed set of findings |
+| `GET /api/v1/receive-chain-warnings[?state=open\|all]` | every station's receive-chain warnings, open ones by default |
+| `GET /api/v1/schedule?station_id=<id>[&hours=6]` | a station's decisions over the next 1 to 24 hours, scheduled and skipped, each with its explanation, its pass's peak and its element set's epoch |
+| `GET /api/v1/schedule-runs/latest` | the newest round's record; its gain over a baseline is `not_measured` live, and is `meridian schedule evaluate`'s (D-172) |
+| `GET /api/v1/conditions` | the newest Kp and each point's cloud cover for this hour, credited to its source; Kp is `not_measured` until `meridian-ingest follow` has run |
+| `GET /api/v1/insights/model` | a sealed model run's summary, the file `REPORT_SUMMARY` names under `PUBLISHED_DIR` (`/published` in the container); `not_yet_computed` while it is unset, and `server_error` if the file is refused (D-332) |
+
+```bash
+curl -s localhost:8000/api/v1/losses?limit=5 | python -m json.tool
+curl -s "localhost:8000/api/v1/schedule?station_id=<id>&hours=6" | python -m json.tool
+curl -s localhost:8000/api/v1/schedule-runs/latest | python -m json.tool
+```
+
+**The dashboard's views read them** (D-334), each at its own address: `/#/network`, `/#/stations/<id>`, `/#/schedule/<id>`, `/#/losses`, `/#/insights`, and `/#/kiosk`, which shows the four in turn every 20 seconds for a screen nobody touches and holds still for a minute after a touch. Every request the views make is warmed through the front (`deploy/front/snapshot-routes.txt`), so each is served marked *not live* when the api is down.
+
+**A loss's findings are a reviewed subset.** The full record of what each cause's test read is the operator's, through `meridian diagnosis explain`; the public list withholds the obstruction sectors, the raw noise levels and every internal id (`THREAT-MODEL.md` §7).
+
+## The demonstration
+
+The demonstration fleet is fifty simulated stations under the `demo` scenario. About one in five carries a single fault, and losses are diagnosed an hour after each pass (D-330, D-333):
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --profile demo up -d
+```
+
+**Give a second checkout its own project name** with `-p`, such as `-p meridian-demo`, on every command. Without it, compose takes the default project, `meridian`, and attaches to whatever database volume that project already holds.
+
+Open `http://localhost:8080/#/kiosk` on the screen it is shown on. The kiosk cycles the network, a station's schedule, the losses and the insights every 20 seconds, and holds for a minute after a touch.
+
+**What a cold start shows, and when.**
+- **At once:** the fleet, its schedule and each decision's explanation.
+- **About an hour after the first passes:** the first diagnosed losses.
+- **Never, from a cold start:** a receive-chain warning, because a chain needs two weeks of its own history first (D-293). The view says *No receive-chain warning is open*, and that is true. SC-9's sealed fleets are the evidence that warnings work.
+
+**Rehearse it in a browser** before it is shown, against the running stack. The tool walks every view and fails on a content-security-policy violation or a console error. It checks that simulated figures carry the badge and that a chosen pass is explained. Then it stops the api for about a minute, checks that every view says *Not live*, and starts the api again (D-335):
+
+```bash
+uvx --with playwright python deploy/tools/demo_rehearsal.py --base http://localhost:8080
+```
+
+Add `--skip-outage` to leave the api running, and `--chromium PATH` to use a browser already installed. Exit status 0 means every check passed. The platform's half of the gate, every step of `PROJECT.md` §13 in what `/api/v1` answers, is `tests/integration/test_demo_rehearsal.py`, which CI runs.
+
+**Offline.** With Wi-Fi off, the stack still comes up and the map draws its own graticule, without tiles (D-092). Before going offline, run `meridian catalogue export --output data/catalogue/live.json` so the fleet flies current element sets. Without it, the development catalogue's orbits are months old, and the schedule view says so beside every pass.
 
 ## The evidence dataset
 
