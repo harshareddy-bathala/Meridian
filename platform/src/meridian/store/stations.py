@@ -84,7 +84,7 @@ class Capability:
 class NewStation:
     """Everything :func:`insert_station` needs for one ``stations`` row.
 
-    Bundled rather than passed as separate parameters: CLAUDE.local.md caps a
+    Bundled rather than passed as separate parameters: CODE-STANDARDS.md caps a
     function at four parameters (five, hard) and "take a dataclass" beyond
     that — precedent already set by ``OrbitService.pass_windows`` taking a
     ``PassSearch`` (D-044) for the same reason.

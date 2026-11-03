@@ -39,7 +39,7 @@ dev = [
 # a week-15 surprise.
 
 [tool.ruff]
-# 88 and the rule selection below are CLAUDE.local.md section 9, verbatim. That
+# 88 and the rule selection below are CODE-STANDARDS.md section 9, verbatim. That
 # section calls itself enforcement — "Aspirational standards decay. These are wired
 # into CI" — and until D-044 it was not wired into anything. See D-044 for what was
 # added, what was kept, and why each of the four deviations exists.
@@ -49,7 +49,7 @@ src = ["platform/src", "client/src", "simulator/src", "ingest/src"]
 
 [tool.ruff.lint]
 select = [
-    # CLAUDE.local.md section 9. Roughly: D and ANN make section 5's docstring and
+    # CODE-STANDARDS.md section 9. Roughly: D and ANN make section 5's docstring and
     # units-on-every-argument rules checkable; C90 and PL make section 2's size
     # limits checkable; N, RET, ARG, TRY, PTH and ERA cover sections 3, 4 and 7.
     "E", "W",   # pycodestyle
@@ -69,7 +69,7 @@ select = [
     # Kept from the ruleset this replaced. Section 9 does not list these, and
     # dropping them to match it exactly would have un-enforced two *hard* project
     # rules — so the ruleset is the union rather than the substitution.
-    "DTZ",      # bans naive datetime. CLAUDE.local.md section 6: "a naive
+    "DTZ",      # bans naive datetime. CODE-STANDARDS.md section 6: "a naive
                 # datetime anywhere is a bug", DATA-MODEL.md: "all timestamps
                 # UTC, no exceptions".
     "TID",      # carries the banned-import rule below, which is the only
@@ -94,7 +94,7 @@ ignore = [
     # reachable. Generate each with: openssl rand -hex 32" — the name of the
     # variable, the reason, and the command that fixes it. Moving that into a
     # class hierarchy would satisfy the rule and cost the operator the one thing
-    # that makes the refusal actionable at 2 a.m. CLAUDE.local.md section 5 is
+    # that makes the refusal actionable at 2 a.m. CODE-STANDARDS.md section 5 is
     # explicit that text which helps the reader beats structure that hides it.
     "TRY003",
 ]
@@ -132,7 +132,7 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 # A test's name is its docstring — `test_a_placeholder_password_inside_database_url_is_caught`
 # says more than a summary line would, and D103 on every test function is exactly
-# the noise CLAUDE.local.md section 5 warns trains readers to skip docstrings. The
+# the noise CODE-STANDARDS.md section 5 warns trains readers to skip docstrings. The
 # tests that need explaining have full docstrings anyway; the rule would only force
 # them onto the ones that do not. ANN for the same reason on fixtures.
 #
@@ -156,7 +156,7 @@ convention = "google"
 # the geometry itself; verify_site.py's complexity sits in one HTMLParser callback
 # that the stdlib's interface shape dictates. These are stdlib-only build tools
 # producing committed artefacts, not the code an outside contributor arrives to
-# read — and CLAUDE.local.md section 9 scopes its own module-length check to
+# read — and CODE-STANDARDS.md section 9 scopes its own module-length check to
 # `platform client simulator`, so the size and complexity families are scoped the
 # same way here. E501 is deliberately *not* ignored: long lines are still fixed.
 "site/tools/make-images.py" = ["T201", "D", "ANN", "PLR", "C90"]
@@ -218,7 +218,7 @@ strict = true
 warn_unused_ignores = true
 warn_return_any = true
 disallow_any_generics = true
-# Both from CLAUDE.local.md section 9. disallow_any_explicit is the stricter of
+# Both from CODE-STANDARDS.md section 9. disallow_any_explicit is the stricter of
 # the two and the one with teeth: `strict` already bans *implicit* Any, but an
 # explicit `dict[str, Any]` sails through it, and a response body typed that way
 # is a body whose shape nothing checks. warn_unreachable catches the guard clause

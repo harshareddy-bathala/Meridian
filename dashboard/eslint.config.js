@@ -17,7 +17,7 @@ export default tseslint.config(
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
-      // The module cap the CI step applies to Python (CLAUDE.local.md section 2).
+      // The module cap the CI step applies to Python (CODE-STANDARDS.md section 2).
       // Blank lines and comments count, as they do for `wc -l`.
       "max-lines": ["error", { max: 400, skipBlankLines: false, skipComments: false }],
       // [tool.ruff.lint.mccabe] max-complexity and [tool.ruff.lint.pylint].

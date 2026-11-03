@@ -156,7 +156,7 @@ def test_one_sample_is_returned_per_instant_asked_for(iss: ElementSet) -> None:
 
 
 def test_a_naive_datetime_is_refused_at_this_boundary(iss: ElementSet) -> None:
-    """CLAUDE.local.md section 6: a naive datetime is a bug, not a tolerance."""
+    """CODE-STANDARDS.md section 6: a naive datetime is a bug, not a tolerance."""
     with pytest.raises(ValueError, match="naive"):
         SkyfieldOrbitService().doppler_curve(
             iss, BLUFFTON, METEOR_CENTRE_FREQ_HZ, [CULMINATION.replace(tzinfo=None)]

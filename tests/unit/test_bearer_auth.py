@@ -4,7 +4,7 @@
 ``PsycopgRegistry.authenticate()`` through, so it is exercised end to end by
 ``tests/msp_conformance/test_heartbeat_endpoint.py`` instead — a heartbeat with
 no token, and one station's token used to report as another. This file covers
-the pure half CLAUDE.local.md §3 asks to be separable.
+the pure half CODE-STANDARDS.md §3 asks to be separable.
 """
 
 from __future__ import annotations

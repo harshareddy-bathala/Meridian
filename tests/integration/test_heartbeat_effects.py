@@ -148,7 +148,7 @@ def send_heartbeat(
 class Issued:
     """One assignment to plant, in the two ways tests here need to vary it.
 
-    A dataclass rather than four keyword arguments, per CLAUDE.local.md §2 — and
+    A dataclass rather than four keyword arguments, per CODE-STANDARDS.md §2 — and
     it reads better at the call site, where ``Issued("as_x", ended_hours_ago=1)``
     says what the row is for.
     """

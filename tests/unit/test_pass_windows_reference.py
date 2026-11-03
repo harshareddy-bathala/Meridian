@@ -320,7 +320,7 @@ def test_a_pass_outlasting_the_search_margin_raises_rather_than_being_clipped(
 def test_a_naive_datetime_is_refused_at_this_boundary(
     service: SkyfieldOrbitService, iss: ElementSet
 ) -> None:
-    """CLAUDE.local.md section 6: a naive datetime is a bug, not a tolerance."""
+    """CODE-STANDARDS.md section 6: a naive datetime is a bug, not a tolerance."""
     with pytest.raises(ValueError, match="naive"):
         service.pass_windows(
             search_over(iss, WINDOW_START.replace(tzinfo=None), WINDOW_END)

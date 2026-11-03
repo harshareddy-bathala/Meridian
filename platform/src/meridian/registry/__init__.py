@@ -87,7 +87,7 @@ class RegistrationRequest:
     """One MSP §4.1 ``register`` payload, already parsed and type-checked.
 
     Bundled into one dataclass rather than passed as separate parameters —
-    the same reason ``store.stations.NewStation`` is: CLAUDE.local.md caps a
+    the same reason ``store.stations.NewStation`` is: CODE-STANDARDS.md caps a
     function at four parameters (five, hard), and this payload alone has ten
     fields before ``capabilities`` is even counted.
 
@@ -120,7 +120,7 @@ class RegistrationRequest:
 class ListeningQuery:
     """One question for :meth:`Registry.was_listening`.
 
-    Bundled rather than passed as five parameters: CLAUDE.local.md §2 caps a
+    Bundled rather than passed as five parameters: CODE-STANDARDS.md §2 caps a
     function at four (five, hard) and says to take a dataclass beyond that.
     ``mode`` is the field that pushed it over, and it is not optional — D-028
     stored ``heartbeats.listening_mode`` precisely so this question could be
@@ -269,7 +269,7 @@ class Registry(Protocol):
 
         Raises:
             UnknownStationError: No such station, or it is soft-deleted.
-            ValueError: ``now`` is naive. CLAUDE.local.md §6 makes that a bug,
+            ValueError: ``now`` is naive. CODE-STANDARDS.md §6 makes that a bug,
                 not a tolerance.
         """
         ...
@@ -295,7 +295,7 @@ class Registry(Protocol):
 
         Args:
             query: What is being asked about. A dataclass rather than five
-                parameters, per CLAUDE.local.md §2 (D-056).
+                parameters, per CODE-STANDARDS.md §2 (D-056).
 
         Returns:
             True when at least one heartbeat confirms all of the above.

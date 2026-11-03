@@ -145,6 +145,6 @@ def test_the_service_measures_age_from_the_element_sets_own_epoch(
 
 
 def test_a_naive_datetime_is_refused_at_this_boundary(iss: ElementSet) -> None:
-    """CLAUDE.local.md section 6: a naive datetime is a bug, not a tolerance."""
+    """CODE-STANDARDS.md section 6: a naive datetime is a bug, not a tolerance."""
     with pytest.raises(ValueError, match="naive"):
         SkyfieldOrbitService().timing_uncertainty(iss, EPOCH.replace(tzinfo=None))

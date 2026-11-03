@@ -273,7 +273,7 @@ def _build_parser() -> argparse.ArgumentParser:
     """The whole command tree.
 
     One helper per subcommand rather than one long body: the function was
-    already at 49 lines against CLAUDE.local.md §2's limit of 40, and a parser
+    already at 49 lines against CODE-STANDARDS.md §2's limit of 40, and a parser
     builder grows by a block every time a command lands.
     """
     parser = argparse.ArgumentParser(
@@ -362,7 +362,7 @@ IMPLEMENTED: dict[str, Callable[[argparse.Namespace], int]] = {
 
 A table rather than a ``match`` with one arm per command: the arms were
 identical apart from a name, so branching on the command carried no information
-and cost a ``return`` against CLAUDE.local.md §2's limit of four.
+and cost a ``return`` against CODE-STANDARDS.md §2's limit of four.
 
 Every entry here is a noun that needs a verb — ``meridian passes`` on its own
 means nothing — so :func:`main` sends the actionless case to that subparser's

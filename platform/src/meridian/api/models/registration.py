@@ -5,7 +5,7 @@ Parses and validates the wire request, and translates it into
 names (``location.lat``, ``client.impl``) into the domain shape's flat
 fields (``lat_deg``, ``client_implementation``) lives here, on the boundary,
 and nowhere past it. Wire names are fixed by MSP §4.1 and are carried as
-Pydantic aliases, so the Python identifiers can obey CLAUDE.local.md §4's
+Pydantic aliases, so the Python identifiers can obey CODE-STANDARDS.md §4's
 rule that a name states its unit and spells out its words.
 
 This module holds no business logic and touches no database — matching
@@ -43,7 +43,7 @@ class Location(BaseModel):
     site.
     """
 
-    # The Python names carry their unit (CLAUDE.local.md §4); the aliases are
+    # The Python names carry their unit (CODE-STANDARDS.md §4); the aliases are
     # the wire names MSP §4.1 fixes and cannot change. Validation accepts the
     # alias only — `populate_by_name` is deliberately not set, so a body sending
     # `lat_deg` is rejected rather than quietly admitted alongside `lat`.

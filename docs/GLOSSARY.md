@@ -192,7 +192,7 @@ What the platform reads from outside, and where each record lives — modules 18
 
 ## Conventional short names in code
 
-Not domain terms, but recorded so the "no abbreviations outside this glossary" rule in `CLAUDE.local.md` §4 is honest in both directions. These are permitted as local variable names only, never as part of a public name.
+Not domain terms, but recorded so the "no abbreviations outside this glossary" rule in `CODE-STANDARDS.md` §4 is honest in both directions. These are permitted as local variable names only, never as part of a public name.
 
 `conn` connection · `cur` cursor · `exc` a caught exception · `argv` / `args` command-line arguments · `raw` an unparsed string straight from the environment
 

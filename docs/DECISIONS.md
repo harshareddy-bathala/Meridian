@@ -919,11 +919,11 @@ continues to be kept in the same commit as the work it describes.
 
 ---
 
-## D-044 — Section 9 of `CLAUDE.local.md` was never in force
+## D-044 — Section 9 of `CODE-STANDARDS.md` was never in force
 
 **2026-08-06 · accepted**
 
-`CLAUDE.local.md` §9 specifies an exact ruff and mypy configuration under the
+`CODE-STANDARDS.md` §9 specifies an exact ruff and mypy configuration under the
 heading *"Aspirational standards decay. These are wired into CI."* The committed
 `pyproject.toml` configured something else, and had since the repository was
 scaffolded:
@@ -1183,7 +1183,7 @@ The trigger to revisit: the first time the platform is reachable from outside th
 
 **`passes.max_elevation_deg` is 0..90, and must be at least `min_elevation_deg`.** The original −90..90 allowed a maximum elevation of −40, which is not a pass: `GLOSSARY.md` defines one as a period during which the satellite is *above* the horizon. The pair constraint is the one that makes the two columns interpretable together — a window is the interval where elevation is at or above the floor, so the peak over that interval cannot be below it. A row violating it is a propagation or frame-conversion error, which is the silent class `CLAUDE.md` warns coordinate frames produce, and it is far cheaper to catch on insert than in a reliability figure three stages later.
 
-**`stations.client_impl` is renamed to `client_implementation`.** `CLAUDE.local.md` §4 permits no abbreviation absent from `GLOSSARY.md`, which lists `lat`, `lon`, `alt` and `freq` and does not list `impl`. Renamed at the column and not only in Python, because an attribute called `client_implementation` writing to a column called `client_impl` moves the abbreviation instead of removing it. The MSP wire field stays `client.impl` — it is fixed by §4.1 and is carried by a Pydantic alias, which is the same mechanism now carrying `lat`, `lon`, `az_deg` and `min_el_deg` while the Python identifiers spell themselves out. `populate_by_name` is deliberately left off, so the wire contract stays exactly what the specification prints.
+**`stations.client_impl` is renamed to `client_implementation`.** `CODE-STANDARDS.md` §4 permits no abbreviation absent from `GLOSSARY.md`, which lists `lat`, `lon`, `alt` and `freq` and does not list `impl`. Renamed at the column and not only in Python, because an attribute called `client_implementation` writing to a column called `client_impl` moves the abbreviation instead of removing it. The MSP wire field stays `client.impl` — it is fixed by §4.1 and is carried by a Pydantic alias, which is the same mechanism now carrying `lat`, `lon`, `az_deg` and `min_el_deg` while the Python identifiers spell themselves out. `populate_by_name` is deliberately left off, so the wire contract stays exactly what the specification prints.
 
 ---
 
@@ -1259,7 +1259,7 @@ The codebase said both things at once. `0002_stations.sql` declared `stations.li
 
 **It gains `mode`.** D-028 added `heartbeats.listening_mode` for exactly this method — *"a station tuned to the right frequency running the wrong demodulator did not observe the pass"* — and the signature then omitted the parameter that would let it use the column. Without it, the method cannot answer the question D-028 stored the data to answer.
 
-**With five parameters it takes a dataclass instead.** `CLAUDE.local.md` §2 caps a function at four (five, hard) and says to take a dataclass beyond that. `ListeningQuery` bundles the station, the satellite, the frequency, the mode and the window, matching the precedent set by `store.stations.NewStation` and `OrbitService.pass_windows`.
+**With five parameters it takes a dataclass instead.** `CODE-STANDARDS.md` §2 caps a function at four (five, hard) and says to take a dataclass beyond that. `ListeningQuery` bundles the station, the satellite, the frequency, the mode and the window, matching the precedent set by `store.stations.NewStation` and `OrbitService.pass_windows`.
 
 **The frequency match is a tolerance, not an equality, and the tolerance is Doppler.** `centre_freq_hz: int` compared exactly would answer "was listening" as *false* for every station that retunes during a pass — which is every station that works. The shift at 137 MHz in low Earth orbit reaches roughly ±3 kHz, wider than the receiver's passband, so a station has to retune continuously across a pass rather than sit on the nominal frequency. A station reporting its *current* tuned frequency mid-pass is reporting a Doppler-shifted one.
 
@@ -1349,7 +1349,7 @@ MSP §4.3 carries `timing_uncertainty_s` to stations, which use it to decide how
 
 **It models along-track error only, and the docstring says so rather than implying completeness.** A pass boundary is a shallow crossing, so cross-track error also moves the crossing instant — by more than it moves the satellite. The figure is therefore a floor. Quantifying the rest needs measured timing error against predicted boundaries, which is exactly what Phase 2 collects.
 
-**Rejected: inflating the prior by a safety factor** to cover what it omits. Any multiplier would be invented, and `CLAUDE.local.md` §5.4 rules out a constant whose provenance is "because it works". A defensible under-estimate that names its own limit is better evidence than a comfortable number nobody can source.
+**Rejected: inflating the prior by a safety factor** to cover what it omits. Any multiplier would be invented, and `CODE-STANDARDS.md` §5.4 rules out a constant whose provenance is "because it works". A defensible under-estimate that names its own limit is better evidence than a comfortable number nobody can source.
 
 *Consequence:* every result carries `method = "vallado2006-along-track-v1"`. SC-3 compares this prior against a model fitted to measurement, and that comparison is impossible if a stored prediction cannot say which produced it — so the string is versioned, and replacing the model means a new string rather than an edit to this one.
 
@@ -1363,7 +1363,7 @@ Both modules need `c`. `registry.doppler_tolerance` uses it to bound how far off
 
 **Both define it, and `tests/unit/test_doppler.py` asserts they agree.** `registry.doppler_tolerance` is documented as a leaf that imports nothing from `meridian`, which is what keeps the registry free of an import cycle through the orbit package; coupling it to `meridian.orbit` to share one float would spend that property on a defined constant that has not changed since 1983.
 
-**Rejected: a shared constants module.** It would hold one value, and `CLAUDE.local.md` §4 exists because modules like that accumulate everything that has no other home. The cost of the duplication is drift, and drift is what the assertion prevents.
+**Rejected: a shared constants module.** It would hold one value, and `CODE-STANDARDS.md` §4 exists because modules like that accumulate everything that has no other home. The cost of the duplication is drift, and drift is what the assertion prevents.
 
 **Rejected: importing one from the other.** Whichever direction is chosen makes one of the two modules depend on a package it has no other reason to know about, and the registry's leaf property is load-bearing while the duplication is not.
 
@@ -1750,7 +1750,7 @@ Same origin is the load-bearing half. `dash.meridian.org.in` already resolves to
 
 *Rejected: Mapbox or Google Maps.* An API key is a runtime dependency on an external service, on the one surface SC-6 is stated against. The independence test applies to the map tiles too: a tile failure degrades to a graticule with the markers still drawn.
 
-`CLAUDE.local.md`'s size, naming and complexity limits apply to TypeScript as much as to Python. `ruff` and `mypy` cannot reach it, so eslint carries `max-lines`, `max-lines-per-function` and `complexity` set to the same numbers — otherwise the standards stop at the language boundary, which is where a second codebase quietly grows different rules.
+`CODE-STANDARDS.md`'s size, naming and complexity limits apply to TypeScript as much as to Python. `ruff` and `mypy` cannot reach it, so eslint carries `max-lines`, `max-lines-per-function` and `complexity` set to the same numbers — otherwise the standards stop at the language boundary, which is where a second codebase quietly grows different rules.
 
 ---
 
@@ -1778,7 +1778,7 @@ Altitude is always published to the nearest metre, independent of the field: sub
 
 *Rejected: a platform-wide rounding policy.* An operator on a university rooftop and one at a home address have different exposure, and only they know which they are.
 
-*Rejected: `"exact"` / `"approximate"`.* Two values, which reads simply and fails twice. The name carries no unit, which `CLAUDE.local.md` §4 does not permit — the field never states how approximate it is. And two postures do not deliver the choice this decision claims to give: an operator wanting 11 km cannot have it, and one happy at 110 m must pick between 1.1 km and their exact roof. The first operator who wants a third value forces another spec change.
+*Rejected: `"exact"` / `"approximate"`.* Two values, which reads simply and fails twice. The name carries no unit, which `CODE-STANDARDS.md` §4 does not permit — the field never states how approximate it is. And two postures do not deliver the choice this decision claims to give: an operator wanting 11 km cannot have it, and one happy at 110 m must pick between 1.1 km and their exact roof. The first operator who wants a third value forces another spec change.
 
 ---
 
@@ -2392,7 +2392,7 @@ It runs as a `jobs` service in the **default** profile, and `sim-scheduler` is r
 
 **2026-09-14 · accepted** · *`meridian/metrics/`, `deploy/prometheus/rules/`, Stage 12, Stage 20*
 
-**Names.** Every name starts with `meridian_` and carries its unit as a suffix, as the Prometheus convention requires and `CLAUDE.local.md` §4 already asks of Python names.
+**Names.** Every name starts with `meridian_` and carries its unit as a suffix, as the Prometheus convention requires and `CODE-STANDARDS.md` §4 already asks of Python names.
 
 **Labels.** Only these labels, each with a bounded set of values:
 - route template;

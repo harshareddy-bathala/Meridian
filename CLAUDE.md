@@ -100,6 +100,7 @@ meridian/
 │   ├── EVALUATION.md
 │   ├── DECISIONS.md      decisions taken during implementation
 │   ├── GIT-WORKFLOW.md   branching, commits, migration rules
+│   ├── CODE-STANDARDS.md size, names, units, time and the lint set
 │   ├── OPERATIONS.md     the runbook: bring-up, commands, backups, alerts
 │   ├── SCALE-AND-FAULTS.md   Stage 21's fault and scale results, simulated
 │   ├── ACCEPTANCE.md     every clause of Stage 24, its status and what proves it

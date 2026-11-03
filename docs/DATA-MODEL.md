@@ -516,7 +516,7 @@ Written by `meridian regions report` from a raw snapshot and a regional configur
   rewrites any row stored under the old range before narrowing the `CHECK`
   (D-052).
 - **A column name spells its words out**, whatever the wire calls the field.
-  `CLAUDE.local.md` §4 permits only the abbreviations in `GLOSSARY.md`, so
+  `CODE-STANDARDS.md` §4 permits only the abbreviations in `GLOSSARY.md`, so
   `stations.client_implementation` is not `client_impl` even though MSP §4.1
   puts `client.impl` on the wire. The protocol's spelling is carried by a
   Pydantic alias in `api/models/`, which is the single place the two vocabularies
