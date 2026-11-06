@@ -5,8 +5,10 @@ existed, enforced none of them. Each check below corresponds to a claim made
 there, and each one exists because breaking it is silent:
 
   fragments      a mistyped href="#..." scrolls nowhere and says nothing
-  modulepreload  orbit.js must be preloaded on index.html and never on a
-                 document page, where it undoes the dynamic import
+  modulepreload  orbit.js and globe.js must be preloaded on index.html and
+                 nowhere else: on a document page the hint undoes the dynamic
+                 import, and on the front page the worker's globe waits two
+                 round trips without them (D-349)
   sitemap        an added page that nobody listed is a page nobody indexes
   link styling   an <a> in a context with no CSS rule falls back to the
                  user-agent blue. This shipped: the wide footer's licence link
@@ -244,9 +246,20 @@ def check_fragments(pages: dict[str, Page]) -> list[str]:
 
 
 def check_modulepreload(pages: dict[str, Page]) -> list[str]:
-    """orbit.js is preloaded on the home page and on no other."""
+    """orbit.js and globe.js are preloaded on the home page and on no other."""
     problems = []
     for name, page in pages.items():
+        preloads_globe = any("globe.js" in h for h in page.modulepreloads)
+        if name == "index.html" and not preloads_globe:
+            problems.append(
+                "index.html: no modulepreload for globe.js. The worker that draws "
+                "the globe loads it, and without the hint it is fetched only once "
+                "main.js has run, a round trip later."
+            )
+        if name != "index.html" and preloads_globe:
+            problems.append(
+                f"{name}: modulepreload for globe.js, which only the front page uses."
+            )
         preloads_orbit = any("orbit.js" in h for h in page.modulepreloads)
         if name == "index.html" and not preloads_orbit:
             problems.append(

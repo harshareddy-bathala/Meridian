@@ -80,7 +80,11 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 
 ## The module split
 
-`orbit.js` holds the projection, the graticule, the orbit model and the elevation test. `main.js` and `rail.js` both import it, and both are `type="module"` — which is also why neither carries `defer` any more, since modules defer by default. Every page that loads one also carries `<link rel="modulepreload" href="/orbit.js">`, so the import is not a second round trip.
+`orbit.js` holds the projection, the graticule, the orbit model and the elevation test. `main.js`, `rail.js` and `globe.js` import it, and all are `type="module"` — which is also why none carries `defer`, since modules defer by default. `index.html` carries `<link rel="modulepreload">` for `orbit.js` and `globe.js`, so neither import is a second round trip.
+
+**The front page's globe is drawn in a worker (D-349).** `globe.js` holds the intro's phases, the drawing and the frame loop, and touches no DOM: what it needs arrives as a message, and what the page needs leaves as one. `main.js` keeps the page's half: it starts `globe.js` as a module worker, waits for it to say it loaded, and only then hands it the canvas with `transferControlToOffscreen()`; it measures the canvas, reads the palette, turns presses into drag messages and writes the caption and the intro classes. Without a GPU, a full-screen canvas drawn on the main thread cost every frame an 18 ms copy of its bitmap, which Lighthouse's slower CPU turned into a long task; from a worker that copy is not the main thread's. Where a browser has no `transferControlToOffscreen` or no module workers, or the worker fails before the handover, `main.js` imports the same `globe.js` and runs it on the main thread, exactly as before. The messages are listed at the top of `globe.js`.
+
+**`/orbit.js` and `/globe.js` are fresh for five minutes** (`_headers`), where every other script revalidates. The worker fetches them itself, one after the other, and without freshness each would be a round trip the preload could not save; with it they come from the cache the preload filled.
 
 `script-src 'self'` covers modules and modulepreload alike. **No `_headers` change was needed for this and none should be.**
 
@@ -95,7 +99,8 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 | `style.css` | Tokens for both themes, layout, the prose layer, the rail, the wide footer, the 404 sweep and the content reveal. The reveal is a CSS animation, not JS, so content still appears if `main.js` fails to load. |
 | `theme.js` | Theme resolution. **Loaded in `<head>` without `defer`, before `style.css`** — see below. Not a module. |
 | `orbit.js` | The projection, graticule, orbit model and elevation test. Imported by both canvases. No DOM except `readPalette()`. |
-| `main.js` | The home page's intro choreography. Home page only. |
+| `globe.js` | The front page's globe: intro phases, drawing and frame loop. No DOM; runs in a worker, or on the main thread where it cannot. |
+| `main.js` | The front page's half of the globe: which thread draws it, its size and colours, the drag, the caption and the intro classes. Home page only. |
 | `rail.js` | The document rail: contents scroll-spy and one still canvas frame. Document pages only. |
 | `pages.js` | Every page but the front. Sections below the fold rise into place as they scroll into view, and a term's note drops down from its (i). Hides nothing that is already on screen, so a blocked script costs the motion and the placement, never the content. |
 | `vendor/cube-motion-0.1.0/` | cube-motion's `rise` and `reveal`, MIT, unmodified. A versioned path, served immutable; an upgrade is a new directory. |
@@ -121,7 +126,7 @@ The site opens light, whatever the system prefers (D-344). The masthead toggle s
 
 The stylesheet carries two sets of values: bare `:root` (light, also the no-JS page) and `:root[data-theme="dark"]`, which outranks it by specificity. There is no dark-by-preference block, and `tests/unit/test_site_dashboard_tokens.py` fails if one comes back.
 
-**The canvas reads its palette from CSS.** `main.js` has no colour constants: `readPalette()` pulls the custom properties from the computed root style, and `theme.js` dispatches a `themechange` event on `document` that triggers a re-read and a redraw. Add a colour by adding a custom property, never by adding a constant to `main.js`. `tools/make-images.py` is the exception — it is a build-time tool with no DOM.
+**The canvas reads its palette from CSS.** Neither `main.js` nor `globe.js` has colour constants: `main.js` calls `readPalette()`, which pulls the custom properties from the computed root style, and sends the result to `globe.js`; `theme.js` dispatches a `themechange` event on `document` that triggers a re-read, a new message and a redraw. Add a colour by adding a custom property, never by adding a constant. `tools/make-images.py` is the exception — it is a build-time tool with no DOM.
 
 ### Contrast
 
@@ -158,7 +163,7 @@ The layer diagram's `.d-box` and `.d-line` use `--muted`, not `--rule`. A diagra
 
 An orthographic globe with a 15° graticule, a 98°-inclination circular orbit at 800 km, and link lines coloured by a real elevation calculation against the station's horizon. Time is compressed — one globe revolution is 120 s and one orbit 40 s, against 24 h and ~101 min in reality — but the projection, the ground track's westward drift and the horizon test are computed, not drawn.
 
-**All intro timing is the `PHASES` object at the top of `main.js`.** Every phase reads its progress through `phaseProgress()`, so changing one number retimes the sequence and nothing else moves. `PHASES.settle` must stay equal to `--reveal-at` in `style.css`; the canvas and the content reveal are deliberately independent mechanisms that happen to agree.
+**All intro timing is the `PHASES` object near the top of `globe.js`.** Every phase reads its progress through `phaseProgress()`, so changing one number retimes the sequence and nothing else moves. `PHASES.settle` must stay equal to `--reveal-at` in `style.css`; the canvas and the content reveal are deliberately independent mechanisms that happen to agree.
 
 The satellite constants (`SAT0`) are the solution to an offline search, not arbitrary — the comment above them states the constraints and how to re-derive them.
 
@@ -178,7 +183,7 @@ It now paints with the canvas at about 110 ms. The animation is unchanged and ev
 
 `theme.js` adds `intro` to the root element before the first paint, and takes it away again after 900 ms unless `main.js` has added `intro-ready` from its first painted frame. **The 1.4 s delay only applies when the globe is actually running.**
 
-It used to be unconditional, with JS able only to cancel it — so a `main.js` that was blocked, stale or broken produced the full blank wait *and* no globe. Test the failure, not the success: block `/main.js` in DevTools and reload, then block `/orbit.js`. Content must be immediate in both cases. If you change any of this, that is the check that matters.
+It used to be unconditional, with JS able only to cancel it — so a `main.js` that was blocked, stale or broken produced the full blank wait *and* no globe. Test the failure, not the success: block `/main.js` in DevTools and reload, then block `/orbit.js`, then `/globe.js`. Content must be immediate in all three cases. If you change any of this, that is the check that matters.
 
 The gate is keyed off `data-intro` on `<html>`, which only the home page carries. `theme.js` is not a module and must never become one — a module defers, and deferring it reintroduces both the theme flash and this gate arriving after paint.
 
@@ -196,7 +201,7 @@ python site/tools/make-images.py --what brand   # site/brand/
 python site/tools/make-images.py --what globe   # the still globe, into index.html
 ```
 
-The social card draws with the same projection and orbit model as `main.js`, and reads the shipped `.woff2` files directly, so there is no second copy of the fonts. Kept as full RGB: a 256-colour palette halves the file but quantises the green link line to grey.
+The social card draws with the same projection and orbit model as `globe.js`, and reads the shipped `.woff2` files directly, so there is no second copy of the fonts. Kept as full RGB: a 256-colour palette halves the file but quantises the green link line to grey.
 
 `--what globe` is the one output that is not an image file. It writes an inline `<svg>` into `index.html`, between two fence comments, from the same `project()`, `graticule()` and `elevation()` the card uses — **do not edit that block by hand.** Re-running is a no-op when nothing has changed. It needs no Pillow, so CI can regenerate and compare it without installing an imaging library; every other output does, and says so if it is missing.
 
@@ -208,7 +213,7 @@ It is hidden two ways, and both are needed. `theme.js` adds `intro` before the f
 
 Inline, not `<img src="…">`: an external SVG document cannot read the page's theme custom properties, so it could not follow the masthead's toggle. Every stroke is coloured by a `.scene-still .gs-*` rule in `style.css`.
 
-**`.scene-still`'s position mirrors `layout()` in `main.js` and has to keep mirroring it.** Centre at 82% / 22% with radius `min(24vw, 40vh)`, and 52% / 21% with `min(38vw, 21vh)` below 64rem (1024px). `#scene` is fixed and inset to zero, so its box *is* the layout viewport — which is what `vw` and `vh` measure, and why the two can be written in different units and land in the same place.
+**`.scene-still`'s position mirrors `layout()` in `globe.js` and has to keep mirroring it.** Centre at 82% / 22% with radius `min(24vw, 40vh)`, and 52% / 21% with `min(38vw, 21vh)` below 64rem (1024px). `#scene` is fixed and inset to zero, so its box *is* the layout viewport — which is what `vw` and `vh` measure, and why the two can be written in different units and land in the same place.
 
 ## Asset stamps
 
@@ -219,11 +224,11 @@ python site/tools/stamp_assets.py           # rewrite in place
 python site/tools/stamp_assets.py --check   # exit 1 if any stamp is stale — this is what CI runs
 ```
 
-**Run it after editing any of `style.css`, `theme.js`, `main.js`, `rail.js` or `orbit.js`.** CI fails otherwise.
+**Run it after editing any of `style.css`, `theme.js`, `main.js`, `globe.js`, `rail.js` or `orbit.js`.** CI fails otherwise.
 
 A URL now names one set of bytes, so no cache can pair one build's HTML with another's CSS. That is not a hypothetical — see D-042, and the Cloudflare section below, for the four-hour window in which it happened twice.
 
-`orbit.js` is stamped into `main.js` and `rail.js` *before* their own hashes are taken, because stamping them changes the files whose hashes were just computed. `index.html`'s `modulepreload` carries the same stamp as the import; if the two ever disagree, the browser fetches `orbit.js` twice.
+`orbit.js` is stamped into `main.js`, `rail.js` and `globe.js`, and then `globe.js` into `main.js`, each *before* the importer's own hash is taken, because stamping a file changes the hash just computed. `index.html`'s two `modulepreload`s carry the same stamps as the imports; if they ever disagree, the browser fetches the file twice.
 
 The stamper only rewrites *quoted* references. `rail.js` opens with a paragraph about what `./orbit.js` is for, and a looser pattern edits that sentence.
 
@@ -235,7 +240,7 @@ The stamper only rewrites *quoted* references. `rail.js` opens with a paragraph 
 |---|---|
 | `stamp_assets.py --check` | a stamp does not match its file |
 | fragment links | an `href="#…"` matches no `id` on that page |
-| `modulepreload` | `orbit.js` is preloaded on a document page, or missing from `index.html` |
+| `modulepreload` | `orbit.js` or `globe.js` is preloaded on another page, or missing from `index.html` |
 | sitemap | it lists a page that does not exist, or omits one that does |
 | **link styling** | an `<a>` sits in no context the stylesheet colours |
 | inline assets | an inline `<style>`, `<script>` or `style=""` appears, which the CSP blocks |

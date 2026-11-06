@@ -1,7 +1,7 @@
 /* Meridian — meridian.org.in
  *
  * The orbit model and the projection, shared by the home page's intro
- * animation (main.js) and the still frame in the document rail (rail.js).
+ * animation (globe.js) and the still frame in the document rail (rail.js).
  *
  * This file was carved out of main.js when the rail needed the same maths.
  * Nothing here changed in the move — a second copy of an orthographic

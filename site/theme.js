@@ -79,8 +79,9 @@
 
     root.classList.add('intro');
 
-    /* main.js is a deferred module: parse, fetch, import orbit.js, first draw.
-       On a fast connection that is well under 200 ms. If nothing has reported
+    /* main.js is a deferred module: parse, fetch, import orbit.js, start the
+       worker that runs globe.js (both preloaded), first draw. On a fast
+       connection that is well under 200 ms. If nothing has reported
        in by the time below, something has gone wrong that this page cannot see
        — so drop the gate and show the content rather than honouring a delay on
        behalf of an animation that is not running. */

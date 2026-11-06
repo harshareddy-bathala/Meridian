@@ -53,7 +53,7 @@
 
   --pad: clamp(1.5rem, 4vw, 4rem);
 
-  /* Content reveal. SETTLE_MS in main.js must match --reveal-at.
+  /* Content reveal. SETTLE_MS in globe.js must match --reveal-at.
      Home page only — a document page that waits four seconds to appear is
      just a slow document page. */
   --reveal-at: 1400ms;
@@ -192,7 +192,7 @@ body {
 
 /* --------------------------------------------------------------- canvas --
    Home page only. Fixed behind everything. The globe's centre and radius are
-   computed in main.js, which is what lets it bleed off the top-right edge.  */
+   computed in globe.js, which is what lets it bleed off the top-right edge. */
 
 #scene {
   position: fixed;
@@ -208,7 +208,7 @@ body {
    generated into index.html by tools/make-images.py; only its placement and
    its colours are here.
 
-   These numbers mirror layout() in main.js and have to keep mirroring it:
+   These numbers mirror layout() in globe.js and have to keep mirroring it:
    centre at 82%/22% of the viewport with radius min(24vw, 40vh), and 52%/21%
    with min(38vw, 21vh) below the 64rem (1024px) breakpoint. #scene is fixed and inset
    to zero, so its box *is* the layout viewport — which is what vw and vh
@@ -1924,7 +1924,7 @@ body {
 
 /* ---------------------------------------------------------- responsive --
    Below this width the globe sits above the content at reduced scale
-   (main.js repositions it). It is never hidden.                           */
+   (globe.js repositions it). It is never hidden.                          */
 
 @media (max-width: 63.9375rem) {
   .page { gap: clamp(2rem, 5vh, 3rem); }
@@ -1996,7 +1996,7 @@ body {
 }
 
 /* ------------------------------------------------------ reduced motion --
-   Non-negotiable: no intro, no reveal, no rotation. main.js draws one
+   Non-negotiable: no intro, no reveal, no rotation. globe.js draws one
    settled frame and never starts a loop.                                  */
 
 @media (prefers-reduced-motion: reduce) {

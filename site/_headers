@@ -83,8 +83,32 @@
 /*.css
   Cache-Control: public, max-age=0, must-revalidate
 
-/*.js
+# One rule per script, not /*.js. Cloudflare Pages joins the values when two
+# matching rules set the same header, so a splat beside a per-file rule would
+# send both directives at once; it also matched /vendor/, whose files are
+# immutable by the rule above.
+/theme.js
   Cache-Control: public, max-age=0, must-revalidate
+
+/main.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/pages.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/rail.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+# The two modules the front page's worker loads (D-349). The page preloads
+# both, and five minutes of freshness lets the worker's own requests for them
+# come from that cache instead of each costing a round trip, one after the
+# other, before the globe can draw. If the stamper ever stopped running, the
+# worst case is five stale minutes, not the unrecoverable file above.
+/orbit.js
+  Cache-Control: public, max-age=300
+
+/globe.js
+  Cache-Control: public, max-age=300
 
 /index.html
   Cache-Control: public, max-age=0, must-revalidate
