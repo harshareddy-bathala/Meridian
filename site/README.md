@@ -4,7 +4,7 @@ The static site at **meridian.org.in**. Plain HTML, CSS and vanilla JS — no fr
 
 Two scripts in `tools/` edit files in here and their output is committed, so what is deployed is still what is in the repository. `make-images.py` generates the icons, the social card and the still globe; `stamp_assets.py` puts a content hash on every CSS and JS reference. Both are checked in CI — see **Asset stamps** below.
 
-It is not the dashboard. See `docs/DECISIONS.md` D-036 for why the public site and the live dashboard are separate surfaces, and D-037 and D-038 for the two-theme system and the move to five pages.
+It is not the dashboard. See `docs/DECISIONS.md` D-036 for why the public site and the live dashboard are separate surfaces, D-037 and D-038 for the two-theme system and the first five pages, and D-340 to D-343 for the visitor pages that followed.
 
 ## Running it locally
 
@@ -18,20 +18,51 @@ then open `http://127.0.0.1:8080/`.
 
 ## Pages
 
+Organised by what a visitor came for (D-340, D-345). The visitor pages are short, mark every technical term with an **(i)**, state status in words, and carry no rail. Their only scripts are `theme.js` and `pages.js`.
+
+**Every page but the front and the 404 has one shape (D-347):** a title, a standfirst of one sentence, the content, and one next step at the end, `<nav class="next">` with a single link. `content_checks.py` fails a page with a second sentence in its standfirst or a second next step.
+
 | Path | |
 |---|---|
-| `index.html` | The front page. One non-scrolling screen — canvas globe, one heading, one paragraph, two links, footer. |
-| `architecture/` | The layer diagram as inline SVG, the six modules, the rules, deployment. |
-| `protocol/` | MSP 0.1: constraints, model, the four endpoints, message shapes, errors, versioning. |
-| `docs/` | Index of every specification, linking to the canonical Markdown on GitHub. |
-| `about/` | What Meridian is, what it will not do, where things stand, how to take part. |
-| `404.html` | `noindex`. Shares the shell. |
+| `index.html` | The front page: one screen that never scrolls (D-345). The globe, which a visitor can turn, one heading, one sentence, two actions, a metadata line and one caption that says what the globe is showing. |
+| `how-it-works/` | The journey of one pass in seven steps, one or two sentences each. Steps 1 to 3 can be played with: pick a pass, switch the plan, switch what the station did. The controls are radio buttons and `:has()`, so they need no script. On a wide screen each step's picture stays in view while its words scroll. |
+| `data/` | What Meridian publishes, the empty state where real images will be, the live dashboard and the public API. |
+| `areas/` | Watching a place over time. Closed until D-326 is accepted; its one picture is labelled as an example. |
+| `stations/` | What a station needs, what it gets back, receive-only, and MSP in one paragraph. |
+| `support/` | What support keeps running and what it builds next. No sums (D-343). Ways to give come from `support.json`. |
+| `developers/` | Running the platform, the doors to the four document pages, and how to help write it. |
+| `terms/` | Every (i) definition in one list, generated from `terms.json`. |
+| `architecture/`, `protocol/`, `docs/`, `about/` | The document pages, under *Developers* in the nav. Layer diagram, MSP 0.1, the documents index, and what Meridian is. |
+| `404.html` | `noindex`. Shares the shell. One sentence and one way back. |
 
-The subpages carry no intro and no reveal, which is why they load instantly. Only `index.html` loads `main.js`.
+The document pages carry no intro, and `pages.js` moves only what is still below the fold, which is why they load instantly. Only `index.html` loads `main.js`, and only the four document pages load `rail.js`.
+
+## Shared regions and the (i) notes
+
+`tools/shell.py` owns four regions, each between two fence comments, and rewrites them in place:
+
+| Region | On | From |
+|---|---|---|
+| `shell:masthead` | every page | `tools/shell_parts.py`, with the current nav entry marked |
+| `shell:footer` | every page | `tools/shell_parts.py` |
+| `shell:terms` | any page with an (i) | `terms.json`, one popover per term the page names |
+| `shell:glossary` | `/terms/` | `terms.json` |
+| `shell:give` | `/support/` | `support.json` |
+
+```
+python site/tools/shell.py           # rewrite in place
+python site/tools/shell.py --check   # exit 1 if any page is stale; CI runs this
+```
+
+**Never edit inside a fence by hand.** Edit `shell_parts.py`, `terms.json` or `support.json` and run the tool, then `stamp_assets.py`.
+
+**An (i) is written as** `<button class="info" popovertarget="term-pass"></button>`, placed directly after the word it explains with no space. The tool fills in its label and its glyph, and writes the popover. The popover is the native `popover` attribute, so opening it, closing it on a second press and closing it on a press anywhere else need no script. `pages.js` only places it under its (i); without it the note opens centred. A term `terms.json` does not define fails the run. Add a definition there first, in one or two sentences for someone who has never used a radio.
+
+**Payment details are real or absent.** `support.json`'s `upi_id` and `github_sponsors` are `null` until they exist, which renders *being set up* with the contact address. Setting `upi_id` also needs `support/upi-qr.svg`. A value that does not look like a real UPI ID or Sponsors URL fails both tools.
 
 ## The document rail
 
-Above **1180px**, `.doc` becomes a three-track grid — prose, an elastic spacer, then the rail — so the prose stays on the left margin and the rail lands on the right, under the theme toggle. Below that width the rail falls back into normal flow between the standfirst and the prose, as a two-column list of links.
+Above **80rem (1280px)**, `.doc` becomes a three-track grid — prose, an elastic spacer, then the rail — so the prose stays on the left margin and the rail lands on the right, under the theme toggle. Below that width the rail falls back into normal flow between the standfirst and the prose, as a two-column list of links.
 
 **There is one contents list, not two.** Forcing a `<details>` open on wide screens would need `::details-content`, which is too new to rely on, and a second list is a list that can disagree with the first.
 
@@ -39,7 +70,7 @@ Above **1180px**, `.doc` becomes a three-track grid — prose, an elastic spacer
 
 **`position: sticky` works only because the body is `overflow-x: clip`, not `hidden`.** `hidden` would make the body a scroll container and pin the rail in place with no error anywhere. If that property is ever changed, the rail stops sticking.
 
-**Below 1180px the rail costs nothing at all.** `orbit.js` is a **dynamic** `import()` behind `matchMedia('(min-width: 1180px)')`, together with the settled-moment search and the scroll-spy. A phone loading a document page makes zero requests for it. It was a static import with a `modulepreload` hint, so every phone fetched and parsed 12 KB and ran a 2 400-iteration search to feed a canvas that `display: none` was going to hide — the `offsetParent` guard only ever stopped the drawing. Deferred, not deleted: crossing the breakpoint activates both.
+**Below 80rem the rail costs nothing at all.** `orbit.js` is a **dynamic** `import()` behind `matchMedia('(min-width: 80rem)')`, together with the settled-moment search and the scroll-spy. A phone loading a document page makes zero requests for it. It was a static import with a `modulepreload` hint, so every phone fetched and parsed 12 KB and ran a 2 400-iteration search to feed a canvas that `display: none` was going to hide — the `offsetParent` guard only ever stopped the drawing. Deferred, not deleted: crossing the breakpoint activates both.
 
 **Never add `<link rel="modulepreload" href="/orbit.js">` to a document page.** It defeats the whole arrangement. `verify_site.py` fails the build if it reappears there, and fails if it goes missing from `index.html`, where `main.js` imports statically and genuinely needs it.
 
@@ -49,7 +80,11 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 
 ## The module split
 
-`orbit.js` holds the projection, the graticule, the orbit model and the elevation test. `main.js` and `rail.js` both import it, and both are `type="module"` — which is also why neither carries `defer` any more, since modules defer by default. Every page that loads one also carries `<link rel="modulepreload" href="/orbit.js">`, so the import is not a second round trip.
+`orbit.js` holds the projection, the graticule, the orbit model and the elevation test. `main.js`, `rail.js` and `globe.js` import it, and all are `type="module"` — which is also why none carries `defer`, since modules defer by default. `index.html` carries `<link rel="modulepreload">` for `orbit.js` and `globe.js`, so neither import is a second round trip.
+
+**The front page's globe is drawn in a worker (D-349).** `globe.js` holds the intro's phases, the drawing and the frame loop, and touches no DOM: what it needs arrives as a message, and what the page needs leaves as one. `main.js` keeps the page's half: it starts `globe.js` as a module worker, waits for it to say it loaded, and only then hands it the canvas with `transferControlToOffscreen()`; it measures the canvas, reads the palette, turns presses into drag messages and writes the caption and the intro classes. Without a GPU, a full-screen canvas drawn on the main thread cost every frame an 18 ms copy of its bitmap, which Lighthouse's slower CPU turned into a long task; from a worker that copy is not the main thread's. Where a browser has no `transferControlToOffscreen` or no module workers, or the worker fails before the handover, `main.js` imports the same `globe.js` and runs it on the main thread, exactly as before. The messages are listed at the top of `globe.js`.
+
+**`/orbit.js` and `/globe.js` are fresh for five minutes** (`_headers`), where every other script revalidates. The worker fetches them itself, one after the other, and without freshness each would be a round trip the preload could not save; with it they come from the cache the preload filled.
 
 `script-src 'self'` covers modules and modulepreload alike. **No `_headers` change was needed for this and none should be.**
 
@@ -64,54 +99,61 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 | `style.css` | Tokens for both themes, layout, the prose layer, the rail, the wide footer, the 404 sweep and the content reveal. The reveal is a CSS animation, not JS, so content still appears if `main.js` fails to load. |
 | `theme.js` | Theme resolution. **Loaded in `<head>` without `defer`, before `style.css`** — see below. Not a module. |
 | `orbit.js` | The projection, graticule, orbit model and elevation test. Imported by both canvases. No DOM except `readPalette()`. |
-| `main.js` | The home page's intro choreography. Home page only. |
+| `globe.js` | The front page's globe: intro phases, drawing and frame loop. No DOM; runs in a worker, or on the main thread where it cannot. |
+| `main.js` | The front page's half of the globe: which thread draws it, its size and colours, the drag, the caption and the intro classes. Home page only. |
 | `rail.js` | The document rail: contents scroll-spy and one still canvas frame. Document pages only. |
+| `pages.js` | Every page but the front. Sections below the fold rise into place as they scroll into view, and a term's note drops down from its (i). Hides nothing that is already on screen, so a blocked script costs the motion and the placement, never the content. |
+| `vendor/cube-motion-0.1.0/` | cube-motion's `rise` and `reveal`, MIT, unmodified. A versioned path, served immutable; an upgrade is a new directory. |
 | `.well-known/security.txt` | RFC 9116. Renew `Expires:` before it lapses — an expired file counts as none. |
-| `fonts/` | IBM Plex Sans and Mono, latin-1 subset, SIL OFL-1.1. `OFL.txt` ships with them — see `ATTRIBUTION.md`. |
+| `fonts/` | IBM Plex Sans and Mono, and Source Serif 4 for display, latin subsets, SIL OFL-1.1. `OFL.txt` and `SourceSerif4-OFL.txt` ship with them — see `ATTRIBUTION.md`. |
 | `_headers` | Cloudflare Pages: CSP, HSTS and cache policy. |
-| `robots.txt`, `sitemap.xml`, `site.webmanifest` | Crawlers and installability. The sitemap lists exactly the five indexed URLs; update it when a page is added. |
+| `robots.txt`, `sitemap.xml`, `site.webmanifest` | Crawlers and installability. The sitemap lists exactly the twelve indexed URLs; `verify_site.py` fails if it does not. |
 | `og-image.png`, `apple-touch-icon.png`, `favicon.ico`, `icon-*.png` | Generated. Never loaded by a page — crawlers, iOS and the manifest only. |
 | `brand/` | Marketing exports. Generated. See `brand/README.md`. |
 | `tools/make-images.py` | Regenerates all of the above, and the still globe inside `index.html`. Needs Pillow for everything except the globe. |
 | `tools/stamp_assets.py` | Puts `?v=<content hash>` on every CSS and JS reference. Run after editing one. Stdlib only. |
-| `tools/verify_site.py` | The invariants this file asserts, checked. Stdlib only. Both run in CI. |
+| `tools/verify_site.py` | The invariants this file asserts, checked. Stdlib only. Runs in CI. |
+| `tools/content_checks.py` | The visitor pages' rules, which `verify_site.py` runs: no sums, real payment details, defined terms, four breakpoints, labelled pictures, no notes about the prose, and every page's shape. |
+| `tools/shell.py`, `tools/shell_parts.py` | The shared regions above. Stdlib only. Runs in CI with `--check`. |
+| `terms.json` | The plain definition behind every (i). |
+| `support.json` | The UPI ID and Sponsors URL, or `null`. |
 
 ## Themes
 
-`prefers-color-scheme` decides by default; the masthead toggle overrides it and persists in `localStorage` under `meridian-theme`.
+The site opens light, whatever the system prefers (D-344). The masthead toggle switches to dark and persists the choice in `localStorage` under `meridian-theme`.
 
 **`theme.js` must stay in `<head>`, before the stylesheet, with no `defer`.** It blocks parsing exactly long enough to set `data-theme` on the root element before the first paint. Deferring it, or moving it after `style.css`, reintroduces a flash of the wrong theme for every visitor whose stored preference differs from their system setting. The CSP allows no inline script, which is why this is a file rather than the usual three lines in the head — that is the whole reason it exists as a separate request.
 
-The stylesheet carries three sets of values: bare `:root` (light, the no-JS default), a `prefers-color-scheme: dark` media query (dark, the no-JS path), and `:root[data-theme="…"]` rules that outrank both by specificity. JS wins whenever it has run; the media queries carry the page when it has not.
+The stylesheet carries two sets of values: bare `:root` (light, also the no-JS page) and `:root[data-theme="dark"]`, which outranks it by specificity. There is no dark-by-preference block, and `tests/unit/test_site_dashboard_tokens.py` fails if one comes back.
 
-**The canvas reads its palette from CSS.** `main.js` has no colour constants: `readPalette()` pulls the custom properties from the computed root style, and `theme.js` dispatches a `themechange` event on `document` that triggers a re-read and a redraw. Add a colour by adding a custom property, never by adding a constant to `main.js`. `tools/make-images.py` is the exception — it is a build-time tool with no DOM.
+**The canvas reads its palette from CSS.** Neither `main.js` nor `globe.js` has colour constants: `main.js` calls `readPalette()`, which pulls the custom properties from the computed root style, and sends the result to `globe.js`; `theme.js` dispatches a `themechange` event on `document` that triggers a re-read, a new message and a redraw. Add a colour by adding a custom property, never by adding a constant. `tools/make-images.py` is the exception — it is a build-time tool with no DOM.
 
 ### Contrast
 
 Every text pair clears WCAG AA. Measured, not assumed — computed with the WCAG relative-luminance formula and checked in the DevTools picker. Four of these failed at some point and were found by computing the ratios, never by looking at the page.
 
-| Token | On dark `#08090D` | On light `#FAF9F7` | Used for |
+| Token | On dark `#08090D` | On light `#F6F4EF` | Used for |
 |---|---|---|---|
-| `--ink` | 15.96:1 | 17.20:1 | headings, links, emphasis, standfirst |
-| `--ink-dim` | 8.20:1 | 8.86:1 | **body text**, table cells, code, legend labels |
-| `--muted` | 4.88:1 | 6.03:1 | nav, metadata, contents list, list markers |
-| `--signal` | 8.39:1 | 4.79:1 | above horizon |
-| `--trace` | 7.79:1 | 5.14:1 | predicted / next pass |
-| `--alert` | 5.01:1 | 6.28:1 | below horizon |
-| `--ink-dim` on `--surface` | 7.66:1 | 8.18:1 | `<pre>` blocks |
+| `--ink` | 15.96:1 | 16.16:1 | headings, links, emphasis, the primary action |
+| `--ink-dim` | 8.20:1 | 9.20:1 | **body text**, standfirst, table cells, code |
+| `--muted` | 4.88:1 | 5.83:1 | metadata, captions, contents list, list markers |
+| `--signal` | 8.39:1 | 5.58:1 | above horizon; the accent: focus, eyebrows, the primary action's hover |
+| `--trace` | 7.79:1 | 5.65:1 | predicted / next pass |
+| `--alert` | 5.01:1 | 6.34:1 | below horizon |
+| `--ink-dim` on `--surface` | 7.66:1 | 8.42:1 | cards, notes, `<pre>` blocks |
 
-**`--muted` is for text that is glanced at; `--ink-dim` is for text that is read.** That distinction is the rule, not the ratio. `--muted` clears AA at 4.88:1 and prose set in it still reads as washed out — the threshold is a proxy for legibility, not the thing itself. Nav labels, timestamps and tracked uppercase mono are `--muted`; anything set as a paragraph is `--ink-dim`. See D-039.
+**`--muted` is for text that is glanced at; `--ink-dim` is for text that is read.** That distinction is the rule, not the ratio. `--muted` clears AA at 4.88:1 and prose set in it still reads as washed out — the threshold is a proxy for legibility, not the thing itself. Timestamps, captions and metadata are `--muted`; anything set as a paragraph is `--ink-dim`. See D-039.
 
 #### The two non-text colours
 
 | Token | On dark | On light | |
 |---|---|---|---|
-| `--rule` | 1.71:1 | 1.68:1 | hairline dividers, borders, underlines |
-| `--wire` | 1.25:1 | 1.87:1 | graticule and orbit strokes on canvas |
+| `--rule` | 1.71:1 | 1.51:1 | hairline dividers, outlines, underlines |
+| `--wire` | 1.25:1 | 1.73:1 | graticule and orbit strokes on canvas |
 
 These are **not text colours and must never be set on text** — `.legend dd` was, at about 1.3:1, and `.prose li::marker` was, which is what the `--ink-dim` / `--muted` split exists to fix.
 
-They are also not held to 4.5:1, because a decorative divider is exempt. They are held to about **1.7:1** instead, which is a judgement rather than a threshold: enough that a rule is unambiguously present, low enough that it stays a hairline and does not become a box. Both sat near 1.25:1 before D-039 and were effectively invisible on any panel without OLED blacks.
+They are also not held to 4.5:1, because a decorative divider is exempt. They are held to about **1.5 to 1.7:1** instead, which is a judgement rather than a threshold: enough that a rule is unambiguously present, low enough that it stays a hairline and does not become a box. Since D-344 most sections are divided by space and cards by the surface colour, so the light rule is the quieter one. Both sat near 1.25:1 before D-039 and were effectively invisible on any panel without OLED blacks.
 
 `--rule` and `--wire` are **deliberately different in the dark theme.** They were once the same value by coincidence. A divider between blocks of prose and a wireframe stroke on near-black do not want the same weight.
 
@@ -121,32 +163,33 @@ The layer diagram's `.d-box` and `.d-line` use `--muted`, not `--rule`. A diagra
 
 An orthographic globe with a 15° graticule, a 98°-inclination circular orbit at 800 km, and link lines coloured by a real elevation calculation against the station's horizon. Time is compressed — one globe revolution is 120 s and one orbit 40 s, against 24 h and ~101 min in reality — but the projection, the ground track's westward drift and the horizon test are computed, not drawn.
 
-**All intro timing is the `PHASES` object at the top of `main.js`.** Every phase reads its progress through `phaseProgress()`, so changing one number retimes the sequence and nothing else moves. `PHASES.settle` must stay equal to `--reveal-at` in `style.css`; the canvas and the content reveal are deliberately independent mechanisms that happen to agree.
+**All intro timing is the `PHASES` object near the top of `globe.js`.** Every phase reads its progress through `phaseProgress()`, so changing one number retimes the sequence and nothing else moves. `PHASES.settle` must stay equal to `--reveal-at` in `style.css`; the canvas and the content reveal are deliberately independent mechanisms that happen to agree.
 
 The satellite constants (`SAT0`) are the solution to an offline search, not arbitrary — the comment above them states the constraints and how to re-derive them.
 
 Two behaviours that are requirements, not niceties:
 
-- `prefers-reduced-motion: reduce` renders one static settled frame and never starts the loop.
+- `prefers-reduced-motion: reduce` renders one static settled frame and never starts the loop. The globe can still be turned; it follows the hand exactly and never coasts.
 - Click, tap, `Escape` or any key skips the intro.
+- Once settled, a drag or a sideways swipe on the globe turns it, and a flick coasts to a stop. Nothing on the page tells the visitor so: the cursor changes over the globe, and that is enough. A press on a link, a button or the text column is never taken by the globe. `html` carries `touch-action: pan-y pinch-zoom` on this page only, so a sideways swipe reaches the script and pinch zoom stays the browser's.
 
 ### The `<h1>` is not in the reveal, and must not be put back into it
 
-Everything in the content column carries `class="reveal"` except the heading. That is deliberate and load-bearing for search: the `<h1>` is the page's largest contentful paint, and holding it behind the 4.2 s delay made **LCP 4 400 ms** — a failing Core Web Vital on the one page that has to rank, and a heading Google's renderer may sample while it is still `visibility: hidden`.
+Everything in the content column carries `class="reveal"` except the heading. That is deliberate and load-bearing for search: the `<h1>` is the page's largest contentful paint, and holding it behind what was then a 4.2 s delay made **LCP 4 400 ms** — a failing Core Web Vital on the one page that has to rank, and a heading Google's renderer may sample while it is still `visibility: hidden`.
 
 It now paints with the canvas at about 110 ms. The animation is unchanged and everything else still waits out the globe; the stagger simply starts one element later. Adding `reveal` back to that `<h1>` silently reintroduces the problem, and nothing will fail — the page will just stop ranking. See D-042.
 
 ### The intro is opt-in, and that is the important part
 
-`theme.js` adds `intro` to the root element before the first paint, and takes it away again after 900 ms unless `main.js` has added `intro-ready` from its first painted frame. **The 4.2 s delay only applies when the globe is actually running.**
+`theme.js` adds `intro` to the root element before the first paint, and takes it away again after 900 ms unless `main.js` has added `intro-ready` from its first painted frame. **The 1.4 s delay only applies when the globe is actually running.**
 
-It used to be unconditional, with JS able only to cancel it — so a `main.js` that was blocked, stale or broken produced the full blank wait *and* no globe. Test the failure, not the success: block `/main.js` in DevTools and reload, then block `/orbit.js`. Content must be immediate in both cases. If you change any of this, that is the check that matters.
+It used to be unconditional, with JS able only to cancel it — so a `main.js` that was blocked, stale or broken produced the full blank wait *and* no globe. Test the failure, not the success: block `/main.js` in DevTools and reload, then block `/orbit.js`, then `/globe.js`. Content must be immediate in all three cases. If you change any of this, that is the check that matters.
 
 The gate is keyed off `data-intro` on `<html>`, which only the home page carries. `theme.js` is not a module and must never become one — a module defers, and deferring it reintroduces both the theme flash and this gate arriving after paint.
 
 **`visibility: hidden` is in the reveal keyframe on purpose.** `opacity: 0` leaves an element hit-tested, focusable and in the accessibility tree, so the invisible header and links responded to hover and click for the whole intro. With `fill-mode: both` the `from` state holds through the delay and `visibility` steps to visible on the animation's first frame, so it costs nothing visually. Do not remove it.
 
-**On the front page's Lighthouse Performance score.** It reports 100. **That is not a speed result and must not be quoted as one.** Real LCP, measured with a `PerformanceObserver`, is **4 400 ms** — the `.lede`, exactly as designed. Lighthouse's simulator models when the element's resources are ready and does not model an animation delay, so it returns 0.4 s. FCP, which is real, is 108 ms and comes from the canvas. D-038 recorded this as null; D-041 explains why the number appeared and why it means nothing. The four subpages score 100 in all four categories on desktop and 99 on mobile, and those are real.
+**On the front page's Lighthouse Performance score.** It reports 100. **That is not a speed result and must not be quoted as one.** Real LCP, measured with a `PerformanceObserver` before D-345 shortened the intro, was **4 400 ms**; re-measure it before quoting any figure. Lighthouse's simulator models when the element's resources are ready and does not model an animation delay, so it returns 0.4 s. FCP, which is real, is 108 ms and comes from the canvas. D-038 recorded this as null; D-041 explains why the number appeared and why it means nothing. The four subpages score 100 in all four categories on desktop and 99 on mobile, and those are real.
 
 ## Regenerating the images
 
@@ -158,7 +201,7 @@ python site/tools/make-images.py --what brand   # site/brand/
 python site/tools/make-images.py --what globe   # the still globe, into index.html
 ```
 
-The social card draws with the same projection and orbit model as `main.js`, and reads the shipped `.woff2` files directly, so there is no second copy of the fonts. Kept as full RGB: a 256-colour palette halves the file but quantises the green link line to grey.
+The social card draws with the same projection and orbit model as `globe.js`, and reads the shipped `.woff2` files directly, so there is no second copy of the fonts. Kept as full RGB: a 256-colour palette halves the file but quantises the green link line to grey.
 
 `--what globe` is the one output that is not an image file. It writes an inline `<svg>` into `index.html`, between two fence comments, from the same `project()`, `graticule()` and `elevation()` the card uses — **do not edit that block by hand.** Re-running is a no-op when nothing has changed. It needs no Pillow, so CI can regenerate and compare it without installing an imaging library; every other output does, and says so if it is missing.
 
@@ -170,7 +213,7 @@ It is hidden two ways, and both are needed. `theme.js` adds `intro` before the f
 
 Inline, not `<img src="…">`: an external SVG document cannot read the page's theme custom properties, so it could not follow the masthead's toggle. Every stroke is coloured by a `.scene-still .gs-*` rule in `style.css`.
 
-**`.scene-still`'s position mirrors `layout()` in `main.js` and has to keep mirroring it.** Centre at 82% / 22% with radius `min(24vw, 40vh)`, and 52% / 21% with `min(38vw, 21vh)` below 840px. `#scene` is fixed and inset to zero, so its box *is* the layout viewport — which is what `vw` and `vh` measure, and why the two can be written in different units and land in the same place.
+**`.scene-still`'s position mirrors `layout()` in `globe.js` and has to keep mirroring it.** Centre at 82% / 22% with radius `min(24vw, 40vh)`, and 52% / 21% with `min(38vw, 21vh)` below 64rem (1024px). `#scene` is fixed and inset to zero, so its box *is* the layout viewport — which is what `vw` and `vh` measure, and why the two can be written in different units and land in the same place.
 
 ## Asset stamps
 
@@ -181,11 +224,11 @@ python site/tools/stamp_assets.py           # rewrite in place
 python site/tools/stamp_assets.py --check   # exit 1 if any stamp is stale — this is what CI runs
 ```
 
-**Run it after editing any of `style.css`, `theme.js`, `main.js`, `rail.js` or `orbit.js`.** CI fails otherwise.
+**Run it after editing any of `style.css`, `theme.js`, `main.js`, `globe.js`, `rail.js` or `orbit.js`.** CI fails otherwise.
 
 A URL now names one set of bytes, so no cache can pair one build's HTML with another's CSS. That is not a hypothetical — see D-042, and the Cloudflare section below, for the four-hour window in which it happened twice.
 
-`orbit.js` is stamped into `main.js` and `rail.js` *before* their own hashes are taken, because stamping them changes the files whose hashes were just computed. `index.html`'s `modulepreload` carries the same stamp as the import; if the two ever disagree, the browser fetches `orbit.js` twice.
+`orbit.js` is stamped into `main.js`, `rail.js` and `globe.js`, and then `globe.js` into `main.js`, each *before* the importer's own hash is taken, because stamping a file changes the hash just computed. `index.html`'s two `modulepreload`s carry the same stamps as the imports; if they ever disagree, the browser fetches the file twice.
 
 The stamper only rewrites *quoted* references. `rail.js` opens with a paragraph about what `./orbit.js` is for, and a looser pattern edits that sentence.
 
@@ -197,10 +240,17 @@ The stamper only rewrites *quoted* references. `rail.js` opens with a paragraph 
 |---|---|
 | `stamp_assets.py --check` | a stamp does not match its file |
 | fragment links | an `href="#…"` matches no `id` on that page |
-| `modulepreload` | `orbit.js` is preloaded on a document page, or missing from `index.html` |
+| `modulepreload` | `orbit.js` or `globe.js` is preloaded on another page, or missing from `index.html` |
 | sitemap | it lists a page that does not exist, or omits one that does |
 | **link styling** | an `<a>` sits in no context the stylesheet colours |
 | inline assets | an inline `<style>`, `<script>` or `style=""` appears, which the CSP blocks |
+| shared regions | `shell.py --check`: a masthead, footer, (i) note, glossary or ways-to-give block differs from what the tool writes |
+| amounts | a currency sign or code beside a number, or a sum in Indian units, on any page or in either data file (D-343) |
+| ways to give | `support.json` holds something that is not a real UPI ID or Sponsors URL |
+| terms | an (i) or popover names a term `terms.json` does not define |
+| breakpoints | `style.css` tests a width other than 40, 64, 80 or 120rem (D-341) |
+| figures | a `<figure class="fig">` caption does not begin *Illustration*, *Example* or *Simulated* |
+| wording | a page, its metadata or its structured data talks about how the site is written, or calls Meridian a non-profit |
 
 The link-styling check exists because the bug it catches shipped: `.foot-bar` styled the wide footer's bottom bar and nothing styled the anchor inside it, so the licence link was drawn in user-agent blue on all five document pages. It reads the styled contexts out of `style.css`, counting **only rules that set `color`** — `.nav a` appears twice in that file, once with a colour and once in the reduced-motion query with nothing but `transition: none`, and counting the second would let a stylesheet that had lost the first still pass.
 

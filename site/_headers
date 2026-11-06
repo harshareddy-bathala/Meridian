@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
@@ -29,6 +29,12 @@
 # object-src is already covered by default-src 'none'. It is named anyway
 # because Lighthouse's CSP audit looks for it by name.
 #
+# connect-src 'self' lets a page fetch from this origin and nowhere else. No
+# page script fetches anything today; without it, default-src 'none' also
+# blocked the in-page fetch Lighthouse uses to read /robots.txt, which scored
+# every page's SEO as "robots.txt is not valid" (D-348). It opens no request to
+# any other host, so the no-third-party claim above is unchanged.
+#
 # JSON-LD lives in <script type="application/ld+json"> blocks. Those are data
 # blocks, never prepared as script, so script-src does not apply to them —
 # verify in the console that no page reports a violation.
@@ -38,6 +44,11 @@
 # a separate and effectively irreversible step, and is not done here.
 
 /fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Vendored code lives under a versioned directory and is never edited in
+# place, so its URLs are immutable by construction: an upgrade is a new path.
+/vendor/*
   Cache-Control: public, max-age=31536000, immutable
 
 /brand/*
@@ -72,8 +83,32 @@
 /*.css
   Cache-Control: public, max-age=0, must-revalidate
 
-/*.js
+# One rule per script, not /*.js. Cloudflare Pages joins the values when two
+# matching rules set the same header, so a splat beside a per-file rule would
+# send both directives at once; it also matched /vendor/, whose files are
+# immutable by the rule above.
+/theme.js
   Cache-Control: public, max-age=0, must-revalidate
+
+/main.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/pages.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/rail.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+# The two modules the front page's worker loads (D-349). The page preloads
+# both, and five minutes of freshness lets the worker's own requests for them
+# come from that cache instead of each costing a round trip, one after the
+# other, before the globe can draw. If the stamper ever stopped running, the
+# worst case is five stale minutes, not the unrecoverable file above.
+/orbit.js
+  Cache-Control: public, max-age=300
+
+/globe.js
+  Cache-Control: public, max-age=300
 
 /index.html
   Cache-Control: public, max-age=0, must-revalidate

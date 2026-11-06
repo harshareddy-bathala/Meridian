@@ -698,11 +698,13 @@ The mechanism is constrained by the CSP. `_headers` allows no `unsafe-inline`, w
 
 *Rejected:* relaxing the CSP to allow an inline theme script. It is the ordinary solution and it would work. It also means `script-src` gains `unsafe-inline`, or a nonce a static host cannot generate, and the claim that the site makes no third-party requests stops being enforced by a header and becomes a promise. A 400-byte file is cheaper than that.
 
+*Amended by D-344 (2026-11-03).* The site now opens light whatever the system prefers; dark is chosen with the toggle and remembered.
+
 ---
 
 ## D-038 — The public site is five pages, and what it does not say
 
-**2026-08-05 · accepted**
+**2026-08-05 · accepted** · *its one-screen front page and its five pages superseded by D-342*
 
 `site/` was one page. It is now `/`, `/architecture/`, `/protocol/`, `/docs/`, `/about/` and a 404, sharing a masthead, nav and footer.
 
@@ -824,6 +826,8 @@ The animation itself is unchanged — same phases, same 4.2 s, same composition.
 *Rejected:* fingerprinting the assets so mixed releases become impossible regardless of cache rules. It is the belt-and-braces answer and it needs a build step, which D-036 rules out. Respecting the headers already shipped achieves the same thing with a dashboard toggle.
 
 *Rejected:* adding `static.cloudflareinsights.com` to `script-src` to make the injected beacon work. That would trade an enforced guarantee for a broken one to enable analytics nobody asked for.
+
+*Amended by D-345 (2026-11-03).* The intro now takes 1.4 s, not 4.2 s; the gate and its fuse are unchanged.
 
 ---
 
@@ -6785,6 +6789,199 @@ On the demonstration stack, every map tile came back as OpenStreetMap's "Access 
 
 ---
 
+## D-340 — The site starts from what a visitor came for, with a short definition behind every technical term
+
+**2026-11-03 · accepted** · *`site/` (every page); `site/terms.json`; `site/tools/shell.py`*
+
+The site was written for someone who already knew what a ground station was: architecture, protocol, documents, about. Visitors arrive with a goal (satellite images, a place to watch, an antenna in a cupboard) rather than a vocabulary, and had to translate the site before they could use it.
+
+**Decision.** Pages are organised by what a visitor came for: *how it works*, *data*, *watch an area*, *join with a station*, *support*. The technical pages stay, unchanged in substance, under *Developers*. Every page follows the same rules:
+
+- **It opens with what the visitor can do or see.** The precise term follows, with an **(i)** that opens a one- or two-sentence definition.
+- **Status is stated in words.** *Waiting for first light*, *Not open yet*, *Invite only, for now*. Never a blank, never a zero.
+- **Every picture says what it is.** The seven on *How it works* and the one on *Watch an area* are drawn for the page and captioned *Illustration · example values* or *Example · drawn, not data*. They are not dashboard captures: a capture is a picture of the simulated fleet, which would need its own SIM badge, would go stale with every dashboard change, and weighs hundreds of kilobytes where a drawing weighs a few. The live dashboard is linked instead, where every figure carries its label.
+- **Nothing is said about other projects.** Clarity is the comparison, never a claim (D-099).
+
+**The (i) is the native `popover` attribute.** It needs no script, so the CSP is untouched; the browser handles focus, Escape and tapping outside. It opens as a small centred sheet rather than beside the button, because anchoring it needs CSS anchor positioning, which two of the three engines do not ship. The definitions live once, in `site/terms.json`; `shell.py` writes the button and its note into each page and the full list into `/terms/`. A page naming an undefined term fails the run.
+
+**The masthead and footer have one copy.** Thirteen hand-written pages could no longer keep twelve identical copies of the nav. `shell.py` rewrites them between fence comments, as `make-images.py` already does for the still globe, and CI runs it with `--check`. The output is committed, so `site/` is still exactly what is served and D-036 still holds.
+
+*Rejected: a templating build step.* It would make `site/` an output rather than the deployment, which is what D-036 and D-042 decline.
+
+*Rejected: tooltips on hover.* A phone has no hover, and a definition that only a mouse can reach is not there for most visitors.
+
+*Amended by D-345 (2026-11-03).* A note now drops down under its (i) rather than opening as a centred sheet: `pages.js` places it, and without that script it still opens centred.
+
+---
+
+## D-341 — One look across the site and the dashboard: shared spacing, type and radii, and four breakpoints
+
+**2026-11-03 · accepted** · *`site/style.css`; `site/main.js`; `site/rail.js`; `site/tools/content_checks.py`*
+
+`style.css` tested ten different widths (480, 640, 720, 839, 840, 900, 1180 and 1800 px, among others), each chosen where one component happened to break. Every new component would have added another.
+
+**Decision.** One spacing scale (`--space-1` to `--space-8`), one fluid type scale (`--step--1` to `--step-3`), two radii, and four breakpoints: **40, 64, 80 and 120 rem**. A `max-width` query uses one sixteenth of a rem under, so the two sides of a breakpoint never overlap. `verify_site.py` fails on any other width. The spacing scale, the grounds, the ink, the rule and the simulated colour are the dashboard's own values, and `tests/unit/test_site_dashboard_tokens.py` holds them equal in both themes. The site's simulated badge now uses the dashboard's word, *Simulated*, and its colour, in place of an amber *SIM*: one label, one look, and a plain word.
+
+- **The globe moves above the content below 64rem**, not 840 px. `NARROW` in `main.js` and the still globe's query move together, as the README requires.
+- **The document rail appears from 80rem**, not 1180 px; `rail.js`'s `matchMedia` moves with it.
+- **The layer diagram's floor drops from 40rem to 36rem**, so it fits at 40rem with the page's padding, and its fade starts where it overflows.
+
+**A defect found on the way.** `.doc > h1` styled the heading of every document page, and stopped matching when the rail grid wrapped the heading in `.doc-head`. Every document page's `<h1>` has since been the browser's default bold heading. It now reads `.doc > h1, .doc-head > h1`.
+
+---
+
+## D-342 — The front page gains a second screen, and the site grows to twelve pages
+
+**2026-11-03 · accepted** · *supersedes D-038's one-screen front page and its five pages* · *`site/index.html`, `site/sitemap.xml`*
+
+D-038 kept the front page to one screen so the globe would be the whole impression. That still holds for the first screen, which is unchanged except for its words. It no longer holds for the visit: someone arriving from a search, an expo poster or a post does not know which of twelve pages they want.
+
+**Decision.** Below the globe, one more screen, *What brings you here?*, with five doors: data or images, watching an area, a station, code, support. It is opaque, so the fixed globe does not show through it, and its footer is the shared one. The heading is still outside the reveal (D-042).
+
+The front page's first sentence is now plain: *Satellites pass overhead for minutes at a time. Meridian makes each one count.* The `<title>` keeps the precise description for search.
+
+The site is now `/`, `/how-it-works/`, `/data/`, `/areas/`, `/stations/`, `/support/`, `/developers/`, `/terms/`, the four existing document pages and the 404. The visitor pages carry no rail and load no script but `theme.js`.
+
+*Rejected: a separate network page with committed figures for the next day.* A static file describing tomorrow is wrong by tomorrow. The live dashboard is linked from the front page, *Data* and *How it works* instead.
+
+*Amended by D-345 (2026-11-03).* The second screen is removed; the front page is one screen, and its doors are the navigation.
+
+---
+
+## D-343 — Support is described by what it keeps running, never by a sum, and payment details are real or absent
+
+**2026-11-03 · accepted** · *`site/support/`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py`*
+
+`PROJECT.md` §17 describes the station in tiers. A public page that quotes a price for them reads as a fundraising target, and dates the moment the price changes.
+
+**Decision.** No public surface states a sum: not the site, the README, the Sponsors profile, `FUNDING.yml` or a post. Support is described the way any organisation describes its running costs: the platform and its link online, the data services and keys, the domain and site, upkeep. Anything beyond them goes, in order, to a tracking antenna (Tier 3), more stations, then new software. `verify_site.py` fails on a currency sign or code beside a number, and on the Indian number words a sum in rupees is usually written with.
+
+**Payment details are real or absent.** `support.json` holds the UPI ID and the Sponsors URL, both `null` until they exist, and `null` renders as *being set up*, with an address to write to meanwhile. A value that is not shaped like a UPI ID or a Sponsors profile, or that contains a word like *example* or *your*, fails both `shell.py` and `verify_site.py`. A UPI ID also needs its QR code generated beside it. A placeholder that ships sends somebody's money to nobody, or to someone else.
+
+The page says plainly that Meridian is not a registered charity and that support is not tax-deductible. A sponsors list starts empty and says so.
+
+---
+
+## D-344 — The site opens on paper: light by default, an editorial serif, larger type and soft corners
+
+**2026-11-03 · accepted** · *`site/style.css`; `site/theme.js`; `site/fonts/`; `dashboard/src/app.css`. Amends D-037 and D-039.*
+
+The site is read like a document: pages of explanation, read in daylight, on phones, and printed. Measured on every page, most of what was not a heading was set at 13 px, or in 10–11 px letter-spaced mono capitals (30 to 50 runs per page), and every box had a hard edge. That reads as an instrument panel, and it is hard to read at arm's length.
+
+**Decision.**
+- **Light by default, whatever the system prefers.** `theme.js` applies the stored choice or light; the toggle still offers dark and remembers it. The stylesheet no longer has a dark-by-preference block, so a visitor without script gets light too. The dashboard keeps following the system: it is an instrument, often watched at night.
+- **Warm paper and ink.** `--bg` `#F6F4EF`, `--ink` `#16181D`, `--ink-dim` 9.2:1 for what is read and `--muted` 5.8:1 for what is glanced at, as D-039 already split them. `--signal`, deepened to 5.6:1, doubles as the accent for focus and the primary action. The shared colours change on the dashboard too, so the two surfaces stay one product (D-341).
+- **Three faces, three jobs.** Source Serif 4 (SIL OFL-1.1, variable weight, latin subset, self-hosted) for display: headings, the front page's line, large numbers. IBM Plex Sans for reading and navigation. IBM Plex Mono for data and code only, no longer for labels.
+- **Nothing a visitor reads is under 14 px.** Body text is 17 to 19 px with a line height of 1.6, and display reaches 64 px.
+- **A thumb can hit everything.** Navigation, actions, the theme toggle, footer links and the (i) buttons all have 44 px targets, the (i) through an invisible hit area. Focus is a 2 px ring in the accent colour.
+- **Soft corners, fewer lines.** Space divides sections where hairlines used to. Cards, panels, code and notes sit on the surface colour with 16 px corners; buttons and badges are pills. The dashed frame stays only where a picture is still to come.
+
+*Rejected: following the system preference, as before.* A visitor whose system is dark landed on a dark document, which is the reading D-037 itself called wrong for documents.
+
+*Rejected: Inter for the body.* Plex Sans is already self-hosted on both surfaces, and changing it would buy a small difference at the cost of a second set of files.
+
+---
+
+## D-345 — The front page is one screen, and its globe can be turned
+
+**2026-11-03 · accepted** · *`site/index.html`; `site/main.js`; `site/style.css`; `site/pages.js`; `site/tools/shell.py`; `site/vendor/cube-motion-0.1.0/`. Amends D-342, D-041 and D-340.*
+
+D-342 gave the front page a second screen of five doors under the globe. Below the fold of a page whose first screen is a moving picture, it was found by scrolling, if at all, and every door it held is already in the navigation. The intro took 4.2 s before anything but the heading appeared, which is long enough to read as a slow page.
+
+**Decision.**
+- **One screen, no scroll** at 390×844, 1280×800, 1366×768 and 1920×1080: the masthead, the heading, one sentence, two actions, a metadata line and one caption. The heading's size also follows the screen's height, so a short laptop screen fits; a screen shorter still scrolls rather than clipping. The doors live in the navigation and on the other pages' footers.
+- **The intro takes 1.4 s**, from close-up to settled globe, and the content follows over 210 ms. The heading still paints first (D-042), and the intro is still skipped by any key or tap and replaced by a still frame under reduced motion.
+- **The globe can be turned.** A drag or a sideways swipe turns it and a flick coasts to a stop. Nothing on the page says so: the cursor changes over the globe, and a hint would be one more line on a screen kept to the essentials. A press on a link, a button or the text column is never taken by the globe. Under reduced motion it follows the hand exactly and never coasts. Without script it is the still picture.
+- **One caption says what the globe shows**, in words, in place of the legend: whether a satellite is above the station's horizon, so it can listen, or that the next pass is already predicted. It is written only when that changes.
+- **Every other page eases in.** The masthead holds still across a page change while the page beneath it fades and rises 8 px. Sections still below the fold rise into place as they scroll into view, using cube-motion's `reveal` (MIT, vendored unmodified under a versioned path). Nothing already on screen is hidden and shown again, and a blocked script costs the motion, never the content. A term's note drops down from its (i), under the word it explains, and goes away when the (i) is pressed again or anything else is; it has no close button and does not dim the page. The (i) itself is a small circle with a plain *i*.
+- **Links that stand alone draw an underline from the left on hover**: the footer, the contents list and the metadata line. Links inside a sentence keep a resting underline, which is how a reader knows they are links, and the navigation keeps its pill.
+
+*Rejected: keeping the doors below the globe.* A second screen on a page built around one picture asks for a scroll that nothing on the first screen invites.
+
+*Rejected: a motion library with a timeline, such as GSAP.* Two entrances do not need one, and the site loads no code it does not use.
+
+---
+
+## D-346 — How it works can be played with
+
+**2026-11-03 · accepted** · *`site/how-it-works/index.html`; `site/style.css`; `site/pages.js`*
+
+Seven pictures, each with a paragraph beside it, explained Meridian well to someone who read every word, and to nobody else. Three of its ideas are comparisons, and a comparison is understood fastest by making it yourself.
+
+**Decision.**
+- **Step 1, predict:** the three passes are choices. Picking one shows why it ranks where it does; the highest pass is chosen first, because it is the one least likely to work.
+- **Step 2, choose:** the schedule switches between Meridian's plan and the obvious one, highest pass first, with what each catches, catches twice and misses.
+- **Step 3, receive:** the station switches between *heard it*, *heard nothing* and *switched off*, and says which of the three is a miss.
+- **Native controls, no script.** Each is a set of radio buttons in a fieldset, so it is reached and changed with the keyboard and read out as a choice; `:has()` shows what the checked one describes. Every picture is still captioned *Illustration · example values*.
+- **One or two sentences per step.** The picture carries the rest.
+- **On a wide screen a step's picture stays in view while its words scroll**, and the step being read is in full colour while the others step back. `pages.js` marks it; without that script every step is simply in full colour.
+- **On a phone the static pictures keep their drawn size** and scroll sideways inside their frame, rather than shrinking their labels below reading size.
+
+*Rejected: one sticky picture that swaps as the steps scroll past.* It needs script to move every figure into one frame, and without that script the page would lose its pictures; a picture that sticks within its own step does the same job with CSS alone.
+
+---
+
+## D-347 — Every page has one shape: a title, one sentence, the content, one next step
+
+**2026-11-06 · accepted** · *`site/*/index.html`; `site/404.html`; `site/style.css`; `site/pages.js`; `site/tools/content_checks.py`*
+
+Each page had grown its own opening and its own ending. Standfirsts ran from one sentence to three, and pages ended on two or three links of equal weight, or, on the glossary and About, on nothing. A reader who finished a page was offered a menu, and the menu is already the navigation and the footer.
+
+**Decision.**
+- **A page title, one sentence under it, the content, and one next step**, on every page but the front and the 404, which are one screen each. The 404 says what happened in one sentence and offers one way back.
+- **The next step is one link**: where a reader who has finished this page most likely goes. A serif title that draws its underline from the left on hover, a line saying what is there, and an arrow; ↗ when it leaves the site. Links that are the page's content, such as the documents Developers lists, stay where they are.
+- **The document pages keep their rail, restyled.** The project's status is a pill, as on the visitor pages, and is said once, not twice. The layer diagram is drawn in words rather than capitals, with soft corners, and never sets a label under 14 px; module names and the documents index are no longer smaller than the text around them.
+- **`content_checks.py` holds the shape**: one `<h1>`, a standfirst of one sentence and exactly one next step, at the end. It fails on a planted second sentence and on a planted second step.
+
+*Rejected: a row of next steps, as before.* Three equal links ask the reader to choose again at the moment they have just finished choosing, and each one is already in the navigation.
+
+---
+
+## D-348 — The site meets WCAG AA on every page, and fits a phone's visible height
+
+**2026-11-06 · accepted** · *`site/style.css`; `site/_headers`; `site/{how-it-works,developers,protocol,architecture}/index.html`; `site/tools/content_checks.py`. Amends D-345 and D-346.*
+
+Measured on all thirteen pages, in both themes, at 390 and 1280 px: axe-core for WCAG 2.2 AA, every interactive element's target size, focus on every control, Lighthouse on mobile, and the front page on emulated phones.
+
+**Decision.**
+- **A step stepping back loses its colour, not its contrast.** D-346 faded the steps of How it works not being read to 35% opacity, which set their text at 1.7:1. They now turn grey, which keeps every word at the contrast it was set at, and the step being read is the one in colour.
+- **What scrolls sideways can be reached by keyboard.** The code blocks, the layer diagram and How it works' four static pictures scroll inside themselves on a phone, so each takes focus and can be scrolled with the arrow keys.
+- **44 px wherever a thumb is the pointer.** The masthead's wordmark, the footer's links and address, the documents' titles and the (i), whose invisible hit area was 43 px, all reach 44. The contents list reaches 44 on a touch screen and keeps its compact rows under a mouse, where WCAG's 24 px is met with room to spare.
+- **The front page fits the height a phone actually shows.** Safari with its bars out shows 664 px of a 390 × 844 iPhone, and the page ran 92 px past it. On screens under 40rem the heading follows the height (`5svh`), the body follows it down to 17 px and no further, the gaps tighten, and the two actions share one row down to 360 px. It is one screen at 390 × 844, 390 × 664, 375 × 635, 360 × 640 and 412 × 839; 320 × 568 still scrolls, as D-345 allows. The masthead's two rows on a phone lose the spare space between them, on every page.
+- **The site may fetch from itself.** `connect-src 'self'` joins the CSP. `default-src 'none'` also blocked the in-page fetch Lighthouse reads `/robots.txt` with, which scored every page's SEO as "robots.txt is not valid". No other host is opened, so no third party is reached.
+
+**Measured after,** against a local server that applies `_headers` and compresses as Cloudflare Pages does: Accessibility, Best Practices and SEO 100 on every indexed page, no axe violation in either theme, no CSP violation, and Performance 97 to 98 on every page but the front. The 404 scores 63 on SEO because it is `noindex`, which is the point of it.
+
+**The front page's Performance is 82 to 86, and that is open.** Without a GPU, as in Lighthouse and PageSpeed Insights, each frame of the globe waits about 18 ms for the compositor to copy the full-screen canvas, and the simulated 4× slower CPU turns every frame into a long task. On a phone with GPU compositing that copy costs next to nothing. Capping the canvas at 1.25 device pixels per CSS pixel instead of 2 scores 99, at the cost of a slightly softer wireframe on 3× screens; drawing it from a worker with `OffscreenCanvas` would take the copy off the main thread without that cost. Neither is done until it is chosen.
+
+*Amended 2026-11-06 by D-349:* the worker was chosen. The front page now scores 98 to 99, at full resolution.
+
+*Rejected: idle frames at 15 fps.* Measured at 85 to 89: the long tasks come from every frame, the intro's included, not from how many idle frames there are.
+
+*Rejected: clearing and drawing only the square that holds the orbits.* No change. The cost is the copy of the whole canvas, not the area drawn into it.
+
+---
+
+## D-349 — The front page's globe is drawn in a worker
+
+**2026-11-06 · accepted** · *`site/globe.js` (new); `site/main.js`; `site/index.html`; `site/_headers`; `site/tools/{stamp_assets,verify_site}.py`; `site/README.md`. Settles the question D-348 left open.*
+
+Without a GPU, which is how Lighthouse and PageSpeed Insights run and how some phones still draw a 2D canvas, every frame of the full-screen globe made the main thread wait about 18 ms while the compositor copied the canvas's whole bitmap. Lighthouse's simulated 4× slower CPU turned each of those frames into a long task, and the front page scored 82 to 86 for performance while every other page scored 98.
+
+**Decision.**
+- **`globe.js` draws, and touches no DOM.** The intro's phases, the drawing and the frame loop moved out of `main.js` unchanged; everything the globe needs from the page arrives as a message (size, palette, motion preference, visibility, skip, drag) and everything the page needs leaves as one (painted, settled, intro done, the caption's state, where the globe is).
+- **`main.js` hands the canvas to a module worker running `globe.js`,** with `transferControlToOffscreen()`, and keeps everything that touches the page: measuring, the palette, presses and drags, the caption and the intro classes. The canvas is handed over only once the worker has said it loaded, so a worker that fails to load costs nothing.
+- **Where that cannot happen, nothing changes.** A browser without `transferControlToOffscreen` or module workers, or a worker that fails before the handover, gets `globe.js` imported and run on the main thread, as the globe ran before. A failure after the handover costs the globe and never the page: the gate `theme.js` put up is dropped.
+- **The worker's scripts cost no extra round trips.** `index.html` preloads `globe.js` beside `orbit.js`, and `_headers` gives those two files five minutes of freshness, so the worker's own requests for them come from the cache the preload filled. Measured cold on a 150 ms connection, the first globe frame moves from 536 ms to 600 ms; without the preload and the freshness it was 875 ms, against `theme.js`'s 900 ms fuse. `/*.js` becomes one rule per script, because Cloudflare Pages joins two matching rules' values into one contradictory header.
+
+**Measured after:** the front page scores 98 to 99 for performance, with no long task at its full two device pixels per CSS pixel; Accessibility, Best Practices and SEO stay at 100. Chromium and Firefox run the worker, the main-thread fallback and the reduced-motion still; WebKit could not be run here, so Safari is untested. With `globe.js`, `orbit.js` or `main.js` blocked, the content shows without the delay and the still globe stays.
+
+*Rejected: capping the canvas at 1.25 device pixels per CSS pixel.* It scored 99, by drawing a softer globe on every phone to satisfy a measurement taken without a GPU.
+
+*Rejected: making the stamped scripts immutable.* It would also remove the worker's round trips, but `_headers` keeps them revalidating so that a stamper that silently stopped could not leave a stale file cached forever. Five minutes bounds that risk; a year does not.
+
+---
+
 ## D-350 — The repository is written for the people arriving at it: a plain README, and the files a contributor looks for
 
 **2026-11-03 · accepted** · *`README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CHANGELOG.md`, `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`*
@@ -7189,6 +7386,21 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
 
 **Migrations were amended in place rather than patched.** `GIT-WORKFLOW.md` Rule 9 protects *merged* migrations; `deploy/migrations/` was still untracked when D-023 through D-035 landed, so 0002, 0005 and 0006 were drafts, not history. A 0007 that patched a 0006 nobody had ever applied would have been a worse artefact to defend than one readable file per table. From the first commit of `deploy/migrations/`, Rule 9 binds normally — and that commit has not happened yet at the time D-034 amends `0002_stations.sql`.
+
+**Landed 2026-11-03**, building the site for the people who use it.
+
+| Decision | Applied to |
+|---|---|
+| D-340 what a visitor came for, an (i) per term, one shell | `site/{how-it-works,data,areas,stations,support,developers,terms}/index.html`; `site/terms.json`; `site/tools/{shell,shell_parts}.py`; `ci.yml › site` |
+| D-341 one look, four breakpoints | `site/style.css`; `site/{main,rail}.js`; `site/tools/content_checks.py`; `site/README.md`; `tests/unit/test_site_dashboard_tokens.py` |
+| D-342 the front page's second screen | `site/index.html`; `site/sitemap.xml`; `site/tools/{stamp_assets,verify_site}.py` |
+| D-343 no sums; real payment details or none | `site/support/index.html`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py` |
+| D-344 light by default, a serif display, larger type, soft corners | `site/style.css`; `site/theme.js`; `site/fonts/`; `site/*/index.html` theme colour; `site/site.webmanifest`; `dashboard/src/app.css`; `tests/unit/test_site_dashboard_tokens.py` |
+| D-345 one screen; a globe to turn; easing in | `site/index.html`; `site/main.js`; `site/pages.js`; `site/tools/shell.py`; `site/style.css`; `site/vendor/cube-motion-0.1.0/`; `site/tools/stamp_assets.py`; `site/_headers`; `site/README.md`; `ATTRIBUTION.md` |
+| D-346 How it works can be played with | `site/how-it-works/index.html`; `site/style.css`; `site/pages.js`; `site/README.md` |
+| D-347 one shape for every page | `site/*/index.html`; `site/404.html`; `site/style.css`; `site/pages.js`; `site/tools/content_checks.py`; `site/README.md` |
+| D-348 WCAG AA everywhere; a phone's visible height; `connect-src 'self'` | `site/style.css`; `site/_headers`; `site/{how-it-works,developers,protocol,architecture}/index.html`; `site/tools/content_checks.py` |
+| D-349 the globe drawn in a worker | `site/globe.js`; `site/main.js`; `site/index.html`; `site/_headers`; `site/tools/{stamp_assets,verify_site}.py`; `site/README.md` |
 
 **Landed 2026-11-03**, making the repository ready for contributors and sponsors.
 

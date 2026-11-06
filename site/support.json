@@ -1,0 +1,5 @@
+{
+  "_about": "The support page's ways to give. null renders as 'opening shortly'. Set a value only to the real, working ID or URL, then run site/tools/shell.py; verify_site.py refuses anything that looks like a placeholder. upi_id also needs site/support/upi-qr.svg, from site/tools/upi_qr.py.",
+  "github_sponsors": null,
+  "upi_id": null
+}

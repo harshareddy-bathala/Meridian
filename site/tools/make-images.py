@@ -11,7 +11,7 @@ Four groups, selectable with --what:
           shows when main.js cannot run.
 
 The globe is a real orthographic projection of a 15-degree graticule with a
-98-degree inclined circular orbit at 800 km — the same model as site/main.js,
+98-degree inclined circular orbit at 800 km — the same model as site/globe.js,
 not an illustration of it. The station sits at 12.9716 N, 77.5946 E and the
 link line is green because an elevation calculation says the satellite is
 above its horizon.
@@ -71,7 +71,7 @@ PAPER = (250, 249, 247)
 INK_DARK = (20, 22, 27)
 
 CX, CY, R = 985.0, 250.0, 268.0  # globe: upper right, bleeding off both edges
-CAMERA = Camera(18 * DEG, 102.6 * DEG)  # matches main.js settled camera
+CAMERA = Camera(18 * DEG, 102.6 * DEG)  # matches globe.js settled camera
 
 STATION_LAT, STATION_LON = 12.9716 * DEG, 77.5946 * DEG
 STATION = unit_sphere_point(STATION_LAT, STATION_LON)

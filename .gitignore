@@ -43,6 +43,8 @@ backups/
 *.db
 *.sqlite3
 data/
+# ...except the site's Data page, which is a page about data, not data.
+!site/data/
 products/
 snapshots/
 

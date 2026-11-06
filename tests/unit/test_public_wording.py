@@ -11,9 +11,10 @@ site. Four kinds of line read badly there, and each is refused here:
   The rules it held are ``docs/CODE-STANDARDS.md``;
 - **a record of who asked**, rather than the reason a reader can check.
 
-The project's origin is stated once, honestly, in the README and the project
-document. Those lines, and two comments in migrations that are never edited once
-merged (``GIT-WORKFLOW.md``), are the allowed exceptions, each matched exactly.
+The project's origin is stated once, honestly, in the README, the project
+document and the site's About page. Those lines, and two comments in migrations
+that are never edited once merged (``GIT-WORKFLOW.md``), are the allowed
+exceptions, each matched exactly.
 """
 
 from __future__ import annotations
@@ -62,6 +63,11 @@ ALLOWED = {
         "docs/PROJECT.md",
         "A final-year engineering project, built by a team of three",
     ): "the project's origin, in its own document",
+    (
+        "site/about/index.html",
+        "Meridian began as a final-year engineering project, built by a team of"
+        " three, and is written to outlast it.</p>",
+    ): "the project's origin, on the page about the project",
     (
         ".gitignore",
         "CLAUDE.local.md",

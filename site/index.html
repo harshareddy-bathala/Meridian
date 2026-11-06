@@ -10,8 +10,7 @@
 <meta name="description" content="Meridian is open-source software for satellite ground stations. It predicts which passes are worth receiving, schedules them, and measures whether it worked.">
 <link rel="canonical" href="https://meridian.org.in/">
 
-<meta name="theme-color" content="#08090D" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#FAF9F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#F6F4EF">
 
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://meridian.org.in/">
@@ -38,11 +37,12 @@
 <link rel="preload" href="/fonts/IBMPlexSans-Regular.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/IBMPlexSans-Medium.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="modulepreload" href="/orbit.js?v=847a79e8">
+<link rel="modulepreload" href="/orbit.js?v=aa6da386">
+<link rel="modulepreload" href="/globe.js?v=0818dada">
 
-<script src="/theme.js?v=bb99dcad"></script>
-<link rel="stylesheet" href="/style.css?v=f68a70f3">
-<script src="/main.js?v=4b4fdb01" type="module"></script>
+<script src="/theme.js?v=49710f4b"></script>
+<link rel="stylesheet" href="/style.css?v=776cae01">
+<script src="/main.js?v=38620c55" type="module"></script>
 
 <script type="application/ld+json">
 {
@@ -56,7 +56,7 @@
       "url": "https://meridian.org.in/",
       "logo": "https://meridian.org.in/brand/meridian-mark-onblack-1024.png",
       "image": "https://meridian.org.in/og-image.png",
-      "description": "A non-profit aerospace software organisation building open scheduling, monitoring and reliability software for satellite ground stations, and MSP, an open protocol any receiving station can implement.",
+      "description": "Open scheduling, monitoring and reliability software for satellite ground stations, and MSP, an open protocol any receiving station can implement.",
       "knowsAbout": [
         "satellite ground stations",
         "satellite pass prediction",
@@ -71,7 +71,7 @@
         "@type": "ContactPoint",
         "contactType": "general enquiries",
         "email": "hello@meridian.org.in",
-        "url": "https://github.com/harshareddy-bathala/Meridian/discussions",
+        "url": "https://github.com/harshareddy-bathala/Meridian/issues",
         "availableLanguage": "en"
       }
     },
@@ -117,6 +117,7 @@
 
 <div class="page">
 
+  <!-- shell:masthead -->
   <header class="masthead reveal">
     <a class="brand" href="/" aria-label="Meridian — home">
       <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
@@ -127,10 +128,11 @@
     </a>
 
     <nav class="nav" aria-label="Primary">
-      <a href="/architecture/">Architecture</a>
-      <a href="/protocol/">Protocol</a>
-      <a href="/docs/">Docs</a>
-      <a href="/about/">About</a>
+      <a href="/how-it-works/">How it works</a>
+      <a href="/data/">Data</a>
+      <a href="/stations/">Stations</a>
+      <a href="/support/">Support</a>
+      <a href="/developers/">Developers</a>
     </nav>
 
     <div class="theme-slot">
@@ -145,44 +147,37 @@
       </button>
     </div>
   </header>
+  <!-- /shell:masthead -->
 
   <main class="content" id="content">
     <!-- No `reveal` class, deliberately. This is the page's largest contentful
-         paint, and holding it for 4.2 s made LCP 4 400 ms on the one page that
-         has to rank. It now paints with the canvas at about 110 ms and the
-         intro is otherwise untouched — everything else still waits. See D-042. -->
-    <h1 class="lede">Predictive scheduling and reliability for satellite ground stations.</h1>
+         paint, so it paints with the canvas and never waits for the intro.
+         See D-042. -->
+    <h1 class="lede">Satellites pass overhead for minutes at a time. Meridian makes each one count.</h1>
 
-    <p class="body reveal">A satellite pass lasts minutes and never repeats. Meridian predicts which
-    reception opportunities are worth taking, schedules them, and measures whether it worked — over
-    MSP, an open protocol any receiving station can implement.</p>
+    <p class="body reveal">It picks the passes worth catching, catches them, checks what came back and
+    tells you what happened. Open software, for any receiving station.</p>
 
     <p class="cta-row reveal">
-      <a class="cta" href="/architecture/">How it works <span class="arrow" aria-hidden="true">→</span></a>
-      <a class="cta cta-quiet" href="https://github.com/harshareddy-bathala/Meridian">View on GitHub <span class="arrow" aria-hidden="true">→</span></a>
+      <a class="cta" href="/how-it-works/">How it works <span class="arrow" aria-hidden="true">→</span></a>
+      <a class="cta cta-quiet" href="https://dash.meridian.org.in/">See it live <span class="arrow" aria-hidden="true">↗</span></a>
     </p>
   </main>
 
   <footer class="colophon reveal">
-    <p class="meta">© 2026 Meridian <span class="dot" aria-hidden="true">·</span> <a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a> <span class="dot" aria-hidden="true">·</span> <a href="mailto:hello@meridian.org.in">hello@meridian.org.in</a></p>
+    <p class="meta">© 2026 Meridian <span class="dot" aria-hidden="true">·</span> <a href="/about/">About</a> <span class="dot" aria-hidden="true">·</span> <a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a> <span class="dot" aria-hidden="true">·</span> <a href="mailto:hello@meridian.org.in">hello@meridian.org.in</a></p>
 
-    <dl class="legend">
-      <div class="legend-row">
-        <dt><span class="swatch swatch-signal" aria-hidden="true"></span>Above horizon</dt>
-        <dd>link acquired</dd>
-      </div>
-      <div class="legend-row">
-        <dt><span class="swatch swatch-alert" aria-hidden="true"></span>Below horizon</dt>
-        <dd>no link</dd>
-      </div>
-      <div class="legend-row">
-        <dt><span class="swatch swatch-trace" aria-hidden="true"></span>Next pass</dt>
-        <dd>predicted</dd>
-      </div>
-    </dl>
+    <!-- What the globe is showing, in words. main.js keeps it in step with the
+         drawing; without script it describes the still frame. Hidden from
+         screen readers because it changes every few seconds and the canvas
+         beside it is decorative. -->
+    <p class="globe-note" aria-hidden="true">
+      <span class="globe-state" data-state="up"><span class="swatch swatch-signal"></span><span class="globe-text">A satellite is above the station's horizon, so it can listen</span></span>
+    </p>
   </footer>
 
 </div>
+
 
 </body>
 </html>

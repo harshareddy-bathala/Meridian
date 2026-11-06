@@ -18,13 +18,18 @@ bytes change, so a cache can only ever return the bytes that URL named.
 
 Ordering
 --------
-main.js and rail.js both `import './orbit.js'`, so orbit.js has to be stamped
-into them before their own hashes can be taken — otherwise the stamping changes
-the files whose hashes were just computed. The passes are therefore:
+main.js, rail.js and globe.js all `import './orbit.js'`, and main.js loads
+'./globe.js', into a worker or on the main thread (D-349). Each file has to be
+stamped into the ones that name it before their own hashes can be taken —
+otherwise the stamping changes the files whose hashes were just computed. The
+passes are therefore:
 
-    1. hash orbit.js, and rewrite the import specifier in main.js and rail.js
-    2. hash the now-rewritten main.js and rail.js, and theme.js and style.css
-    3. rewrite the HTML, including index.html's modulepreload for orbit.js —
+    1. hash orbit.js, and rewrite the import specifier in main.js, rail.js and
+       globe.js
+    2. hash the now-rewritten globe.js, and rewrite both of main.js's
+       references to it
+    3. hash the now-rewritten main.js and rail.js, and theme.js and style.css
+    4. rewrite the HTML, including index.html's modulepreload for orbit.js —
        which must carry the *same* stamp as the import, or the preload and the
        import are two different URLs and the browser fetches the file twice
 
@@ -52,6 +57,13 @@ STAMP_CHARS = 8
 PAGES = [
     "index.html",
     "404.html",
+    "how-it-works/index.html",
+    "data/index.html",
+    "areas/index.html",
+    "stations/index.html",
+    "support/index.html",
+    "developers/index.html",
+    "terms/index.html",
     "about/index.html",
     "architecture/index.html",
     "docs/index.html",
@@ -59,11 +71,12 @@ PAGES = [
 ]
 
 # Referenced from HTML by absolute path.
-HTML_ASSETS = ["style.css", "theme.js", "main.js", "rail.js", "orbit.js"]
+HTML_ASSETS = ["style.css", "theme.js", "main.js", "rail.js", "orbit.js", "pages.js"]
 
 # Referenced from JavaScript by relative specifier, which is why orbit.js is
-# not in the list above alone.
-MODULE_IMPORTERS = ["main.js", "rail.js"]
+# not in the list above alone, and why globe.js, which no page names, is here.
+MODULE_IMPORTERS = ["main.js", "rail.js", "globe.js"]
+GLOBE_LOADERS = ["main.js"]
 
 
 def stamp_of(text: str) -> str:
@@ -93,11 +106,16 @@ def stamped_sources() -> dict[str, str]:
     Returns the *stamped* text of the module importers, not what is on disk, so
     the caller writes and hashes the same bytes.
     """
-    sources = {name: (SITE / name).read_text(encoding="utf-8") for name in HTML_ASSETS}
+    names = [*HTML_ASSETS, "globe.js"]
+    sources = {name: (SITE / name).read_text(encoding="utf-8") for name in names}
 
     orbit_stamp = stamp_of(sources["orbit.js"])
     for name in MODULE_IMPORTERS:
         sources[name] = restamp(sources[name], "./orbit.js", orbit_stamp)
+
+    globe_stamp = stamp_of(sources["globe.js"])
+    for name in GLOBE_LOADERS:
+        sources[name] = restamp(sources[name], "./globe.js", globe_stamp)
 
     return sources
 

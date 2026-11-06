@@ -8,8 +8,7 @@
 <meta name="description" content="How Meridian is built: the orbit, prediction, scheduler, registry, observation and reliability modules, and the independence test the design has to pass.">
 <link rel="canonical" href="https://meridian.org.in/architecture/">
 
-<meta name="theme-color" content="#08090D" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#FAF9F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#F6F4EF">
 
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://meridian.org.in/architecture/">
@@ -36,9 +35,10 @@
 <link rel="preload" href="/fonts/IBMPlexSans-Regular.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
 
-<script src="/theme.js?v=bb99dcad"></script>
-<link rel="stylesheet" href="/style.css?v=f68a70f3">
-<script src="/rail.js?v=d28dfb5e" type="module"></script>
+<script src="/theme.js?v=49710f4b"></script>
+<link rel="stylesheet" href="/style.css?v=776cae01">
+<script src="/pages.js?v=01fba62a" type="module"></script>
+<script src="/rail.js?v=97d80e4a" type="module"></script>
 
 <script type="application/ld+json">
 {
@@ -72,6 +72,7 @@
 
 <div class="page page-doc">
 
+  <!-- shell:masthead -->
   <header class="masthead">
     <a class="brand" href="/" aria-label="Meridian — home">
       <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
@@ -82,10 +83,11 @@
     </a>
 
     <nav class="nav" aria-label="Primary">
-      <a href="/architecture/" aria-current="page">Architecture</a>
-      <a href="/protocol/">Protocol</a>
-      <a href="/docs/">Docs</a>
-      <a href="/about/">About</a>
+      <a href="/how-it-works/">How it works</a>
+      <a href="/data/">Data</a>
+      <a href="/stations/">Stations</a>
+      <a href="/support/">Support</a>
+      <a href="/developers/" aria-current="true">Developers</a>
     </nav>
 
     <div class="theme-slot">
@@ -100,14 +102,14 @@
       </button>
     </div>
   </header>
+  <!-- /shell:masthead -->
 
   <main class="doc" id="content">
     <div class="doc-head">
       <p class="eyebrow">Architecture</p>
-      <h1>Six modules, one protocol boundary, and a rule about what may depend on what.</h1>
-      <p class="standfirst">Meridian decides which satellite passes are worth receiving, schedules them,
-      monitors the stations doing the work, and reports measured reliability. The parts that do this are
-      kept deliberately separate, because the boundaries are what make the claims checkable.</p>
+      <h1>Six parts, and the rules between them.</h1>
+      <p class="standfirst">Meridian's parts are kept apart on purpose, because firm boundaries between
+      them are what make its claims checkable.</p>
     </div>
 
     <aside class="rail">
@@ -125,9 +127,9 @@
 
       <div class="rail-panel">
         <canvas class="rail-scene" aria-hidden="true"></canvas>
-        <p class="rail-status">Phase 1 · Foundations</p>
-        <p class="rail-note">Pre-launch. No measured results yet.</p>
-        <a class="rail-src" href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/ARCHITECTURE.md">Canonical spec ↗</a>
+        <p class="rail-status"><span class="pill pill-wait">Station 001 is being built</span></p>
+        <p class="rail-note">No measured results yet.</p>
+        <a class="rail-src" href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/ARCHITECTURE.md">The full document ↗</a>
       </div>
     </aside>
 
@@ -135,7 +137,7 @@
 
       <h2 id="layers">Layers</h2>
 
-      <div class="diagram-scroll">
+      <div class="diagram-scroll" tabindex="0" role="region" aria-labelledby="diagram-title">
         <svg class="diagram" viewBox="0 0 640 415" role="img" aria-labelledby="diagram-title diagram-desc">
           <title id="diagram-title">Meridian layer diagram</title>
           <desc id="diagram-desc">Anyone, anywhere reaches the dashboard and public API, which sits on
@@ -145,59 +147,59 @@
           connects three kinds of station: station 001 on a Pi with an SDR, a microcontroller station,
           and fifty simulated stations, labelled as simulated.</desc>
 
-          <text x="280" y="16" text-anchor="middle">ANYONE, ANYWHERE</text>
+          <text x="280" y="16" text-anchor="middle">Anyone, anywhere</text>
           <path class="d-line" d="M280 24 V44"/>
 
-          <rect class="d-box" x="120" y="44" width="320" height="34"/>
-          <text x="280" y="66" text-anchor="middle">DASHBOARD + PUBLIC API</text>
+          <rect class="d-box" rx="8" x="120" y="44" width="320" height="34"/>
+          <text x="280" y="66" text-anchor="middle">Dashboard and public API</text>
 
           <path class="d-line" d="M280 78 V100"/>
 
-          <rect class="d-box" x="40" y="100" width="480" height="150"/>
-          <text class="d-label" x="54" y="120">PLATFORM</text>
+          <rect class="d-box d-frame" x="40" y="100" width="480" height="150" rx="16"/>
+          <text class="d-label" x="54" y="120">Platform</text>
 
-          <rect class="d-box" x="70" y="140" width="95" height="28"/>
+          <rect class="d-box" rx="8" x="70" y="140" width="95" height="28"/>
           <text x="117" y="158" text-anchor="middle">orbit</text>
           <path class="d-line" d="M165 154 H195"/>
 
-          <rect class="d-box" x="195" y="140" width="115" height="28"/>
+          <rect class="d-box" rx="8" x="195" y="140" width="115" height="28"/>
           <text x="252" y="158" text-anchor="middle">prediction</text>
           <path class="d-line" d="M310 154 H340"/>
 
-          <rect class="d-box" x="340" y="140" width="105" height="28"/>
+          <rect class="d-box" rx="8" x="340" y="140" width="105" height="28"/>
           <text x="392" y="158" text-anchor="middle">scheduler</text>
 
-          <rect class="d-box" x="70" y="195" width="170" height="28"/>
+          <rect class="d-box" rx="8" x="70" y="195" width="170" height="28"/>
           <text x="155" y="213" text-anchor="middle">observation store</text>
 
-          <rect class="d-box" x="255" y="195" width="95" height="28"/>
+          <rect class="d-box" rx="8" x="255" y="195" width="95" height="28"/>
           <text x="302" y="213" text-anchor="middle">registry</text>
 
-          <rect class="d-box" x="365" y="195" width="110" height="28"/>
+          <rect class="d-box" rx="8" x="365" y="195" width="110" height="28"/>
           <text x="420" y="213" text-anchor="middle">reliability</text>
 
-          <rect class="d-box d-optional" x="545" y="145" width="88" height="60"/>
-          <text class="d-label" x="589" y="167" text-anchor="middle">external</text>
+          <rect class="d-box d-optional" rx="8" x="545" y="137" width="88" height="76"/>
+          <text class="d-label" x="589" y="162" text-anchor="middle">external</text>
           <text class="d-label" x="589" y="180" text-anchor="middle">archives</text>
-          <text class="d-label" x="589" y="196" text-anchor="middle">data only</text>
+          <text class="d-label" x="589" y="198" text-anchor="middle">data only</text>
           <path class="d-line d-optional" d="M545 175 H520"/>
 
           <path class="d-line" d="M280 250 V275"/>
 
-          <rect class="d-box" x="120" y="275" width="320" height="34"/>
-          <text x="280" y="297" text-anchor="middle">MERIDIAN STATION PROTOCOL</text>
+          <rect class="d-box" rx="8" x="120" y="275" width="320" height="34"/>
+          <text x="280" y="297" text-anchor="middle">Meridian Station Protocol</text>
 
           <path class="d-line" d="M280 309 V332 M110 332 H450 M110 332 V350 M280 332 V350 M450 332 V350"/>
 
-          <rect class="d-box" x="40" y="350" width="140" height="52"/>
+          <rect class="d-box" rx="8" x="40" y="350" width="140" height="52"/>
           <text x="110" y="373" text-anchor="middle">Station 001</text>
           <text class="d-label" x="110" y="390" text-anchor="middle">Pi + SDR</text>
 
-          <rect class="d-box" x="210" y="350" width="140" height="52"/>
+          <rect class="d-box" rx="8" x="210" y="350" width="140" height="52"/>
           <text x="280" y="373" text-anchor="middle">Microcontroller</text>
           <text class="d-label" x="280" y="390" text-anchor="middle">station</text>
 
-          <rect class="d-box" x="380" y="350" width="140" height="52"/>
+          <rect class="d-box" rx="8" x="380" y="350" width="140" height="52"/>
           <text x="450" y="373" text-anchor="middle">50 simulated</text>
           <text class="d-label" x="450" y="390" text-anchor="middle">labelled as such</text>
         </svg>
@@ -299,13 +301,17 @@
       <p><code>docker compose up</code> on a clean machine must produce a working platform in under ten
       minutes. That is a requirement, not an aspiration.</p>
 
-      <p><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/ARCHITECTURE.md">Read
-      the full architecture document on GitHub</a>, or see <a href="/protocol/">the protocol</a> for
-      how stations connect.</p>
+      <p><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/ARCHITECTURE.md">The
+      full architecture document</a> is on GitHub.</p>
 
     </div>
+    <nav class="next" aria-label="Next step">
+      <a class="next-link" href="/protocol/"><span class="next-k">Next</span><span class="next-t">Read the protocol</span><span class="next-d">How a station talks to the platform: MSP 0.1.</span><span class="arrow" aria-hidden="true">→</span></a>
+    </nav>
+
   </main>
 
+  <!-- shell:footer -->
   <footer class="colophon colophon-wide">
     <div class="foot-brand">
       <a class="brand" href="/" aria-label="Meridian — home">
@@ -315,35 +321,39 @@
         </svg>
         <span class="wordmark">Meridian</span>
       </a>
-      <p class="foot-line">Open scheduling, monitoring and measured reliability for satellite
-      ground stations, and MSP — an open protocol any receiving station can implement.</p>
+      <p class="foot-line">Open software that decides which satellite passes are worth catching,
+      catches them, checks the result and says what happened.</p>
       <p class="foot-line"><a href="mailto:hello@meridian.org.in">hello@meridian.org.in</a></p>
     </div>
+
+    <nav class="foot-col" aria-label="Use Meridian">
+      <p class="foot-h">Use Meridian</p>
+      <ul>
+        <li><a href="/how-it-works/">How it works</a></li>
+        <li><a href="/data/">Data and images</a></li>
+        <li><a href="/areas/">Watch an area</a></li>
+        <li><a href="/stations/">Join with a station</a></li>
+        <li><a href="/support/">Support the project</a></li>
+      </ul>
+    </nav>
+
+    <nav class="foot-col" aria-label="For developers">
+      <p class="foot-h">For developers</p>
+      <ul>
+        <li><a href="/developers/">Start here</a></li>
+        <li><a href="/architecture/">Architecture</a></li>
+        <li><a href="/protocol/">Protocol</a></li>
+        <li><a href="/docs/">All documents</a></li>
+        <li><a href="/terms/">Glossary</a></li>
+      </ul>
+    </nav>
 
     <nav class="foot-col" aria-label="Project">
       <p class="foot-h">Project</p>
       <ul>
-        <li><a href="/architecture/">Architecture</a></li>
-        <li><a href="/protocol/">Protocol</a></li>
         <li><a href="/about/">About</a></li>
-      </ul>
-    </nav>
-
-    <nav class="foot-col" aria-label="Documentation">
-      <p class="foot-h">Documentation</p>
-      <ul>
-        <li><a href="/docs/">All documents</a></li>
-        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">MSP specification</a></li>
-        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/DATA-MODEL.md">Data model</a></li>
-        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/EVALUATION.md">Evaluation method</a></li>
-      </ul>
-    </nav>
-
-    <nav class="foot-col" aria-label="Source">
-      <p class="foot-h">Source</p>
-      <ul>
-        <li><a href="https://github.com/harshareddy-bathala/Meridian">GitHub</a></li>
-        <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a></li>
+        <li><a href="https://dash.meridian.org.in/">Live dashboard ↗</a></li>
+        <li><a href="https://github.com/harshareddy-bathala/Meridian">GitHub ↗</a></li>
         <li><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/ATTRIBUTION.md">Attribution</a></li>
       </ul>
     </nav>
@@ -351,6 +361,7 @@
     <p class="foot-bar">© 2026 Meridian <span class="dot" aria-hidden="true">·</span>
     <a href="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE">Apache-2.0</a></p>
   </footer>
+  <!-- /shell:footer -->
 
 </div>
 
