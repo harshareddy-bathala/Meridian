@@ -36,7 +36,7 @@
 <link rel="preload" href="/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
 
 <script src="/theme.js?v=bdcf2d8d"></script>
-<link rel="stylesheet" href="/style.css?v=81bde736">
+<link rel="stylesheet" href="/style.css?v=52de18b6">
 <script src="/pages.js?v=01fba62a" type="module"></script>
 <script src="/rail.js?v=4999dcfd" type="module"></script>
 
@@ -191,7 +191,7 @@
         <dd>A periodic statement of liveness and current state.</dd>
       </dl>
 
-<pre><code>station                                    platform
+<pre tabindex="0"><code>station                                    platform
    │                                           │
    │──── register ───────────────────────────▶   │   once, on first join
    │◀─── station_id + token ──────────────────  │
@@ -208,7 +208,7 @@
 
       <p>HTTP/1.1, JSON bodies, four endpoints:</p>
 
-<pre><code>POST /msp/v0/register
+<pre tabindex="0"><code>POST /msp/v0/register
 POST /msp/v0/heartbeat      → assignments
 POST /msp/v0/observations
 GET  /msp/v0/time           → server time, for clock offset estimation</code></pre>
@@ -225,7 +225,7 @@ GET  /msp/v0/time           → server time, for clock offset estimation</code><
       network has no scale problem that open registration would solve. Relaxing this later is a policy
       change at one endpoint, not a protocol change.</p>
 
-<pre><code>{
+<pre tabindex="0"><code>{
   "invite_token": "…",
   "registration_key": "…",
   "name": "nec-rooftop-01",
@@ -258,7 +258,7 @@ GET  /msp/v0/time           → server time, for clock offset estimation</code><
       <p>Every thirty seconds a station states what it is doing. The response carries any assignments
       due.</p>
 
-<pre><code>{
+<pre tabindex="0"><code>{
   "station_id": "st_7fa3c1",
   "sent_at": "2026-08-14T09:31:02Z",
   "state": "listening",
@@ -303,7 +303,7 @@ GET  /msp/v0/time           → server time, for clock offset estimation</code><
 
       <h2 id="assignments">Assignments</h2>
 
-<pre><code>{
+<pre tabindex="0"><code>{
   "assignment_id": "as_44b2",
   "satellite_id": "norad:57166",
   "start_at": "2026-08-14T09:41:20Z",
@@ -371,7 +371,7 @@ GET  /msp/v0/time           → server time, for clock offset estimation</code><
 
       <p>Standard HTTP status semantics. Every error response carries this body and no other shape:</p>
 
-<pre><code>{ "error": "invalid_invite", "message": "Invite token has already been used." }</code></pre>
+<pre tabindex="0"><code>{ "error": "invalid_invite", "message": "Invite token has already been used." }</code></pre>
 
       <p>Two flat string fields. No nesting, no arrays, no optional members — a microcontroller client
       can extract both with a substring scan and never needs a JSON tree walker, which is the entire

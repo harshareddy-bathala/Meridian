@@ -36,7 +36,7 @@ AMOUNT = re.compile(
 BREAKPOINTS = {40, 64, 80, 120}
 MEDIA_WIDTH = re.compile(r"\((min|max)-width:\s*([\d.]+)(rem|px|em)\)")
 
-FIGURE = re.compile(r'<figure class="fig[^"]*">(.*?)</figure>', re.S)
+FIGURE = re.compile(r'<figure class="fig[^"]*"[^>]*>(.*?)</figure>', re.S)
 CAPTION = re.compile(r"<figcaption>(.*?)</figcaption>", re.S)
 HONEST_CAPTION = re.compile(r"^(Illustration|Example|Simulated)\b")
 
