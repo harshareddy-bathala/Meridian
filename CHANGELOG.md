@@ -2,7 +2,7 @@
 
 Every release, newest first. Dates are UTC. The project is pre-1.0: MSP is frozen at 0.1, and everything else may still change between releases, with the reason recorded in [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
-## 0.1.0
+## 0.1.0 — 2026-11-06
 
 The first release: the platform's software, complete and tested, before the first physical station receives.
 
@@ -16,11 +16,13 @@ The first release: the platform's software, complete and tested, before the firs
 - **Publishes** a read-only API, a live dashboard, a sealed evidence dataset and regenerable evaluation reports.
 - **Keeps running offline:** scheduling and reception continue with every external service unreachable, and the dashboard serves its last good copy when the API is down.
 - **Simulates** up to fifty stations speaking real MSP, with injectable faults, and labels every simulated record as simulated.
+- **Explains itself** at [meridian.org.in](https://meridian.org.in/): pages by what a visitor came for, a How it works whose comparisons can be played with, a short definition behind every technical term, and a globe that can be turned, drawn off the main thread. Static files, a strict content security policy, no third-party request.
 
 ### Measured
 
 - 41 of the 42 acceptance conditions in [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) proven on every change. The 72-hour run on the station's own computer is the one pending.
 - A cold `docker compose up` on a clean machine is held under ten minutes by CI on every pull request.
+- The site meets WCAG 2.2 AA on every page in both themes, and every indexed page scores 98 to 100 in each Lighthouse category on mobile.
 
 ### Not yet
 
