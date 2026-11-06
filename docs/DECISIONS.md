@@ -6921,6 +6921,22 @@ Seven pictures, each with a paragraph beside it, explained Meridian well to some
 
 ---
 
+## D-347 — Every page has one shape: a title, one sentence, the content, one next step
+
+**2026-11-06 · accepted** · *`site/*/index.html`; `site/404.html`; `site/style.css`; `site/pages.js`; `site/tools/content_checks.py`*
+
+Each page had grown its own opening and its own ending. Standfirsts ran from one sentence to three, and pages ended on two or three links of equal weight, or, on the glossary and About, on nothing. A reader who finished a page was offered a menu, and the menu is already the navigation and the footer.
+
+**Decision.**
+- **A page title, one sentence under it, the content, and one next step**, on every page but the front and the 404, which are one screen each. The 404 says what happened in one sentence and offers one way back.
+- **The next step is one link**: where a reader who has finished this page most likely goes. A serif title that draws its underline from the left on hover, a line saying what is there, and an arrow; ↗ when it leaves the site. Links that are the page's content, such as the documents Developers lists, stay where they are.
+- **The document pages keep their rail, restyled.** The project's status is a pill, as on the visitor pages, and is said once, not twice. The layer diagram is drawn in words rather than capitals, with soft corners, and never sets a label under 14 px; module names and the documents index are no longer smaller than the text around them.
+- **`content_checks.py` holds the shape**: one `<h1>`, a standfirst of one sentence and exactly one next step, at the end. It fails on a planted second sentence and on a planted second step.
+
+*Rejected: a row of next steps, as before.* Three equal links ask the reader to choose again at the moment they have just finished choosing, and each one is already in the navigation.
+
+---
+
 ## D-350 — The repository is written for the people arriving at it: a plain README, and the files a contributor looks for
 
 **2026-11-03 · accepted** · *`README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CHANGELOG.md`, `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`*
@@ -7337,6 +7353,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-344 light by default, a serif display, larger type, soft corners | `site/style.css`; `site/theme.js`; `site/fonts/`; `site/*/index.html` theme colour; `site/site.webmanifest`; `dashboard/src/app.css`; `tests/unit/test_site_dashboard_tokens.py` |
 | D-345 one screen; a globe to turn; easing in | `site/index.html`; `site/main.js`; `site/pages.js`; `site/tools/shell.py`; `site/style.css`; `site/vendor/cube-motion-0.1.0/`; `site/tools/stamp_assets.py`; `site/_headers`; `site/README.md`; `ATTRIBUTION.md` |
 | D-346 How it works can be played with | `site/how-it-works/index.html`; `site/style.css`; `site/pages.js`; `site/README.md` |
+| D-347 one shape for every page | `site/*/index.html`; `site/404.html`; `site/style.css`; `site/pages.js`; `site/tools/content_checks.py`; `site/README.md` |
 
 **Landed 2026-11-03**, making the repository ready for contributors and sponsors.
 
