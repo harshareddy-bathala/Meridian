@@ -6954,9 +6954,31 @@ Measured on all thirteen pages, in both themes, at 390 and 1280 px: axe-core for
 
 **The front page's Performance is 82 to 86, and that is open.** Without a GPU, as in Lighthouse and PageSpeed Insights, each frame of the globe waits about 18 ms for the compositor to copy the full-screen canvas, and the simulated 4× slower CPU turns every frame into a long task. On a phone with GPU compositing that copy costs next to nothing. Capping the canvas at 1.25 device pixels per CSS pixel instead of 2 scores 99, at the cost of a slightly softer wireframe on 3× screens; drawing it from a worker with `OffscreenCanvas` would take the copy off the main thread without that cost. Neither is done until it is chosen.
 
+*Amended 2026-11-06 by D-349:* the worker was chosen. The front page now scores 98 to 99, at full resolution.
+
 *Rejected: idle frames at 15 fps.* Measured at 85 to 89: the long tasks come from every frame, the intro's included, not from how many idle frames there are.
 
 *Rejected: clearing and drawing only the square that holds the orbits.* No change. The cost is the copy of the whole canvas, not the area drawn into it.
+
+---
+
+## D-349 — The front page's globe is drawn in a worker
+
+**2026-11-06 · accepted** · *`site/globe.js` (new); `site/main.js`; `site/index.html`; `site/_headers`; `site/tools/{stamp_assets,verify_site}.py`; `site/README.md`. Settles the question D-348 left open.*
+
+Without a GPU, which is how Lighthouse and PageSpeed Insights run and how some phones still draw a 2D canvas, every frame of the full-screen globe made the main thread wait about 18 ms while the compositor copied the canvas's whole bitmap. Lighthouse's simulated 4× slower CPU turned each of those frames into a long task, and the front page scored 82 to 86 for performance while every other page scored 98.
+
+**Decision.**
+- **`globe.js` draws, and touches no DOM.** The intro's phases, the drawing and the frame loop moved out of `main.js` unchanged; everything the globe needs from the page arrives as a message (size, palette, motion preference, visibility, skip, drag) and everything the page needs leaves as one (painted, settled, intro done, the caption's state, where the globe is).
+- **`main.js` hands the canvas to a module worker running `globe.js`,** with `transferControlToOffscreen()`, and keeps everything that touches the page: measuring, the palette, presses and drags, the caption and the intro classes. The canvas is handed over only once the worker has said it loaded, so a worker that fails to load costs nothing.
+- **Where that cannot happen, nothing changes.** A browser without `transferControlToOffscreen` or module workers, or a worker that fails before the handover, gets `globe.js` imported and run on the main thread, as the globe ran before. A failure after the handover costs the globe and never the page: the gate `theme.js` put up is dropped.
+- **The worker's scripts cost no extra round trips.** `index.html` preloads `globe.js` beside `orbit.js`, and `_headers` gives those two files five minutes of freshness, so the worker's own requests for them come from the cache the preload filled. Measured cold on a 150 ms connection, the first globe frame moves from 536 ms to 600 ms; without the preload and the freshness it was 875 ms, against `theme.js`'s 900 ms fuse. `/*.js` becomes one rule per script, because Cloudflare Pages joins two matching rules' values into one contradictory header.
+
+**Measured after:** the front page scores 98 to 99 for performance, with no long task at its full two device pixels per CSS pixel; Accessibility, Best Practices and SEO stay at 100. Chromium and Firefox run the worker, the main-thread fallback and the reduced-motion still; WebKit could not be run here, so Safari is untested. With `globe.js`, `orbit.js` or `main.js` blocked, the content shows without the delay and the still globe stays.
+
+*Rejected: capping the canvas at 1.25 device pixels per CSS pixel.* It scored 99, by drawing a softer globe on every phone to satisfy a measurement taken without a GPU.
+
+*Rejected: making the stamped scripts immutable.* It would also remove the worker's round trips, but `_headers` keeps them revalidating so that a stamper that silently stopped could not leave a stale file cached forever. Five minutes bounds that risk; a year does not.
 
 ---
 
@@ -7378,6 +7400,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-346 How it works can be played with | `site/how-it-works/index.html`; `site/style.css`; `site/pages.js`; `site/README.md` |
 | D-347 one shape for every page | `site/*/index.html`; `site/404.html`; `site/style.css`; `site/pages.js`; `site/tools/content_checks.py`; `site/README.md` |
 | D-348 WCAG AA everywhere; a phone's visible height; `connect-src 'self'` | `site/style.css`; `site/_headers`; `site/{how-it-works,developers,protocol,architecture}/index.html`; `site/tools/content_checks.py` |
+| D-349 the globe drawn in a worker | `site/globe.js`; `site/main.js`; `site/index.html`; `site/_headers`; `site/tools/{stamp_assets,verify_site}.py`; `site/README.md` |
 
 **Landed 2026-11-03**, making the repository ready for contributors and sponsors.
 
