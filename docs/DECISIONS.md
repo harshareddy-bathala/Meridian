@@ -6937,6 +6937,29 @@ Each page had grown its own opening and its own ending. Standfirsts ran from one
 
 ---
 
+## D-348 — The site meets WCAG AA on every page, and fits a phone's visible height
+
+**2026-11-06 · accepted** · *`site/style.css`; `site/_headers`; `site/{how-it-works,developers,protocol,architecture}/index.html`; `site/tools/content_checks.py`. Amends D-345 and D-346.*
+
+Measured on all thirteen pages, in both themes, at 390 and 1280 px: axe-core for WCAG 2.2 AA, every interactive element's target size, focus on every control, Lighthouse on mobile, and the front page on emulated phones.
+
+**Decision.**
+- **A step stepping back loses its colour, not its contrast.** D-346 faded the steps of How it works not being read to 35% opacity, which set their text at 1.7:1. They now turn grey, which keeps every word at the contrast it was set at, and the step being read is the one in colour.
+- **What scrolls sideways can be reached by keyboard.** The code blocks, the layer diagram and How it works' four static pictures scroll inside themselves on a phone, so each takes focus and can be scrolled with the arrow keys.
+- **44 px wherever a thumb is the pointer.** The masthead's wordmark, the footer's links and address, the documents' titles and the (i), whose invisible hit area was 43 px, all reach 44. The contents list reaches 44 on a touch screen and keeps its compact rows under a mouse, where WCAG's 24 px is met with room to spare.
+- **The front page fits the height a phone actually shows.** Safari with its bars out shows 664 px of a 390 × 844 iPhone, and the page ran 92 px past it. On screens under 40rem the heading follows the height (`5svh`), the body follows it down to 17 px and no further, the gaps tighten, and the two actions share one row down to 360 px. It is one screen at 390 × 844, 390 × 664, 375 × 635, 360 × 640 and 412 × 839; 320 × 568 still scrolls, as D-345 allows. The masthead's two rows on a phone lose the spare space between them, on every page.
+- **The site may fetch from itself.** `connect-src 'self'` joins the CSP. `default-src 'none'` also blocked the in-page fetch Lighthouse reads `/robots.txt` with, which scored every page's SEO as "robots.txt is not valid". No other host is opened, so no third party is reached.
+
+**Measured after,** against a local server that applies `_headers` and compresses as Cloudflare Pages does: Accessibility, Best Practices and SEO 100 on every indexed page, no axe violation in either theme, no CSP violation, and Performance 97 to 98 on every page but the front. The 404 scores 63 on SEO because it is `noindex`, which is the point of it.
+
+**The front page's Performance is 82 to 86, and that is open.** Without a GPU, as in Lighthouse and PageSpeed Insights, each frame of the globe waits about 18 ms for the compositor to copy the full-screen canvas, and the simulated 4× slower CPU turns every frame into a long task. On a phone with GPU compositing that copy costs next to nothing. Capping the canvas at 1.25 device pixels per CSS pixel instead of 2 scores 99, at the cost of a slightly softer wireframe on 3× screens; drawing it from a worker with `OffscreenCanvas` would take the copy off the main thread without that cost. Neither is done until it is chosen.
+
+*Rejected: idle frames at 15 fps.* Measured at 85 to 89: the long tasks come from every frame, the intro's included, not from how many idle frames there are.
+
+*Rejected: clearing and drawing only the square that holds the orbits.* No change. The cost is the copy of the whole canvas, not the area drawn into it.
+
+---
+
 ## D-350 — The repository is written for the people arriving at it: a plain README, and the files a contributor looks for
 
 **2026-11-03 · accepted** · *`README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CHANGELOG.md`, `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`*
@@ -7354,6 +7377,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-345 one screen; a globe to turn; easing in | `site/index.html`; `site/main.js`; `site/pages.js`; `site/tools/shell.py`; `site/style.css`; `site/vendor/cube-motion-0.1.0/`; `site/tools/stamp_assets.py`; `site/_headers`; `site/README.md`; `ATTRIBUTION.md` |
 | D-346 How it works can be played with | `site/how-it-works/index.html`; `site/style.css`; `site/pages.js`; `site/README.md` |
 | D-347 one shape for every page | `site/*/index.html`; `site/404.html`; `site/style.css`; `site/pages.js`; `site/tools/content_checks.py`; `site/README.md` |
+| D-348 WCAG AA everywhere; a phone's visible height; `connect-src 'self'` | `site/style.css`; `site/_headers`; `site/{how-it-works,developers,protocol,architecture}/index.html`; `site/tools/content_checks.py` |
 
 **Landed 2026-11-03**, making the repository ready for contributors and sponsors.
 
