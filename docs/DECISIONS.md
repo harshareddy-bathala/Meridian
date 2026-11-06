@@ -7391,7 +7391,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 
 | Decision | Applied to |
 |---|---|
-| D-340 plain words, an (i) per term, one shell | `site/{how-it-works,data,areas,stations,support,developers,terms}/index.html`; `site/terms.json`; `site/tools/{shell,shell_parts}.py`; `ci.yml › site` |
+| D-340 what a visitor came for, an (i) per term, one shell | `site/{how-it-works,data,areas,stations,support,developers,terms}/index.html`; `site/terms.json`; `site/tools/{shell,shell_parts}.py`; `ci.yml › site` |
 | D-341 one look, four breakpoints | `site/style.css`; `site/{main,rail}.js`; `site/tools/content_checks.py`; `site/README.md`; `tests/unit/test_site_dashboard_tokens.py` |
 | D-342 the front page's second screen | `site/index.html`; `site/sitemap.xml`; `site/tools/{stamp_assets,verify_site}.py` |
 | D-343 no sums; real payment details or none | `site/support/index.html`; `site/support.json`; `site/tools/{shell_parts,content_checks}.py` |
