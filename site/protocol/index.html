@@ -36,8 +36,8 @@
 <link rel="preload" href="/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
 
 <script src="/theme.js?v=bdcf2d8d"></script>
-<link rel="stylesheet" href="/style.css?v=134eeb93">
-<script src="/pages.js?v=db9e580d" type="module"></script>
+<link rel="stylesheet" href="/style.css?v=81bde736">
+<script src="/pages.js?v=01fba62a" type="module"></script>
 <script src="/rail.js?v=4999dcfd" type="module"></script>
 
 <script type="application/ld+json">
@@ -109,9 +109,8 @@
     <div class="doc-head">
       <p class="eyebrow">MSP · Version 0.1</p>
       <h1>An open protocol for satellite ground stations.</h1>
-      <p class="standfirst">MSP defines how a receiving station joins a network, declares what it can do,
-      reports its state, receives work, and returns results. Four endpoints, JSON bodies, and a design
-      constraint that shapes everything else: it has to be implementable on a microcontroller.</p>
+      <p class="standfirst">MSP is how a receiving station joins a network, says what it can do, takes
+      work and returns results, in four endpoints small enough for a microcontroller.</p>
     </div>
 
     <aside class="rail">
@@ -134,9 +133,9 @@
 
       <div class="rail-panel">
         <canvas class="rail-scene" aria-hidden="true"></canvas>
-        <p class="rail-status">MSP 0.1 · Frozen</p>
-        <p class="rail-note">The specification is the contract. This page is not.</p>
-        <a class="rail-src" href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">Canonical spec ↗</a>
+        <p class="rail-status"><span class="pill pill-live">MSP 0.1, frozen</span></p>
+        <p class="rail-note">The specification is the contract. This page introduces it.</p>
+        <a class="rail-src" href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">The full specification ↗</a>
       </div>
     </aside>
 
@@ -400,11 +399,14 @@ GET  /msp/v0/time           → server time, for clock offset estimation</code><
       resolved and written into the text. The specification is the authoritative document; this page
       is an introduction to it.</p>
 
-      <p><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">Read the
-      full MSP 0.1 specification on GitHub</a>, or see <a href="/architecture/">the architecture</a>
-      for what sits on the other side of this boundary.</p>
+      <p><a href="https://github.com/harshareddy-bathala/Meridian/blob/main/docs/MSP-SPEC.md">The
+      full MSP 0.1 specification</a> is on GitHub.</p>
 
     </div>
+    <nav class="next" aria-label="Next step">
+      <a class="next-link" href="/stations/"><span class="next-k">Next</span><span class="next-t">Join with a station</span><span class="next-d">What a station needs, and what it gets back.</span><span class="arrow" aria-hidden="true">→</span></a>
+    </nav>
+
   </main>
 
   <!-- shell:footer -->

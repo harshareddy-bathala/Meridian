@@ -20,6 +20,8 @@ then open `http://127.0.0.1:8080/`.
 
 Organised by what a visitor came for (D-340, D-345). The visitor pages are short, mark every technical term with an **(i)**, state status in words, and carry no rail. Their only scripts are `theme.js` and `pages.js`.
 
+**Every page but the front and the 404 has one shape (D-347):** a title, a standfirst of one sentence, the content, and one next step at the end, `<nav class="next">` with a single link. `content_checks.py` fails a page with a second sentence in its standfirst or a second next step.
+
 | Path | |
 |---|---|
 | `index.html` | The front page: one screen that never scrolls (D-345). The globe, which a visitor can turn, one heading, one sentence, two actions, a metadata line and one caption that says what the globe is showing. |
@@ -28,10 +30,10 @@ Organised by what a visitor came for (D-340, D-345). The visitor pages are short
 | `areas/` | Watching a place over time. Closed until D-326 is accepted; its one picture is labelled as an example. |
 | `stations/` | What a station needs, what it gets back, receive-only, and MSP in one paragraph. |
 | `support/` | What support keeps running and what it builds next. No sums (D-343). Ways to give come from `support.json`. |
-| `developers/` | Running the platform, and the doors to the four document pages. |
+| `developers/` | Running the platform, the doors to the four document pages, and how to help write it. |
 | `terms/` | Every (i) definition in one list, generated from `terms.json`. |
 | `architecture/`, `protocol/`, `docs/`, `about/` | The document pages, under *Developers* in the nav. Layer diagram, MSP 0.1, the documents index, and what Meridian is. |
-| `404.html` | `noindex`. Shares the shell. |
+| `404.html` | `noindex`. Shares the shell. One sentence and one way back. |
 
 The document pages carry no intro, and `pages.js` moves only what is still below the fold, which is why they load instantly. Only `index.html` loads `main.js`, and only the four document pages load `rail.js`.
 
@@ -106,7 +108,7 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 | `tools/make-images.py` | Regenerates all of the above, and the still globe inside `index.html`. Needs Pillow for everything except the globe. |
 | `tools/stamp_assets.py` | Puts `?v=<content hash>` on every CSS and JS reference. Run after editing one. Stdlib only. |
 | `tools/verify_site.py` | The invariants this file asserts, checked. Stdlib only. Runs in CI. |
-| `tools/content_checks.py` | The visitor pages' rules, which `verify_site.py` runs: no sums, real payment details, defined terms, four breakpoints, labelled pictures, and no notes about the prose. |
+| `tools/content_checks.py` | The visitor pages' rules, which `verify_site.py` runs: no sums, real payment details, defined terms, four breakpoints, labelled pictures, no notes about the prose, and every page's shape. |
 | `tools/shell.py`, `tools/shell_parts.py` | The shared regions above. Stdlib only. Runs in CI with `--check`. |
 | `terms.json` | The plain definition behind every (i). |
 | `support.json` | The UPI ID and Sponsors URL, or `null`. |

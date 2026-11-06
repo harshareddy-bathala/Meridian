@@ -665,10 +665,10 @@ body {
 /* A definition list is what the glossary and the module index actually are. */
 .prose dl { margin: 1.5rem 0 0; }
 .prose dt {
-  margin-top: 1.25rem;
+  margin-top: 1.5rem;
   font-family: var(--mono);
-  font-size: 0.8125rem;
-  letter-spacing: 0.02em;
+  font-size: 0.9375rem;
+  font-weight: 500;
   color: var(--ink);
 }
 .prose dd {
@@ -716,21 +716,24 @@ body {
   display: block;
   width: 100%;
   min-width: 36rem;
+  max-width: 40rem;
   height: auto;
 }
+/* 15.5 units in a 640-unit drawing: never under 14 px, at the 36rem floor,
+   and 15.5 px at the 40rem cap. In words, not capitals, like the page. */
 .diagram text {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-family: var(--sans);
+  font-size: 15.5px;
   fill: var(--ink);
 }
-.diagram .d-label { fill: var(--ink-dim); font-size: 9.5px; }
+.diagram .d-label { fill: var(--ink-dim); }
 
 /* --muted, not --rule. This diagram is needed to understand the page, which
    puts it under the 3:1 bar for graphical objects rather than the "decorative
    divider" exemption a hairline rule enjoys. --rule at 1.71:1 would not clear
    it; --muted is 4.88:1 dark and 6.03:1 light. */
-.diagram .d-box { fill: none; stroke: var(--muted); stroke-width: 1; }
+.diagram .d-box { fill: var(--bg); stroke: var(--muted); stroke-width: 1; }
+.diagram .d-frame { fill: var(--surface); stroke: none; }
 .diagram .d-line { stroke: var(--muted); stroke-width: 1; fill: none; }
 .diagram .d-optional { stroke-dasharray: 3 3; }
 
@@ -758,7 +761,7 @@ body {
 
 .index-row p {
   margin: 0;
-  font-size: 0.9375rem;
+  font-size: var(--step-0);
   line-height: 1.6;
   color: var(--ink-dim);
   max-width: 68ch;
@@ -781,8 +784,8 @@ body {
 .index-row p a:focus-visible { text-decoration-color: var(--ink); }
 
 .index-row .where {
-  font-family: var(--mono);
   font-size: var(--step--1);
+  font-weight: 500;
   color: var(--muted);
 }
 
@@ -856,7 +859,8 @@ body {
   line-height: 1.5;
 }
 
-.rail-status { font-weight: 500; color: var(--ink-dim); }
+.rail-status { margin-top: 1rem; }
+.rail-status .pill { white-space: normal; }
 .rail-note   { color: var(--muted); }
 
 .rail-src {
@@ -1067,6 +1071,65 @@ body {
 @media (hover: hover) {
   .door .arrow { transition: transform var(--dur-2) var(--ease), color var(--dur-1) var(--ease); }
   .door:hover .arrow { transform: translateX(0.25em); }
+}
+
+/* ----------------------------------------------------------------- next --
+   Every page but the front ends on one next step: where a reader who has
+   finished this page most likely goes. One, so it reads as a suggestion and
+   not a menu; the menu is the navigation and the footer. The title draws its
+   underline from the left, as every link that stands alone does. */
+.next { margin-top: var(--space-8); }
+.doc > .next { grid-column: 1; }
+
+.next-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-5);
+  align-items: center;
+  padding: var(--space-6) 0 var(--space-2);
+  border-top: 1px solid var(--rule);
+  color: var(--ink);
+  text-decoration: none;
+}
+.next-k, .next-t, .next-d { grid-column: 1; }
+.next-k {
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--signal);
+}
+.next-t {
+  justify-self: start;
+  margin-top: var(--space-2);
+  padding-bottom: 0.1em;
+  font-family: var(--serif);
+  font-size: var(--step-2);
+  font-weight: 420;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  background: linear-gradient(currentColor, currentColor) no-repeat 0 100% / 0 1px;
+  transition: background-size var(--dur-2) var(--ease);
+}
+.next-d {
+  margin-top: var(--space-2);
+  font-size: var(--step-0);
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+.next-link .arrow {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  font-size: var(--step-2);
+  color: var(--muted);
+  transition: color var(--dur-1) var(--ease);
+}
+.next-link:hover .next-t,
+.next-link:focus-visible .next-t { background-size: 100% 1px; }
+.next-link:hover .arrow,
+.next-link:focus-visible .arrow { color: var(--ink); }
+@media (hover: hover) {
+  .next-link .arrow { transition: transform var(--dur-2) var(--ease), color var(--dur-1) var(--ease); }
+  .next-link:hover .arrow { transform: translateX(0.25em); }
 }
 
 /* ------------------------------------------------------------- journey --
@@ -1921,9 +1984,9 @@ body {
   .door .arrow, .info, .section p a, .section li a:not(.door),
   .meta a, .foot-line a, .foot-bar a, .door, .term,
   .globe-state .swatch, .seg label, .pass-row, .journey-live .step .fig,
-  .journey-live .step .step-text { transition: none; }
+  .journey-live .step .step-text, .next-t, .next-link .arrow { transition: none; }
   .why, .plan-sum, .verdict, .plan { animation: none !important; }
-  .door:hover .arrow { transform: none; }
+  .door:hover .arrow, .next-link:hover .arrow { transform: none; }
   .cta:active { transform: none; }
 
   /* The 404's acquisition sweep stops where it stands. */
@@ -1954,6 +2017,7 @@ body {
   .skip,
   .theme-slot,
   .rail,
+  .next,
   .globe-note { display: none; }
 
   .page { min-height: 0; padding: 0; gap: 1.5rem; }

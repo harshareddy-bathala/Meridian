@@ -29,7 +29,7 @@ function belowTheFold(el) {
 
 if ('IntersectionObserver' in window && typeof Element.prototype.animate === 'function') {
   const waiting = [...document.querySelectorAll(
-    '.section, .journey > .step, .tiles > li, .doors > li, .index-row'
+    '.section, .journey > .step, .tiles > li, .doors > li, .index-row, .next'
   )].filter(belowTheFold);
   if (waiting.length) reveal(waiting);
 }

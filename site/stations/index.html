@@ -36,8 +36,8 @@
 <link rel="preload" href="/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
 
 <script src="/theme.js?v=bdcf2d8d"></script>
-<link rel="stylesheet" href="/style.css?v=134eeb93">
-<script src="/pages.js?v=db9e580d" type="module"></script>
+<link rel="stylesheet" href="/style.css?v=81bde736">
+<script src="/pages.js?v=01fba62a" type="module"></script>
 
 <script type="application/ld+json">
 {
@@ -120,8 +120,8 @@
       <p class="eyebrow">Join with a station</p>
       <h1>Have an antenna? Join the network.</h1>
       <p class="standfirst">A ground station<button class="info" type="button" popovertarget="term-ground-station" aria-label="What “Ground station” means">i</button>
-      that joins Meridian gets told which passes are worth its time, gets warned when it starts to fail,
-      and gets a plain report of what it caught. It never has to run our software to do it.</p>
+      that joins Meridian is told which passes are worth its time, warned when it starts to fail,
+      and sent a plain report of what it caught.</p>
       <p class="status-line"><span class="pill pill-wait">Invite only, for now</span> Station 001, the team's
       own, is being built. Other stations join by invitation while the network is small.</p>
     </div>
@@ -180,16 +180,16 @@
     <section class="section" aria-labelledby="msp-h">
       <h2 id="msp-h">One open protocol.</h2>
       <p>Stations talk to Meridian through MSP<button class="info" type="button" popovertarget="term-msp" aria-label="What “MSP” means">i</button>, a short,
-      published protocol: register, send a heartbeat<button class="info" type="button" popovertarget="term-heartbeat" aria-label="What “Heartbeat” means">i</button>,
+      <a href="/protocol/">published protocol</a>: register, send a heartbeat<button class="info" type="button" popovertarget="term-heartbeat" aria-label="What “Heartbeat” means">i</button>,
       collect the schedule, report what was received. Anything that follows it can join, whatever software
       it runs. It is small enough to implement on a microcontroller.</p>
       <p>If you would rather not write your own, the reference station client runs on a Raspberry Pi,
       and installs without any database or web server.</p>
-      <ul class="doors">
-        <li><a class="door door-plain" href="/protocol/"><span class="door-t">Read the protocol</span><span class="door-d">MSP 0.1, explained for someone arriving cold.</span><span class="arrow" aria-hidden="true">→</span></a></li>
-        <li><a class="door door-plain" href="https://github.com/harshareddy-bathala/Meridian/issues"><span class="door-t">Ask to join</span><span class="door-d">Open an issue on GitHub with where your station is and what it has.</span><span class="arrow" aria-hidden="true">↗</span></a></li>
-      </ul>
     </section>
+
+    <nav class="next" aria-label="Next step">
+      <a class="next-link" href="https://github.com/harshareddy-bathala/Meridian/issues"><span class="next-k">Next</span><span class="next-t">Ask to join</span><span class="next-d">Open an issue on GitHub with where your station is and what it has.</span><span class="arrow" aria-hidden="true">↗</span></a>
+    </nav>
 
     <!-- shell:terms -->
     <div class="term" id="term-ground-station" popover>

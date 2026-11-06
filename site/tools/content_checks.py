@@ -11,6 +11,8 @@ figures      every picture says what it is: an illustration, an example or
 wording      no page talks about how the site itself is written, and none calls
              Meridian a non-profit. A visitor reads what Meridian does, not
              notes on the prose; and the project's status is not one to claim.
+shape        every page but the front and the 404 has one title, a standfirst
+             of one sentence, and ends on exactly one next step (D-347).
 """
 
 from __future__ import annotations
@@ -135,6 +137,40 @@ def check_wording(site: Path, pages: list[str]) -> list[str]:
     return found
 
 
+STANDFIRST = re.compile(r'<p class="standfirst">(.*?)</p>', re.S)
+# A full stop, question or exclamation mark that ends a sentence: followed by
+# space and a capital, or by the end. "MSP 0.1" and "e.g." are neither.
+SENTENCE_END = re.compile(r"[.?!](?=\s+[A-Z“\"]|\s*$)")
+NEXT_OPEN = '<nav class="next" aria-label="Next step">'
+NEXT = re.compile(re.escape(NEXT_OPEN) + r'\s*<a class="next-link" href="[^"]+">')
+CONTENT = re.compile(r'<section\b|<div class="prose')
+WHOLE_SCREEN = {"index.html", "404.html"}
+
+
+def check_shape(site: Path, pages: list[str]) -> list[str]:
+    """A page title, one sentence, the content, one next step (D-347)."""
+    problems = []
+    for name in pages:
+        if name in WHOLE_SCREEN:
+            continue
+        page = (site / name).read_text(encoding="utf-8")
+        main = page[page.find("<main") : page.find("</main>")]
+        titles = main.count("<h1")
+        if titles != 1:
+            problems.append(f"{name}: has {titles} titles, not one")
+        lead = STANDFIRST.findall(main)
+        words = visible_text(lead[0]).strip() if len(lead) == 1 else ""
+        sentences = len(SENTENCE_END.findall(words))
+        if sentences != 1:
+            problems.append(f"{name}: the standfirst is {sentences} sentences, not one")
+        steps = len(NEXT.findall(main))
+        if steps != 1:
+            problems.append(f"{name}: ends on {steps} next steps, not one")
+        elif CONTENT.search(main[main.rfind(NEXT_OPEN) :]):
+            problems.append(f"{name}: content follows the next step")
+    return problems
+
+
 def check_content(site: Path, pages: list[str], css: str) -> list[str]:
     """Every check in this file."""
     return (
@@ -144,4 +180,5 @@ def check_content(site: Path, pages: list[str], css: str) -> list[str]:
         + check_breakpoints(css)
         + check_figures(site, pages)
         + check_wording(site, pages)
+        + check_shape(site, pages)
     )
