@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
@@ -28,6 +28,12 @@
 #
 # object-src is already covered by default-src 'none'. It is named anyway
 # because Lighthouse's CSP audit looks for it by name.
+#
+# connect-src 'self' lets a page fetch from this origin and nowhere else. No
+# page script fetches anything today; without it, default-src 'none' also
+# blocked the in-page fetch Lighthouse uses to read /robots.txt, which scored
+# every page's SEO as "robots.txt is not valid" (D-348). It opens no request to
+# any other host, so the no-third-party claim above is unchanged.
 #
 # JSON-LD lives in <script type="application/ld+json"> blocks. Those are data
 # blocks, never prepared as script, so script-src does not apply to them —
