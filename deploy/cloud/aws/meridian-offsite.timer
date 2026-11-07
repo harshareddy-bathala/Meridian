@@ -1,0 +1,13 @@
+# After the nightly backup (02:47 UTC), so the newest dump goes with it.
+# Persistent: a night the host was off is made up when it next boots.
+
+[Unit]
+Description=Nightly copy of Meridian's backups to object storage
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -58,11 +58,18 @@ GENERATED = {
 TUNNEL_TOKEN = "tunnel_token"
 """Issued by Cloudflare; stored by `set`, read by docker-compose.public.yml."""
 
+DATADOG_API_KEY = "datadog_api_key"
+"""Issued by Datadog; stored by `set`, read by docker-compose.datadog.yml (D-353)."""
+
+ISSUED = (TUNNEL_TOKEN, DATADOG_API_KEY)
+"""Secrets someone else issues, so they are stored by hand and never generated."""
+
 READERS = {
     PEPPER: ("api",),
     "metrics_token": ("api", "jobs", "prometheus"),
     "registration_invite_token": ("api",),
     TUNNEL_TOKEN: ("tunnel",),
+    DATADOG_API_KEY: ("datadog-agent",),
 }
 """The services that read each secret at start and must be recreated."""
 
@@ -155,8 +162,9 @@ def rotate(directory: Path, name: str) -> None:
 
 def set_secret(directory: Path, name: str, value: str) -> None:
     """Store a secret someone else issued, such as the tunnel token."""
-    if name != TUNNEL_TOKEN:
-        raise ToolError(f"only {TUNNEL_TOKEN} is set by hand; rotate the others")
+    if name not in ISSUED:
+        issued = " and ".join(ISSUED)
+        raise ToolError(f"only {issued} are set by hand; rotate the others")
     if not value.strip():
         raise ToolError("nothing was given on standard input")
     directory.mkdir(mode=DIR_MODE, exist_ok=True)
@@ -181,6 +189,8 @@ def recreate_command(name: str, *, public: bool = False) -> str:
     services = " ".join(READERS.get(name, ("api",)))
     with_public = public or name == TUNNEL_TOKEN
     extra = " -f deploy/docker-compose.public.yml" if with_public else ""
+    if name == DATADOG_API_KEY:
+        extra += " -f deploy/docker-compose.datadog.yml"
     return f"{COMPOSE}{extra} up -d --force-recreate {services}"
 
 

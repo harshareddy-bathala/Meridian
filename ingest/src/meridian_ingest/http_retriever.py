@@ -275,7 +275,14 @@ class HttpRetriever:
     def _read(
         self, remote: RemoteArtefact, response: httpx.Response
     ) -> RetrievedArtefact:
-        """Spool the body, and refuse one that stopped short of its own length."""
+        """Spool the body, and refuse one that stopped short of its own length.
+
+        ``Content-Length`` counts the bytes on the wire. A source that sends
+        its body compressed (``Content-Encoding: gzip``, as CelesTrak does)
+        declares the compressed size, and httpx hands over the body unpacked,
+        so an encoded body's declared length is held against the bytes that
+        arrived, never against the unpacked body that is stored and hashed.
+        """
         # SIM115 is suppressed because the spool outlives this call — it *is*
         # body the caller streams from — so the retriever owns it and closes
         # it, rather than a `with` block closing it before anyone reads it.
@@ -285,9 +292,11 @@ class HttpRetriever:
         for block in response.iter_bytes():
             written += len(block)
             spool.write(block)
+        encoding = response.headers.get("Content-Encoding", "identity").strip()
+        arrived = written if encoding == "identity" else response.num_bytes_downloaded
         declared = response.headers.get("Content-Length")
-        if declared is not None and declared.isdigit() and int(declared) != written:
-            reason = f"{written} bytes arrived of the {declared} the archive declared"
+        if declared is not None and declared.isdigit() and int(declared) != arrived:
+            reason = f"{arrived} bytes arrived of the {declared} the archive declared"
             raise _Again(reason)
         spool.seek(0)
         return RetrievedArtefact(

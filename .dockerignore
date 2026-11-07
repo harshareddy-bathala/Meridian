@@ -63,6 +63,10 @@ tests/
 analysis/
 *.md
 !README.md
+# The ingest image carries it: `fetch` checks a source's attribution entry
+# before opening a socket (D-134, D-352). The platform image copies named
+# directories only, so this file never reaches it.
+!ATTRIBUTION.md
 
 # Editors and OS
 .vscode/

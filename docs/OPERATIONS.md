@@ -504,7 +504,7 @@ layers = ["<a Bhuvan layer name>"]   # display only; no default
 - **Tiles are recorded and never read for a number** — `load` reports them as skipped (D-133). Bhuvan's map images are display only because its terms say so (D-220).
 - **Night-time lights need `uv sync --extra hdf5`** (or `pip install 'meridian-ingest[hdf5]'`); without it `normalise` refuses that source by name (D-226).
 
-**Near real time is `follow`, run where `meridian-ingest` is installed, never in the compose stack** (D-225):
+**Near real time is `follow`, run where `meridian-ingest` is installed, never in the platform image or the jobs service** (D-225). On a deployment host, that is the `ingest` container (§ Ingest as a container); from a checkout, it is:
 
 ```bash
 uv run meridian-ingest follow --once        # one round: each due source fetched, then loaded
@@ -518,6 +518,26 @@ A source is due when its newest retrieval is older than its cadence (Kp and clou
 ```
 
 **A value is a feature only for passes after it was published**, and "published" is our own fetch unless the artefact states an earlier production time (D-222). So a backfill never supplies features for passes already flown: the conditions group fills in from when `follow` starts running. Features are read from a snapshot's `environment_samples.jsonl`, never from the table while scheduling (D-224).
+
+### Ingest as a container
+
+`deploy/docker-compose.ingest.yml` adds one service, `ingest`, which runs `meridian-ingest follow --interval 300` in an image of its own (D-352). The main compose file knows nothing of it. Add the file to every command on the host that runs ingest:
+
+```bash
+cp deploy/ingest.live.toml.example deploy/ingest.toml   # then: raw_root = "/var/lib/meridian-ingest/raw"
+install -d -m 700 deploy/secrets/ingest                 # keys go here, one file each
+compose -f deploy/docker-compose.ingest.yml build ingest
+compose -f deploy/docker-compose.ingest.yml up -d ingest
+compose -f deploy/docker-compose.ingest.yml logs -f ingest
+```
+
+- **`deploy/ingest.toml` is the deployment's own** and is not tracked: it names the places sources are asked about.
+- **Keys** are `deploy/secrets/ingest/firms_map_key` and `deploy/secrets/ingest/earthdata_token`, read only by the source that needs one. Leave a source commented out in the settings until its key file exists.
+- **The raw store is the `ingest-raw` volume.** It is not in the database dump, so copy it on the dump's schedule (§ The raw store is not in the database backup):
+  ```bash
+  sudo tar -C "$(docker volume inspect -f '{{.Mountpoint}}' meridian_ingest-raw)" -czf backups/raw-$(date -u +%F).tar.gz .
+  ```
+- **One-off commands** run in the same image: `compose -f deploy/docker-compose.ingest.yml run --rm ingest meridian-ingest fetch --source celestrak_gp`.
 
 ### Element sets and the archive, and every source live
 
@@ -549,20 +569,21 @@ Stage 34 adds two sources to the nine above (D-320 to D-324): `celestrak_gp`, cu
 6. **Then `follow`**, by the cron line above. `ElementSetsStale` is the alert that says it stopped.
 7. **Before going offline** — a demonstration, a field site — export the catalogue the platform now holds, on a connected machine, and load that file on the offline one (D-321):
    ```bash
-   docker compose exec api meridian catalogue export --output /tmp/live.json && docker compose cp api:/tmp/live.json data/catalogue/live.json
+   docker compose exec -T api sh -c 'meridian catalogue export --output /tmp/live.json >&2 && cat /tmp/live.json' > data/catalogue/live.json
    ```
 
 **Record each first live fetch** in the table below: the date, what came back and anything refused. Until a row is filled, that source has only ever been run against fixtures.
 
 | Source | First live fetch | Result |
 |---|---|---|
-| `celestrak_gp` | — | — |
-| `satnogs_network` | — | — |
-| `noaa_swpc_kp` | — | — |
-| `open_meteo_cloud` | — | — |
-| `open_meteo_aerosol` | — | — |
-| `nasa_power_precipitation` | — | — |
-| `ornl_modis_ndvi` | — | — |
+| `celestrak_gp` | 2026-11-07, cloud host | 73 sets in the `weather` group; 2 loaded, 0.4 days old; the rest kept in the raw store. The first attempts were refused until the retriever held a gzip body to the bytes on the wire. |
+| `satnogs_network` | — | — off on the cloud host until the team accepts D-322 |
+| `noaa_swpc_kp` | 2026-11-07, cloud host, by `follow` | 57 values; the latest Kp 3.0 |
+| `open_meteo_cloud` | 2026-11-07, cloud host, by `follow` | 96 hourly values at one point |
+| `open_meteo_aerosol` | 2026-11-07, cloud host, by `follow` | 96 hourly values at one point |
+| `nasa_power_precipitation` | 2026-11-07, cloud host, by `follow` | 15 daily values at one point |
+| `ornl_modis_ndvi` | 2026-11-07, cloud host, by `follow` | 162 values around one point |
+| `nasa_gibs` | 2026-11-07, cloud host, by `follow` | 2 tiles over the configured box, recorded and never read for a value |
 | `nasa_firms` | — | — needs `FIRMS_MAP_KEY` |
 | `nasa_black_marble` | — | — needs `EARTHDATA_TOKEN` |
 
@@ -2085,6 +2106,25 @@ By default every alert goes to a receiver that sends nothing. Alerts remain visi
 3. Set `ALERTMANAGER_CONFIG_FILE=alertmanager.local.yml` in `deploy/.env`, then `compose --profile metrics up -d alertmanager`.
 
 The rules are `deploy/prometheus/rules/meridian.yml`, and each one's tests are in `deploy/prometheus/tests/meridian.test.yml`. Change a rule and its test together.
+
+### Datadog, instead of the metrics profile
+
+A host may be monitored by Datadog rather than by the `metrics` profile (D-353). The cloud host is: Prometheus, Alertmanager and Grafana would take a fifth of its memory. Nothing depends on it. With Datadog unreachable or its key lapsed, the platform schedules, receives and reports exactly as before, and the Prometheus rules stay the reference.
+
+1. **The key.** In Datadog, *Organization Settings → API Keys → New Key*, named after the host. Store it on the host, pasting at the prompt:
+   ```bash
+   python3 deploy/tools/rotate_secret.py set datadog_api_key
+   ```
+2. **The site and the host's name**, in `deploy/.env`: `DD_SITE` is the host of your Datadog address (`us5.datadoghq.com` for this project's organisation) and `DD_HOSTNAME` the name the host reports under.
+3. **The Agent**, by adding `-f deploy/docker-compose.datadog.yml` to every compose command. It also labels the api and the jobs process so the Agent scrapes their `/metrics` with the scrape token, which recreates both once.
+4. **The monitors**, from a machine with Datadog's CLI, [`pup`](https://docs.datadoghq.com/cli/), signed in with `pup auth login --site <DD_SITE>`:
+   ```bash
+   python deploy/tools/datadog_monitors.py                      # what would change
+   DATADOG_NOTIFY="@you@example.org" python deploy/tools/datadog_monitors.py --apply
+   ```
+   `deploy/datadog/monitors.json` holds one monitor per Prometheus rule, and `tests/unit/test_datadog.py` keeps the two in step: change a rule and its monitor together. Recipients are never in the file; `DATADOG_NOTIFY` adds them as the monitors are sent. A monitor grouped by `simulated` emails them only for measured stations: the demonstration fleet's injected faults (D-330) are recorded in Datadog, as Prometheus records them, and email nobody.
+
+**In Datadog**, every Meridian metric is `meridian.<name>`, a counter is `meridian.<name>.count`, and the `simulated` tag keeps measured and simulated apart as it does in Prometheus. Histogram buckets are not collected, so each metric costs one series per label set. The `ScheduledTask*` monitors are worded differently from their rules, because Datadog has no `time()`: *stalled* is a task's last-success time not moving for 15 minutes, and *never succeeded* is a task with no such time at all for 20.
 
 **Some thresholds follow settings.** `ScheduledTaskStalled`'s 900 s is three rounds at the default interval, and the liveness thresholds follow the 30 s heartbeat. The rule files do not read `.env`, so changing `SCHEDULE_INTERVAL_S` or `HEARTBEAT_INTERVAL_S` means editing the numbers there too.
 

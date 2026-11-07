@@ -160,6 +160,22 @@ def test_only_the_tunnel_token_is_set_by_hand(tool: ModuleType, tmp_path: Path) 
         tool.set_secret(tmp_path, "tunnel_token", "  \n")
 
 
+def test_the_datadog_key_is_set_by_hand_and_read_by_the_agent_alone(
+    tool: ModuleType, tmp_path: Path
+) -> None:
+    """Datadog issues it (D-353); recreating the Agent needs its own override."""
+    tool.set_secret(tmp_path / "secrets", "datadog_api_key", "0123abcd\n")
+
+    stored = tmp_path / "secrets" / "datadog_api_key"
+    assert stored.read_text().strip() == "0123abcd"
+    command = tool.recreate_command("datadog_api_key", public=True)
+    assert "-f deploy/docker-compose.datadog.yml" in command
+    assert "-f deploy/docker-compose.public.yml" in command
+    assert command.endswith("--force-recreate datadog-agent")
+    datadog = (TOOL.parents[1] / "docker-compose.datadog.yml").read_text()
+    assert "source: ./secrets/datadog_api_key" in datadog
+
+
 def test_the_public_file_mounts_the_file_set_writes() -> None:
     public = (TOOL.parents[1] / "docker-compose.public.yml").read_text()
     assert "source: ./secrets/tunnel_token" in public

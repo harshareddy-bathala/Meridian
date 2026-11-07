@@ -34,18 +34,22 @@ REPO = Path(__file__).resolve().parents[2]
 COMPOSE = sorted((REPO / "deploy").glob("docker-compose*.yml"))
 WORKFLOWS = sorted((REPO / ".github" / "workflows").glob("*.yml"))
 DOCKERFILE = REPO / "deploy" / "Dockerfile"
+INGEST_DOCKERFILE = REPO / "deploy" / "ingest" / "Dockerfile"
 DEPENDABOT = REPO / ".github" / "dependabot.yml"
 
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
-OWN_IMAGE = "${MERIDIAN_IMAGE"
+OWN_IMAGES = ("${MERIDIAN_IMAGE", "${MERIDIAN_INGEST_IMAGE")
+"""Images this repository builds, so there is no registry digest to name."""
 
 
 def unpinned_images(text: str) -> list[str]:
     """Every ``image:`` value, or ``*_IMAGE:`` setting, not named by digest."""
     found = re.findall(r"^\s*(?:image|[A-Z_]*_IMAGE):\s*['\"]?([^\s'\"#]+)", text, re.M)
     return [
-        one for one in found if not one.startswith(OWN_IMAGE) and not DIGEST.search(one)
+        one
+        for one in found
+        if not one.startswith(OWN_IMAGES) and not DIGEST.search(one)
     ]
 
 
@@ -95,10 +99,21 @@ def test_every_image_is_named_by_digest() -> None:
 
 
 def test_every_base_the_image_builds_from_is_named_by_digest() -> None:
-    text = DOCKERFILE.read_text(encoding="utf-8")
+    for dockerfile, bases in ((DOCKERFILE, 3), (INGEST_DOCKERFILE, 3)):
+        text = dockerfile.read_text(encoding="utf-8")
 
-    assert len(re.findall(r"@sha256:", text)) >= 3
-    assert unpinned_bases(text) == []
+        assert len(re.findall(r"@sha256:", text)) >= bases, dockerfile
+        assert unpinned_bases(text) == [], dockerfile
+
+
+def test_both_images_build_from_the_same_bases() -> None:
+    """One Dependabot group moves the pins in both files (D-352)."""
+
+    def bases(path: Path) -> set[str]:
+        text = path.read_text(encoding="utf-8")
+        return {one for one in re.findall(r"(\S+@sha256:[0-9a-f]{64})", text)}
+
+    assert bases(INGEST_DOCKERFILE) <= bases(DOCKERFILE)
 
 
 def test_every_action_is_named_by_commit() -> None:

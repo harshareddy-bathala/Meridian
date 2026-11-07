@@ -7017,6 +7017,42 @@ It is a development dependency, and it is not in the served bundle. The patterns
 
 ---
 
+## D-352 — Ingest runs in an image and a container of its own, added by an override file the platform never needs
+
+**2026-11-07 · accepted** · *`deploy/ingest/Dockerfile`, `deploy/docker-compose.ingest.yml`, `ci.yml` (`image`), `.github/dependabot.yml`, `tests/unit/{test_compose_hardening,test_pinning}.py`; Stage 36. Narrows `OPERATIONS.md`'s "never in the compose stack"; D-138 and D-225 unchanged.*
+
+Stage 36 puts the platform on a cloud host, and `meridian-ingest follow` needs a machine to run on. The runbook said to run it from a checkout with `uv`, by cron, "never in the compose stack". D-138 and D-225 give the reasons. The platform image must not carry the code that talks to an archive, and a source that hangs must not delay a schedule. Neither reason is about compose itself.
+
+**Decision.** Ingest gets an image of its own, `deploy/ingest/Dockerfile`, holding `meridian-ingest`, the `meridian` it imports and its HDF5 reader. The client and the simulator are not in it. One service runs it, `ingest`, defined only in `deploy/docker-compose.ingest.yml` and running `follow` in its own process.
+- **The platform is complete without it.** The main compose file names no ingest service, so a deployment that never adds the override never builds, pulls or runs anything that reaches an external source. CI's single-machine bring-up is unchanged (D-130).
+- **It is hardened like every service** (D-206). Its keys are files in `deploy/secrets/ingest/`, mounted read-only (D-114, D-223). It writes as `meridian_api`, which may change rows and nothing else (D-207). It listens on nothing.
+- **It is built where it runs, not published.** CI builds it on every pull request. It checks that the image imports the archive layer and HDF5, carries no station client, and answers `sources` with no network. The image shares its bases and their digests with the platform's, so one Dependabot group moves both pins.
+- **A deployment's `ingest.toml` is not tracked.** It names the places a deployment asks sources about, so it stays on the host, like a secret.
+
+*Rejected: cron on the host with `uv`.* It works, and it puts a Python toolchain and a second dependency set on the host outside the image the scans cover (D-205). It also leaves a process with no restart policy and no log cap.
+
+*Rejected: a profile in the main compose file.* A profile can be left off, but the definition would still sit in the file the platform runs from. Then the platform's own file would name the archive layer, which is the coupling D-138 keeps out.
+
+---
+
+## D-353 — A cloud host may be monitored by Datadog, which mirrors the Prometheus rules and is never needed
+
+**2026-11-07 · accepted** · *`deploy/docker-compose.datadog.yml`, `deploy/datadog/monitors.json`, `deploy/tools/datadog_monitors.py`, `deploy/tools/rotate_secret.py` (`datadog_api_key`), `tests/unit/test_datadog.py`; Stage 36. D-109, D-112 and D-130 unchanged.*
+
+The cloud host has 2 GB. Prometheus, Alertmanager and Grafana would take about a fifth of it, and would watch the platform from the same machine that fails with it. The team has Datadog through a student programme, which covers the host and collects from outside it.
+
+**Decision.** On a host that chooses it, the Datadog Agent replaces the `metrics` profile. It is added by an override file, as the public deployment and ingest are.
+- **It reads what Prometheus reads.** It scrapes the api's and the jobs process's `/metrics` with the same scrape token (D-087), through autodiscovery labels the override puts on those two services. It also reads the containers' logs, which are redacted where they are written (D-204), and the host's health. Histogram buckets are not collected, which keeps each metric to one series per label set.
+- **The rules stay the reference.** `deploy/datadog/monitors.json` holds one monitor per Prometheus rule, at the same severity. A test fails if a rule has no monitor, or if a monitor queries a metric the platform does not export. Where Datadog cannot say what a rule says, the monitor says the nearest thing and the runbook names the difference: there is no `time()`, so *stalled* is a last-success time that stopped moving.
+- **No key and no recipient in the repository.** The Agent reads its API key from a file through its own secret helper, so the key is not in the environment of any service. `rotate_secret.py set datadog_api_key` stores it, as it stores the tunnel token. Monitors are applied with Datadog's CLI, signed in by the operator, and their recipients are added from `DATADOG_NOTIFY` when they are sent.
+- **Never needed** (D-130). Without the file, nothing is collected or sent. With Datadog unreachable, the platform behaves the same. A deployment on one machine keeps the `metrics` profile, and so does every gate.
+
+*Rejected: Datadog's browser tracking on the dashboard.* It is a third-party script, which the dashboard's policy refuses (D-208) and the site promises not to load. What a visitor sees of the network is the platform's own.
+
+*Rejected: the `metrics` profile on the cloud host.* It works, and it would spend memory the platform needs on watching itself from inside the machine it watches.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

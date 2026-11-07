@@ -327,6 +327,27 @@ jobs:
           docker compose -f deploy/docker-compose.yml --profile metrics \
             --profile public --profile sim config --quiet
 
+      - name: The ingest image builds apart from the platform's
+        # meridian-ingest runs in an image of its own, never the platform's
+        # (D-138, D-352). Built here on every pull request because no
+        # deployment pulls it from a registry: the host that runs ingest builds
+        # it. It must import the archive layer and its HDF5 reader, must not
+        # carry the station client, and must answer `sources` with no network.
+        run: |
+          set -euo pipefail
+          cp deploy/.env.example deploy/.env
+          printf 'raw_root = "/tmp/raw"\n' > deploy/ingest.toml
+          install -d -m 700 deploy/secrets/ingest
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.ingest.yml config --quiet
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.ingest.yml build ingest
+          docker run --rm --network none meridian-ingest:local \
+            python -c "import meridian_ingest, meridian, h5py; import importlib.util as u; assert u.find_spec('meridian_client') is None"
+          docker run --rm --network none --read-only --tmpfs /tmp \
+            -v "$PWD/deploy/ingest.toml:/run/config/ingest.toml:ro" \
+            -e MERIDIAN_INGEST_CONFIG=/run/config/ingest.toml \
+            meridian-ingest:local meridian-ingest sources
+          rm deploy/ingest.toml
+
       - name: Bring the stack up
         run: |
           set -euo pipefail

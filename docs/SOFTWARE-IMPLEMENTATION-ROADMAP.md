@@ -48,6 +48,31 @@ flowchart TD
 
 *Snapshot taken 2026-11-02. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
+**Stages 36 to 41 were added on 2026-11-07, after every earlier stage was built**: the platform in a cloud, monitored (36); the dashboard for readers who own no station (37); open imagery, placed and explained (38); the station owner's page (39); a real station joining (40); and first light and completion (41).
+
+**Stage 36's software is built and running** (2026-11-07). Its decisions are D-352 and D-353, `deploy/cloud/aws/README.md` and `docs/OPERATIONS.md` § Ingest as a container and § Datadog, instead of the metrics profile are its runbook, and it added no migration. Stage 37 is next.
+- **The completion gate passes, on the cloud host.** *The public hostname serves the dashboard from the cloud host through the tunnel alone; `verify_public_surface.py` passes against it with the edge's rate limit; the front drill shows every view as Not live with the api stopped; a restore drill passes on the host; stopping the api fires a monitor.*
+  - `verify_public_surface.py https://dash.meridian.org.in --burst 300`: all five checks passed, 250 of 300 refused at the edge and none by the platform. No script was injected, and the policy and HSTS reached the browser.
+  - The front drill passed with 364 views for 50 stations. Each was served from its copy in 2.0 s, labelled and dated, and from the api again once it was back. `ApiUnavailable` fired two minutes into the stop and cleared after it.
+  - The restore drill runs weekly from the host's timer, after the nightly backup; the first is 2026-11-08.
+- **The host** (D-129): AWS EC2 `t4g.small` in `ap-south-1`, created from `cloud-init.yaml` and the runbook's commands. It has no inbound rule, and its shell is Session Manager. The 50-station demonstration fleet runs on live element sets, which clears Stage 35's owed trial.
+- **Ingest in its own image and file** (D-352). The first live fetch of seven sources is recorded in the runbook. SatNOGS stays off until D-322 is accepted.
+- **Datadog, mirroring the Prometheus rules** (D-353): 23 monitors for 22 rules, held in step by a test. The Agent is hardened like every service, and only measured stations' alerts email anyone.
+- **Offsite copies:** the nightly dumps and the ingest raw store go to a versioned bucket the host may write and never read or delete.
+- **Found on the way, fixed:**
+  - the retriever refused every gzip-compressed answer, CelesTrak's first among them, by holding `Content-Length` against the unpacked body;
+  - the ingest build could not read `ATTRIBUTION.md`;
+  - Docker created `data/` as root;
+  - the runbook's catalogue export used `compose cp`, which cannot read a tmpfs;
+  - grouping a health monitor by every tag would have left a silent group after each restart.
+- **Owed, not done:**
+  - the weekly copy of the backups on the station tier, once the Pi runs as station 001;
+  - the team's acceptance of D-135's cloud half as recorded here.
+- **Known limits:**
+  - the host has 2 GB, enough with 4 GB of swap for now, and moves to `t4g.medium` when the station hardware arrives;
+  - the account's free plan ends on 2027-02-28, so the platform moves by backup and restore before then;
+  - in an outage each request waits the front's 2 s connect timeout, so the front drill takes about fourteen minutes at fifty stations.
+
 **Stage 35's software is built** (2026-11-02), after Stage 34 merged. Its decisions are D-330 through D-335, `docs/OPERATIONS.md` § The demonstration and § The network's public views are its runbook, `docs/SCALE-AND-FAULTS.md` § The demonstration fleet records its trials, and it added no migration.
 - **The completion gate passes, in two halves** (D-335). *A rehearsal against the `demo` profile steps through `PROJECT.md` §13's software steps.*
   - **The platform's**, `tests/integration/test_demo_rehearsal.py`, on every build: the `demo` fleet flown and settled; the fleet visible and simulated; a pass explained with its orbit; every loss diagnosed with every cause tested; a report that regenerates; every result simulated.
@@ -3401,6 +3426,231 @@ Network, schedule, losses and insights, routed by fragment (D-091), in the site'
 ## Completion gate
 
 A rehearsal against the `demo` profile, in a browser, steps through `PROJECT.md` §13's software steps: the fleet is visible, a pass is explained, a loss is diagnosed, a report is delivered and regenerates to its hash, every simulated figure carries SIM, and with the api stopped every view is served marked stale.
+
+---
+
+# Stage 36 — The platform in a cloud, monitored
+
+Depends on Stages 12, 23 and 33. Added after every earlier stage was built: the software was complete, and the public dashboard still ran on the machine that must never stop receiving.
+
+## Learn
+
+- running a host that accepts no inbound connection: a tunnel that dials out, and a shell reached through the provider's session service rather than a port;
+- moving a deployment between accounts and providers by backup and restore, so a host that runs on credit can be left before the credit runs out;
+- collecting a service's own metrics, logs and host health in a hosted monitor, without making the monitor something the service needs.
+
+## Implement
+
+### The host
+
+- A host described by files a newcomer can run again: a cloud-init file that installs Docker and the compose plugin, adds swap, creates the deployment user and installs the backup and drill timers, and a runbook naming every provider command that creates the instance, its role, its security group and its budget alert.
+- No inbound rule. The tunnel connects out (D-088, D-206); the shell is the provider's session service; instance metadata requires a token.
+- The platform tier only (D-129). The station tier stays on the Pi, which points its client at the public hostname.
+- The demonstration fleet runs on the host continuously, so the public views always have a fleet to show, every figure from it badged simulated (D-330).
+
+### Ingest on the host
+
+- `meridian-ingest follow` runs in an image of its own, under a profile of its own. The platform image still does not install ingest (D-138), and the platform still fetches nothing (D-225).
+- Keys are secret files, as every other secret is (D-114).
+
+### Monitoring
+
+- A hosted monitor's collector beside the platform, from an override file, reading the platform's `/metrics` with the scrape token (D-087), container logs and host health.
+- Every Prometheus alert has a monitor of the same meaning, kept as files in the repository and applied by a tool. A test holds the two lists equal.
+- Optional. If the monitor is unreachable or its key lapses, nothing schedules, receives or reports differently. Prometheus, Alertmanager and Grafana stay in the repository for a deployment on one machine.
+
+### Custody
+
+- Nightly dumps also go to object storage in the same account, and a weekly copy is kept on the station tier, so the record outlives the host.
+- Moving the platform to another account or another provider is the restore drill run for real (D-286), written as a runbook section.
+
+## Tests
+
+- the monitor list and the alert rules name the same alerts;
+- the override file adds the collector and nothing else, pinned by digest and hardened like every service (D-206, D-256);
+- the cloud-init file parses, and installs nothing the runbook does not name;
+- a deployment on one machine still comes up in CI with no override at all (D-130).
+
+## Completion gate
+
+The public hostname serves the dashboard from the cloud host, through the tunnel alone. `verify_public_surface.py` passes against it with the edge's rate limit, the front drill shows every view as *Not live* with the api stopped, a restore drill passes on the host, and stopping the api fires a monitor. The same commit builds and runs on one machine with no cloud account.
+
+---
+
+# Stage 37 — The dashboard for everyone
+
+Depends on Stages 11, 20, 32, 34 and 35, and on Stage 36 for a public address that stays up.
+
+## Learn
+
+- what a reader who owns no station comes for, and how to answer each question on a page of its own;
+- live figures from the platform's own records, with no third-party script on the page;
+- a design that is one system across two surfaces built separately.
+
+## Implement
+
+### One page per question
+
+Each is a fragment (D-091), polls through the shared refresh, says when it is a snapshot (D-284), badges every simulated figure, and says every absence in words (D-086).
+
+- **Live**, the first page: what is overhead now, each tracked satellite's position and next ninety minutes of ground track sampled by the orbit service, the next pass, today's counts by outcome with measured and simulated apart, a week's capture rate and loss budget, stations by liveness, element-set age, the geomagnetic index, and a feed of what just happened. No images.
+- **Stations, Schedule** as they are.
+- **Results**: every settled pass and its outcome across the network, with the loss view inside it. This is the network-wide results view Stage 24 owed, and it fills `/api/v1/aggregates`.
+- **Areas**: each published area's series with their intervals, its changes, its fires and its clear-sky rate, with every source and its terms. Open once D-326 is accepted.
+- **Changes**: every detected change to an area, with its interval and the report it came from; the network's events; the release notes.
+- **Reports**: a plain-language weekly report on the network, the published area reports, and the sealed evaluation summary.
+- **Data**: the evidence packages with their manifests and hashes, the API reference, how to cite, and every source's credit and licence.
+- **Plan a station**: a place, rounded to a tenth of a degree, and the next two days of passes over it with each one's peak and configuration A's predicted yield. Nothing about the place is stored.
+
+### Ways in
+
+Every page says which way in a reader wants: exploring the data needs nothing; running a station signs in (Stage 39); wanting to run one leads to the station planner and the site's station page.
+
+### One look
+
+The dashboard's tokens are generated from the site's stylesheet and checked equal in CI, where today they are copied by hand.
+
+## Tests
+
+- every new endpoint's body is pinned by the privacy review (D-210), and answers `not_yet_computed` where nothing is computed;
+- every request a view makes is in the front's warmed list (D-283);
+- every view renders its simulated badge with simulated data and none with measured data;
+- the content-security policy reports nothing on any view, at a phone's width and a desktop's.
+
+## Completion gate
+
+A reader with no station, in a browser, finds what is happening now, every pass's result, an area's changes, a plain report and a downloadable dataset, each on its own page, each labelled simulated or measured, and each served as a stale copy with the api stopped.
+
+---
+
+# Stage 38 — Open imagery, placed and explained
+
+Depends on Stages 14, 31, 32 and 34. Uses Stage 40's received images when they exist, and runs without them.
+
+## Learn
+
+- open imagery archives that publish cloud-optimised files behind a catalogue, and reading a window of a scene without downloading all of it;
+- georeferencing: a raster's coordinate reference system, its transform, and a world file;
+- writing a caption and placing a marker from records, so that every statement on an image cites where it came from.
+
+## Implement
+
+### Sources
+
+One per class, each credited before its first fetch (D-134):
+
+- high-resolution optical scenes, about 10 m, from an open catalogue that needs no key;
+- an older and longer optical record, about 30 m, in the public domain;
+- the daily wide view the platform already lists (D-220);
+- images received by Meridian's own stations, from Stage 40.
+
+A source whose terms permit viewing only is never rendered into a product of ours.
+
+### The pipeline
+
+In `meridian-ingest`, behind an optional extra, never in the platform image (D-138):
+
+- **search** each published area for its clearest recent scene, and fetch the window over it into the raw store, with its provenance;
+- **render** a georeferenced GeoTIFF, a PNG with its world file, a tile pyramid for the viewer, and a picture with latitude and longitude lines drawn by our own code, a scale bar and the credit line;
+- **annotate** from records only, never from pixels (D-133): fire detections, area outlines, detected changes, place names from a public-domain or attribution-only gazetteer, and for a received image its ground track. Every marker carries its explanation and at least one citation;
+- **caption** from a versioned template, hashed, which is also the image's alternative text;
+- **publish** a content-addressed directory whose manifest is the record, with a stated retention.
+
+### Serving
+
+- `/api/v1/imagery` lists images by area, source class and date, and the files are served from the platform's own origin, so the content-security policy is unchanged (D-208).
+- The front keeps no copy of the image files. They are content-addressed and cached at the edge.
+- An **Imagery** page keeps images received by Meridian apart from public archive imagery, never mixed; a viewer draws the tiles under the dashboard's own graticule with the annotations, a coordinate read-out, the caption and the downloads. An area's page shows its latest scene; the Live page shows none.
+
+## Tests
+
+- a synthetic scene renders to the same bytes twice;
+- a line of latitude drawn at a known coordinate lands on the expected pixel;
+- a world file read back gives the scene's bounds;
+- every annotation cites a record, and the caption regenerates to its hash;
+- no test opens a socket (D-142).
+
+## Completion gate
+
+For a published area, a scene fetched live from each source is shown with latitude and longitude marked, every marker explained and cited, a caption that regenerates, and downloads that open at the right place in a GIS tool; with every source unreachable, the page serves what was last published and says how old it is.
+
+---
+
+# Stage 39 — The station owner's page
+
+Depends on Stages 23, 27, 28 and 29.
+
+## Learn
+
+- authenticating a person without holding anything about them;
+- sessions in a browser under a strict policy: cookies, cross-site requests, and what a cache must never keep;
+- declared unavailability, and why it is not a miss.
+
+## Implement
+
+- **An owner key per station**, issued by an operator at the command line and printed once, stored hashed like a station's token (D-017), revocable. No name, address or contact is held, which settles D-107 without changing `PROJECT.md` §16.
+- **An owner surface** apart from the public API, which the front never caches. Sign-in sets a cookie the page cannot read and another site cannot send; every change needs the cookie and a header.
+- **What an owner sees**: the station's exact position and windows, every diagnosis in full, the receive chain's whole record, the client's health, every owner report written for the station, its received images, and an export of its receptions.
+- **What an owner does**: declares a maintenance window, which the scheduler plans around and reliability counts as declared unavailable rather than a miss (rule 7).
+- MSP is unchanged. Nothing about an owner travels on the wire.
+
+## Tests
+
+- an owner reads only their own station, and a revoked key or an expired session is refused;
+- no public response carries an owner field;
+- a pass inside a maintenance window is never assigned and never counted as a miss;
+- the sign-in flow raises no policy violation in a browser.
+
+## Completion gate
+
+An owner signs in with a key, sees their station in full and their reports, declares a maintenance window that changes the next schedule, and nothing about them is stored but the key's hash.
+
+---
+
+# Stage 40 — A real station joins
+
+Depends on Stages 13, 19 and 25, and on Stage 38 to show what arrives.
+
+## Learn
+
+- the live LRPT chain: an SDR, a demodulator and a decoder run as one supervised program;
+- moving files a station holds to the platform, idempotently, over the same queue that carries its reports;
+- the scan geometry of the instrument behind the image, and placing every pixel on the ground from the orbit that was flown.
+
+## Implement
+
+- **Registration from the station client**: a command that redeems an invite, writes the credentials and is safe to run twice (D-023).
+- **A physical receiver**: the live pipeline of an existing decoder run as a supervised subprocess, as decoders already are (D-124), stating its capture window and naming its products. Receive only (rule 4).
+- **Product transfer, MSP 0.4**: a station uploads a product it declared, by its hash, authenticated by its token; the platform checks the hash and keeps the bytes content-addressed. An upload is resent until acknowledged (D-129), and a station uploads only when its file says so.
+- **Placing a received image on the ground**: control points from the pass's own element set and the instrument's scan, through the orbit service, cross-checked against the decoder's own projection and against coastlines with a stated error. The image then enters Stage 38's pipeline as received by Meridian, with its reception verdict beside it.
+
+## Tests
+
+- MSP conformance for 0.4, including a wrong hash, an oversized body and an upload for another station;
+- a recorded pass replayed through the live receiver's interface produces the products it names;
+- georeferencing a fixture pass agrees with its known coastline to within the stated error.
+
+## Completion gate
+
+Station 001 registers from its own command, receives a Meteor-M pass, and its image appears on the Imagery page with latitude and longitude marked and its verdict, measured, beside the demonstration fleet's simulated passes.
+
+---
+
+# Stage 41 — First light and completion
+
+Depends on every earlier stage.
+
+## Implement
+
+- **Station 001 measured**: its LRPT frequency and frame interval confirmed, the §12.1 drill run on it, a real owner report delivered, and the first measured evidence package published with a persistent identifier.
+- **Every owed run**: the first live fetch of every source, a demonstration trial on live element sets, the archive backfill and the real-data model run, the fault-specification review (D-105), and the SC-8 and SC-9 fleets.
+- **Every proposed decision accepted or replaced** by the team, each recorded.
+- **The seventy-two hour run** on the Pi (D-198, D-257), closing the last acceptance clause.
+- **Polish**: tests that read the database's clock against the wall clock rewritten, the platform image public for anyone to pull, an accessibility and policy pass over the site and the dashboard, and every page that says *waiting for first light* changed to what was measured.
+
+## Completion gate
+
+Every clause of `ACCEPTANCE.md` is proven, every figure the site and the dashboard publish is regenerable from a snapshot, a configuration and a seed, and the release is tagged.
 
 ---
 

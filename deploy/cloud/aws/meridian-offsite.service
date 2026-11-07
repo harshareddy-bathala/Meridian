@@ -1,0 +1,36 @@
+# Copy the nightly dumps and the ingest raw store to object storage (Stage 36).
+#
+# The dumps and the raw store are the two things the platform cannot rebuild
+# (D-209, OPERATIONS.md § The raw store is not in the database backup). On the
+# host they share one disk with the database; this keeps a copy off it, in a
+# bucket the instance role may list and write but never read or delete, so a
+# compromised host cannot destroy the history it is copying.
+#
+# `sync` uploads only what is new and deletes nothing; the bucket's lifecycle
+# rule ages copies out. The CLI runs from AWS's own image, pinned by digest,
+# on the host's network, which is how it reaches the instance role (the
+# metadata service is closed to bridged containers by a hop limit of 1).
+#
+# Installed by deploy/cloud/aws/README.md § Offsite copies, which writes
+# /etc/meridian/offsite.env with MERIDIAN_OFFSITE_BUCKET and AWS_REGION.
+
+[Unit]
+Description=Copy Meridian's backups and ingest raw store to object storage
+Wants=docker.service
+After=docker.service meridian-backup.service
+
+[Service]
+Type=oneshot
+User=meridian
+WorkingDirectory=/opt/meridian
+EnvironmentFile=/etc/meridian/offsite.env
+ExecStart=/usr/bin/docker run --rm --network host -e AWS_REGION \
+  -v /opt/meridian/backups:/backups:ro \
+  amazon/aws-cli:2.38.6@sha256:bdb0dd07c54dfc7fe6526387dcf23eaab269875a20d647ae4de8196ea04d6bd4 \
+  s3 sync /backups s3://${MERIDIAN_OFFSITE_BUCKET}/platform/ --only-show-errors
+ExecStart=/usr/bin/docker run --rm --network host -e AWS_REGION \
+  -v meridian_ingest-raw:/raw:ro \
+  amazon/aws-cli:2.38.6@sha256:bdb0dd07c54dfc7fe6526387dcf23eaab269875a20d647ae4de8196ea04d6bd4 \
+  s3 sync /raw s3://${MERIDIAN_OFFSITE_BUCKET}/ingest-raw/ --only-show-errors
+Nice=10
+IOSchedulingClass=idle

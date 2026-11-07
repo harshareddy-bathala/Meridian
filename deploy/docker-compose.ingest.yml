@@ -1,0 +1,72 @@
+# The ingest service: `meridian-ingest follow`, in an image of its own (D-352).
+#
+# Not a profile of the main file, because the platform must be complete without
+# it (D-138): a deployment that never names this file never builds, pulls or runs
+# anything that talks to an external source. Add it to every command on the host
+# that runs ingest:
+#
+#   docker compose -f deploy/docker-compose.yml ... -f deploy/docker-compose.ingest.yml up -d
+#
+# It needs two things on the host first:
+#   - deploy/ingest.toml, from deploy/ingest.live.toml.example, with
+#     raw_root = "/var/lib/meridian-ingest/raw";
+#   - deploy/secrets/ingest/, a directory (mode 0700) holding firms_map_key and
+#     earthdata_token once those sources are enabled. It may be empty: a key is
+#     read only by the source that needs it.
+#
+# It writes to the platform's database as meridian_api, which may change rows
+# and nothing else (D-207), and is never on the scheduling path: a source that
+# hangs delays its own round and no one else's (D-225).
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+x-read-only: &read-only
+  type: bind
+  read_only: true
+  bind:
+    create_host_path: false
+
+services:
+  ingest:
+    image: ${MERIDIAN_INGEST_IMAGE:-meridian-ingest:local}
+    build:
+      context: ..
+      dockerfile: deploy/ingest/Dockerfile
+    # Built on the host that runs it, never pulled: no registry publishes it.
+    # `compose pull` skips it, and `up` builds it when it is missing.
+    pull_policy: build
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    logging: *logging
+    tmpfs:
+      - /tmp
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://meridian_api:${API_DATABASE_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-meridian}
+      MERIDIAN_INGEST_CONFIG: /run/config/ingest.toml
+      FIRMS_MAP_KEY_FILE: /run/secrets/meridian-ingest/firms_map_key
+      EARTHDATA_TOKEN_FILE: /run/secrets/meridian-ingest/earthdata_token
+    volumes:
+      - ingest-raw:/var/lib/meridian-ingest
+      - <<: *read-only
+        source: ./ingest.toml
+        target: /run/config/ingest.toml
+      - <<: *read-only
+        source: ./secrets/ingest
+        target: /run/secrets/meridian-ingest
+
+volumes:
+  # The raw store cannot be recreated without going back to every source, and is
+  # not in the database dump (OPERATIONS.md § The raw store is not in the
+  # database backup).
+  ingest-raw:
