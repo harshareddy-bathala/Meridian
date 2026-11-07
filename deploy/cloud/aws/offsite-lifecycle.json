@@ -1,0 +1,12 @@
+{
+  "Rules": [
+    {
+      "ID": "age-out",
+      "Status": "Enabled",
+      "Filter": {},
+      "Expiration": { "Days": 200 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 30 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 2 }
+    }
+  ]
+}

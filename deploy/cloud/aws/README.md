@@ -129,6 +129,36 @@ sudo systemctl enable --now meridian-backup.timer meridian-restore-drill.timer
 python3 /opt/meridian/deploy/tools/verify_public_surface.py https://dash.meridian.org.in --burst 300
 ```
 
+## 7. Offsite copies
+
+The dumps and the ingest raw store share one disk with the database. A bucket in the same account keeps a copy off it. The instance role may list and write the bucket, never read or delete it, so a compromised host cannot destroy the history it copies. Reading a copy back is the operator's, with their own credentials.
+
+From the machine you created the host from:
+
+```bash
+BUCKET="meridian-backups-$ACCOUNT"
+aws s3api create-bucket --bucket "$BUCKET" --create-bucket-configuration LocationConstraint="$AWS_REGION"
+aws s3api put-public-access-block --bucket "$BUCKET" --public-access-block-configuration \
+  BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
+aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" \
+  --lifecycle-configuration file://deploy/cloud/aws/offsite-lifecycle.json
+aws iam put-role-policy --role-name "$NAME-ssm" --policy-name offsite-write \
+  --policy-document "$(sed "s/BUCKET/$BUCKET/g" deploy/cloud/aws/offsite-policy.json)"
+```
+
+Then on the host, as the default user:
+
+```bash
+sudo install -d -m 755 /etc/meridian
+printf 'MERIDIAN_OFFSITE_BUCKET=%s\nAWS_REGION=%s\n' "<the bucket>" ap-south-1 | sudo tee /etc/meridian/offsite.env
+sudo cp /opt/meridian/deploy/cloud/aws/meridian-offsite.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now meridian-offsite.timer
+sudo systemctl start meridian-offsite.service && journalctl -u meridian-offsite --since -5min --no-pager
+```
+
+Copies are kept for 200 days, and a replaced version for 30. That is longer than the host keeps its own dumps (D-209), so the bucket also holds what the host has already pruned.
+
 ## Moving the host
 
 Credit is per account and cannot be moved, so the platform moves instead, by `docs/OPERATIONS.md` § Restoring on another machine:

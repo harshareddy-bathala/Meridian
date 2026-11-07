@@ -116,3 +116,30 @@ def test_only_ec2_may_assume_the_role() -> None:
 def test_no_amount_is_written_down() -> None:
     """The budget's limit is set when the alert is created, never recorded here."""
     assert not re.search(r"\$\s?\d|\d+\s?(USD|dollars)", _runbook())
+
+
+def test_the_offsite_role_may_write_the_bucket_but_never_read_or_delete_it() -> None:
+    """A compromised host must not be able to destroy the history it copies."""
+    policy = json.loads((AWS / "offsite-policy.json").read_text())
+    actions = {statement["Action"] for statement in policy["Statement"]}
+    assert actions == {"s3:ListBucket", "s3:PutObject"}
+    assert all(statement["Effect"] == "Allow" for statement in policy["Statement"])
+
+
+def test_the_offsite_copy_runs_after_the_backup_from_a_pinned_image() -> None:
+    unit = (AWS / "meridian-offsite.service").read_text()
+    images = re.findall(r"amazon/aws-cli:\S+", unit)
+    assert len(images) == 2
+    assert all(re.search(r"@sha256:[0-9a-f]{64}$", image) for image in images)
+    assert "After=docker.service meridian-backup.service" in unit
+    assert "--network host" in unit, "only the host's network reaches the role"
+    assert ":ro" in unit and "--delete" not in unit
+    assert "EnvironmentFile=/etc/meridian/offsite.env" in unit
+    assert "Persistent=true" in (AWS / "meridian-offsite.timer").read_text()
+
+
+def test_offsite_copies_age_out() -> None:
+    (rule,) = json.loads((AWS / "offsite-lifecycle.json").read_text())["Rules"]
+    assert rule["Status"] == "Enabled"
+    assert rule["Expiration"]["Days"] >= 180, "at least the six monthly dumps"
+    assert rule["NoncurrentVersionExpiration"]["NoncurrentDays"] > 0
