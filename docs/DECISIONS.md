@@ -7093,6 +7093,28 @@ The live page draws each tracked satellite where it is and where it goes over th
 
 ---
 
+## D-362 — `/aggregates` is today's passes as counts and a week by day, counted by the reliability report's own rules
+
+**2026-11-07 · accepted** · *`meridian/reliability/{daily,aggregates}.py`, `meridian/store/reliability_reads.py` (`count_scheduled_between`), `meridian/api/public/{aggregates,models/aggregates}.py`, `docs/THREAT-MODEL.md` §7, `tests/unit/{test_reliability_daily,test_public_privacy}.py`, `tests/integration/test_public_aggregates_endpoint.py`; Stage 37. Settles D-086's placeholder for this path; applies D-177, D-182, D-184, D-185 and D-187.*
+
+`/api/v1/aggregates` has answered `not_yet_computed` since Stage 11, waiting for analytical views that D-177 answered elsewhere. The dashboard's live page needs two things from the network as a whole: today's passes by what became of them, and a week of capture rate and loss budget to draw as small charts.
+
+**Decision.** The path now answers `computed`, for measured and simulated stations apart (rule 5).
+- **Today is counts.** For the UTC day: every pass scheduled to close today, how many have closed, how many of those are classified, by class with every class present, how many had a station confirmed listening, and how many have closed and are not classified yet. The last figure matters. A pass is classified only once the settle margin has passed (D-182), a day by default, so on most deployments almost nothing that closed today is classified. Without it the page would read a busy day as a quiet one.
+- **The week is seven UTC days, today last.** Each has its capture rate and its own loss budget: SC-4's target applied to that day's eligible passes. Each also says whether it has **settled**, meaning its last window closed more than the settle margin ago. An unsettled day can still change, and the page has to say so beside it.
+- **The report's rules, not new ones.** Each day's figures are `capture_rate` and `loss_budget` applied to that day's classified passes alone, so a day reads like the thirty-day figure on `/reliability`, with the same Wilson interval and the same budget, debits counted by reason. Passes are read under the deployment's method and classification hash, through the same configuration dependency. A pass belongs to the UTC day its window closed, as the report's window counts window ends.
+- **Scheduled is counted by assignment.** A classification pools the overlapping assignments of one station and satellite. From D-165 on a rise has one scheduled assignment per station, so the two counts agree on anything recent.
+- **Counts, never passes.** No pass, window or station is named, so nothing can be turned back into a schedule (D-093, D-187). A zero is a count of rows that exist; a rate with nothing to divide has no estimate, as on `/reliability` (D-086).
+- **Counted on each request.** It reads a week of classifications, a few thousand rows at fifty stations, and today's assignments. The front keeps the last good copy (D-282). If it is slow at scale, a minute's cache like D-361's is the remedy.
+
+`tests/msp_conformance/test_not_yet_computed_endpoints.py` pinned the placeholder for this path alone and is removed with it. `/areas` and `/insights/model` keep their own tests of D-086's shape.
+
+*Rejected: today's figures from classifications only.* Under the default margin they would show nothing for most of the day, which is the absence-read-as-quiet this project exists to avoid.
+
+*Rejected: a rolling seven-day capture rate.* One number over a week hides the day a station went deaf. A day at a time is what a small chart can show.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7486,6 +7508,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-351 minimatch 11 by override | `dashboard/package.json`; `dashboard/package-lock.json` |
 | D-360 the dashboard's tokens from the site | `site/tools/dashboard_tokens.py`; `dashboard/src/{tokens.css,app.css,main.tsx}`; `tests/unit/test_site_dashboard_tokens.py`; `.github/workflows/ci.yml`; `pyproject.toml`; `site/README.md` |
 | D-361 ground tracks, sampled on the platform | `platform/src/meridian/api/public/{tracks,models/tracks,surface}.py`; `platform/src/meridian/store/element_sets.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_satellite_tracks,test_public_privacy}.py`; `tests/integration/{test_public_tracks_endpoint,test_satnogs_archive_load}.py` |
+| D-362 today and the week, counted by the report's rules | `platform/src/meridian/reliability/{daily,aggregates}.py`; `platform/src/meridian/store/reliability_reads.py`; `platform/src/meridian/api/public/{aggregates,models/aggregates}.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_reliability_daily,test_public_privacy}.py`; `tests/integration/test_public_aggregates_endpoint.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

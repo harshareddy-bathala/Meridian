@@ -1,40 +1,52 @@
-"""``/api/v1/aggregates`` — network-wide metrics, once they are computed.
+"""``/api/v1/aggregates`` — today's passes, and a week by day, across the network.
 
-Answered with :class:`NotYetComputed` (D-086). The aggregates the roadmap lists —
-pass completeness, element-set divergence, timing error, scheduler performance —
-are analytical views over downsampled continuous aggregates, which Stage 19
-creates. Counting rows here in the meantime would publish numbers nobody has
-defined, and a dashboard would chart them as though somebody had.
+The dashboard's live page reads this for its counts and its small charts. The
+figures are counted by ``meridian.reliability.aggregates`` from the stored
+classifications, under the same rules and configuration as ``/reliability``;
+this module only shapes them (D-362).
 
-Reference: docs/DECISIONS.md D-083, D-086; docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md
-Stage 19.
+The path was fixed in Stage 11 and answered ``not_yet_computed`` (D-086),
+waiting for analytical views Stage 19 answered elsewhere (D-177). It now
+answers ``computed``, and a client that branched on ``status`` keeps working.
+
+The reliability file is read once per process and kept, as ``/reliability``
+reads it, through the same dependency.
+
+Reference: docs/DECISIONS.md D-083, D-086, D-177, D-184, D-362.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from meridian.api.public.models.not_yet_computed import NotYetComputed
+from meridian.api import platform_clock
+from meridian.api.dependencies import get_connection
+from meridian.api.public.models.aggregates import PublicAggregates
+from meridian.api.public.reliability import deployed_reliability_config
+from meridian.reliability.aggregates import read_live_aggregates
+from meridian.reliability.config import ReliabilityConfig
+from meridian.store.stations import Connection
 
-__all__ = ["AGGREGATES_STAGE", "router"]
-
-AGGREGATES_STAGE = 19
-"""Stage 19 — complete deferred storage, whose analytical views these are."""
+__all__ = ["router"]
 
 router = APIRouter()
 
 
 @router.get("/aggregates")
-def network_aggregates() -> NotYetComputed:
-    """Network-wide aggregate metrics: not yet computed.
+def network_aggregates(
+    conn: Connection = Depends(get_connection, scope="function"),
+    config: ReliabilityConfig = Depends(deployed_reliability_config),
+) -> PublicAggregates:
+    """Today's passes by what became of them, and the week's figures by day.
+
+    Args:
+        conn: A pooled connection, injected.
+        config: The deployment's reliability configuration, injected.
 
     Returns:
-        A placeholder with no numeric field, naming the stage that computes it.
+        For measured and simulated stations apart: today's scheduled, closed,
+        classified and waiting passes, and seven days of capture rate and loss
+        budget, each day marked settled or not.
     """
-    return NotYetComputed(
-        reason=(
-            "Aggregate metrics are analytical views over continuous aggregates"
-            " that have not been defined or created yet."
-        ),
-        available_from_stage=AGGREGATES_STAGE,
-    )
+    aggregates = read_live_aggregates(conn, now=platform_clock.utc_now(), config=config)
+    return PublicAggregates.of(aggregates)
