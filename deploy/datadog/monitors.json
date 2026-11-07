@@ -4,7 +4,7 @@
     {
       "name": "Meridian ApiUnavailable: the api's metrics endpoint is not answering",
       "type": "service check",
-      "query": "\"meridian.openmetrics.health\".over(\"meridian_service:api\").by(\"*\").last(2).count_by_status()",
+      "query": "\"meridian.openmetrics.health\".over(\"meridian_service:api\").by(\"meridian_service\").last(2).count_by_status()",
       "message": "The api has not answered a scrape for a minute.\n\nSee docs/OPERATIONS.md#apiunavailable in the repository.",
       "tags": [
         "managed:meridian",
@@ -247,7 +247,7 @@
     {
       "name": "Meridian SchedulerUnavailable: the jobs process's metrics endpoint is not answering",
       "type": "service check",
-      "query": "\"meridian.openmetrics.health\".over(\"meridian_service:jobs\").by(\"*\").last(2).count_by_status()",
+      "query": "\"meridian.openmetrics.health\".over(\"meridian_service:jobs\").by(\"meridian_service\").last(2).count_by_status()",
       "message": "The jobs process has not answered a scrape for a minute.\n\nSee docs/OPERATIONS.md#schedulerunavailable in the repository.",
       "tags": [
         "managed:meridian",

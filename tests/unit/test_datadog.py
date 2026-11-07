@@ -73,6 +73,14 @@ def test_every_monitor_queries_a_metric_the_platform_exports() -> None:
             assert name == "openmetrics" or name in exported, (monitor["name"], name)
 
 
+def test_a_health_monitor_groups_by_service_not_by_container() -> None:
+    """The check's tags carry the container's address, which a restart changes;
+    grouped by every tag, the old address would go silent and alert as no data."""
+    for monitor in _monitors():
+        if monitor["type"] == "service check":
+            assert monitor["query"].count('.by("meridian_service")') == 1
+
+
 def test_every_monitor_is_managed_and_names_no_recipient() -> None:
     names = [m["name"] for m in _monitors()]
     assert len(set(names)) == len(names)
