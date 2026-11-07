@@ -569,14 +569,14 @@ Stage 34 adds two sources to the nine above (D-320 to D-324): `celestrak_gp`, cu
 6. **Then `follow`**, by the cron line above. `ElementSetsStale` is the alert that says it stopped.
 7. **Before going offline** — a demonstration, a field site — export the catalogue the platform now holds, on a connected machine, and load that file on the offline one (D-321):
    ```bash
-   docker compose exec api meridian catalogue export --output /tmp/live.json && docker compose cp api:/tmp/live.json data/catalogue/live.json
+   docker compose exec -T api sh -c 'meridian catalogue export --output /tmp/live.json >&2 && cat /tmp/live.json' > data/catalogue/live.json
    ```
 
 **Record each first live fetch** in the table below: the date, what came back and anything refused. Until a row is filled, that source has only ever been run against fixtures.
 
 | Source | First live fetch | Result |
 |---|---|---|
-| `celestrak_gp` | — | — |
+| `celestrak_gp` | 2026-11-07, cloud host | 73 sets in the `weather` group; 2 loaded, 0.4 days old; the rest kept in the raw store. The first attempts were refused until the retriever held a gzip body to the bytes on the wire. |
 | `satnogs_network` | — | — |
 | `noaa_swpc_kp` | — | — |
 | `open_meteo_cloud` | — | — |
