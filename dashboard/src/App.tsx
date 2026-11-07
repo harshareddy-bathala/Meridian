@@ -5,7 +5,7 @@ import { InsightsView } from "./Insights";
 import { Kiosk } from "./Kiosk";
 import { LossesView } from "./Losses";
 import { Nav } from "./Nav";
-import { Network } from "./Network";
+import { Live } from "./Live";
 import type { Route } from "./route";
 import { ScheduleView } from "./ScheduleTimeline";
 import { StationDetail } from "./StationDetail";
@@ -15,6 +15,7 @@ import { SnapshotNote } from "./SnapshotNote";
 import { StationMap } from "./StationMap";
 import { useRoute } from "./useRoute";
 import { useStations } from "./useStations";
+import { WaysIn } from "./WaysIn";
 
 type Load =
   | { kind: "loading" }
@@ -103,8 +104,8 @@ function Stations({ selectedId, go }: { selectedId: string | null; go: (route: R
 
 function View({ route, go }: { route: Route; go: (route: Route) => void }) {
   switch (route.view) {
-    case "network":
-      return <Network go={go} />;
+    case "live":
+      return <Live go={go} />;
     case "stations":
       return <Stations selectedId={route.stationId} go={go} />;
     case "schedule":
@@ -127,6 +128,7 @@ export function App() {
         <h1>Meridian</h1>
         <PlatformStatus load={load} />
         <Nav route={route} />
+        {route.view !== "kiosk" && <WaysIn />}
       </header>
       <View route={route} go={go} />
     </main>

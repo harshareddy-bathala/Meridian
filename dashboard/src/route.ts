@@ -3,17 +3,17 @@
 // A fragment never reaches the server, which is how D-091 gives the dashboard
 // views without a catch-all route, and a view is a link that can be shared:
 //
-//   #/network              the fleet, its reliability and its open warnings
+//   #/live                 what is happening now: the home page
 //   #/stations[/<id>]      the station directory, and one station's panel
 //   #/schedule[/<id>]      one station's next hours, and why
 //   #/losses               every diagnosed loss
 //   #/insights             the conditions outside, and the model's calibration
 //   #/kiosk                every view in turn, for a screen nobody touches
 //
-// Anything else is the network view, so an old or mistyped link still lands
-// somewhere true.
+// Anything else is the live view, so an old or mistyped link still lands
+// somewhere true. `#/network`, the home page before Stage 37, opens it too.
 
-export const VIEWS = ["network", "stations", "schedule", "losses", "insights", "kiosk"] as const;
+export const VIEWS = ["live", "stations", "schedule", "losses", "insights", "kiosk"] as const;
 export type View = (typeof VIEWS)[number];
 
 export interface Route {
@@ -22,7 +22,7 @@ export interface Route {
   stationId: string | null;
 }
 
-export const DEFAULT_ROUTE: Route = { view: "network", stationId: null };
+export const DEFAULT_ROUTE: Route = { view: "live", stationId: null };
 
 export function parseRoute(hash: string): Route {
   const [name = "", ...rest] = hash.replace(/^#\/?/, "").split("/");

@@ -175,3 +175,108 @@ export const insightsBody = {
     { name: "C", computable: false, reason: "needs a learned station profile" },
   ],
 };
+
+const proportionBody = (numerator: number, denominator: number) => ({
+  numerator,
+  denominator,
+  estimate: denominator === 0 ? null : numerator / denominator,
+  interval: denominator === 0 ? null : [0.5, 0.95],
+});
+
+function dayBody(day: string, settled: boolean, decoded: number, eligible: number) {
+  return {
+    day,
+    settled,
+    passes: eligible,
+    capture_rate: proportionBody(decoded, eligible),
+    loss_budget: {
+      capture_target: 0.9,
+      eligible,
+      allowed: eligible * 0.1,
+      spent: eligible - decoded,
+      remaining: eligible * 0.1 - (eligible - decoded),
+      remaining_ratio: eligible === 0 ? null : 0,
+      exhausted: eligible - decoded > eligible * 0.1,
+      by_reason: {},
+    },
+  };
+}
+
+/** /api/v1/aggregates: simulated stations busy, measured ones quiet. */
+export const aggregatesBody = {
+  status: "computed",
+  as_of: "2026-11-07T15:00:00Z",
+  method: "classification-1",
+  config_sha256: "ab".repeat(32),
+  settle_margin_s: 86_400,
+  capture_target: 0.9,
+  measured: {
+    simulated: false,
+    today: {
+      day: "2026-11-07",
+      scheduled: 0,
+      ended: 0,
+      classified: 0,
+      by_class: { successful_reception: 0, satellite_silent: 0 },
+      listening_confirmed: 0,
+      awaiting: 0,
+    },
+    days: ["01", "02", "03", "04", "05", "06", "07"].map((d) => dayBody(`2026-11-${d}`, true, 0, 0)),
+  },
+  simulated: {
+    simulated: true,
+    today: {
+      day: "2026-11-07",
+      scheduled: 40,
+      ended: 22,
+      classified: 10,
+      by_class: {
+        successful_reception: 7,
+        confirmed_miss: 1,
+        station_unavailable: 1,
+        satellite_silent: 1,
+        satellite_state_indeterminate: 0,
+      },
+      listening_confirmed: 8,
+      awaiting: 12,
+    },
+    days: ["01", "02", "03", "04", "05", "06", "07"].map((d) => dayBody(`2026-11-${d}`, d < "06", 9, 10)),
+  },
+};
+
+export function eventBody(kind: string, simulated = true) {
+  return {
+    at: "2026-11-07T14:03:12Z",
+    kind,
+    ref: `${kind}-1`,
+    station_id: "st_1",
+    simulated,
+    satellite_id: kind === "pass_decoded" || kind === "loss_diagnosed" ? "norad:57166" : null,
+    assignment_id: kind === "pass_decoded" || kind === "loss_diagnosed" ? "as_1" : null,
+    cause: kind === "loss_diagnosed" ? "obstruction" : null,
+  };
+}
+
+/** /api/v1/satellites/tracks: one satellite crossing the antimeridian, one without an orbit. */
+export const tracksBody = {
+  status: "computed",
+  at: "2026-11-07T14:00:00Z",
+  step_s: 60,
+  horizon_s: 5400,
+  satellites: [
+    {
+      satellite_id: "norad:57166",
+      name: "Meteor-M2-3",
+      is_active: true,
+      element_set_epoch: "2026-11-07T08:00:00Z",
+      element_set_age_s: 21_600,
+      element_set_source: "celestrak",
+      track: [
+        { t: "2026-11-07T14:00:00Z", lat_deg: 10, lon_deg: 178 },
+        { t: "2026-11-07T14:01:00Z", lat_deg: 12, lon_deg: -178 },
+        { t: "2026-11-07T14:02:00Z", lat_deg: 14, lon_deg: -174 },
+      ],
+    },
+  ],
+  omitted: [{ satellite_id: "norad:59051", name: "Meteor-M2-4", reason: "no_element_set" }],
+};

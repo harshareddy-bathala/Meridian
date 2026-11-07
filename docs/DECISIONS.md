@@ -7141,6 +7141,37 @@ Each names its record by the id that record's own endpoint publishes, so a reade
 
 ---
 
+## D-364 — Live is the dashboard's first page, every page says which way in, and a satellite is never drawn as a station
+
+**2026-11-07 · accepted** · *`dashboard/src/{Live,LiveNow,LiveFigures,Sparkline,Feed,WaysIn,satelliteLayer,StationMap,route,Nav,App,Kiosk,tracks,aggregates,events,schedule,format,useNow}.ts(x)`, `app.css`, `deploy/front/snapshot-routes.txt`, and their tests; Stage 37. Applies D-086, D-091, D-283, D-284, D-334, D-361, D-362 and D-363; replaces D-334's network view.*
+
+The dashboard opened on the network view: a map, two populations' thirty-day figures, and the open warnings. A reader who owns no station comes to see what is happening now, and that page could not tell them.
+
+**Decision.**
+- **`#/live` is the first page.** It replaces the network view, which it contains. `#/network`, and anything unknown, opens it, so no old link breaks. It shows:
+  - the time in UTC, to the second, because every window is published in it;
+  - the scheduled passes under way, each with how long it has left, and the next pass with a countdown;
+  - the map, with every tracked satellite where it is now and its next ninety minutes (D-361);
+  - the stations by liveness;
+  - each orbit's age, with a warning past three days, the threshold the schedule view uses;
+  - the geomagnetic index;
+  - today's passes and the week's capture rate and loss budget (D-362);
+  - what just happened (D-363);
+  - the open warnings;
+  - the thirty-day figures, until the results page (Part 6) takes them.
+  It shows no images.
+- **The browser propagates nothing.** Between two of the platform's points a minute apart it draws a straight line, and places the satellite along it by the reader's clock, the short way round across the antimeridian. Tracks are read once a minute, as the platform computes them.
+- **A satellite is a diamond, a station a circle.** In the first browser check a satellite from a stale orbit was drawn hollow and dashed, which is how a simulated station is drawn, and the two could not be told apart. The shape now says which is which, and the dashing still says stale. Both are ink, never a liveness colour or the site's signal colours. The live map opens on the whole world, not on the stations: fitted to them, it left a satellite at high latitude off the edge.
+- **The week is two small charts per population,** each one series in ink with no legend; its title names it. A day still inside its settle margin is hollow, and the table under the charts says "not yet" in words. A day with nothing to count is a gap, never a point at zero. Each point names its day and value on hover, and a disclosure gives every figure as a table.
+- **Every page says which way in a reader wants.** Exploring the data needs no sign-in. Station owners will sign in with an owner key (Stage 39), and the strip says that is still being built rather than linking nowhere. Someone who wants to run a station is sent to the site's station page. The kiosk leaves the strip out.
+- **The warmed list follows the page.** The four new reads join `snapshot-routes.txt`. The network-wide `assignments?limit=10`, which no view requested, leaves it, so every warmed copy is one a reader can ask for (D-283).
+
+*Rejected: placing satellites with a JavaScript SGP4.* D-361 rejects a second propagator.
+
+*Rejected: a colour for satellites.* The palette's hues already mean liveness, a snapshot, a warning and the horizon. A shape carries the difference without adding one more colour to learn.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7536,6 +7567,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-361 ground tracks, sampled on the platform | `platform/src/meridian/api/public/{tracks,models/tracks,surface}.py`; `platform/src/meridian/store/element_sets.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_satellite_tracks,test_public_privacy}.py`; `tests/integration/{test_public_tracks_endpoint,test_satnogs_archive_load}.py` |
 | D-362 today and the week, counted by the report's rules | `platform/src/meridian/reliability/{daily,aggregates}.py`; `platform/src/meridian/store/reliability_reads.py`; `platform/src/meridian/api/public/{aggregates,models/aggregates}.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_reliability_daily,test_public_privacy}.py`; `tests/integration/test_public_aggregates_endpoint.py` |
 | D-363 the events feed, read back from existing records | `platform/src/meridian/store/event_reads.py`; `platform/src/meridian/api/public/{events,models/events,surface}.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/test_public_privacy.py`; `tests/integration/test_public_events_endpoint.py` |
+| D-364 the live page, the ways in, satellites as diamonds | `dashboard/src/{Live,LiveNow,LiveFigures,Sparkline,Feed,WaysIn,satelliteLayer,StationMap,route,Nav,App,Kiosk,tracks,aggregates,events,schedule,format,useNow}.ts(x)`; `dashboard/src/app.css`; `dashboard/src/{live.test.ts,views.test.tsx,route.test.ts,snapshotRoutes.test.ts,fixtures.test-data.ts}`; `deploy/front/snapshot-routes.txt` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

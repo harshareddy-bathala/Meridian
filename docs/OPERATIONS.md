@@ -1161,7 +1161,7 @@ curl -s "localhost:8000/api/v1/schedule?station_id=<id>&hours=6" | python -m jso
 curl -s localhost:8000/api/v1/schedule-runs/latest | python -m json.tool
 ```
 
-**The dashboard's views read them** (D-334), each at its own address: `/#/network`, `/#/stations/<id>`, `/#/schedule/<id>`, `/#/losses`, `/#/insights`, and `/#/kiosk`, which shows the four in turn every 20 seconds for a screen nobody touches and holds still for a minute after a touch. Every request the views make is warmed through the front (`deploy/front/snapshot-routes.txt`), so each is served marked *not live* when the api is down.
+**The dashboard's views read them** (D-334), each at its own address: `/#/live` (D-364; `/#/network` opens it too), `/#/stations/<id>`, `/#/schedule/<id>`, `/#/losses`, `/#/insights`, and `/#/kiosk`, which shows the four in turn every 20 seconds for a screen nobody touches and holds still for a minute after a touch. Every request the views make is warmed through the front (`deploy/front/snapshot-routes.txt`), so each is served marked *not live* when the api is down.
 
 **A loss's findings are a reviewed subset.** The full record of what each cause's test read is the operator's, through `meridian diagnosis explain`; the public list withholds the obstruction sectors, the raw noise levels and every internal id (`THREAT-MODEL.md` §7).
 

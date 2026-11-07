@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { InsightsView } from "./Insights";
 import { LossesView } from "./Losses";
-import { Network } from "./Network";
+import { Live } from "./Live";
 import type { Route } from "./route";
 import { ScheduleView } from "./ScheduleTimeline";
 import { useStations } from "./useStations";
@@ -17,7 +17,7 @@ export const KIOSK_STEP_MS = 20_000;
 /** How long a touch, a click or a key holds the cycle still. */
 export const KIOSK_HOLD_MS = 60_000;
 
-const STEPS = ["network", "schedule", "losses", "insights"] as const;
+const STEPS = ["live", "schedule", "losses", "insights"] as const;
 
 function useCycle(): [number, () => void] {
   const [step, setStep] = useState(0);
@@ -42,8 +42,8 @@ function useCycle(): [number, () => void] {
 
 function KioskStep({ name, shown, go }: { name: (typeof STEPS)[number]; shown: string | null; go: (route: Route) => void }) {
   switch (name) {
-    case "network":
-      return <Network go={go} />;
+    case "live":
+      return <Live go={go} />;
     case "schedule":
       return <ScheduleView stationId={shown} go={go} />;
     case "losses":
@@ -58,7 +58,7 @@ export function Kiosk({ go }: { go: (route: Route) => void }) {
   const directory = useStations();
   // The schedule shows a station that is being heard, so the screen is not empty.
   const shown = directory.stations?.find((one) => one.liveness === "online")?.stationId ?? null;
-  const name = STEPS[step % STEPS.length] ?? "network";
+  const name = STEPS[step % STEPS.length] ?? "live";
   return (
     <div className="kiosk" onPointerDown={hold} onKeyDown={hold} role="presentation">
       <p className="dim kiosk-step" aria-live="polite">

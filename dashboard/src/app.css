@@ -459,3 +459,133 @@ tr.selected {
     font-size: 22px;
   }
 }
+
+/* Ways in (Stage 37): three short lines under the nav, on every page. */
+.ways-in {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin-block: 0 var(--space-4);
+  padding-block: var(--space-3);
+  border-block: 1px solid var(--rule);
+  color: var(--muted);
+}
+
+.ways-in p {
+  margin: 0;
+}
+
+.ways-in strong {
+  color: var(--ink);
+}
+
+/* The live page (D-361 to D-363). */
+.clock {
+  margin: 0 0 var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--step-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.overhead {
+  margin-block-end: var(--space-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.under-way,
+.orbits,
+.feed {
+  padding-inline-start: var(--space-5);
+}
+
+.feed li + li {
+  margin-top: var(--space-1);
+}
+
+.figure h4 {
+  margin: 0 0 var(--space-2);
+}
+
+/* A satellite and its next ninety minutes: ink, never a liveness colour or the
+   site's signal colours, which mean above and below the horizon. A satellite
+   from a stale orbit is hollow and dashed, so the warning survives without
+   colour. */
+.track {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  fill: none;
+}
+
+/* The diamond is drawn by a box inside the marker. Leaflet places the marker
+   itself with an inline transform, and CSS applies a `rotate` before
+   `transform`, which would turn that translation by 45° too. */
+.satellite::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  rotate: 45deg;
+  background: var(--ink);
+  border: 2px solid var(--bg);
+}
+
+.satellite-stale::before {
+  background: var(--bg);
+  border: 2px dashed var(--ink);
+}
+
+/* Small charts: one series in ink, a hollow mark for a day not settled. */
+.sparkline {
+  margin: 0 0 var(--space-3);
+}
+
+.sparkline figcaption {
+  color: var(--muted);
+}
+
+.sparkline figcaption strong {
+  color: var(--ink);
+}
+
+.sparkline svg {
+  display: block;
+  width: 100%;
+  max-width: 21rem;
+  height: auto;
+}
+
+.sparkline-line {
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  fill: none;
+}
+
+.sparkline-reference {
+  stroke: var(--rule);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.sparkline-mark {
+  fill: var(--ink);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.sparkline-unsettled .sparkline-mark {
+  fill: var(--surface);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.sparkline-hit {
+  fill: transparent;
+}
+
+.figure details table {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}

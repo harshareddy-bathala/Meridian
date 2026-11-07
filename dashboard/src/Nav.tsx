@@ -1,7 +1,7 @@
 import type { Route, View } from "./route";
 
 const LINKS: { view: View; label: string }[] = [
-  { view: "network", label: "Network" },
+  { view: "live", label: "Live" },
   { view: "stations", label: "Stations" },
   { view: "schedule", label: "Schedule" },
   { view: "losses", label: "Losses" },

@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { livenessLabel, precisionLabel } from "./format";
 import { graticule } from "./graticule";
+import { drawPositions, drawTracks } from "./satelliteLayer";
 import type { Station } from "./stations";
+import type { SatelliteTrack } from "./tracks";
 
 const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const OSM_ATTRIBUTION = "© OpenStreetMap contributors";
@@ -53,6 +55,8 @@ function addTiles(map: L.Map, setStatus: (status: TileStatus) => void): void {
 interface MapView {
   map: L.Map;
   markers: L.FeatureGroup;
+  tracks: L.FeatureGroup;
+  positions: L.FeatureGroup;
 }
 
 function useLeafletMap() {
@@ -66,7 +70,10 @@ function useLeafletMap() {
     const map = L.map(node, { worldCopyJump: true }).setView([20, 0], 2);
     drawGraticule(map);
     addTiles(map, setTileStatus);
-    setView({ map, markers: L.featureGroup().addTo(map) });
+    // Tracks under the stations, positions over them: a station stays clickable.
+    const tracks = L.featureGroup().addTo(map);
+    const markers = L.featureGroup().addTo(map);
+    setView({ map, markers, tracks, positions: L.featureGroup().addTo(map) });
     return () => {
       setView(null);
       map.remove();
@@ -90,10 +97,17 @@ function tooltipFor(station: Station): HTMLElement {
   return element;
 }
 
+/** The world a satellite can be over, as far as a Mercator map can draw it. */
+const WORLD: L.LatLngTuple[] = [
+  [-75, -180],
+  [80, 180],
+];
+
 function useStationMarkers(
   view: MapView | null,
   stations: Station[],
   onSelect: (stationId: string) => void,
+  fit: "stations" | "world",
 ) {
   const fitted = useRef(false);
   // Through a ref, so a new callback identity does not redraw every marker.
@@ -120,14 +134,38 @@ function useStationMarkers(
         .addTo(markers);
     }
     // Once: after that the reader owns the view, and a refresh must not move it.
-    const bounds = markers.getBounds();
+    // A map with satellites shows the world: a satellite is seldom over the
+    // stations, and one fitted to them would leave it off the edge.
+    const bounds = fit === "world" ? L.latLngBounds(WORLD) : markers.getBounds();
     if (!fitted.current && bounds.isValid()) {
       fitted.current = true;
       // Capped at 4 so a lone station is shown with its region around it, and
       // a tile-less map still has graticule lines on screen.
       map.fitBounds(bounds, { maxZoom: 4, padding: [32, 32] });
     }
-  }, [view, stations]);
+  }, [view, stations, fit]);
+}
+
+/** The satellites over the map, when the view draws them; see satelliteLayer.ts. */
+export interface Satellites {
+  tracks: SatelliteTrack[];
+  nowMs: number;
+}
+
+function useSatellites(view: MapView | null, satellites: Satellites | undefined) {
+  const tracks = satellites?.tracks;
+  const nowMs = satellites?.nowMs ?? 0;
+  const minute = Math.floor(nowMs / 60_000);
+  useEffect(() => {
+    if (view !== null && tracks !== undefined) {
+      drawTracks(view.tracks, tracks, minute * 60_000);
+    }
+  }, [view, tracks, minute]);
+  useEffect(() => {
+    if (view !== null && tracks !== undefined) {
+      drawPositions(view.positions, tracks, nowMs);
+    }
+  }, [view, tracks, nowMs]);
 }
 
 const TILE_NOTE: Partial<Record<TileStatus, string>> = {
@@ -138,15 +176,20 @@ const TILE_NOTE: Partial<Record<TileStatus, string>> = {
 interface MapProps {
   stations: Station[];
   onSelect: (stationId: string) => void;
+  /** Satellites to draw over the stations; the live page's map has them. */
+  satellites?: Satellites | undefined;
 }
 
-export function StationMap({ stations, onSelect }: MapProps) {
+export function StationMap({ stations, onSelect, satellites }: MapProps) {
   const { attach, view, tileStatus } = useLeafletMap();
-  useStationMarkers(view, stations, onSelect);
+  useStationMarkers(view, stations, onSelect, satellites === undefined ? "stations" : "world");
+  useSatellites(view, satellites);
   const note = TILE_NOTE[tileStatus];
   return (
     <figure className="station-map">
-      <div ref={attach} className="station-map-canvas" role="img" aria-label="Map of stations" />
+      <div ref={attach} className="station-map-canvas" role="img"
+        aria-label={satellites === undefined ? "Map of stations" : "Map of stations, and of satellites with their next ninety minutes"}
+      />
       {note !== undefined && <figcaption className="dim">{note}</figcaption>}
     </figure>
   );
