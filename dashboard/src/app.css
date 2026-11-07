@@ -22,30 +22,16 @@
   font-display: swap;
 }
 
-/* The site's grounds and ink (site/brand/README.md). The signal colours there
-   mean above horizon, below horizon and predicted, so liveness does not borrow
-   them: it has its own tokens, and always a text label beside the colour. */
+/* The grounds, the ink, the spacing and the type are the site's, generated into
+   tokens.css from site/style.css (D-360). The signal colours there mean above
+   horizon, below horizon and predicted, so liveness does not borrow them: it
+   has its own tokens here, and always a text label beside the colour. */
 :root {
   color-scheme: light dark;
-  font-family: "IBM Plex Sans", system-ui, sans-serif;
-  /* One spacing scale, so views laid out apart still line up. */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.5rem;
-  --space-6: 2rem;
-  --space-7: 3rem;
-  --space-8: 4rem;
-  --bg: #f6f4ef;
-  --surface: #edeae3;
-  --rule: #cfc8bb;
-  --ink: #16181d;
-  --dim: #5a5f69;
+  font-family: var(--sans);
   --online: #1f6f8b;
   --stale: #8a5a00;
   --offline: #6b6f76;
-  --simulated: #5b3fa0;
   /* A view showing the front's kept copy, not the platform's answer (D-284).
      Its own token: "stale" already means a station's liveness. */
   --snapshot: #9a3412;
@@ -56,15 +42,9 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #08090d;
-    --surface: #101319;
-    --rule: #333944;
-    --ink: #e8e6e1;
-    --dim: #a9a6a0;
     --online: #6fb7d1;
     --stale: #d9a441;
     --offline: #9aa0a8;
-    --simulated: #b9a3ec;
     --snapshot: #f0915c;
     --warning: #f97066;
   }
@@ -82,11 +62,11 @@ main {
 }
 
 .dim {
-  color: var(--dim);
+  color: var(--muted);
 }
 
 .mono {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--mono);
   font-size: 0.9em;
 }
 
@@ -102,7 +82,7 @@ table {
 caption {
   text-align: start;
   padding-block: 0.5rem;
-  color: var(--dim);
+  color: var(--muted);
 }
 
 th,
@@ -231,13 +211,13 @@ tr.selected {
 }
 
 .badge-skipped {
-  color: var(--dim);
+  color: var(--muted);
 }
 
 /* Outcomes, in words: only a decode is coloured, and nothing is coloured as a
    failure, because a quiet pass is not a miss until the platform says so. */
 .badge-outcome {
-  color: var(--dim);
+  color: var(--muted);
 }
 
 .badge-outcome.badge-decoded {
@@ -285,9 +265,9 @@ tr.selected {
 }
 
 .horizon-learned {
-  fill: var(--dim);
+  fill: var(--muted);
   fill-opacity: 0.25;
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-width: 0.8;
 }
 
@@ -299,7 +279,7 @@ tr.selected {
 }
 
 .horizon-label {
-  fill: var(--dim);
+  fill: var(--muted);
   font-size: 9px;
 }
 
@@ -367,7 +347,7 @@ tr.selected {
 }
 
 .figure dt {
-  color: var(--dim);
+  color: var(--muted);
 }
 
 .figure dd {
@@ -419,7 +399,7 @@ tr.selected {
 
 .timeline-skipped rect {
   fill: none;
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-dasharray: 6 4;
 }
 
@@ -447,7 +427,7 @@ tr.selected {
 }
 
 .calibration-ideal {
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-dasharray: 4 4;
 }
 

@@ -119,6 +119,13 @@ jobs:
         # was edited by hand and now differs from the other twelve.
         run: python site/tools/shell.py --check
 
+      - name: Dashboard tokens are the site's
+        # dashboard/src/tokens.css is written from site/style.css by
+        # site/tools/dashboard_tokens.py and committed, so the dashboard builds
+        # without site/. Stale means one surface's spacing, type or colours
+        # changed without the other's (D-341, D-360).
+        run: python site/tools/dashboard_tokens.py --check
+
       - name: Site invariants hold
         # Fragment links resolve, orbit.js is preloaded only where it is
         # imported statically, the sitemap matches the pages that exist, every

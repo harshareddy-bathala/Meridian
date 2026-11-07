@@ -7053,6 +7053,24 @@ The cloud host has 2 GB. Prometheus, Alertmanager and Grafana would take about a
 
 ---
 
+## D-360 — The dashboard's shared tokens are generated from the site's stylesheet, and its secondary text is the site's `--muted`
+
+**2026-11-07 · accepted** · *`site/tools/dashboard_tokens.py`, `dashboard/src/tokens.css`, `dashboard/src/{app.css,main.tsx}`, `tests/unit/test_site_dashboard_tokens.py`, `.github/workflows/ci.yml` (the site job); Stage 37. Carries out D-341.*
+
+D-341 gave the two surfaces one spacing scale, one type scale, two radii and one set of grounds and ink, and held them equal with a test that compared the values both stylesheets set by hand. The test listed five colours. The dashboard's secondary text, `--dim`, was not among them, and had drifted: it was the site's `--muted` in light and its `--ink-dim` in dark. A list of what to compare is a second copy, and it misses what nobody added to it.
+
+**Decision.** The site's stylesheet is the one source.
+- **`site/tools/dashboard_tokens.py` writes `dashboard/src/tokens.css`** from `site/style.css`: the spacing scale, the type scale, the radii, the touch target and the two font stacks from its bare `:root`, and the grounds, the ink, `--ink-dim`, `--muted` and the simulated colour from each theme. The dashboard has no theme toggle, so the site's toggled dark values are written under `prefers-color-scheme: dark`. A token the site stops setting fails the tool by name.
+- **Committed, and checked.** The output is committed, as `shell.py`'s is, so the dashboard and its image build from `dashboard/` alone. CI's site job runs the tool with `--check`, and a unit test does the same and adds two rules: `app.css` sets none of the shared tokens itself, and reads no token that neither file sets.
+- **The dashboard's own colours stay its own.** Liveness, the snapshot note and the receive-chain warning keep their tokens in `app.css` (D-284, D-294), because the site's signal colours mean above horizon, below horizon and predicted.
+- **`--dim` becomes `--muted`.** Every caption, label and secondary figure the dashboard dims is something glanced at, which is what the site calls `--muted`. In light nothing changes. In dark it moves from `#A9A6A0` to the site's `#787E8A`: 4.88:1 on the ground and 4.56:1 on a panel, above WCAG AA's 4.5:1 (D-348), and dimmer than before.
+
+*Rejected: generating the file at build time.* Vite would need `site/` inside the dashboard's build, and so would the image, for a file that changes a few times a year.
+
+*Rejected: mapping `--dim` to `--ink-dim` in both themes.* It keeps dark as it was and darkens light's secondary text to 8.4:1, where the site sets what is glanced at in `--muted`. The two surfaces would then dim the same kind of text differently, which is the seam this removes.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7444,6 +7462,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 |---|---|
 | D-350 the README and the contributor files | `README.md`; `CONTRIBUTING.md`; `CODE_OF_CONDUCT.md`; `SECURITY.md`; `CHANGELOG.md`; `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`; `ATTRIBUTION.md`; `CLAUDE.md` (the layout) |
 | D-351 minimatch 11 by override | `dashboard/package.json`; `dashboard/package-lock.json` |
+| D-360 the dashboard's tokens from the site | `site/tools/dashboard_tokens.py`; `dashboard/src/{tokens.css,app.css,main.tsx}`; `tests/unit/test_site_dashboard_tokens.py`; `.github/workflows/ci.yml`; `pyproject.toml`; `site/README.md` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 
