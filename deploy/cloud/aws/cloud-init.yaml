@@ -51,6 +51,9 @@ runcmd:
   - [systemctl, enable, --now, docker]
   - [git, clone, --branch, main, "https://github.com/harshareddy-bathala/Meridian.git", /opt/meridian]
   - [chown, -R, "meridian:meridian", /opt/meridian]
+  # Compose bind-mounts these, and Docker creates a missing source as root,
+  # which the account that runs compose then cannot write the catalogue into.
+  - [install, -d, -o, meridian, -g, meridian, /opt/meridian/data, /opt/meridian/data/datasets, /opt/meridian/data/catalogue]
   - [sh, -c, "cp /opt/meridian/deploy/systemd/meridian-*.service /opt/meridian/deploy/systemd/meridian-*.timer /etc/systemd/system/"]
   - [systemctl, daemon-reload]
 
