@@ -6,12 +6,6 @@ import { formatDay, formatFrequency, livenessLabel } from "./format";
 import { TodayFigures, Week } from "./LiveFigures";
 import { Clock, Kp, Orbits, Overhead } from "./LiveNow";
 import { fetchOpenWarnings, type NetworkWarning } from "./networkWarnings";
-import {
-  describeBudget,
-  describeCapture,
-  fetchNetworkReliability,
-  type PopulationSummary,
-} from "./reliability";
 import type { Route } from "./route";
 import { fetchNetworkPasses } from "./schedule";
 import { SimBadge } from "./SimBadge";
@@ -27,9 +21,10 @@ import { useStations } from "./useStations";
 // What is happening now, for a reader who owns no station: the time, what is
 // overhead and where every satellite goes next, the next pass, today's passes
 // and the week's, the stations and the orbits they are scheduled from, the
-// geomagnetic index, and what just happened. No images (Stage 37). Measured
-// and simulated figures are stated apart, each simulated one marked (rule 5),
-// and every absence is a sentence (D-086).
+// geomagnetic index, and what just happened. No images (Stage 37). Every
+// settled pass, and the thirty days' figures, are the results page's (D-365).
+// Measured and simulated figures are stated apart, each simulated one marked
+// (rule 5), and every absence is a sentence (D-086).
 
 /** One empty list, so the map's effects do not see a new one every second. */
 const EMPTY_TRACKS: SatelliteTrack[] = [];
@@ -55,27 +50,6 @@ function Fleet({ stations }: { stations: Station[] }) {
         </>
       )}
     </p>
-  );
-}
-
-export function Population({ population }: { population: PopulationSummary }) {
-  const name = population.simulated ? "Simulated stations" : "Measured stations";
-  return (
-    <div className="figure">
-      <h3>
-        {name} {population.simulated && <SimBadge />}
-      </h3>
-      {population.passes === 0 ? (
-        <p className="dim">No pass has settled in the window.</p>
-      ) : (
-        <dl>
-          <dt>Capture rate</dt>
-          <dd>{describeCapture(population.capture)}</dd>
-          <dt>Loss budget</dt>
-          <dd>{describeBudget(population.budget)}</dd>
-        </dl>
-      )}
-    </div>
   );
 }
 
@@ -113,7 +87,6 @@ function useLive() {
     aggregates: usePolled("aggregates", fetchAggregates),
     events: usePolled("events", fetchEvents),
     conditions: usePolled("conditions", fetchConditions),
-    reliability: usePolled("reliability", fetchNetworkReliability),
     warnings: usePolled("open-warnings", fetchOpenWarnings),
   };
   const all = Object.values(reads);
@@ -178,23 +151,6 @@ function FiguresSection({ live }: { live: LiveReads }) {
   );
 }
 
-function ThirtyDays({ live }: { live: LiveReads }) {
-  const reliability = live.reliability.value;
-  if (reliability === null) {
-    return <p className="dim">Loading the reliability figures…</p>;
-  }
-  return (
-    <div className="figures">
-      <Population population={reliability.measured} />
-      <Population population={reliability.simulated} />
-      <p className="dim">
-        Over {formatDay(reliability.windowStart)} to {formatDay(reliability.windowEnd)}. A pass counts once its
-        settle margin has passed, so the newest passes are not in it yet.
-      </p>
-    </div>
-  );
-}
-
 export function Live({ go }: { go: Go }) {
   const live = useLive();
   const now = useNow(1000);
@@ -213,8 +169,10 @@ export function Live({ go }: { go: Go }) {
       {live.events.value !== null && <Feed events={live.events.value} names={live.names} go={go} />}
       <h3>Receive-chain warnings</h3>
       {live.warnings.value !== null && <Warnings warnings={live.warnings.value} go={go} />}
-      <h3>The last thirty days</h3>
-      <ThirtyDays live={live} />
+      <p className="dim">
+        Every settled pass, and the thirty days&apos; capture rate and loss budget, are on{" "}
+        <a href="#/results">Results</a>.
+      </p>
     </section>
   );
 }

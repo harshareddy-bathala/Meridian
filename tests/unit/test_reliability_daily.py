@@ -1,4 +1,4 @@
-"""The network's figures by UTC day, from classified passes (D-362).
+"""The network's figures by UTC day, and what each class does to SC-4 (D-362, D-365).
 
 ``figures_by_day`` must apply the reliability report's own rules to one day at a
 time, and nothing of its own: a day's capture rate and budget are what
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta, timezone
 
-from meridian.reliability.budget import loss_budget
+from meridian.reliability.budget import DEBIT_REASONS, effect_of, loss_budget
 from meridian.reliability.classification import PASS_CLASSES
 from meridian.reliability.daily import class_counts, day_bounds, figures_by_day
 from meridian.reliability.slis import PassRecord, capture_rate
@@ -101,3 +101,14 @@ def test_a_day_runs_from_midnight_to_midnight_utc() -> None:
         datetime(2026, 9, 1, tzinfo=UTC),
         datetime(2026, 9, 2, tzinfo=UTC),
     )
+
+
+def test_every_class_has_one_effect_and_only_debits_are_lost() -> None:
+    effects = {one: effect_of(one) for one in PASS_CLASSES}
+
+    assert effects["successful_reception"] == "captured"
+    assert {k for k, v in effects.items() if v == "satellite"} == {
+        "satellite_silent",
+        "satellite_state_indeterminate",
+    }
+    assert tuple(k for k, v in effects.items() if v == "lost") == DEBIT_REASONS

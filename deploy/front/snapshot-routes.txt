@@ -29,3 +29,4 @@
 /api/v1/assignments?limit=50&decision=scheduled
 /api/v1/aggregates
 /api/v1/events?limit=20
+/api/v1/results?limit=50

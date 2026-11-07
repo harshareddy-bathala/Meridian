@@ -15,6 +15,7 @@ import {
   eventBody,
   insightsBody,
   lossBody,
+  resultBody,
   runBody,
   tracksBody,
   warningBody,
@@ -23,7 +24,9 @@ import { decodeInsights } from "./insights";
 import { ModelPanel } from "./Insights";
 import { decodeLoss } from "./losses";
 import { LossRow } from "./Losses";
-import { Population, Warnings } from "./Live";
+import { Warnings } from "./Live";
+import { Population, ResultRow } from "./Results";
+import { decodeResult } from "./results";
 import { TodayFigures, Week } from "./LiveFigures";
 import { Orbits, Overhead } from "./LiveNow";
 import { decodeAssignment } from "./schedule";
@@ -169,5 +172,27 @@ describe("the live page", () => {
       "No satellite is tracked yet.",
     );
     expect(renderToStaticMarkup(<Orbits tracks={decodeTracks(tracksBody)} />)).toContain("no orbit is held for it");
+  });
+});
+
+describe("the results page", () => {
+  const row = (simulated: boolean) =>
+    renderToStaticMarkup(
+      <table>
+        <tbody>
+          <ResultRow result={decodeResult(resultBody(1, "station_unavailable", "lost", simulated), "r")} go={go} />
+        </tbody>
+      </table>,
+    );
+
+  it("marks a simulated pass, and not a measured one", () => {
+    expect(badges(row(true))).toBe(1);
+    expect(badges(row(false))).toBe(0);
+  });
+
+  it("says what the pass did, and the cause it was diagnosed with", () => {
+    expect(row(true)).toContain("Station unavailable");
+    expect(row(true)).toContain("lost: spends the loss budget");
+    expect(row(true)).toContain("something blocks that part of the sky");
   });
 });

@@ -1154,6 +1154,7 @@ Stage 35 adds six reads to the public API for the dashboard's network, schedule,
 | `GET /api/v1/satellites/tracks` | every tracked satellite's ground track, a point a minute from the current minute for ninety minutes, sampled by the orbit service from the element set pass generation would use, with that set's epoch, age and source; each satellite without one is listed with why. Computed once a minute per api worker (D-361) |
 | `GET /api/v1/aggregates` | for measured and simulated stations apart, today's passes as counts (scheduled, closed, classified by class, confirmed listening, and closed but not yet classified) and seven UTC days of capture rate and loss budget, each day marked settled once its last window is past the settle margin; counted from `pass_classifications` under the deployment's `[classification]`, as `/reliability` is (D-362) |
 | `GET /api/v1/events` | the last week's events, newest first and paged: a station registered, a pass first reported decoded, a loss diagnosed under the deployment's `[diagnosis]`, a receive-chain warning raised or cleared under its watch; each names the record it came from (D-363) |
+| `GET /api/v1/results[?station_id=]` | every pass classified under the deployment's `[classification]`, the most recently classified first: its window to whole minutes, its class, its `effect` on SC-4 (`captured`, `lost` or `satellite`), whether a station was confirmed listening, the report's outcome, and its diagnosed cause where the deployment's `[diagnosis]` made one (D-365) |
 
 ```bash
 curl -s localhost:8000/api/v1/losses?limit=5 | python -m json.tool
@@ -1161,7 +1162,7 @@ curl -s "localhost:8000/api/v1/schedule?station_id=<id>&hours=6" | python -m jso
 curl -s localhost:8000/api/v1/schedule-runs/latest | python -m json.tool
 ```
 
-**The dashboard's views read them** (D-334), each at its own address: `/#/live` (D-364; `/#/network` opens it too), `/#/stations/<id>`, `/#/schedule/<id>`, `/#/losses`, `/#/insights`, and `/#/kiosk`, which shows the four in turn every 20 seconds for a screen nobody touches and holds still for a minute after a touch. Every request the views make is warmed through the front (`deploy/front/snapshot-routes.txt`), so each is served marked *not live* when the api is down.
+**The dashboard's views read them** (D-334), each at its own address: `/#/live` (D-364; `/#/network` opens it too), `/#/stations/<id>`, `/#/schedule/<id>`, `/#/results` (D-365; `/#/losses` opens it), `/#/insights`, and `/#/kiosk`, which shows the four in turn every 20 seconds for a screen nobody touches and holds still for a minute after a touch. Every request the views make is warmed through the front (`deploy/front/snapshot-routes.txt`), so each is served marked *not live* when the api is down.
 
 **A loss's findings are a reviewed subset.** The full record of what each cause's test read is the operator's, through `meridian diagnosis explain`; the public list withholds the obstruction sectors, the raw noise levels and every internal id (`THREAT-MODEL.md` §7).
 

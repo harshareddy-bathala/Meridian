@@ -6,6 +6,7 @@
 
 import { decodeItems, getJson, type Fetcher } from "./api";
 import { asBoolean, asNullableString, asObject, asOneOf, asString } from "./decode";
+import { causeWords } from "./losses";
 
 export const EVENT_KINDS = [
   "loss_diagnosed",
@@ -48,21 +49,13 @@ export async function fetchEvents(fetcher: Fetcher, signal: AbortSignal): Promis
   return decodeItems(await getJson(fetcher, url, "the events feed", signal), decodeEvent).items;
 }
 
-const CAUSE_WORDS: Record<string, string> = {
-  satellite_silent: "the satellite was silent",
-  station_not_listening: "the station was not listening",
-  obstruction: "something blocked the sky",
-  interference: "interference",
-  timing_fault: "a timing fault",
-  undetermined: "cause undetermined",
-};
-
 function satellite(event: NetworkEvent): string {
   return event.satelliteId ?? "a satellite";
 }
 
 function cause(event: NetworkEvent): string {
-  return CAUSE_WORDS[event.cause ?? "undetermined"] ?? event.cause ?? "cause undetermined";
+  const words = causeWords(event.cause ?? "undetermined");
+  return words === "undetermined" ? "cause undetermined" : words;
 }
 
 const WORDS: Record<NetworkEvent["kind"], (event: NetworkEvent) => string> = {

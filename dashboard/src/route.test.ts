@@ -4,7 +4,7 @@ import { DEFAULT_ROUTE, formatRoute, parseRoute } from "./route";
 
 describe("the route in the fragment", () => {
   it("names each view, and a station where one belongs", () => {
-    expect(parseRoute("#/losses")).toEqual({ view: "losses", stationId: null });
+    expect(parseRoute("#/results")).toEqual({ view: "results", stationId: null });
     expect(parseRoute("#/schedule/st_1")).toEqual({ view: "schedule", stationId: "st_1" });
     expect(parseRoute("#/stations/st_1")).toEqual({ view: "stations", stationId: "st_1" });
     expect(parseRoute("#/insights/st_1")).toEqual({ view: "insights", stationId: null });
@@ -17,9 +17,10 @@ describe("the route in the fragment", () => {
     expect(parseRoute("#/nowhere")).toEqual(DEFAULT_ROUTE);
   });
 
-  it("opens the live view from the old home page's link", () => {
+  it("opens the views that replaced them from the old links", () => {
     expect(parseRoute("#/network")).toEqual(DEFAULT_ROUTE);
     expect(parseRoute("#/live")).toEqual(DEFAULT_ROUTE);
+    expect(parseRoute("#/losses")).toEqual({ view: "results", stationId: null });
   });
 
   it("round-trips a station id that needs encoding", () => {

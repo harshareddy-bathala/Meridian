@@ -69,7 +69,7 @@ describe("the events feed", () => {
     expect(words).toEqual([
       "joined the network",
       "decoded a pass of norad:57166",
-      "lost a pass of norad:57166: something blocked the sky",
+      "lost a pass of norad:57166: something blocks that part of the sky",
       "receive chain fell short of its baseline",
       "receive chain recovered",
     ]);

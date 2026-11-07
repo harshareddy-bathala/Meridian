@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { InsightsView } from "./Insights";
-import { LossesView } from "./Losses";
+import { ResultsView } from "./Results";
 import { Live } from "./Live";
 import type { Route } from "./route";
 import { ScheduleView } from "./ScheduleTimeline";
@@ -17,7 +17,7 @@ export const KIOSK_STEP_MS = 20_000;
 /** How long a touch, a click or a key holds the cycle still. */
 export const KIOSK_HOLD_MS = 60_000;
 
-const STEPS = ["live", "schedule", "losses", "insights"] as const;
+const STEPS = ["live", "schedule", "results", "insights"] as const;
 
 function useCycle(): [number, () => void] {
   const [step, setStep] = useState(0);
@@ -46,8 +46,8 @@ function KioskStep({ name, shown, go }: { name: (typeof STEPS)[number]; shown: s
       return <Live go={go} />;
     case "schedule":
       return <ScheduleView stationId={shown} go={go} />;
-    case "losses":
-      return <LossesView go={go} />;
+    case "results":
+      return <ResultsView go={go} />;
     case "insights":
       return <InsightsView />;
   }

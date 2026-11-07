@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { fetchPlatformHealth, type PlatformHealth } from "./health";
 import { InsightsView } from "./Insights";
 import { Kiosk } from "./Kiosk";
-import { LossesView } from "./Losses";
 import { Nav } from "./Nav";
+import { ResultsView } from "./Results";
 import { Live } from "./Live";
 import type { Route } from "./route";
 import { ScheduleView } from "./ScheduleTimeline";
@@ -110,8 +110,8 @@ function View({ route, go }: { route: Route; go: (route: Route) => void }) {
       return <Stations selectedId={route.stationId} go={go} />;
     case "schedule":
       return <ScheduleView stationId={route.stationId} go={go} />;
-    case "losses":
-      return <LossesView go={go} />;
+    case "results":
+      return <ResultsView go={go} />;
     case "insights":
       return <InsightsView />;
     case "kiosk":

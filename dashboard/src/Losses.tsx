@@ -59,11 +59,12 @@ export function LossRow({ loss, go }: { loss: Loss; go: Go }) {
   );
 }
 
-export function LossesView({ go }: { go: Go }) {
+/** The list, a part of the results page since Stage 37 (D-365). */
+export function LossesSection({ go }: { go: Go }) {
   const losses = usePolled("losses", (fetcher, signal) => fetchLosses(fetcher, null, signal));
   return (
-    <section aria-labelledby="losses-heading" className={snapshotClass("view", losses.snapshot)}>
-      <h2 id="losses-heading">Losses</h2>
+    <section aria-labelledby="losses-heading" className={snapshotClass("", losses.snapshot)}>
+      <h3 id="losses-heading">Losses</h3>
       <SnapshotNote snapshot={losses.snapshot} what="This list shows" />
       {losses.error !== null && <p role="alert">{losses.error}</p>}
       {losses.value === null ? (

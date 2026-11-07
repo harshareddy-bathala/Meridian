@@ -7172,6 +7172,24 @@ The dashboard opened on the network view: a map, two populations' thirty-day fig
 
 ---
 
+## D-365 — Results is every settled pass with its effect on SC-4, read from the reliability module, and the losses are part of it
+
+**2026-11-07 · accepted** · *`meridian/store/result_reads.py`, `meridian/reliability/budget.py` (`effect_of`), `meridian/api/public/{results,models/results}.py`, `dashboard/src/{Results,results,Losses,Live,route,Nav,App,Kiosk,events}.ts(x)`, `deploy/front/snapshot-routes.txt`, `deploy/tools/demo_rehearsal.py`, `docs/THREAT-MODEL.md` §7, and their tests; Stage 37. Settles what Stage 24 left owed: a network-wide results view and the loss budget on the dashboard. Applies D-085, D-093, D-182, D-185, D-187, D-272 and D-331.*
+
+Stage 24 left the dashboard with no view of every pass's result across the network: the losses view lists what was diagnosed, and nothing listed what was captured, or what the satellite decided.
+
+**Decision.**
+- **`GET /api/v1/results`** lists every pass classified under the deployment's own method and configuration (D-182), the most recently classified first, paged by the classification's id (D-085). Each result has its window widened to whole minutes (D-093), as `/losses` publishes it, so a list gives away nothing D-187 keeps by counting the budget's debits instead of listing them. It also has its class, whether a station was confirmed listening, the report's outcome, and the cause and diagnosis id where the deployment's own diagnosis found one, at its latest revision (D-272).
+- **`effect` is the platform's reading of the class:** `captured`, `lost` (it spends the loss budget), or `satellite` (the satellite's own doing, counted neither way). `effect_of` in `meridian.reliability.budget` derives it from the same constants the budget spends by, and a test holds its `lost` classes equal to the budget's reasons. So the page never has to know which classes spend the budget, and cannot disagree with `/reliability`. That rule stays in one place, in code, as D-182 requires.
+- **The results page holds the thirty days' figures, every settled pass and every diagnosed loss.** The thirty days move here from the live page, which keeps today and the week. `#/losses` opens results, so no old link breaks. The newest page of results is polled and warmed (D-283). An older page is loaded on request, is not warmed, and in an outage fails and says so rather than being served as a copy.
+- **One set of words for a cause.** The events feed had its own copy of the words for each cause, written for Part 4. It now uses the losses view's, so the feed and the list cannot describe one cause two ways.
+
+*Rejected: ordering by window end.* A cursor would have to carry the exact instant a window closed, which D-093 never publishes and D-210 forbids a cursor to carry. Classifications are written in window order within a round, so their id orders the list nearly as well, and it is published.
+
+*Rejected: the dashboard grouping classes itself.* It is what `aggregates.ts` does for today's counts, from two constants copied from the platform. The results page reads `effect` instead. Today's counts can follow when `/aggregates` next changes.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7568,6 +7586,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-362 today and the week, counted by the report's rules | `platform/src/meridian/reliability/{daily,aggregates}.py`; `platform/src/meridian/store/reliability_reads.py`; `platform/src/meridian/api/public/{aggregates,models/aggregates}.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_reliability_daily,test_public_privacy}.py`; `tests/integration/test_public_aggregates_endpoint.py` |
 | D-363 the events feed, read back from existing records | `platform/src/meridian/store/event_reads.py`; `platform/src/meridian/api/public/{events,models/events,surface}.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/test_public_privacy.py`; `tests/integration/test_public_events_endpoint.py` |
 | D-364 the live page, the ways in, satellites as diamonds | `dashboard/src/{Live,LiveNow,LiveFigures,Sparkline,Feed,WaysIn,satelliteLayer,StationMap,route,Nav,App,Kiosk,tracks,aggregates,events,schedule,format,useNow}.ts(x)`; `dashboard/src/app.css`; `dashboard/src/{live.test.ts,views.test.tsx,route.test.ts,snapshotRoutes.test.ts,fixtures.test-data.ts}`; `deploy/front/snapshot-routes.txt` |
+| D-365 results, every settled pass with its effect | `platform/src/meridian/store/result_reads.py`; `platform/src/meridian/reliability/budget.py`; `platform/src/meridian/api/public/{results,models/results,surface}.py`; `dashboard/src/{Results,results,Losses,Live,route,Nav,App,Kiosk,events}.ts(x)`; `deploy/front/snapshot-routes.txt`; `deploy/tools/demo_rehearsal.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_reliability_daily,test_public_privacy}.py`; `tests/integration/test_public_results_endpoint.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

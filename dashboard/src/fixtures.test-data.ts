@@ -280,3 +280,21 @@ export const tracksBody = {
   ],
   omitted: [{ satellite_id: "norad:59051", name: "Meteor-M2-4", reason: "no_element_set" }],
 };
+
+export function resultBody(id: number, classification: string, effect: string, simulated = true) {
+  return {
+    classification_id: id,
+    assignment_id: `as_${String(id)}`,
+    station_id: "st_1",
+    satellite_id: "norad:57166",
+    window_start: "2026-11-06T10:04:00Z",
+    window_end: "2026-11-06T10:16:00Z",
+    classification,
+    effect,
+    listening_confirmed: classification !== "station_unavailable",
+    outcome: classification === "successful_reception" ? "decoded" : null,
+    diagnosis_id: effect === "lost" ? 9 : null,
+    cause: effect === "lost" ? "obstruction" : null,
+    simulated,
+  };
+}
