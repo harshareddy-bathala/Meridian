@@ -2122,7 +2122,7 @@ A host may be monitored by Datadog rather than by the `metrics` profile (D-353).
    python deploy/tools/datadog_monitors.py                      # what would change
    DATADOG_NOTIFY="@you@example.org" python deploy/tools/datadog_monitors.py --apply
    ```
-   `deploy/datadog/monitors.json` holds one monitor per Prometheus rule, and `tests/unit/test_datadog.py` keeps the two in step: change a rule and its monitor together. Recipients are never in the file; `DATADOG_NOTIFY` adds them as the monitors are sent.
+   `deploy/datadog/monitors.json` holds one monitor per Prometheus rule, and `tests/unit/test_datadog.py` keeps the two in step: change a rule and its monitor together. Recipients are never in the file; `DATADOG_NOTIFY` adds them as the monitors are sent. A monitor grouped by `simulated` emails them only for measured stations: the demonstration fleet's injected faults (D-330) are recorded in Datadog, as Prometheus records them, and email nobody.
 
 **In Datadog**, every Meridian metric is `meridian.<name>`, a counter is `meridian.<name>.count`, and the `simulated` tag keeps measured and simulated apart as it does in Prometheus. Histogram buckets are not collected, so each metric costs one series per label set. The `ScheduledTask*` monitors are worded differently from their rules, because Datadog has no `time()`: *stalled* is a task's last-success time not moving for 15 minutes, and *never succeeded* is a task with no such time at all for 20.
 

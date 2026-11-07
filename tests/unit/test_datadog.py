@@ -140,7 +140,14 @@ def _tool() -> ModuleType:
 def test_the_tool_matches_by_name_and_prunes_only_what_the_file_dropped() -> None:
     tool = _tool()
     want = tool.desired(notify="@team")
-    assert all(m["message"].endswith("\n\n@team") for m in want)
+    for monitor in want:
+        if "by {simulated}" in monitor["query"]:
+            # The demonstration fleet's injected faults are recorded, not emailed.
+            assert monitor["message"].endswith(
+                '{{#is_exact_match "simulated.name" "false"}}@team{{/is_exact_match}}'
+            )
+        else:
+            assert monitor["message"].endswith("\n\n@team")
     have = {want[0]["name"]: {"id": 7, "name": want[0]["name"]}}
     have["Meridian Gone: retired"] = {"id": 9, "name": "Meridian Gone: retired"}
 

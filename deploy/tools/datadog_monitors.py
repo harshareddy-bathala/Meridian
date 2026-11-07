@@ -10,8 +10,9 @@ longer names is reported, and deleted only with ``--prune``.
 
 **Recipients are not in the repository.** ``DATADOG_NOTIFY`` holds the handles a
 monitor notifies, such as ``@you@example.org``, and is appended to every
-message as it is sent. With it unset the monitors are still created, and
-notify nobody.
+message as it is sent; a monitor grouped by ``simulated`` notifies them only for
+measured stations. With it unset the monitors are still created, and notify
+nobody.
 
 It runs Datadog's own CLI, ``pup``, signed in with ``pup auth login``, so this
 tool never holds a key.
@@ -46,8 +47,25 @@ def desired(path: Path = MONITORS, notify: str = "") -> list[dict[str, Any]]:
         raise ToolError("two monitors in the file share a name")
     if notify.strip():
         for monitor in monitors:
-            monitor["message"] = f"{monitor['message']}\n\n{notify.strip()}"
+            monitor["message"] = f"{monitor['message']}\n\n{addressed(monitor, notify)}"
     return monitors
+
+
+def addressed(monitor: dict[str, Any], notify: str) -> str:
+    """The recipients, held back for a group of simulated stations.
+
+    The demonstration fleet injects faults on purpose (D-330), so a monitor
+    grouped by ``simulated`` alerts on it every day. Its alerts are still
+    recorded, as Prometheus records them; only a measured group sends anyone
+    an email.
+    """
+    if "by {simulated}" not in monitor["query"]:
+        return notify.strip()
+    return (
+        '{{#is_exact_match "simulated.name" "false"}}'
+        f"{notify.strip()}"
+        "{{/is_exact_match}}"
+    )
 
 
 def pup(*args: str) -> str:
