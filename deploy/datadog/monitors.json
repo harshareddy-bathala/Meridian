@@ -1,0 +1,478 @@
+{
+  "_comment": "One Datadog monitor per rule in deploy/prometheus/rules/meridian.yml (D-353), applied by deploy/tools/datadog_monitors.py. Recipients are added when applied, from DATADOG_NOTIFY, and are never written here.",
+  "monitors": [
+    {
+      "name": "Meridian ApiUnavailable: the api's metrics endpoint is not answering",
+      "type": "service check",
+      "query": "\"meridian.openmetrics.health\".over(\"meridian_service:api\").by(\"*\").last(2).count_by_status()",
+      "message": "The api has not answered a scrape for a minute.\n\nSee docs/OPERATIONS.md#apiunavailable in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ApiUnavailable",
+        "severity:critical"
+      ],
+      "priority": 1,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 1,
+          "ok": 1
+        },
+        "no_data_timeframe": 2
+      }
+    },
+    {
+      "name": "Meridian DatabaseUnavailable: the api cannot reach the database",
+      "type": "metric alert",
+      "query": "max(last_1m):max:meridian.database_reachable{*} < 1",
+      "message": "The api reports the database unreachable.\n\nSee docs/OPERATIONS.md#databaseunavailable in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:DatabaseUnavailable",
+        "severity:critical"
+      ],
+      "priority": 1,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 1
+        }
+      }
+    },
+    {
+      "name": "Meridian SchemaMigrationMismatch: the schema is not the one the code expects",
+      "type": "metric alert",
+      "query": "max(last_1m):max:meridian.schema_up_to_date{*} < 1",
+      "message": "The database schema does not match the running code.\n\nSee docs/OPERATIONS.md#schemamigrationmismatch in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:SchemaMigrationMismatch",
+        "severity:critical"
+      ],
+      "priority": 1,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 1
+        }
+      }
+    },
+    {
+      "name": "Meridian StationStale: a station's heartbeat is late",
+      "type": "metric alert",
+      "query": "max(last_5m):sum:meridian.stations{liveness:stale} by {simulated} > 0",
+      "message": "At least one station is stale (simulated={{simulated.name}}).\n\nSee docs/OPERATIONS.md#stationstale in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:StationStale",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian StationOffline: a station is offline",
+      "type": "metric alert",
+      "query": "max(last_5m):sum:meridian.stations{liveness:offline} by {simulated} > 0",
+      "message": "At least one station is offline (simulated={{simulated.name}}).\n\nSee docs/OPERATIONS.md#stationoffline in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:StationOffline",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian HeartbeatIngestionStopped: no heartbeat has arrived in five minutes",
+      "type": "metric alert",
+      "query": "sum(last_5m):sum:meridian.msp_heartbeats.count{*}.as_count() < 1",
+      "message": "No station heartbeat has reached the platform in five minutes.\n\nSee docs/OPERATIONS.md#heartbeatingestionstopped in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:HeartbeatIngestionStopped",
+        "severity:critical"
+      ],
+      "priority": 1,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "no_data_timeframe": 10,
+        "thresholds": {
+          "critical": 1
+        }
+      }
+    },
+    {
+      "name": "Meridian ObservationsOverdue: assignments are overdue",
+      "type": "metric alert",
+      "query": "min(last_30m):sum:meridian.assignments_overdue{*} by {simulated} > 0",
+      "message": "Assignments have been overdue for 30 minutes (simulated={{simulated.name}}).\n\nSee docs/OPERATIONS.md#observationsoverdue in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ObservationsOverdue",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian LossBudgetThresholdReached: under a quarter of the loss budget is left",
+      "type": "metric alert",
+      "query": "max(last_1h):min:meridian.loss_budget_remaining_ratio{*} by {simulated} < 0.25",
+      "message": "Less than a quarter of the loss budget remains (simulated={{simulated.name}}).\n\nSee docs/OPERATIONS.md#lossbudgetthresholdreached in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:LossBudgetThresholdReached",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 0.25
+        }
+      }
+    },
+    {
+      "name": "Meridian ReceiveChainDegrading: a receive chain is degrading",
+      "type": "metric alert",
+      "query": "max(last_5m):max:meridian.receive_chain_warnings_open{*} by {simulated} > 0",
+      "message": "A receive-chain warning is open (simulated={{simulated.name}}).\n\nSee docs/OPERATIONS.md#receivechaindegrading in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ReceiveChainDegrading",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ReportDeliveryFailing: owner reports are queued or retrying",
+      "type": "metric alert",
+      "query": "min(last_1h):max:meridian.report_deliveries{state:retrying OR state:queued} by {simulated} > 0",
+      "message": "Owner reports have waited or been retried for an hour (simulated={{simulated.name}}).\n\nSee docs/OPERATIONS.md#reportdeliveryfailing in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ReportDeliveryFailing",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ReportDeliveryFailing: an owner report was abandoned",
+      "type": "metric alert",
+      "query": "change(max(last_5m),last_6h):max:meridian.report_deliveries{state:abandoned} by {simulated} > 0",
+      "message": "An owner report was given up on in the last six hours (simulated={{simulated.name}}).\n\nSee docs/OPERATIONS.md#reportdeliveryfailing in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ReportDeliveryFailing",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ElementSetsStale: the newest element set is over three days old",
+      "type": "metric alert",
+      "query": "min(last_15m):max:meridian.element_set_age_seconds{*} by {satellite_id} > 259200",
+      "message": "A satellite's newest element set is more than three days old ({{satellite_id.name}}).\n\nSee docs/OPERATIONS.md#elementsetsstale in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ElementSetsStale",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 259200
+        }
+      }
+    },
+    {
+      "name": "Meridian SchedulerUnavailable: the jobs process's metrics endpoint is not answering",
+      "type": "service check",
+      "query": "\"meridian.openmetrics.health\".over(\"meridian_service:jobs\").by(\"*\").last(2).count_by_status()",
+      "message": "The jobs process has not answered a scrape for a minute.\n\nSee docs/OPERATIONS.md#schedulerunavailable in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:SchedulerUnavailable",
+        "severity:critical"
+      ],
+      "priority": 1,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 1,
+          "ok": 1
+        },
+        "no_data_timeframe": 2
+      }
+    },
+    {
+      "name": "Meridian ScheduledTaskStalled: a core task has not completed in 15 minutes",
+      "type": "metric alert",
+      "query": "change(max(last_5m),last_15m):max:meridian.job_last_success_timestamp_seconds{!task:profiles,!task:diagnosis,!task:watch,!task:reports} by {task} <= 0",
+      "message": "The {{task.name}} task has not completed in over 15 minutes.\n\nSee docs/OPERATIONS.md#scheduledtaskstalled in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ScheduledTaskStalled",
+        "severity:critical"
+      ],
+      "priority": 1,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ScheduledTaskStalled: an analysis task has not completed in 15 minutes",
+      "type": "metric alert",
+      "query": "change(max(last_5m),last_15m):max:meridian.job_last_success_timestamp_seconds{task:profiles OR task:diagnosis OR task:watch OR task:reports} by {task} <= 0",
+      "message": "The {{task.name}} task has not completed in over 15 minutes.\n\nSee docs/OPERATIONS.md#scheduledtaskstalled in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ScheduledTaskStalled",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": false,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ScheduledTaskNeverSucceeded: the schedule task has never completed",
+      "type": "metric alert",
+      "query": "max(last_15m):max:meridian.job_last_success_timestamp_seconds{task:schedule} < 0",
+      "message": "The schedule task has not completed once in the last 15 minutes of the jobs process running.\n\nSee docs/OPERATIONS.md#scheduledtaskneversucceeded in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ScheduledTaskNeverSucceeded",
+        "severity:critical"
+      ],
+      "priority": 1,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "no_data_timeframe": 20,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ScheduledTaskNeverSucceeded: the pass_generation task has never completed",
+      "type": "metric alert",
+      "query": "max(last_15m):max:meridian.job_last_success_timestamp_seconds{task:pass_generation} < 0",
+      "message": "The pass_generation task has not completed once in the last 15 minutes of the jobs process running.\n\nSee docs/OPERATIONS.md#scheduledtaskneversucceeded in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ScheduledTaskNeverSucceeded",
+        "severity:critical"
+      ],
+      "priority": 1,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "no_data_timeframe": 20,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ScheduledTaskNeverSucceeded: the expiry_sweep task has never completed",
+      "type": "metric alert",
+      "query": "max(last_15m):max:meridian.job_last_success_timestamp_seconds{task:expiry_sweep} < 0",
+      "message": "The expiry_sweep task has not completed once in the last 15 minutes of the jobs process running.\n\nSee docs/OPERATIONS.md#scheduledtaskneversucceeded in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ScheduledTaskNeverSucceeded",
+        "severity:critical"
+      ],
+      "priority": 1,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "no_data_timeframe": 20,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ScheduledTaskNeverSucceeded: the reliability task has never completed",
+      "type": "metric alert",
+      "query": "max(last_15m):max:meridian.job_last_success_timestamp_seconds{task:reliability} < 0",
+      "message": "The reliability task has not completed once in the last 15 minutes of the jobs process running.\n\nSee docs/OPERATIONS.md#scheduledtaskneversucceeded in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ScheduledTaskNeverSucceeded",
+        "severity:critical"
+      ],
+      "priority": 1,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "no_data_timeframe": 20,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ScheduledTaskNeverSucceeded: the diagnosis task has never completed",
+      "type": "metric alert",
+      "query": "max(last_15m):max:meridian.job_last_success_timestamp_seconds{task:diagnosis} < 0",
+      "message": "The diagnosis task has not completed once in the last 15 minutes of the jobs process running.\n\nSee docs/OPERATIONS.md#scheduledtaskneversucceeded in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ScheduledTaskNeverSucceeded",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "no_data_timeframe": 20,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ScheduledTaskNeverSucceeded: the watch task has never completed",
+      "type": "metric alert",
+      "query": "max(last_15m):max:meridian.job_last_success_timestamp_seconds{task:watch} < 0",
+      "message": "The watch task has not completed once in the last 15 minutes of the jobs process running.\n\nSee docs/OPERATIONS.md#scheduledtaskneversucceeded in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ScheduledTaskNeverSucceeded",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "no_data_timeframe": 20,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ScheduledTaskNeverSucceeded: the reports task has never completed",
+      "type": "metric alert",
+      "query": "max(last_15m):max:meridian.job_last_success_timestamp_seconds{task:reports} < 0",
+      "message": "The reports task has not completed once in the last 15 minutes of the jobs process running.\n\nSee docs/OPERATIONS.md#scheduledtaskneversucceeded in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ScheduledTaskNeverSucceeded",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "no_data_timeframe": 20,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    },
+    {
+      "name": "Meridian ScheduledTaskNeverSucceeded: the profiles task has never completed",
+      "type": "metric alert",
+      "query": "max(last_15m):max:meridian.job_last_success_timestamp_seconds{task:profiles} < 0",
+      "message": "The profiles task has not completed once in the last 15 minutes of the jobs process running.\n\nSee docs/OPERATIONS.md#scheduledtaskneversucceeded in the repository.",
+      "tags": [
+        "managed:meridian",
+        "alert:ScheduledTaskNeverSucceeded",
+        "severity:warning"
+      ],
+      "priority": 3,
+      "options": {
+        "notify_no_data": true,
+        "include_tags": true,
+        "renotify_interval": 0,
+        "no_data_timeframe": 20,
+        "thresholds": {
+          "critical": 0
+        }
+      }
+    }
+  ]
+}

@@ -106,12 +106,16 @@ python3 deploy/tools/rotate_secret.py set tunnel_token    # paste the token, the
 cp deploy/ingest.live.toml.example deploy/ingest.toml
 sed -i 's|^raw_root = .*|raw_root = "/var/lib/meridian-ingest/raw"|' deploy/ingest.toml
 install -d -m 700 deploy/secrets/ingest
+python3 deploy/tools/rotate_secret.py set datadog_api_key # paste the Datadog API key, then Enter and Ctrl-D
+sed -i 's|^DD_SITE=.*|DD_SITE=us5.datadoghq.com|' deploy/.env
 ```
+
+The host is monitored by Datadog, not by the `metrics` profile (D-353); `docs/OPERATIONS.md` § Datadog, instead of the metrics profile applies its monitors.
 
 The tunnel token comes from Cloudflare Zero Trust → Networks → Tunnels → `meridian`. Paste it at the prompt, never on a command line, where the shell's history would keep it. The tunnel's route for the dash hostname must be `http://front:8080`.
 
 ```bash
-alias compose='docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml -f deploy/docker-compose.public.yml -f deploy/docker-compose.demo.yml -f deploy/docker-compose.ingest.yml'
+alias compose='docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml -f deploy/docker-compose.public.yml -f deploy/docker-compose.demo.yml -f deploy/docker-compose.ingest.yml -f deploy/docker-compose.datadog.yml'
 compose pull
 compose --profile demo up -d --wait
 ```

@@ -2107,6 +2107,25 @@ By default every alert goes to a receiver that sends nothing. Alerts remain visi
 
 The rules are `deploy/prometheus/rules/meridian.yml`, and each one's tests are in `deploy/prometheus/tests/meridian.test.yml`. Change a rule and its test together.
 
+### Datadog, instead of the metrics profile
+
+A host may be monitored by Datadog rather than by the `metrics` profile (D-353). The cloud host is: Prometheus, Alertmanager and Grafana would take a fifth of its memory. Nothing depends on it. With Datadog unreachable or its key lapsed, the platform schedules, receives and reports exactly as before, and the Prometheus rules stay the reference.
+
+1. **The key.** In Datadog, *Organization Settings → API Keys → New Key*, named after the host. Store it on the host, pasting at the prompt:
+   ```bash
+   python3 deploy/tools/rotate_secret.py set datadog_api_key
+   ```
+2. **The site and the host's name**, in `deploy/.env`: `DD_SITE` is the host of your Datadog address (`us5.datadoghq.com` for this project's organisation) and `DD_HOSTNAME` the name the host reports under.
+3. **The Agent**, by adding `-f deploy/docker-compose.datadog.yml` to every compose command. It also labels the api and the jobs process so the Agent scrapes their `/metrics` with the scrape token, which recreates both once.
+4. **The monitors**, from a machine with Datadog's CLI, [`pup`](https://docs.datadoghq.com/cli/), signed in with `pup auth login --site <DD_SITE>`:
+   ```bash
+   python deploy/tools/datadog_monitors.py                      # what would change
+   DATADOG_NOTIFY="@you@example.org" python deploy/tools/datadog_monitors.py --apply
+   ```
+   `deploy/datadog/monitors.json` holds one monitor per Prometheus rule, and `tests/unit/test_datadog.py` keeps the two in step: change a rule and its monitor together. Recipients are never in the file; `DATADOG_NOTIFY` adds them as the monitors are sent.
+
+**In Datadog**, every Meridian metric is `meridian.<name>`, a counter is `meridian.<name>.count`, and the `simulated` tag keeps measured and simulated apart as it does in Prometheus. Histogram buckets are not collected, so each metric costs one series per label set. The `ScheduledTask*` monitors are worded differently from their rules, because Datadog has no `time()`: *stalled* is a task's last-success time not moving for 15 minutes, and *never succeeded* is a task with no such time at all for 20.
+
 **Some thresholds follow settings.** `ScheduledTaskStalled`'s 900 s is three rounds at the default interval, and the liveness thresholds follow the 30 s heartbeat. The rule files do not read `.env`, so changing `SCHEDULE_INTERVAL_S` or `HEARTBEAT_INTERVAL_S` means editing the numbers there too.
 
 ---

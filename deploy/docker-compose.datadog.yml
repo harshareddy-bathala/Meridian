@@ -1,0 +1,92 @@
+# The Datadog Agent beside the platform, on a host that is monitored by Datadog
+# rather than by the metrics profile (D-353).
+#
+# Optional, like every override here: a deployment that never names this file
+# runs no collector and sends nothing anywhere, and the platform behaves the same
+# with it as without it. If Datadog is unreachable or the key lapses, nothing
+# schedules, receives or reports differently (D-130). Add it to every command on
+# the host:
+#
+#   docker compose -f deploy/docker-compose.yml ... -f deploy/docker-compose.datadog.yml up -d
+#
+# It needs, on the host:
+#   - deploy/secrets/datadog_api_key, the organisation's API key, one line;
+#   - DD_SITE and DD_HOSTNAME in deploy/.env.
+#
+# What it reads:
+#   - the api's and the jobs process's /metrics, with the same scrape token
+#     Prometheus uses (D-087), through autodiscovery labels set below on those
+#     two services. Every Meridian metric arrives as `meridian.<name>`, with
+#     counters as `.count`; histogram buckets are not collected, so a metric
+#     costs one series per label set, not one per bucket;
+#   - every container's logs, already redacted where they are written (D-204);
+#   - host and container health, from /proc, the cgroup tree and the Docker
+#     socket, all read-only.
+#
+# The Docker socket is a trust boundary: a process that can talk to it can start
+# containers. It is mounted read-only, which stops writes to the file and not
+# requests over it, so the Agent is trusted with the host. THREAT-MODEL.md says so.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+x-read-only: &read-only
+  type: bind
+  read_only: true
+  bind:
+    create_host_path: false
+
+services:
+  api:
+    labels:
+      com.datadoghq.ad.checks: >-
+        {"openmetrics": {"instances": [{"openmetrics_endpoint": "http://%%host%%:8000/metrics",
+        "namespace": "meridian", "raw_metric_prefix": "meridian_", "metrics": ["meridian_.*"],
+        "collect_histogram_buckets": false, "tags": ["meridian_service:api"],
+        "auth_token": {"reader": {"type": "file", "path": "/run/secrets/meridian/metrics_token"},
+        "writer": {"type": "header", "name": "Authorization", "value": "Bearer <TOKEN>"}}}]}}
+
+  jobs:
+    labels:
+      com.datadoghq.ad.checks: >-
+        {"openmetrics": {"instances": [{"openmetrics_endpoint": "http://%%host%%:9464/metrics",
+        "namespace": "meridian", "raw_metric_prefix": "meridian_", "metrics": ["meridian_.*"],
+        "collect_histogram_buckets": false, "tags": ["meridian_service:jobs"],
+        "auth_token": {"reader": {"type": "file", "path": "/run/secrets/meridian/metrics_token"},
+        "writer": {"type": "header", "name": "Authorization", "value": "Bearer <TOKEN>"}}}]}}
+
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7.84.6@sha256:4aa71f1f624e36ed4d04568e4ad3f323af14426db07d2f9ed98869f6d0bdbbd3
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+      # The instance's metadata service is closed to containers (hop limit 1),
+      # so the Agent is told the host's name rather than left to find it.
+      DD_HOSTNAME: ${DD_HOSTNAME:-meridian-platform}
+      DD_TAGS: project:meridian
+      # The key is read from a file by the Agent's own secret helper, so it is
+      # never in this file, the environment of any other service, or `docker inspect`.
+      DD_API_KEY: ENC[file@/run/secrets/datadog/api_key]
+      DD_SECRET_BACKEND_COMMAND: /readsecret_multiple_providers.sh
+      DD_LOGS_ENABLED: "true"
+      DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL: "true"
+      DD_CONTAINER_EXCLUDE_LOGS: "name:datadog-agent"
+      DD_APM_ENABLED: "false"
+      DD_PROCESS_AGENT_ENABLED: "false"
+      DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "false"
+      DD_ENABLE_PAYLOADS_EVENTS: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - <<: *read-only
+        source: ./secrets/datadog_api_key
+        target: /run/secrets/datadog/api_key
+      - <<: *read-only
+        source: ./secrets/metrics_token
+        target: /run/secrets/meridian/metrics_token

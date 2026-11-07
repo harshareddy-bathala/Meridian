@@ -7035,6 +7035,24 @@ Stage 36 puts the platform on a cloud host, and `meridian-ingest follow` needs a
 
 ---
 
+## D-353 — A cloud host may be monitored by Datadog, which mirrors the Prometheus rules and is never needed
+
+**2026-11-07 · accepted** · *`deploy/docker-compose.datadog.yml`, `deploy/datadog/monitors.json`, `deploy/tools/datadog_monitors.py`, `deploy/tools/rotate_secret.py` (`datadog_api_key`), `tests/unit/test_datadog.py`; Stage 36. D-109, D-112 and D-130 unchanged.*
+
+The cloud host has 2 GB. Prometheus, Alertmanager and Grafana would take about a fifth of it, and would watch the platform from the same machine that fails with it. The team has Datadog through a student programme, which covers the host and collects from outside it.
+
+**Decision.** On a host that chooses it, the Datadog Agent replaces the `metrics` profile. It is added by an override file, as the public deployment and ingest are.
+- **It reads what Prometheus reads.** It scrapes the api's and the jobs process's `/metrics` with the same scrape token (D-087), through autodiscovery labels the override puts on those two services. It also reads the containers' logs, which are redacted where they are written (D-204), and the host's health. Histogram buckets are not collected, which keeps each metric to one series per label set.
+- **The rules stay the reference.** `deploy/datadog/monitors.json` holds one monitor per Prometheus rule, at the same severity. A test fails if a rule has no monitor, or if a monitor queries a metric the platform does not export. Where Datadog cannot say what a rule says, the monitor says the nearest thing and the runbook names the difference: there is no `time()`, so *stalled* is a last-success time that stopped moving.
+- **No key and no recipient in the repository.** The Agent reads its API key from a file through its own secret helper, so the key is not in the environment of any service. `rotate_secret.py set datadog_api_key` stores it, as it stores the tunnel token. Monitors are applied with Datadog's CLI, signed in by the operator, and their recipients are added from `DATADOG_NOTIFY` when they are sent.
+- **Never needed** (D-130). Without the file, nothing is collected or sent. With Datadog unreachable, the platform behaves the same. A deployment on one machine keeps the `metrics` profile, and so does every gate.
+
+*Rejected: Datadog's browser tracking on the dashboard.* It is a third-party script, which the dashboard's policy refuses (D-208) and the site promises not to load. What a visitor sees of the network is the platform's own.
+
+*Rejected: the `metrics` profile on the cloud host.* It works, and it would spend memory the platform needs on watching itself from inside the machine it watches.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

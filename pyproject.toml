@@ -177,6 +177,7 @@ convention = "google"
 "deploy/tools/scale_probe.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/long_run.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/rotate_secret.py" = ["T201", "D", "ANN", "PLR", "C90"]
+"deploy/tools/datadog_monitors.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/restore_drill.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/scheduled_backup.py" = ["T201", "D", "ANN", "PLR", "C90"]
 "deploy/tools/diagnosis_runs.py" = ["T201", "D", "ANN", "PLR", "C90", "SLF001"]
