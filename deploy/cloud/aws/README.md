@@ -4,7 +4,7 @@ The commands that create the cloud host for the platform tier (D-129, Stage 36),
 
 **What the host is**
 
-- **Instance:** one arm64 instance in `ap-south-1` with 2 vCPUs and 4 GB, running Ubuntu 24.04. The platform image is published for arm64 (D-113).
+- **Instance:** one arm64 instance in `ap-south-1`, `t4g.small` with 2 vCPUs and 2 GB plus 4 GB of swap, running Ubuntu 24.04. The platform image is published for arm64 (D-113). An account on AWS's Free plan may launch only free-tier types, which `t4g.small` is and `t4g.medium` is not; move to `t4g.medium` (4 GB) when the host's memory says so, by stopping the instance and changing its type.
 - **Disk:** a 40 GB encrypted gp3 root volume, **kept if the instance is deleted**, because the database lives on it.
 - **Inbound:** none. The Cloudflare tunnel dials out (D-088), and the shell is AWS Systems Manager's Session Manager, so there is no SSH key and no port 22.
 - **Instance metadata:** requires a token (IMDSv2), with a hop limit of 1. Containers cannot reach the instance's role, only the host can.
@@ -53,7 +53,7 @@ SUBNET=$(aws ec2 describe-subnets \
   --query 'Subnets[0].SubnetId' --output text)
 
 ID=$(aws ec2 run-instances \
-  --image-id "$AMI" --instance-type t4g.medium --subnet-id "$SUBNET" \
+  --image-id "$AMI" --instance-type t4g.small --subnet-id "$SUBNET" \
   --security-group-ids "$SG" --associate-public-ip-address \
   --iam-instance-profile Name="$NAME-ssm" \
   --metadata-options HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=1 \
@@ -70,7 +70,7 @@ aws ec2 wait instance-status-ok --instance-ids "$ID"
 
 ## 4. A budget alert
 
-The host runs on credit. A budget emails the account's owner before the credit is spent, at 50%, 80% and 100% of a monthly limit that is set here and written nowhere in this repository.
+The host runs on credit. A budget emails the account's owner before the credit is spent, at 50%, 80% and 100% of a monthly limit that is set here and written nowhere in this repository. It counts spending **before** credits are applied: a budget that counts credits sees a net cost near zero and never warns.
 
 ```bash
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
@@ -78,7 +78,7 @@ LIMIT=...   # the monthly limit, in USD
 EMAIL=...   # where the warnings go
 for pct in 50 80 100; do NOTES+="{\"Notification\":{\"NotificationType\":\"ACTUAL\",\"ComparisonOperator\":\"GREATER_THAN\",\"Threshold\":$pct,\"ThresholdType\":\"PERCENTAGE\"},\"Subscribers\":[{\"SubscriptionType\":\"EMAIL\",\"Address\":\"$EMAIL\"}]},"; done
 aws budgets create-budget --account-id "$ACCOUNT" \
-  --budget "{\"BudgetName\":\"$NAME\",\"BudgetLimit\":{\"Amount\":\"$LIMIT\",\"Unit\":\"USD\"},\"TimeUnit\":\"MONTHLY\",\"BudgetType\":\"COST\"}" \
+  --budget "{\"BudgetName\":\"$NAME\",\"BudgetLimit\":{\"Amount\":\"$LIMIT\",\"Unit\":\"USD\"},\"TimeUnit\":\"MONTHLY\",\"BudgetType\":\"COST\",\"CostTypes\":{\"IncludeCredit\":false,\"IncludeRefund\":false}}" \
   --notifications-with-subscribers "[${NOTES%,}]"
 ```
 

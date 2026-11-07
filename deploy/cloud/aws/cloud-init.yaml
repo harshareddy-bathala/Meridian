@@ -29,12 +29,13 @@ packages:
   - containerd.io
   - docker-compose-plugin
 
-# Postgres, the api and the demonstration fleet share 4 GB. Swap turns a
-# memory spike into slowness rather than a killed database.
+# Postgres, the api, ingest and the demonstration fleet share 2 GB on the
+# first host. Swap turns a memory spike into slowness rather than a killed
+# database; the monitor's memory graph says when the host has to grow.
 swap:
   filename: /swapfile
-  size: 2G
-  maxsize: 2G
+  size: 4G
+  maxsize: 4G
 
 users:
   - default
