@@ -112,6 +112,11 @@ def test_the_override_only_labels_the_platform_it_scrapes() -> None:
         (instance,) = checks["openmetrics"]["instances"]
         assert instance["openmetrics_endpoint"] == f"http://%%host%%:{port}/metrics"
         assert instance["collect_histogram_buckets"] is False
+        # The prefix is stripped before `metrics` is matched (found on the host:
+        # "meridian_.*" collected nothing), so the filter is by exclusion.
+        assert instance["raw_metric_prefix"] == "meridian_"
+        assert instance["metrics"] == [".+"]
+        assert instance["exclude_metrics"] == ["^process_", "^python_"]
         reader = instance["auth_token"]["reader"]
         assert reader == {"type": "file", "path": "/run/secrets/meridian/metrics_token"}
 

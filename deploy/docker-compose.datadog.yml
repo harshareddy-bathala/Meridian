@@ -16,7 +16,9 @@
 # What it reads:
 #   - the api's and the jobs process's /metrics, with the same scrape token
 #     Prometheus uses (D-087), through autodiscovery labels set below on those
-#     two services. Every Meridian metric arrives as `meridian.<name>`, with
+#     two services. The prefix is stripped before `metrics` is matched, so the
+#     filter is everything but the Python client's own process_ and python_
+#     families. Every Meridian metric arrives as `meridian.<name>`, with
 #     counters as `.count`; histogram buckets are not collected, so a metric
 #     costs one series per label set, not one per bucket;
 #   - every container's logs, already redacted where they are written (D-204);
@@ -44,7 +46,8 @@ services:
     labels:
       com.datadoghq.ad.checks: >-
         {"openmetrics": {"instances": [{"openmetrics_endpoint": "http://%%host%%:8000/metrics",
-        "namespace": "meridian", "raw_metric_prefix": "meridian_", "metrics": ["meridian_.*"],
+        "namespace": "meridian", "raw_metric_prefix": "meridian_", "metrics": [".+"],
+        "exclude_metrics": ["^process_", "^python_"],
         "collect_histogram_buckets": false, "tags": ["meridian_service:api"],
         "auth_token": {"reader": {"type": "file", "path": "/run/secrets/meridian/metrics_token"},
         "writer": {"type": "header", "name": "Authorization", "value": "Bearer <TOKEN>"}}}]}}
@@ -53,7 +56,8 @@ services:
     labels:
       com.datadoghq.ad.checks: >-
         {"openmetrics": {"instances": [{"openmetrics_endpoint": "http://%%host%%:9464/metrics",
-        "namespace": "meridian", "raw_metric_prefix": "meridian_", "metrics": ["meridian_.*"],
+        "namespace": "meridian", "raw_metric_prefix": "meridian_", "metrics": [".+"],
+        "exclude_metrics": ["^process_", "^python_"],
         "collect_histogram_buckets": false, "tags": ["meridian_service:jobs"],
         "auth_token": {"reader": {"type": "file", "path": "/run/secrets/meridian/metrics_token"},
         "writer": {"type": "header", "name": "Authorization", "value": "Bearer <TOKEN>"}}}]}}
