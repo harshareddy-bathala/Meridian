@@ -48,7 +48,30 @@ flowchart TD
 
 *Snapshot taken 2026-11-02. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
-**Stages 36 to 41 were added on 2026-11-07, after every earlier stage was built**: the platform in a cloud, monitored (36); the dashboard for readers who own no station (37); open imagery, placed and explained (38); the station owner's page (39); a real station joining (40); and first light and completion (41). Stage 36 is next.
+**Stages 36 to 41 were added on 2026-11-07, after every earlier stage was built**: the platform in a cloud, monitored (36); the dashboard for readers who own no station (37); open imagery, placed and explained (38); the station owner's page (39); a real station joining (40); and first light and completion (41).
+
+**Stage 36's software is built and running** (2026-11-07). Its decisions are D-352 and D-353, `deploy/cloud/aws/README.md` and `docs/OPERATIONS.md` § Ingest as a container and § Datadog, instead of the metrics profile are its runbook, and it added no migration. Stage 37 is next.
+- **The completion gate passes, on the cloud host.** *The public hostname serves the dashboard from the cloud host through the tunnel alone; `verify_public_surface.py` passes against it with the edge's rate limit; the front drill shows every view as Not live with the api stopped; a restore drill passes on the host; stopping the api fires a monitor.*
+  - `verify_public_surface.py https://dash.meridian.org.in --burst 300`: all five checks passed, 250 of 300 refused at the edge and none by the platform. No script was injected, and the policy and HSTS reached the browser.
+  - The front drill passed with 364 views for 50 stations. Each was served from its copy in 2.0 s, labelled and dated, and from the api again once it was back. `ApiUnavailable` fired two minutes into the stop and cleared after it.
+  - The restore drill runs weekly from the host's timer, after the nightly backup; the first is 2026-11-08.
+- **The host** (D-129): AWS EC2 `t4g.small` in `ap-south-1`, created from `cloud-init.yaml` and the runbook's commands. It has no inbound rule, and its shell is Session Manager. The 50-station demonstration fleet runs on live element sets, which clears Stage 35's owed trial.
+- **Ingest in its own image and file** (D-352). The first live fetch of seven sources is recorded in the runbook. SatNOGS stays off until D-322 is accepted.
+- **Datadog, mirroring the Prometheus rules** (D-353): 23 monitors for 22 rules, held in step by a test. The Agent is hardened like every service, and only measured stations' alerts email anyone.
+- **Offsite copies:** the nightly dumps and the ingest raw store go to a versioned bucket the host may write and never read or delete.
+- **Found on the way, fixed:**
+  - the retriever refused every gzip-compressed answer, CelesTrak's first among them, by holding `Content-Length` against the unpacked body;
+  - the ingest build could not read `ATTRIBUTION.md`;
+  - Docker created `data/` as root;
+  - the runbook's catalogue export used `compose cp`, which cannot read a tmpfs;
+  - grouping a health monitor by every tag would have left a silent group after each restart.
+- **Owed, not done:**
+  - the weekly copy of the backups on the station tier, once the Pi runs as station 001;
+  - the team's acceptance of D-135's cloud half as recorded here.
+- **Known limits:**
+  - the host has 2 GB, enough with 4 GB of swap for now, and moves to `t4g.medium` when the station hardware arrives;
+  - the account's free plan ends on 2027-02-28, so the platform moves by backup and restore before then;
+  - in an outage each request waits the front's 2 s connect timeout, so the front drill takes about fourteen minutes at fifty stations.
 
 **Stage 35's software is built** (2026-11-02), after Stage 34 merged. Its decisions are D-330 through D-335, `docs/OPERATIONS.md` § The demonstration and § The network's public views are its runbook, `docs/SCALE-AND-FAULTS.md` § The demonstration fleet records its trials, and it added no migration.
 - **The completion gate passes, in two halves** (D-335). *A rehearsal against the `demo` profile steps through `PROJECT.md` §13's software steps.*
