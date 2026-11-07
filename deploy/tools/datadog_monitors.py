@@ -69,7 +69,8 @@ def pup(*args: str) -> str:
 def live() -> dict[str, dict[str, Any]]:
     """Every live monitor this file manages, by name."""
     out = pup("monitors", "list", "--tags", MANAGED, "--limit", "1000")
-    if out.strip().startswith("No monitors"):
+    # pup prints "No monitors found" to stderr and nothing to stdout.
+    if not out.strip() or out.strip().startswith("No monitors"):
         return {}
     found = json.loads(out)
     if isinstance(found, dict):
