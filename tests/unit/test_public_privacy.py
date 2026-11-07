@@ -418,6 +418,16 @@ REVIEWED = {
         "source",
     },
     "PublishedLocation": {"alt_m", "lat_deg", "lon_deg"},
+    "PublicEvent": {
+        "assignment_id",
+        "at",
+        "cause",
+        "kind",
+        "ref",
+        "satellite_id",
+        "simulated",
+        "station_id",
+    },
     "PublicAggregates": {
         "as_of",
         "capture_target",

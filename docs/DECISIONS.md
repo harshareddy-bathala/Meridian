@@ -7115,6 +7115,32 @@ The live page draws each tracked satellite where it is and where it goes over th
 
 ---
 
+## D-363 — The events feed is read back from records the platform already keeps, and stores nothing of its own
+
+**2026-11-07 · accepted** · *`meridian/store/event_reads.py`, `meridian/api/public/{events,models/events}.py`, `docs/THREAT-MODEL.md` §7, `tests/unit/test_public_privacy.py`, `tests/integration/test_public_events_endpoint.py`; Stage 37. Applies D-085, D-093, D-210, D-272 and D-292.*
+
+The live page ends with a feed of what just happened. An event table would be a second record of facts the platform already holds, written by every module that makes one, and it could disagree with them.
+
+**Decision.** `GET /api/v1/events` is one read over five records, each with the time it was written:
+- **`station_joined`**, from a station's registration;
+- **`pass_decoded`**, from a pass's first report with outcome `decoded`. A resubmission that decodes again is the same pass, so it is one event, at the first report's arrival;
+- **`loss_diagnosed`**, from a diagnosis under the deployment's own method and `[diagnosis]` hash, at its latest revision only, as `/losses` reads it (D-272), with its cause or `undetermined`;
+- **`warning_raised`** and **`warning_cleared`**, from a receive-chain warning under the deployment's watch (D-292).
+
+Each names its record by the id that record's own endpoint publishes, so a reader can follow it there. Each carries `simulated` from its record (rule 5). Deleted stations are left out, as every public list leaves them out.
+
+- **The last week.** A feed is for what just happened; history is each module's own page. A week also bounds the read. The decoded reports are read from the hypertable's chunks that can hold a report submitted in the week, bounded thirty days earlier by MSP's own limit on how old a reception may be when it arrives (D-013).
+- **Newest first, by keyset.** Ordered by `(at, kind, ref)`, a total order, so a page boundary never falls inside one instant. The cursor carries the last event's three values, each published on the event itself (D-085, D-210).
+- **Nothing new is disclosed.** Each time is already published by the record's own endpoint, and no pass window appears here, so D-093's widened windows are not undone.
+
+*Rejected: "a station came online" as an event.* Liveness is derived on read and never stored (D-054). Finding each return from silence means scanning every heartbeat in the week for gaps, which is the cost D-178 built an hourly aggregate to avoid. The live page shows each station's liveness now, from `/stations`. Registration is the station event that is a record.
+
+*Rejected: a scheduling round as an event.* The jobs service decides a round every few minutes, and the feed would be nothing else. `/schedule-runs/latest` already shows the newest.
+
+*Rejected: an `events` table written by each module.* A second copy of every fact, with no migration reserved for this stage, and nothing a read cannot already give.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7509,6 +7535,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-360 the dashboard's tokens from the site | `site/tools/dashboard_tokens.py`; `dashboard/src/{tokens.css,app.css,main.tsx}`; `tests/unit/test_site_dashboard_tokens.py`; `.github/workflows/ci.yml`; `pyproject.toml`; `site/README.md` |
 | D-361 ground tracks, sampled on the platform | `platform/src/meridian/api/public/{tracks,models/tracks,surface}.py`; `platform/src/meridian/store/element_sets.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_satellite_tracks,test_public_privacy}.py`; `tests/integration/{test_public_tracks_endpoint,test_satnogs_archive_load}.py` |
 | D-362 today and the week, counted by the report's rules | `platform/src/meridian/reliability/{daily,aggregates}.py`; `platform/src/meridian/store/reliability_reads.py`; `platform/src/meridian/api/public/{aggregates,models/aggregates}.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_reliability_daily,test_public_privacy}.py`; `tests/integration/test_public_aggregates_endpoint.py` |
+| D-363 the events feed, read back from existing records | `platform/src/meridian/store/event_reads.py`; `platform/src/meridian/api/public/{events,models/events,surface}.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/test_public_privacy.py`; `tests/integration/test_public_events_endpoint.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 
