@@ -577,12 +577,13 @@ Stage 34 adds two sources to the nine above (D-320 to D-324): `celestrak_gp`, cu
 | Source | First live fetch | Result |
 |---|---|---|
 | `celestrak_gp` | 2026-11-07, cloud host | 73 sets in the `weather` group; 2 loaded, 0.4 days old; the rest kept in the raw store. The first attempts were refused until the retriever held a gzip body to the bytes on the wire. |
-| `satnogs_network` | — | — |
-| `noaa_swpc_kp` | — | — |
-| `open_meteo_cloud` | — | — |
-| `open_meteo_aerosol` | — | — |
-| `nasa_power_precipitation` | — | — |
-| `ornl_modis_ndvi` | — | — |
+| `satnogs_network` | — | — off on the cloud host until the team accepts D-322 |
+| `noaa_swpc_kp` | 2026-11-07, cloud host, by `follow` | 57 values; the latest Kp 3.0 |
+| `open_meteo_cloud` | 2026-11-07, cloud host, by `follow` | 96 hourly values at one point |
+| `open_meteo_aerosol` | 2026-11-07, cloud host, by `follow` | 96 hourly values at one point |
+| `nasa_power_precipitation` | 2026-11-07, cloud host, by `follow` | 15 daily values at one point |
+| `ornl_modis_ndvi` | 2026-11-07, cloud host, by `follow` | 162 values around one point |
+| `nasa_gibs` | 2026-11-07, cloud host, by `follow` | 2 tiles over the configured box, recorded and never read for a value |
 | `nasa_firms` | — | — needs `FIRMS_MAP_KEY` |
 | `nasa_black_marble` | — | — needs `EARTHDATA_TOKEN` |
 
