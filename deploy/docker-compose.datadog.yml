@@ -66,6 +66,19 @@ services:
     image: gcr.io/datadoghq/agent:7.84.6@sha256:4aa71f1f624e36ed4d04568e4ad3f323af14426db07d2f9ed98869f6d0bdbbd3
     restart: unless-stopped
     logging: *logging
+    # Hardened like every service (D-206), and seen to run and scrape so on the
+    # cloud host. It writes its generated configuration, sockets and logs to
+    # these tmpfs paths, which start empty on every restart; it keeps nothing.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run
+      - /run
+      - /opt/datadog-agent/run
+      - /var/log/datadog
+      - /etc/datadog-agent:mode=0755,uid=0
     environment:
       DD_SITE: ${DD_SITE:-datadoghq.com}
       # The instance's metadata service is closed to containers (hop limit 1),

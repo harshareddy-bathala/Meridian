@@ -22,6 +22,7 @@ COMPOSE_FILES = (
     "docker-compose.secrets.yml",
     "docker-compose.public.yml",
     "docker-compose.ingest.yml",
+    "docker-compose.datadog.yml",
 )
 
 
