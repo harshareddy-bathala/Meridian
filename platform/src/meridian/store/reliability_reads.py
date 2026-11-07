@@ -19,9 +19,11 @@ from meridian.store.stations import Connection
 
 __all__ = [
     "ClassifiedRow",
+    "ScheduledCount",
     "StationOnline",
     "SubmissionDelay",
     "count_classified_between",
+    "count_scheduled_between",
     "find_classified_between",
     "find_station_online_seconds",
     "find_submission_delays",
@@ -138,6 +140,81 @@ def count_classified_between(
             (method, config_sha256, start, end),
         )
         return {(one.classification, one.simulated): one.n for one in cur.fetchall()}
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledCount:
+    """One population's scheduled passes whose windows close inside a window."""
+
+    simulated: bool
+    scheduled: int
+    """Every ``scheduled`` decision, whatever became of it."""
+
+    ended: int
+    """Those whose window had closed by the instant asked about."""
+
+    awaiting: int
+    """Of those, the ones no classification holds yet: still inside the settle
+    margin, or waiting for the jobs service's next round."""
+
+
+def count_scheduled_between(
+    conn: Connection,
+    *,
+    classified_under: tuple[str, bytes],
+    window: tuple[datetime, datetime],
+    now: datetime,
+) -> dict[bool, ScheduledCount]:
+    """Scheduled passes closing in a window, and how many are classified yet.
+
+    Args:
+        conn: An open connection. Read-only.
+        classified_under: The method and the configuration hash a pass must be
+            classified under to stop awaiting.
+        window: The half-open interval of window ends.
+        now: The instant a window must have closed by to count as ended.
+
+    Returns:
+        ``{simulated: counts}`` for each population with a scheduled pass.
+
+    Note:
+        Counted by assignment, where a classification pools the overlapping
+        assignments of one station and satellite (D-182). From D-165 on a rise
+        has one scheduled assignment per station, so the two agree; an older
+        history can hold more assignments than physical passes.
+    """
+    method, config_sha256 = classified_under
+    start, end = window
+    with conn.cursor(row_factory=class_row(ScheduledCount)) as cur:
+        cur.execute(
+            """
+            select (a.simulated or p.simulated) as simulated,
+                   count(*)::int as scheduled,
+                   count(*) filter (where a.end_at <= %(now)s)::int as ended,
+                   count(*) filter (
+                       where a.end_at <= %(now)s and not exists (
+                           select 1
+                           from pass_classifications c
+                           where c.method = %(method)s
+                             and c.config_sha256 = %(config)s
+                             and c.assignment_ids @> array[a.assignment_id]
+                       )
+                   )::int as awaiting
+            from assignments a
+            join passes p on p.id = a.pass_id
+            where a.decision = 'scheduled'
+              and a.end_at >= %(start)s and a.end_at < %(end)s
+            group by 1
+            """,
+            {
+                "now": now,
+                "method": method,
+                "config": config_sha256,
+                "start": start,
+                "end": end,
+            },
+        )
+        return {one.simulated: one for one in cur.fetchall()}
 
 
 def find_station_online_seconds(

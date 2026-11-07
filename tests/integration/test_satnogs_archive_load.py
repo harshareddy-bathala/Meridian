@@ -26,6 +26,7 @@ from meridian.datasets.export import (  # noqa: E402 — after importorskip
 )
 from meridian.registry.psycopg_registry import PsycopgRegistry  # noqa: E402
 from meridian.store.element_sets import (  # noqa: E402
+    find_current_element_sets,
     find_current_epochs,
     find_element_set_current_at,
 )
@@ -154,6 +155,7 @@ def test_carried_sets_are_stored_for_the_archive_and_never_read_live(
     later = datetime(2026, 10, 8, tzinfo=UTC)
     assert find_element_set_current_at(rollback, "norad:57166", later) is None
     assert find_current_epochs(rollback, later) == {}
+    assert find_current_element_sets(rollback, later) == {}
 
 
 def test_a_carried_set_for_an_untracked_satellite_is_not_stored(

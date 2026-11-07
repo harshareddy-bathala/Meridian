@@ -193,6 +193,27 @@ export async function fetchUpcomingAssignments(
   return decodeItems(body, decodeAssignment).items;
 }
 
+/** How many scheduled passes the live page reads: a page, the API's default (D-085). */
+export const NETWORK_PASSES_LIMIT = 50;
+
+/** The network's scheduled passes not yet over, soonest first: those under way, then the next. */
+export async function fetchNetworkPasses(fetcher: Fetcher, signal: AbortSignal): Promise<Assignment[]> {
+  const query = new URLSearchParams({ limit: String(NETWORK_PASSES_LIMIT), decision: "scheduled" });
+  const url = `/api/v1/assignments?${query.toString()}`;
+  const body = await getJson(fetcher, url, "the network's passes", signal);
+  return decodeItems(body, decodeAssignment).items;
+}
+
+/** The passes under way at ``nowMs``: begun, and not yet over. */
+export function passesUnderWay(passes: Assignment[], nowMs: number): Assignment[] {
+  return passes.filter((one) => Date.parse(one.startAt) <= nowMs && nowMs < Date.parse(one.endAt));
+}
+
+/** The first pass to begin after ``nowMs``, or null if none is listed. */
+export function nextPass(passes: Assignment[], nowMs: number): Assignment | null {
+  return passes.find((one) => Date.parse(one.startAt) > nowMs) ?? null;
+}
+
 /** The station's most recent heartbeat, or null if it has never sent one. */
 export async function fetchLatestHeartbeat(
   fetcher: Fetcher,

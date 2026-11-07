@@ -8,7 +8,7 @@ Stage 35's gate has two halves. The platform's, that every step of
 ``tests/integration/test_demo_rehearsal.py``. This is the browser's, run against
 the ``demo`` profile as a visitor meets it, through the front:
 
-1. **Every view renders** (network, stations, schedule, losses, insights and
+1. **Every view renders** (live, stations, schedule, results, insights and
    the kiosk), with no error on the console and **no content-security-policy
    violation** (D-208), the policy the platform sends being the one in force.
 2. **Simulated figures say so.** The network and a station's schedule, drawn
@@ -44,10 +44,10 @@ from typing import Any
 from compose_db import Compose, ToolError, add_compose_arguments, compose_from
 from front_drill import run, wait_for_api
 
-VIEWS = ("network", "stations", "schedule", "losses", "insights", "kiosk")
-"""Every view the dashboard has (D-334)."""
+VIEWS = ("live", "stations", "schedule", "results", "insights", "kiosk")
+"""Every view the dashboard has (D-334, D-364)."""
 
-OUTAGE_VIEWS = ("network", "losses", "insights")
+OUTAGE_VIEWS = ("live", "results", "insights")
 """The views asked for again with the api stopped: those a visitor opens first."""
 
 SETTLE_MS = 4_000
@@ -92,10 +92,10 @@ def rehearse_views(page: Any, base: str, verdict: Verdict, errors: list[str]) ->
         verdict.check(page.locator("main h2").count() > 0, f"{view}: the view renders")
         verdict.check(not violations, f"{view}: no policy violation {violations or ''}")
     verdict.check(not errors, f"no console error {errors[:3] or ''}")
-    open_view(page, base, "network")
+    open_view(page, base, "live")
     verdict.check(
         page.locator(".badge-simulated").count() > 0,
-        "network: the fleet is marked simulated",
+        "live: the fleet is marked simulated",
     )
     explain_a_pass(page, base, verdict)
 

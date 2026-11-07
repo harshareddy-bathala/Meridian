@@ -7053,6 +7053,143 @@ The cloud host has 2 GB. Prometheus, Alertmanager and Grafana would take about a
 
 ---
 
+## D-360 — The dashboard's shared tokens are generated from the site's stylesheet, and its secondary text is the site's `--muted`
+
+**2026-11-07 · accepted** · *`site/tools/dashboard_tokens.py`, `dashboard/src/tokens.css`, `dashboard/src/{app.css,main.tsx}`, `tests/unit/test_site_dashboard_tokens.py`, `.github/workflows/ci.yml` (the site job); Stage 37. Carries out D-341.*
+
+D-341 gave the two surfaces one spacing scale, one type scale, two radii and one set of grounds and ink, and held them equal with a test that compared the values both stylesheets set by hand. The test listed five colours. The dashboard's secondary text, `--dim`, was not among them, and had drifted: it was the site's `--muted` in light and its `--ink-dim` in dark. A list of what to compare is a second copy, and it misses what nobody added to it.
+
+**Decision.** The site's stylesheet is the one source.
+- **`site/tools/dashboard_tokens.py` writes `dashboard/src/tokens.css`** from `site/style.css`: the spacing scale, the type scale, the radii, the touch target and the two font stacks from its bare `:root`, and the grounds, the ink, `--ink-dim`, `--muted` and the simulated colour from each theme. The dashboard has no theme toggle, so the site's toggled dark values are written under `prefers-color-scheme: dark`. A token the site stops setting fails the tool by name.
+- **Committed, and checked.** The output is committed, as `shell.py`'s is, so the dashboard and its image build from `dashboard/` alone. CI's site job runs the tool with `--check`, and a unit test does the same and adds two rules: `app.css` sets none of the shared tokens itself, and reads no token that neither file sets.
+- **The dashboard's own colours stay its own.** Liveness, the snapshot note and the receive-chain warning keep their tokens in `app.css` (D-284, D-294), because the site's signal colours mean above horizon, below horizon and predicted.
+- **`--dim` becomes `--muted`.** Every caption, label and secondary figure the dashboard dims is something glanced at, which is what the site calls `--muted`. In light nothing changes. In dark it moves from `#A9A6A0` to the site's `#787E8A`: 4.88:1 on the ground and 4.56:1 on a panel, above WCAG AA's 4.5:1 (D-348), and dimmer than before.
+
+*Rejected: generating the file at build time.* Vite would need `site/` inside the dashboard's build, and so would the image, for a file that changes a few times a year.
+
+*Rejected: mapping `--dim` to `--ink-dim` in both themes.* It keeps dark as it was and darkens light's secondary text to 8.4:1, where the site sets what is glanced at in `--muted`. The two surfaces would then dim the same kind of text differently, which is the seam this removes.
+
+---
+
+## D-361 — Ground tracks are sampled on the platform, once a minute, from the set pass generation would use
+
+**2026-11-07 · accepted** · *`meridian/api/public/{tracks,models/tracks}.py`, `meridian/api/public/surface.py`, `meridian/store/element_sets.py` (`find_current_element_sets`), `docs/THREAT-MODEL.md` §7, `tests/unit/{test_satellite_tracks,test_public_privacy}.py`, `tests/integration/test_public_tracks_endpoint.py`; Stage 37. Applies D-085, D-086, D-093, D-210, D-321 and D-325.*
+
+The live page draws each tracked satellite where it is and where it goes over the next ninety minutes. Only `meridian.orbit` propagates (ARCHITECTURE.md rule 2), so the browser must be handed the track, not the element set.
+
+**Decision.** `GET /api/v1/satellites/tracks` serves every tracked satellite's sub-satellite point every minute, from the current minute to ninety minutes on, both included.
+- **From the set pass generation would use.** `find_current_element_sets` chooses, for every satellite at once, the newest set whose epoch is not after the minute, with `find_element_set_current_at`'s tiebreaks. Like every live read it leaves out the archive's carried sets (D-325) and deleted satellites. Each track carries its set's epoch, age and source, because element-set age is a first-class figure, and a track from an 83-day-old set is drawn but says how old it is.
+- **To a hundredth of a degree.** About a kilometre. SGP4 from a day-old set is good to a few kilometres, so a finer figure claims more than the propagation knows. Nothing about a station is read, so nothing is coarsened for privacy; §7 records the response as accepted.
+- **An absence is named.** A satellite with no set, one SGP4 refuses (its points come back not finite, as for a decayed orbit), and the first past the limit are each listed under `omitted` with the reason. None is a number (D-086), and none is silently dropped.
+- **Once a minute.** The answer for a minute is kept in the process and served to every request in it, until the minute or anything it was computed from changes: a satellite's name or activity, or the id of its set. A new set is served at once. Measured here, a track takes about 0.2 ms a point, so fifty satellites would take about a second, which is not to be spent on every poll. A minute is also the grain of every other published window (D-093). Each api worker keeps its own.
+- **One view, not a list.** The response is not paged (D-085), like `/conditions`. It propagates at most 200 satellites, the API's largest page, and names the first beyond that as `over_limit`.
+- **Before the catalogue's routes.** `/satellites/{satellite_id}` would otherwise take `tracks` as an id, so the router is included ahead of it, and a test asks for the path and gets tracks.
+
+*Rejected: shipping element sets and propagating in the browser.* It moves SGP4 out of the one package allowed it, and a JavaScript port is a second propagator to keep equal to the first.
+
+*Rejected: tracks written by the jobs service into a table.* It needs a migration and a round for something computed in milliseconds, and the table would be stale between rounds.
+
+*Rejected: `/api/v1/tracks`.* A track belongs to a satellite, and a satellite id (`norad:NNNNN`) can never be `tracks`.
+
+---
+
+## D-362 — `/aggregates` is today's passes as counts and a week by day, counted by the reliability report's own rules
+
+**2026-11-07 · accepted** · *`meridian/reliability/{daily,aggregates}.py`, `meridian/store/reliability_reads.py` (`count_scheduled_between`), `meridian/api/public/{aggregates,models/aggregates}.py`, `docs/THREAT-MODEL.md` §7, `tests/unit/{test_reliability_daily,test_public_privacy}.py`, `tests/integration/test_public_aggregates_endpoint.py`; Stage 37. Settles D-086's placeholder for this path; applies D-177, D-182, D-184, D-185 and D-187.*
+
+`/api/v1/aggregates` has answered `not_yet_computed` since Stage 11, waiting for analytical views that D-177 answered elsewhere. The dashboard's live page needs two things from the network as a whole: today's passes by what became of them, and a week of capture rate and loss budget to draw as small charts.
+
+**Decision.** The path now answers `computed`, for measured and simulated stations apart (rule 5).
+- **Today is counts.** For the UTC day: every pass scheduled to close today, how many have closed, how many of those are classified, by class with every class present, how many had a station confirmed listening, and how many have closed and are not classified yet. The last figure matters. A pass is classified only once the settle margin has passed (D-182), a day by default, so on most deployments almost nothing that closed today is classified. Without it the page would read a busy day as a quiet one.
+- **The week is seven UTC days, today last.** Each has its capture rate and its own loss budget: SC-4's target applied to that day's eligible passes. Each also says whether it has **settled**, meaning its last window closed more than the settle margin ago. An unsettled day can still change, and the page has to say so beside it.
+- **The report's rules, not new ones.** Each day's figures are `capture_rate` and `loss_budget` applied to that day's classified passes alone, so a day reads like the thirty-day figure on `/reliability`, with the same Wilson interval and the same budget, debits counted by reason. Passes are read under the deployment's method and classification hash, through the same configuration dependency. A pass belongs to the UTC day its window closed, as the report's window counts window ends.
+- **Scheduled is counted by assignment.** A classification pools the overlapping assignments of one station and satellite. From D-165 on a rise has one scheduled assignment per station, so the two counts agree on anything recent.
+- **Counts, never passes.** No pass, window or station is named, so nothing can be turned back into a schedule (D-093, D-187). A zero is a count of rows that exist; a rate with nothing to divide has no estimate, as on `/reliability` (D-086).
+- **Counted on each request.** It reads a week of classifications, a few thousand rows at fifty stations, and today's assignments. The front keeps the last good copy (D-282). If it is slow at scale, a minute's cache like D-361's is the remedy.
+
+`tests/msp_conformance/test_not_yet_computed_endpoints.py` pinned the placeholder for this path alone and is removed with it. `/areas` and `/insights/model` keep their own tests of D-086's shape.
+
+*Rejected: today's figures from classifications only.* Under the default margin they would show nothing for most of the day, which is the absence-read-as-quiet this project exists to avoid.
+
+*Rejected: a rolling seven-day capture rate.* One number over a week hides the day a station went deaf. A day at a time is what a small chart can show.
+
+---
+
+## D-363 — The events feed is read back from records the platform already keeps, and stores nothing of its own
+
+**2026-11-07 · accepted** · *`meridian/store/event_reads.py`, `meridian/api/public/{events,models/events}.py`, `docs/THREAT-MODEL.md` §7, `tests/unit/test_public_privacy.py`, `tests/integration/test_public_events_endpoint.py`; Stage 37. Applies D-085, D-093, D-210, D-272 and D-292.*
+
+The live page ends with a feed of what just happened. An event table would be a second record of facts the platform already holds, written by every module that makes one, and it could disagree with them.
+
+**Decision.** `GET /api/v1/events` is one read over five records, each with the time it was written:
+- **`station_joined`**, from a station's registration;
+- **`pass_decoded`**, from a pass's first report with outcome `decoded`. A resubmission that decodes again is the same pass, so it is one event, at the first report's arrival;
+- **`loss_diagnosed`**, from a diagnosis under the deployment's own method and `[diagnosis]` hash, at its latest revision only, as `/losses` reads it (D-272), with its cause or `undetermined`;
+- **`warning_raised`** and **`warning_cleared`**, from a receive-chain warning under the deployment's watch (D-292).
+
+Each names its record by the id that record's own endpoint publishes, so a reader can follow it there. Each carries `simulated` from its record (rule 5). Deleted stations are left out, as every public list leaves them out.
+
+- **The last week.** A feed is for what just happened; history is each module's own page. A week also bounds the read. The decoded reports are read from the hypertable's chunks that can hold a report submitted in the week, bounded thirty days earlier by MSP's own limit on how old a reception may be when it arrives (D-013).
+- **Newest first, by keyset.** Ordered by `(at, kind, ref)`, a total order, so a page boundary never falls inside one instant. The cursor carries the last event's three values, each published on the event itself (D-085, D-210).
+- **Nothing new is disclosed.** Each time is already published by the record's own endpoint, and no pass window appears here, so D-093's widened windows are not undone.
+
+*Rejected: "a station came online" as an event.* Liveness is derived on read and never stored (D-054). Finding each return from silence means scanning every heartbeat in the week for gaps, which is the cost D-178 built an hourly aggregate to avoid. The live page shows each station's liveness now, from `/stations`. Registration is the station event that is a record.
+
+*Rejected: a scheduling round as an event.* The jobs service decides a round every few minutes, and the feed would be nothing else. `/schedule-runs/latest` already shows the newest.
+
+*Rejected: an `events` table written by each module.* A second copy of every fact, with no migration reserved for this stage, and nothing a read cannot already give.
+
+---
+
+## D-364 — Live is the dashboard's first page, every page says which way in, and a satellite is never drawn as a station
+
+**2026-11-07 · accepted** · *`dashboard/src/{Live,LiveNow,LiveFigures,Sparkline,Feed,WaysIn,satelliteLayer,StationMap,route,Nav,App,Kiosk,tracks,aggregates,events,schedule,format,useNow}.ts(x)`, `app.css`, `deploy/front/snapshot-routes.txt`, and their tests; Stage 37. Applies D-086, D-091, D-283, D-284, D-334, D-361, D-362 and D-363; replaces D-334's network view.*
+
+The dashboard opened on the network view: a map, two populations' thirty-day figures, and the open warnings. A reader who owns no station comes to see what is happening now, and that page could not tell them.
+
+**Decision.**
+- **`#/live` is the first page.** It replaces the network view, which it contains. `#/network`, and anything unknown, opens it, so no old link breaks. It shows:
+  - the time in UTC, to the second, because every window is published in it;
+  - the scheduled passes under way, each with how long it has left, and the next pass with a countdown;
+  - the map, with every tracked satellite where it is now and its next ninety minutes (D-361);
+  - the stations by liveness;
+  - each orbit's age, with a warning past three days, the threshold the schedule view uses;
+  - the geomagnetic index;
+  - today's passes and the week's capture rate and loss budget (D-362);
+  - what just happened (D-363);
+  - the open warnings;
+  - the thirty-day figures, until the results page (Part 6) takes them.
+  It shows no images.
+- **The browser propagates nothing.** Between two of the platform's points a minute apart it draws a straight line, and places the satellite along it by the reader's clock, the short way round across the antimeridian. Tracks are read once a minute, as the platform computes them.
+- **A satellite is a diamond, a station a circle.** In the first browser check a satellite from a stale orbit was drawn hollow and dashed, which is how a simulated station is drawn, and the two could not be told apart. The shape now says which is which, and the dashing still says stale. Both are ink, never a liveness colour or the site's signal colours. The live map opens on the whole world, not on the stations: fitted to them, it left a satellite at high latitude off the edge.
+- **The week is two small charts per population,** each one series in ink with no legend; its title names it. A day still inside its settle margin is hollow, and the table under the charts says "not yet" in words. A day with nothing to count is a gap, never a point at zero. Each point names its day and value on hover, and a disclosure gives every figure as a table.
+- **Every page says which way in a reader wants.** Exploring the data needs no sign-in. Station owners will sign in with an owner key (Stage 39), and the strip says that is still being built rather than linking nowhere. Someone who wants to run a station is sent to the site's station page. The kiosk leaves the strip out.
+- **The warmed list follows the page.** The four new reads join `snapshot-routes.txt`. The network-wide `assignments?limit=10`, which no view requested, leaves it, so every warmed copy is one a reader can ask for (D-283).
+
+*Rejected: placing satellites with a JavaScript SGP4.* D-361 rejects a second propagator.
+
+*Rejected: a colour for satellites.* The palette's hues already mean liveness, a snapshot, a warning and the horizon. A shape carries the difference without adding one more colour to learn.
+
+---
+
+## D-365 — Results is every settled pass with its effect on SC-4, read from the reliability module, and the losses are part of it
+
+**2026-11-07 · accepted** · *`meridian/store/result_reads.py`, `meridian/reliability/budget.py` (`effect_of`), `meridian/api/public/{results,models/results}.py`, `dashboard/src/{Results,results,Losses,Live,route,Nav,App,Kiosk,events}.ts(x)`, `deploy/front/snapshot-routes.txt`, `deploy/tools/demo_rehearsal.py`, `docs/THREAT-MODEL.md` §7, and their tests; Stage 37. Settles what Stage 24 left owed: a network-wide results view and the loss budget on the dashboard. Applies D-085, D-093, D-182, D-185, D-187, D-272 and D-331.*
+
+Stage 24 left the dashboard with no view of every pass's result across the network: the losses view lists what was diagnosed, and nothing listed what was captured, or what the satellite decided.
+
+**Decision.**
+- **`GET /api/v1/results`** lists every pass classified under the deployment's own method and configuration (D-182), the most recently classified first, paged by the classification's id (D-085). Each result has its window widened to whole minutes (D-093), as `/losses` publishes it, so a list gives away nothing D-187 keeps by counting the budget's debits instead of listing them. It also has its class, whether a station was confirmed listening, the report's outcome, and the cause and diagnosis id where the deployment's own diagnosis found one, at its latest revision (D-272).
+- **`effect` is the platform's reading of the class:** `captured`, `lost` (it spends the loss budget), or `satellite` (the satellite's own doing, counted neither way). `effect_of` in `meridian.reliability.budget` derives it from the same constants the budget spends by, and a test holds its `lost` classes equal to the budget's reasons. So the page never has to know which classes spend the budget, and cannot disagree with `/reliability`. That rule stays in one place, in code, as D-182 requires.
+- **The results page holds the thirty days' figures, every settled pass and every diagnosed loss.** The thirty days move here from the live page, which keeps today and the week. `#/losses` opens results, so no old link breaks. The newest page of results is polled and warmed (D-283). An older page is loaded on request, is not warmed, and in an outage fails and says so rather than being served as a copy.
+- **One set of words for a cause.** The events feed had its own copy of the words for each cause, written for Part 4. It now uses the losses view's, so the feed and the list cannot describe one cause two ways.
+
+*Rejected: ordering by window end.* A cursor would have to carry the exact instant a window closed, which D-093 never publishes and D-210 forbids a cursor to carry. Classifications are written in window order within a round, so their id orders the list nearly as well, and it is published.
+
+*Rejected: the dashboard grouping classes itself.* It is what `aggregates.ts` does for today's counts, from two constants copied from the platform. The results page reads `effect` instead. Today's counts can follow when `/aggregates` next changes.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7444,6 +7581,12 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 |---|---|
 | D-350 the README and the contributor files | `README.md`; `CONTRIBUTING.md`; `CODE_OF_CONDUCT.md`; `SECURITY.md`; `CHANGELOG.md`; `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`; `ATTRIBUTION.md`; `CLAUDE.md` (the layout) |
 | D-351 minimatch 11 by override | `dashboard/package.json`; `dashboard/package-lock.json` |
+| D-360 the dashboard's tokens from the site | `site/tools/dashboard_tokens.py`; `dashboard/src/{tokens.css,app.css,main.tsx}`; `tests/unit/test_site_dashboard_tokens.py`; `.github/workflows/ci.yml`; `pyproject.toml`; `site/README.md` |
+| D-361 ground tracks, sampled on the platform | `platform/src/meridian/api/public/{tracks,models/tracks,surface}.py`; `platform/src/meridian/store/element_sets.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_satellite_tracks,test_public_privacy}.py`; `tests/integration/{test_public_tracks_endpoint,test_satnogs_archive_load}.py` |
+| D-362 today and the week, counted by the report's rules | `platform/src/meridian/reliability/{daily,aggregates}.py`; `platform/src/meridian/store/reliability_reads.py`; `platform/src/meridian/api/public/{aggregates,models/aggregates}.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_reliability_daily,test_public_privacy}.py`; `tests/integration/test_public_aggregates_endpoint.py` |
+| D-363 the events feed, read back from existing records | `platform/src/meridian/store/event_reads.py`; `platform/src/meridian/api/public/{events,models/events,surface}.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/test_public_privacy.py`; `tests/integration/test_public_events_endpoint.py` |
+| D-364 the live page, the ways in, satellites as diamonds | `dashboard/src/{Live,LiveNow,LiveFigures,Sparkline,Feed,WaysIn,satelliteLayer,StationMap,route,Nav,App,Kiosk,tracks,aggregates,events,schedule,format,useNow}.ts(x)`; `dashboard/src/app.css`; `dashboard/src/{live.test.ts,views.test.tsx,route.test.ts,snapshotRoutes.test.ts,fixtures.test-data.ts}`; `deploy/front/snapshot-routes.txt` |
+| D-365 results, every settled pass with its effect | `platform/src/meridian/store/result_reads.py`; `platform/src/meridian/reliability/budget.py`; `platform/src/meridian/api/public/{results,models/results,surface}.py`; `dashboard/src/{Results,results,Losses,Live,route,Nav,App,Kiosk,events}.ts(x)`; `deploy/front/snapshot-routes.txt`; `deploy/tools/demo_rehearsal.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_reliability_daily,test_public_privacy}.py`; `tests/integration/test_public_results_endpoint.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

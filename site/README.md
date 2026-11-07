@@ -115,6 +115,7 @@ The moment it draws is *searched*, not hard-coded: the longest visible link over
 | `tools/verify_site.py` | The invariants this file asserts, checked. Stdlib only. Runs in CI. |
 | `tools/content_checks.py` | The visitor pages' rules, which `verify_site.py` runs: no sums, real payment details, defined terms, four breakpoints, labelled pictures, no notes about the prose, and every page's shape. |
 | `tools/shell.py`, `tools/shell_parts.py` | The shared regions above. Stdlib only. Runs in CI with `--check`. |
+| `tools/dashboard_tokens.py` | Writes the dashboard's shared tokens, `dashboard/src/tokens.css`, from this stylesheet (D-360). Run after changing a spacing, type, radius, ground or ink value. Stdlib only. Runs in CI with `--check`. |
 | `terms.json` | The plain definition behind every (i). |
 | `support.json` | The UPI ID and Sponsors URL, or `null`. |
 
@@ -124,7 +125,7 @@ The site opens light, whatever the system prefers (D-344). The masthead toggle s
 
 **`theme.js` must stay in `<head>`, before the stylesheet, with no `defer`.** It blocks parsing exactly long enough to set `data-theme` on the root element before the first paint. Deferring it, or moving it after `style.css`, reintroduces a flash of the wrong theme for every visitor whose stored preference differs from their system setting. The CSP allows no inline script, which is why this is a file rather than the usual three lines in the head — that is the whole reason it exists as a separate request.
 
-The stylesheet carries two sets of values: bare `:root` (light, also the no-JS page) and `:root[data-theme="dark"]`, which outranks it by specificity. There is no dark-by-preference block, and `tests/unit/test_site_dashboard_tokens.py` fails if one comes back.
+The stylesheet carries two sets of values: bare `:root` (light, also the no-JS page) and `:root[data-theme="dark"]`, which outranks it by specificity. There is no dark-by-preference block, and `tests/unit/test_site_dashboard_tokens.py` fails if one comes back. The dashboard, which has no toggle, takes the dark values under `prefers-color-scheme` instead: `tools/dashboard_tokens.py` writes them there.
 
 **The canvas reads its palette from CSS.** Neither `main.js` nor `globe.js` has colour constants: `main.js` calls `readPalette()`, which pulls the custom properties from the computed root style, and sends the result to `globe.js`; `theme.js` dispatches a `themechange` event on `document` that triggers a re-read, a new message and a redraw. Add a colour by adding a custom property, never by adding a constant. `tools/make-images.py` is the exception — it is a build-time tool with no DOM.
 

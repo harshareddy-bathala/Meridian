@@ -6,12 +6,31 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { assignmentBody, insightsBody, lossBody, runBody, warningBody } from "./fixtures.test-data";
+import { decodeAggregates } from "./aggregates";
+import { decodeEvent } from "./events";
+import { Feed } from "./Feed";
+import {
+  aggregatesBody,
+  assignmentBody,
+  eventBody,
+  insightsBody,
+  lossBody,
+  resultBody,
+  runBody,
+  tracksBody,
+  warningBody,
+} from "./fixtures.test-data";
 import { decodeInsights } from "./insights";
 import { ModelPanel } from "./Insights";
 import { decodeLoss } from "./losses";
 import { LossRow } from "./Losses";
-import { Population, Warnings } from "./Network";
+import { Warnings } from "./Live";
+import { Population, ResultRow } from "./Results";
+import { decodeResult } from "./results";
+import { TodayFigures, Week } from "./LiveFigures";
+import { Orbits, Overhead } from "./LiveNow";
+import { decodeAssignment } from "./schedule";
+import { decodeTracks } from "./tracks";
 import { decodeNetworkWarning } from "./networkWarnings";
 import { decodeScheduleRun } from "./scheduleRun";
 import { Explanation, LatestRound, Planned } from "./ScheduleTimeline";
@@ -98,5 +117,82 @@ describe("an absence", () => {
     expect(
       renderToStaticMarkup(<ModelPanel read={{ notYetComputed: "No run yet." }} />),
     ).toContain("Not yet computed. No run yet.");
+  });
+});
+
+describe("the live page", () => {
+  const aggregates = decodeAggregates(aggregatesBody);
+  const names = new Map([["st_1", "Rooftop"]]);
+
+  it("marks today's and the week's simulated figures, and not the measured ones", () => {
+    const simulated = renderToStaticMarkup(<TodayFigures population={aggregates.simulated} marginS={86_400} />);
+    expect(badges(simulated)).toBe(1);
+    expect(simulated).toContain("40, 22 closed so far");
+    expect(simulated).toContain("once a day has passed");
+    expect(badges(renderToStaticMarkup(<Week population={aggregates.simulated} />))).toBe(1);
+    expect(badges(renderToStaticMarkup(<TodayFigures population={aggregates.measured} marginS={86_400} />))).toBe(0);
+  });
+
+  it("marks a simulated event and pass, and not a measured event", () => {
+    const simulated = renderToStaticMarkup(
+      <Feed events={[decodeEvent(eventBody("pass_decoded"), "e")]} names={names} go={go} />,
+    );
+    expect(badges(simulated)).toBe(1);
+    expect(simulated).toContain("Rooftop");
+    const measured = renderToStaticMarkup(
+      <Feed events={[decodeEvent(eventBody("station_joined", false), "e")]} names={names} go={go} />,
+    );
+    expect(badges(measured)).toBe(0);
+    const pass = decodeAssignment(assignmentBody("as_1"), "a");
+    const now = new Date(Date.parse(pass.startAt) + 60_000);
+    expect(badges(renderToStaticMarkup(<Overhead passes={[pass]} now={now} names={names} />))).toBe(1);
+  });
+
+  it("draws an unsettled day hollow, and says so in words beside it", () => {
+    const week = renderToStaticMarkup(<Week population={aggregates.simulated} />);
+    expect(week.split("sparkline-unsettled").length - 1).toBe(4);
+    expect(week).toContain("not settled yet");
+    expect(week).toContain("not yet");
+  });
+
+  it("says every absence in words", () => {
+    expect(renderToStaticMarkup(<TodayFigures population={aggregates.measured} marginS={86_400} />)).toContain(
+      "No pass is scheduled to close today.",
+    );
+    expect(renderToStaticMarkup(<Week population={aggregates.measured} />)).toContain(
+      "No pass was classified this week.",
+    );
+    expect(renderToStaticMarkup(<Feed events={[]} names={names} go={go} />)).toContain(
+      "Nothing was recorded in the last week.",
+    );
+    const quiet = renderToStaticMarkup(<Overhead passes={[]} now={new Date()} names={names} />);
+    expect(quiet).toContain("No scheduled pass is under way.");
+    expect(quiet).toContain("No later pass is scheduled yet.");
+    expect(renderToStaticMarkup(<Orbits tracks={{ at: "", satellites: [], omitted: [] }} />)).toContain(
+      "No satellite is tracked yet.",
+    );
+    expect(renderToStaticMarkup(<Orbits tracks={decodeTracks(tracksBody)} />)).toContain("no orbit is held for it");
+  });
+});
+
+describe("the results page", () => {
+  const row = (simulated: boolean) =>
+    renderToStaticMarkup(
+      <table>
+        <tbody>
+          <ResultRow result={decodeResult(resultBody(1, "station_unavailable", "lost", simulated), "r")} go={go} />
+        </tbody>
+      </table>,
+    );
+
+  it("marks a simulated pass, and not a measured one", () => {
+    expect(badges(row(true))).toBe(1);
+    expect(badges(row(false))).toBe(0);
+  });
+
+  it("says what the pass did, and the cause it was diagnosed with", () => {
+    expect(row(true)).toContain("Station unavailable");
+    expect(row(true)).toContain("lost: spends the loss budget");
+    expect(row(true)).toContain("something blocks that part of the sky");
   });
 });

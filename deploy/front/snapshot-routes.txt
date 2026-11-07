@@ -13,7 +13,6 @@
 
 /api/v1/stations?limit=200
 /api/v1/reliability
-/api/v1/assignments?limit=10
 /api/v1/stations/{station}/heartbeats?limit=1
 /api/v1/assignments?limit=10&station_id={station}
 /api/v1/stations/{station}/profiles
@@ -26,3 +25,8 @@
 /api/v1/schedule-runs/latest
 /api/v1/conditions
 /api/v1/insights/model
+/api/v1/satellites/tracks
+/api/v1/assignments?limit=50&decision=scheduled
+/api/v1/aggregates
+/api/v1/events?limit=20
+/api/v1/results?limit=50
