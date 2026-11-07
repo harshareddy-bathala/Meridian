@@ -103,17 +103,20 @@ done
 sed -i 's|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=https://dash.meridian.org.in|; s|^TUNNEL_HOSTNAME=.*|TUNNEL_HOSTNAME=dash.meridian.org.in|' deploy/.env
 python3 deploy/tools/rotate_secret.py init
 python3 deploy/tools/rotate_secret.py set tunnel_token    # paste the token, then Enter and Ctrl-D
+cp deploy/ingest.live.toml.example deploy/ingest.toml
+sed -i 's|^raw_root = .*|raw_root = "/var/lib/meridian-ingest/raw"|' deploy/ingest.toml
+install -d -m 700 deploy/secrets/ingest
 ```
 
 The tunnel token comes from Cloudflare Zero Trust → Networks → Tunnels → `meridian`. Paste it at the prompt, never on a command line, where the shell's history would keep it. The tunnel's route for the dash hostname must be `http://front:8080`.
 
 ```bash
-alias compose='docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml -f deploy/docker-compose.public.yml -f deploy/docker-compose.demo.yml'
+alias compose='docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.secrets.yml -f deploy/docker-compose.public.yml -f deploy/docker-compose.demo.yml -f deploy/docker-compose.ingest.yml'
 compose pull
 compose --profile demo up -d --wait
 ```
 
-The demonstration fleet runs alongside the platform so the public views always show a fleet. Every figure from it is badged simulated (D-330). The image is pulled from GHCR, so the package must be public, or `docker login ghcr.io` must be run first (`docs/OPERATIONS.md` § Pull or build).
+The demonstration fleet runs alongside the platform so the public views always show a fleet. Every figure from it is badged simulated (D-330). `ingest` is built on the host, because no registry publishes it (D-352). It starts with every source the live settings enable; before each source's first fetch, re-read its terms page in `ATTRIBUTION.md`, and record the fetch in `docs/OPERATIONS.md` § Element sets and the archive, and every source live. The image is pulled from GHCR, so the package must be public, or `docker login ghcr.io` must be run first (`docs/OPERATIONS.md` § Pull or build).
 
 Then, once it answers, leave the `meridian` shell (`exit`) and, as the default user, start the timers cloud-init installed and check the public surface:
 
@@ -127,7 +130,7 @@ python3 /opt/meridian/deploy/tools/verify_public_surface.py https://dash.meridia
 Credit is per account and cannot be moved, so the platform moves instead, by `docs/OPERATIONS.md` § Restoring on another machine:
 
 1. Build the new host from this file in the new account.
-2. Restore the newest dump onto it, with the same token pepper.
+2. Restore the newest dump onto it, with the same token pepper, and unpack the newest copy of the ingest raw store into its `ingest-raw` volume.
 3. Copy the tunnel token across, then stop the old host's stack. The tunnel follows whichever connector is running.
 
 Stations notice nothing but a short gap, and they resend what was not acknowledged (D-129).

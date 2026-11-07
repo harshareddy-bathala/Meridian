@@ -7017,6 +7017,24 @@ It is a development dependency, and it is not in the served bundle. The patterns
 
 ---
 
+## D-352 — Ingest runs in an image and a container of its own, added by an override file the platform never needs
+
+**2026-11-07 · accepted** · *`deploy/ingest/Dockerfile`, `deploy/docker-compose.ingest.yml`, `ci.yml` (`image`), `.github/dependabot.yml`, `tests/unit/{test_compose_hardening,test_pinning}.py`; Stage 36. Narrows `OPERATIONS.md`'s "never in the compose stack"; D-138 and D-225 unchanged.*
+
+Stage 36 puts the platform on a cloud host, and `meridian-ingest follow` needs a machine to run on. The runbook said to run it from a checkout with `uv`, by cron, "never in the compose stack". D-138 and D-225 give the reasons. The platform image must not carry the code that talks to an archive, and a source that hangs must not delay a schedule. Neither reason is about compose itself.
+
+**Decision.** Ingest gets an image of its own, `deploy/ingest/Dockerfile`, holding `meridian-ingest`, the `meridian` it imports and its HDF5 reader. The client and the simulator are not in it. One service runs it, `ingest`, defined only in `deploy/docker-compose.ingest.yml` and running `follow` in its own process.
+- **The platform is complete without it.** The main compose file names no ingest service, so a deployment that never adds the override never builds, pulls or runs anything that reaches an external source. CI's single-machine bring-up is unchanged (D-130).
+- **It is hardened like every service** (D-206). Its keys are files in `deploy/secrets/ingest/`, mounted read-only (D-114, D-223). It writes as `meridian_api`, which may change rows and nothing else (D-207). It listens on nothing.
+- **It is built where it runs, not published.** CI builds it on every pull request. It checks that the image imports the archive layer and HDF5, carries no station client, and answers `sources` with no network. The image shares its bases and their digests with the platform's, so one Dependabot group moves both pins.
+- **A deployment's `ingest.toml` is not tracked.** It names the places a deployment asks sources about, so it stays on the host, like a secret.
+
+*Rejected: cron on the host with `uv`.* It works, and it puts a Python toolchain and a second dependency set on the host outside the image the scans cover (D-205). It also leaves a process with no restart policy and no log cap.
+
+*Rejected: a profile in the main compose file.* A profile can be left off, but the definition would still sit in the file the platform runs from. Then the platform's own file would name the archive layer, which is the coupling D-138 keeps out.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.

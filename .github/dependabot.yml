@@ -28,7 +28,9 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: docker
-    directory: /deploy
+    # deploy/Dockerfile and deploy/ingest/Dockerfile share their bases, so one
+    # grouped update moves both pins together (D-352).
+    directories: [/deploy, /deploy/ingest]
     schedule:
       interval: weekly
     commit-message:

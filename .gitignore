@@ -26,6 +26,10 @@ deploy/prometheus/metrics_token
 # mounted by deploy/docker-compose.secrets.yml (D-201).
 deploy/secrets/
 
+# A deployment's own ingest settings, which name the places it asks sources
+# about. The examples beside it are tracked (D-352).
+deploy/ingest.toml
+
 # A deployment's own Alertmanager configuration and the secrets it reads
 # (D-112). Only the null-receiver default and the example are tracked.
 deploy/alertmanager/*.local.yml

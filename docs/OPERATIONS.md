@@ -504,7 +504,7 @@ layers = ["<a Bhuvan layer name>"]   # display only; no default
 - **Tiles are recorded and never read for a number** — `load` reports them as skipped (D-133). Bhuvan's map images are display only because its terms say so (D-220).
 - **Night-time lights need `uv sync --extra hdf5`** (or `pip install 'meridian-ingest[hdf5]'`); without it `normalise` refuses that source by name (D-226).
 
-**Near real time is `follow`, run where `meridian-ingest` is installed, never in the compose stack** (D-225):
+**Near real time is `follow`, run where `meridian-ingest` is installed, never in the platform image or the jobs service** (D-225). On a deployment host, that is the `ingest` container (§ Ingest as a container); from a checkout, it is:
 
 ```bash
 uv run meridian-ingest follow --once        # one round: each due source fetched, then loaded
@@ -518,6 +518,26 @@ A source is due when its newest retrieval is older than its cadence (Kp and clou
 ```
 
 **A value is a feature only for passes after it was published**, and "published" is our own fetch unless the artefact states an earlier production time (D-222). So a backfill never supplies features for passes already flown: the conditions group fills in from when `follow` starts running. Features are read from a snapshot's `environment_samples.jsonl`, never from the table while scheduling (D-224).
+
+### Ingest as a container
+
+`deploy/docker-compose.ingest.yml` adds one service, `ingest`, which runs `meridian-ingest follow --interval 300` in an image of its own (D-352). The main compose file knows nothing of it. Add the file to every command on the host that runs ingest:
+
+```bash
+cp deploy/ingest.live.toml.example deploy/ingest.toml   # then: raw_root = "/var/lib/meridian-ingest/raw"
+install -d -m 700 deploy/secrets/ingest                 # keys go here, one file each
+compose -f deploy/docker-compose.ingest.yml build ingest
+compose -f deploy/docker-compose.ingest.yml up -d ingest
+compose -f deploy/docker-compose.ingest.yml logs -f ingest
+```
+
+- **`deploy/ingest.toml` is the deployment's own** and is not tracked: it names the places sources are asked about.
+- **Keys** are `deploy/secrets/ingest/firms_map_key` and `deploy/secrets/ingest/earthdata_token`, read only by the source that needs one. Leave a source commented out in the settings until its key file exists.
+- **The raw store is the `ingest-raw` volume.** It is not in the database dump, so copy it on the dump's schedule (§ The raw store is not in the database backup):
+  ```bash
+  sudo tar -C "$(docker volume inspect -f '{{.Mountpoint}}' meridian_ingest-raw)" -czf backups/raw-$(date -u +%F).tar.gz .
+  ```
+- **One-off commands** run in the same image: `compose -f deploy/docker-compose.ingest.yml run --rm ingest meridian-ingest fetch --source celestrak_gp`.
 
 ### Element sets and the archive, and every source live
 

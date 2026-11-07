@@ -21,6 +21,7 @@ COMPOSE_FILES = (
     "docker-compose.yml",
     "docker-compose.secrets.yml",
     "docker-compose.public.yml",
+    "docker-compose.ingest.yml",
 )
 
 
@@ -122,3 +123,32 @@ def test_the_front_starts_without_waiting_for_the_api() -> None:
     """It must come up when the api cannot, or it has nothing to serve a copy for."""
     front = _services("docker-compose.yml")["front"]
     assert front["depends_on"] == {"api": {"condition": "service_started"}}
+
+
+def test_ingest_runs_only_from_its_own_file_and_its_own_image() -> None:
+    """The platform is complete without ingest (D-138), and ingest is never the
+    jobs service or the platform image (D-225, D-352)."""
+    main = _services("docker-compose.yml")
+    assert "ingest" not in main
+    commands = [str(body.get("command")) for body in main.values()]
+    assert all("meridian-ingest" not in command for command in commands)
+
+    ingest = _services("docker-compose.ingest.yml")["ingest"]
+    assert ingest["build"]["dockerfile"] == "deploy/ingest/Dockerfile"
+    assert ingest["pull_policy"] == "build", "no registry publishes it"
+    assert ingest["image"].startswith("${MERIDIAN_INGEST_IMAGE")
+    assert "ports" not in ingest and "expose" not in ingest
+    assert "meridian_api:" in ingest["environment"]["DATABASE_URL"]
+
+
+def test_ingest_reads_keys_from_files_it_cannot_write() -> None:
+    ingest = _services("docker-compose.ingest.yml")["ingest"]
+    environment = ingest["environment"]
+    keys = "/run/secrets/meridian-ingest/"
+    assert environment["FIRMS_MAP_KEY_FILE"].startswith(keys)
+    assert environment["EARTHDATA_TOKEN_FILE"].startswith(keys)
+    assert not any(key.endswith(("_KEY", "_TOKEN")) for key in environment)
+    binds = [v for v in ingest["volumes"] if isinstance(v, dict)]
+    secrets = [v for v in binds if v["target"] == "/run/secrets/meridian-ingest"]
+    assert secrets and secrets[0]["read_only"] is True
+    assert secrets[0]["bind"]["create_host_path"] is False
