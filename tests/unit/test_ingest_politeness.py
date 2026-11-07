@@ -14,6 +14,7 @@ Reference: docs/DECISIONS.md D-134, D-142.
 
 from __future__ import annotations
 
+import gzip
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -379,6 +380,47 @@ def test_a_body_that_stopped_short_of_its_declared_length_is_retried(
     retrieved = fetching.retrieve(a_remote())
 
     assert b"".join(retrieved.chunks) == BODY
+    assert len(waited) == 1
+
+
+def test_a_compressed_body_is_held_to_the_length_that_was_sent(
+    waited: list[float], fetcher: Fetcher
+) -> None:
+    """CelesTrak's first live fetch: gzip on the wire, the compressed size
+    declared, and the body unpacked by the client. Refused on every attempt
+    while the check counted the unpacked bytes."""
+    packed = gzip.compress(BODY * 40)
+    handler = responder(
+        httpx.Response(
+            200,
+            stream=httpx.ByteStream(packed),
+            headers={"Content-Encoding": "gzip", "Content-Length": str(len(packed))},
+        )
+    )
+    fetching = fetcher(handler)
+
+    assert b"".join(fetching.retrieve(a_remote()).chunks) == BODY * 40
+    assert waited == []
+
+
+def test_a_compressed_body_that_stopped_short_is_still_retried(
+    waited: list[float], fetcher: Fetcher
+) -> None:
+    packed = gzip.compress(BODY * 40)
+    handler = responder(
+        httpx.Response(
+            200,
+            content=packed,
+            headers={
+                "Content-Encoding": "gzip",
+                "Content-Length": str(len(packed) + 1),
+            },
+        ),
+        httpx.Response(200, content=BODY),
+    )
+    fetching = fetcher(handler)
+
+    assert b"".join(fetching.retrieve(a_remote()).chunks) == BODY
     assert len(waited) == 1
 
 
