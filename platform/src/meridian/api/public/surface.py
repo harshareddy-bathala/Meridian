@@ -32,6 +32,7 @@ from meridian.api.public import (
     satellites,
     schedule,
     stations,
+    tracks,
 )
 from meridian.api.public.envelope import API_PREFIX
 
@@ -40,6 +41,8 @@ __all__ = ["router"]
 router = APIRouter(prefix=API_PREFIX, tags=["public"])
 
 router.include_router(stations.router)
+# Before the catalogue: `/satellites/{satellite_id}` would take `tracks` as an id.
+router.include_router(tracks.router)
 router.include_router(satellites.router)
 router.include_router(passes.router)
 router.include_router(assignments.router)

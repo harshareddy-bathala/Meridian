@@ -32,6 +32,7 @@ __all__ = [
     "ARCHIVE_ONLY_SOURCES",
     "NewElementSet",
     "StoredElementSet",
+    "find_current_element_sets",
     "find_current_epochs",
     "find_element_set_by_id",
     "find_element_set_current_at",
@@ -198,6 +199,40 @@ def find_current_epochs(conn: Connection, at: datetime) -> dict[str, datetime]:
             {"at": at, "archive_only": list(ARCHIVE_ONLY_SOURCES)},
         )
         return {row.satellite_id: row.epoch for row in cur.fetchall()}
+
+
+def find_current_element_sets(
+    conn: Connection, at: datetime
+) -> dict[str, StoredElementSet]:
+    """The set current at ``at``, for every satellite tracked, in one query.
+
+    Args:
+        conn: An open connection. Read-only; opens no transaction of its own.
+        at: The instant to be current at, timezone-aware UTC.
+
+    Returns:
+        One entry per satellite not deleted that holds a set from before ``at``,
+        keyed by satellite id. A satellite with none is absent.
+
+    Note:
+        The set :func:`find_element_set_current_at` would choose for each
+        satellite, with the same order and tiebreaks, so a ground track on the
+        dashboard comes from the set the next round of pass generation uses.
+    """
+    with conn.cursor(row_factory=class_row(StoredElementSet)) as cur:
+        cur.execute(
+            f"""
+            select distinct on (e.satellite_id)
+                   e.id, e.satellite_id, e.epoch, e.retrieved_at,
+                   e.line1, e.line2, e.source, e.content_sha256
+            from element_sets e
+            join satellites s on s.satellite_id = e.satellite_id
+            where s.deleted_at is null and e.epoch <= %(at)s and {_LIVE}
+            order by e.satellite_id, e.epoch desc, e.retrieved_at desc, e.id desc
+            """,
+            {"at": at, "archive_only": list(ARCHIVE_ONLY_SOURCES)},
+        )
+        return {row.satellite_id: row for row in cur.fetchall()}
 
 
 def find_element_set_current_at(

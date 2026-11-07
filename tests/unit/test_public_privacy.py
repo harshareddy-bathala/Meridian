@@ -418,6 +418,18 @@ REVIEWED = {
         "source",
     },
     "PublishedLocation": {"alt_m", "lat_deg", "lon_deg"},
+    "OmittedSatellite": {"name", "reason", "satellite_id"},
+    "SatelliteTrack": {
+        "element_set_age_s",
+        "element_set_epoch",
+        "element_set_source",
+        "is_active",
+        "name",
+        "satellite_id",
+        "track",
+    },
+    "SatelliteTracks": {"at", "horizon_s", "omitted", "satellites", "status", "step_s"},
+    "TrackPoint": {"lat_deg", "lon_deg", "t"},
     "StationLiveness": {"last_heartbeat_at", "liveness", "simulated", "station_id"},
     "WeighedPass": {"assignment_id", "decision", "pass_id", "value"},
 }

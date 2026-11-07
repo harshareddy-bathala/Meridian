@@ -1141,7 +1141,7 @@ diff one.txt two.txt                                                          # 
 
 ## The network's public views
 
-Stage 35 adds six reads to the public API for the dashboard's network, schedule, losses and insights views (D-331). Each follows the surface's rules: windows to whole minutes and angles to whole degrees (D-093), keyset cursors (D-085), `simulated` on every body that has results, and a stated absence rather than a zero (D-086).
+Stage 35 adds six reads to the public API for the dashboard's network, schedule, losses and insights views (D-331), and Stage 37 adds the reads its pages need, from D-361 on. Each follows the surface's rules: windows to whole minutes and angles to whole degrees (D-093), keyset cursors (D-085), `simulated` on every body that has results, and a stated absence rather than a zero (D-086).
 
 | Read | What it answers |
 |---|---|
@@ -1151,6 +1151,7 @@ Stage 35 adds six reads to the public API for the dashboard's network, schedule,
 | `GET /api/v1/schedule-runs/latest` | the newest round's record; its gain over a baseline is `not_measured` live, and is `meridian schedule evaluate`'s (D-172) |
 | `GET /api/v1/conditions` | the newest Kp and each point's cloud cover for this hour, credited to its source; Kp is `not_measured` until `meridian-ingest follow` has run |
 | `GET /api/v1/insights/model` | a sealed model run's summary, the file `REPORT_SUMMARY` names under `PUBLISHED_DIR` (`/published` in the container); `not_yet_computed` while it is unset, and `server_error` if the file is refused (D-332) |
+| `GET /api/v1/satellites/tracks` | every tracked satellite's ground track, a point a minute from the current minute for ninety minutes, sampled by the orbit service from the element set pass generation would use, with that set's epoch, age and source; each satellite without one is listed with why. Computed once a minute per api worker (D-361) |
 
 ```bash
 curl -s localhost:8000/api/v1/losses?limit=5 | python -m json.tool

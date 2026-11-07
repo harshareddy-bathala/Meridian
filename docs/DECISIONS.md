@@ -7071,6 +7071,28 @@ D-341 gave the two surfaces one spacing scale, one type scale, two radii and one
 
 ---
 
+## D-361 — Ground tracks are sampled on the platform, once a minute, from the set pass generation would use
+
+**2026-11-07 · accepted** · *`meridian/api/public/{tracks,models/tracks}.py`, `meridian/api/public/surface.py`, `meridian/store/element_sets.py` (`find_current_element_sets`), `docs/THREAT-MODEL.md` §7, `tests/unit/{test_satellite_tracks,test_public_privacy}.py`, `tests/integration/test_public_tracks_endpoint.py`; Stage 37. Applies D-085, D-086, D-093, D-210, D-321 and D-325.*
+
+The live page draws each tracked satellite where it is and where it goes over the next ninety minutes. Only `meridian.orbit` propagates (ARCHITECTURE.md rule 2), so the browser must be handed the track, not the element set.
+
+**Decision.** `GET /api/v1/satellites/tracks` serves every tracked satellite's sub-satellite point every minute, from the current minute to ninety minutes on, both included.
+- **From the set pass generation would use.** `find_current_element_sets` chooses, for every satellite at once, the newest set whose epoch is not after the minute, with `find_element_set_current_at`'s tiebreaks. Like every live read it leaves out the archive's carried sets (D-325) and deleted satellites. Each track carries its set's epoch, age and source, because element-set age is a first-class figure, and a track from an 83-day-old set is drawn but says how old it is.
+- **To a hundredth of a degree.** About a kilometre. SGP4 from a day-old set is good to a few kilometres, so a finer figure claims more than the propagation knows. Nothing about a station is read, so nothing is coarsened for privacy; §7 records the response as accepted.
+- **An absence is named.** A satellite with no set, one SGP4 refuses (its points come back not finite, as for a decayed orbit), and the first past the limit are each listed under `omitted` with the reason. None is a number (D-086), and none is silently dropped.
+- **Once a minute.** The answer for a minute is kept in the process and served to every request in it, until the minute or anything it was computed from changes: a satellite's name or activity, or the id of its set. A new set is served at once. Measured here, a track takes about 0.2 ms a point, so fifty satellites would take about a second, which is not to be spent on every poll. A minute is also the grain of every other published window (D-093). Each api worker keeps its own.
+- **One view, not a list.** The response is not paged (D-085), like `/conditions`. It propagates at most 200 satellites, the API's largest page, and names the first beyond that as `over_limit`.
+- **Before the catalogue's routes.** `/satellites/{satellite_id}` would otherwise take `tracks` as an id, so the router is included ahead of it, and a test asks for the path and gets tracks.
+
+*Rejected: shipping element sets and propagating in the browser.* It moves SGP4 out of the one package allowed it, and a JavaScript port is a second propagator to keep equal to the first.
+
+*Rejected: tracks written by the jobs service into a table.* It needs a migration and a round for something computed in milliseconds, and the table would be stale between rounds.
+
+*Rejected: `/api/v1/tracks`.* A track belongs to a satellite, and a satellite id (`norad:NNNNN`) can never be `tracks`.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7463,6 +7485,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-350 the README and the contributor files | `README.md`; `CONTRIBUTING.md`; `CODE_OF_CONDUCT.md`; `SECURITY.md`; `CHANGELOG.md`; `.github/{CODEOWNERS,FUNDING.yml,pull_request_template.md,ISSUE_TEMPLATE/}`; `ATTRIBUTION.md`; `CLAUDE.md` (the layout) |
 | D-351 minimatch 11 by override | `dashboard/package.json`; `dashboard/package-lock.json` |
 | D-360 the dashboard's tokens from the site | `site/tools/dashboard_tokens.py`; `dashboard/src/{tokens.css,app.css,main.tsx}`; `tests/unit/test_site_dashboard_tokens.py`; `.github/workflows/ci.yml`; `pyproject.toml`; `site/README.md` |
+| D-361 ground tracks, sampled on the platform | `platform/src/meridian/api/public/{tracks,models/tracks,surface}.py`; `platform/src/meridian/store/element_sets.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_satellite_tracks,test_public_privacy}.py`; `tests/integration/{test_public_tracks_endpoint,test_satnogs_archive_load}.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 
