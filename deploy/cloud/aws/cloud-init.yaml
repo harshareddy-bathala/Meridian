@@ -1,0 +1,56 @@
+#cloud-config
+# The platform tier's host, from a clean Ubuntu 24.04 image (D-129, Stage 36).
+#
+# Passed as the instance's user data by README.md § Create the instance. It
+# installs Docker from Docker's own repository, adds swap, creates the account
+# the platform runs as, checks out the repository and installs the backup and
+# restore-drill timers. It opens no port and starts no container: secrets are
+# written and the stack brought up by hand, in README.md § Bring the platform up,
+# so nothing secret ever passes through user data, which the instance can read
+# back from its metadata service.
+
+package_update: true
+package_upgrade: true
+
+apt:
+  sources:
+    docker.list:
+      source: "deb [signed-by=$KEY_FILE] https://download.docker.com/linux/ubuntu $RELEASE stable"
+      # Docker's release signing key, as published at
+      # https://docs.docker.com/engine/install/ubuntu/
+      keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+packages:
+  - ca-certificates
+  - git
+  - python3
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-compose-plugin
+
+# Postgres, the api and the demonstration fleet share 4 GB. Swap turns a
+# memory spike into slowness rather than a killed database.
+swap:
+  filename: /swapfile
+  size: 2G
+  maxsize: 2G
+
+users:
+  - default
+  - name: meridian
+    gecos: Meridian platform
+    shell: /bin/bash
+    # Membership of docker is equivalent to root on this host; the account
+    # exists to run compose and the timers, and nobody signs in as it.
+    groups: [docker]
+    lock_passwd: true
+
+runcmd:
+  - [systemctl, enable, --now, docker]
+  - [git, clone, --branch, main, "https://github.com/harshareddy-bathala/Meridian.git", /opt/meridian]
+  - [chown, -R, "meridian:meridian", /opt/meridian]
+  - [sh, -c, "cp /opt/meridian/deploy/systemd/meridian-*.service /opt/meridian/deploy/systemd/meridian-*.timer /etc/systemd/system/"]
+  - [systemctl, daemon-reload]
+
+final_message: "Meridian host ready after $UPTIME s. Next: README.md § Bring the platform up."
