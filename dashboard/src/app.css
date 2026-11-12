@@ -611,3 +611,25 @@ tr.selected {
   margin: var(--space-3) 0 var(--space-1);
   font-size: 1em;
 }
+
+/* The weekly report is the template's text, kept line for line (D-367). */
+.report-text {
+  max-width: 72ch;
+}
+
+.report-text h4 {
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.report-block {
+  margin-bottom: var(--space-3);
+}
+
+.report-block p {
+  margin: 0 0 var(--space-1);
+}
+
+.report-heading {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}

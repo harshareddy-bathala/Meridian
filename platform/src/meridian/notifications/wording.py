@@ -24,6 +24,7 @@ import unicodedata
 
 __all__ = [
     "CAUSES",
+    "CLASS_NAMES",
     "OUTCOMES",
     "OUTCOME_NAMES",
     "UNSCORED",
@@ -85,6 +86,20 @@ OUTCOME_NAMES = {
     "not_attempted": "not attempted",
     "no_report": "no report",
 }
+
+CLASS_NAMES = {
+    "successful_reception": "decoded",
+    "signal_no_decode": "heard but not decoded",
+    "confirmed_miss": "missed while listening",
+    "satellite_silent": "satellite silent",
+    "satellite_state_indeterminate": "satellite's state undetermined",
+    "station_unavailable": "station unavailable",
+    "station_not_confirmed_listening": "not confirmed listening",
+    "assignment_declined": "declined",
+}
+"""One short name per Stage 20 pass class, for the network's weekly report.
+A miss is only ever *missed while listening*: a pass the station was not
+confirmed listening for is named as that, never as a miss (rule 7)."""
 
 VERDICT_BUCKETS = (
     (0.75, "very likely usable"),

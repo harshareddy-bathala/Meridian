@@ -22,6 +22,7 @@ import { fetchOpenWarnings } from "./networkWarnings";
 import { fetchProfiles } from "./profiles";
 import { fetchRecentReceptions } from "./receptions";
 import { fetchReceiveChains } from "./receiveChain";
+import { fetchWeekly } from "./reports";
 import { fetchNetworkReliability, fetchStationCapture } from "./reliability";
 import { fetchResults } from "./results";
 import { fetchLatestHeartbeat, fetchNetworkPasses, fetchUpcomingAssignments } from "./schedule";
@@ -72,6 +73,7 @@ async function requests(): Promise<string[]> {
     fetchEvents(fetcher, signal),
     fetchResults(fetcher, null, signal),
     fetchAreas(fetcher, signal),
+    fetchWeekly(fetcher, signal),
   ];
   await Promise.allSettled(calls);
   return urls;

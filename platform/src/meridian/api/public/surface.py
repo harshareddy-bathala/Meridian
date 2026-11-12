@@ -30,6 +30,7 @@ from meridian.api.public import (
     observations,
     passes,
     reliability,
+    reports,
     results,
     satellites,
     schedule,
@@ -58,3 +59,4 @@ router.include_router(schedule.router)
 router.include_router(conditions.router)
 router.include_router(events.router)
 router.include_router(results.router)
+router.include_router(reports.router)

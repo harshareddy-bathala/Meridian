@@ -1,4 +1,4 @@
-"""A sealed regional report, summarised for the public read API once D-137 allows it.
+"""A sealed regional report, summarised for the public read API.
 
 ``meridian regions summary <report> --output <file>`` writes ``areas-summary-1``:
 the report's hash and method, each active area's label, size and bounding
@@ -6,7 +6,7 @@ box, every series point of the public products, and every change with its
 interval and verdict, copied from the report's own files (D-229). The API
 reads the file and nothing else, because no runtime module may import this
 package (D-228), and serves it only when the deployment says areas are
-published, which D-326 proposes and the team must accept first (D-227).
+published, as D-326 settles it (accepted in Stage 37, D-366).
 
 **Coverage is left out.** It counts our own network's receptions over an area,
 which may be simulated, and is published with the reception figures it

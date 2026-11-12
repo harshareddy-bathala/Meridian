@@ -1,8 +1,7 @@
-// The live page's first screen: the time, what is overhead, the next pass, the
-// orbits it is all predicted from, and the geomagnetic index. Presentational:
-// the view hands each one its data.
+// The live page's first screen: the time, what is overhead, the next pass, and
+// the orbits it is all predicted from. Presentational: the view hands each one
+// its data.
 
-import { describeSample, type Conditions } from "./conditions";
 import { formatCountdown, formatUtcClock } from "./format";
 import { nextPass, passesUnderWay, type Assignment } from "./schedule";
 import { SimBadge } from "./SimBadge";
@@ -76,17 +75,5 @@ export function Orbits({ tracks }: { tracks: SatelliteTracks }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-export function Kp({ conditions }: { conditions: Conditions }) {
-  const { kp } = conditions;
-  if ("notMeasured" in kp) {
-    return <p className="dim">Geomagnetic index: not measured. {kp.notMeasured}</p>;
-  }
-  return (
-    <p>
-      {describeSample(kp, "Kp")}, published by {kp.source.name} ({kp.source.licence}).
-    </p>
   );
 }

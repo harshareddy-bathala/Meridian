@@ -7217,6 +7217,42 @@ D-326 proposed the answer to D-137 on 2026-11-02: only the team registers an are
 
 ---
 
+## D-367 — The reports page: the network's week in a versioned template, the area reports, and the sealed model summary
+
+**2026-11-12 · accepted** · *`meridian/notifications/{network,network_reading,wording,facts}.py`, `meridian/store/network_week_reads.py`, `meridian/api/public/{reports,models/network_report,surface}.py`, `dashboard/src/{Reports,reports,ModelSummary,Conditions,Live,LiveNow,route,Nav,App,Kiosk}.ts(x)`, `deploy/front/snapshot-routes.txt`, `deploy/tools/demo_rehearsal.py`, `docs/{THREAT-MODEL,OPERATIONS}.md`, and their tests; Stage 37. Applies D-086, D-182, D-303, D-306 and D-332.*
+
+The roadmap gives Stage 37 a reports page: a plain-language weekly report on the network, the published area reports, and the sealed evaluation summary.
+
+**Decision.**
+- **`#/reports`** replaces Insights. Its model summary moves here unchanged. Its conditions, Kp and the cloud over the stations, move to Live, where Kp was already shown. `#/insights` opens the reports page.
+- **The network's week is template `network-weekly-1`**, beside the owner reports' `pass-1` and `weekly-1`, and under their rules (D-303):
+  - a function of its facts alone;
+  - every word from `wording.py`, which gains one short name per pass class;
+  - plain text, with no language model;
+  - a released version never edited, its hash pinned by a test on fixed facts.
+- **What it says.** For measured and simulated stations apart, each in a section of its own, the simulated one headed as such (rule 5):
+  - stations registered, and those heard from;
+  - settled passes by class;
+  - the capture rate with its 95% interval;
+  - the loss budget against SC-4's target;
+  - losses by diagnosed cause;
+  - receive-chain warnings open at the end.
+
+  These are counts only, naming no station, satellite, pass or place. A deployment with no simulated station prints no simulated section, and one with no measured station says so.
+- **Counted as Results and Live count.** The passes are the classifications whose window closed in the week, under the deployment's `[classification]`, through `capture_rate`, `loss_budget` and `class_counts`. Causes are each pass's latest diagnosis under `[diagnosis]`, as `/results` reads them. An owner's `weekly-1` counts a station's passes by when their window began, but this report must agree with the reliability figures beside it, which count by window end.
+- **A settled week only** (D-306): Monday to Monday UTC, served once its last passes are past the settle margin. An earlier week is asked for by its Monday, back to the week of the first station still registered. A day that is not a Monday, or a week still settling, is an `invalid_query` that says which.
+- **Rendered on each request, and stored nowhere.** An owner's report names its rows because a sender must prove what it sends (D-302); nothing is sent here. The body carries the facts' and the text's sha256, so two reads can be compared. Records are append-only, so in a settled week only a late diagnosis or a removed station changes them.
+- **The area reports** are the published regional summary (D-366), read again: the report's hash and span, each area's latest published value per quantity, and its changes, each linking to the area's page. The page computes nothing from the values (rule 8).
+- **Not yet here: the SC figures.** Each sealed section writes its criterion as a row of its own shape: SC-1's relative gain, SC-5's slowest detection, SC-8's recall per cause. Publishing them needs a summary that states each one the same way, written by `meridian report summary` beside `model-summary-1`, and checked whole. That is the next part of this stage.
+
+*Rejected: a weekly-reports table filled by the jobs service.* Stage 37 has no migration reserved, and a stored copy would prove nothing that the hashes do not already show, since no recipient needs the copy that was sent.
+
+*Rejected: writing the week's sentences in the browser.* They would be words no template version holds and no hash pins. The same sentence would then read differently on the site, in a report and on the page.
+
+*Rejected: verdict bands in the network's week.* The verdict model's calibration is SC-7's question, answered by the sealed evaluation. A count of bands would mix that question into a reliability report.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7615,6 +7651,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-364 the live page, the ways in, satellites as diamonds | `dashboard/src/{Live,LiveNow,LiveFigures,Sparkline,Feed,WaysIn,satelliteLayer,StationMap,route,Nav,App,Kiosk,tracks,aggregates,events,schedule,format,useNow}.ts(x)`; `dashboard/src/app.css`; `dashboard/src/{live.test.ts,views.test.tsx,route.test.ts,snapshotRoutes.test.ts,fixtures.test-data.ts}`; `deploy/front/snapshot-routes.txt` |
 | D-365 results, every settled pass with its effect | `platform/src/meridian/store/result_reads.py`; `platform/src/meridian/reliability/budget.py`; `platform/src/meridian/api/public/{results,models/results,surface}.py`; `dashboard/src/{Results,results,Losses,Live,route,Nav,App,Kiosk,events}.ts(x)`; `deploy/front/snapshot-routes.txt`; `deploy/tools/demo_rehearsal.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_reliability_daily,test_public_privacy}.py`; `tests/integration/test_public_results_endpoint.py` |
 | D-366 D-326 accepted; areas, changes and release notes | `docs/DECISIONS.md`; `platform/src/meridian/api/public/areas.py`; `platform/src/meridian/cli_regions.py`; `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `.dockerignore`; `dashboard/src/{Areas,AreaMap,areas,Changes,ReleaseNotes,releaseNotes,useOlderPages,Results,events,StationMap,Sparkline,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/msp_conformance/test_public_areas_endpoint.py`; `tests/unit/test_regions_summary.py` |
+| D-367 the reports page and the network's week | `platform/src/meridian/notifications/{network,network_reading,wording,facts}.py`; `platform/src/meridian/store/network_week_reads.py`; `platform/src/meridian/api/public/{reports,models/network_report,surface}.py`; `platform/src/meridian/regions/summary.py`; `platform/src/meridian/reports/summary.py`; `dashboard/src/{Reports,reports,ModelSummary,Conditions,Live,LiveNow,route,Nav,App,Kiosk}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `deploy/tools/demo_rehearsal.py`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_network_report,test_notifications_boundaries,test_public_privacy}.py`; `tests/integration/test_public_network_report.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

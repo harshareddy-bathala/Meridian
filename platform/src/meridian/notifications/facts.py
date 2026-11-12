@@ -32,6 +32,7 @@ __all__ = [
     "WeeklyFacts",
     "facts_json",
     "inputs_sha256",
+    "plain_json",
 ]
 
 
@@ -133,7 +134,7 @@ Facts = PassFacts | WeeklyFacts
 def facts_json(facts: Facts) -> dict[str, object]:
     """The facts as plain JSON values: instants in UTC, tuples as lists."""
     kind = "pass" if isinstance(facts, PassFacts) else "weekly"
-    return {"kind": kind, "facts": _plain(dataclasses.asdict(facts))}
+    return {"kind": kind, "facts": plain_json(dataclasses.asdict(facts))}
 
 
 def inputs_sha256(facts: Facts) -> bytes:
@@ -144,13 +145,14 @@ def inputs_sha256(facts: Facts) -> bytes:
     return hashlib.sha256(text.encode("utf-8")).digest()
 
 
-def _plain(value: object) -> object:
+def plain_json(value: object) -> object:
+    """A dataclass's fields as JSON values: instants in UTC, tuples as lists."""
     if isinstance(value, datetime):
         if value.tzinfo is None:
             raise ValueError(f"an instant without a zone cannot be a fact: {value}")
         return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
     if isinstance(value, dict):
-        return {str(key): _plain(item) for key, item in value.items()}
+        return {str(key): plain_json(item) for key, item in value.items()}
     if isinstance(value, list | tuple):
-        return [_plain(item) for item in value]
+        return [plain_json(item) for item in value]
     return value

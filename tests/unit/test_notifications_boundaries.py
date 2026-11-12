@@ -22,7 +22,7 @@ from pathlib import Path
 PLATFORM = Path(__file__).resolve().parents[2] / "platform" / "src" / "meridian"
 NOTIFICATIONS = PLATFORM / "notifications"
 
-TEXT_PATH = ("facts.py", "wording.py", "templates.py")
+TEXT_PATH = ("facts.py", "wording.py", "templates.py", "network.py")
 """Every module a report's words come from."""
 
 LANGUAGE_MODELS = (

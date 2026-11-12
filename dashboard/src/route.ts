@@ -9,12 +9,13 @@
 //   #/results              every settled pass, the thirty days, every loss
 //   #/areas[/<id>]         the published areas of interest, and one area
 //   #/changes              every change to an area, the network's events, releases
-//   #/insights             the conditions outside, and the model's calibration
+//   #/reports              the network's week in words, area reports, the evaluation
 //   #/kiosk                every view in turn, for a screen nobody touches
 //
 // Anything else is the live view, so an old or mistyped link still lands
-// somewhere true. Two views Stage 37 replaced keep their links: `#/network`
-// opens the live view and `#/losses` the results it is now part of.
+// somewhere true. Views Stage 37 replaced keep their links: `#/network` opens
+// the live view, `#/losses` the results it is now part of, and `#/insights` the
+// reports, which took in its model (its conditions are on the live view).
 
 export const VIEWS = [
   "live",
@@ -23,7 +24,7 @@ export const VIEWS = [
   "results",
   "areas",
   "changes",
-  "insights",
+  "reports",
   "kiosk",
 ] as const;
 export type View = (typeof VIEWS)[number];
@@ -38,8 +39,8 @@ export interface Route {
 
 export const DEFAULT_ROUTE: Route = { view: "live", stationId: null };
 
-/** Views Stage 37 replaced, and the views that took them in (D-364, D-365). */
-const RENAMED: Record<string, View> = { network: "live", losses: "results" };
+/** Views Stage 37 replaced, and the views that took them in (D-364, D-365, D-367). */
+const RENAMED: Record<string, View> = { network: "live", losses: "results", insights: "reports" };
 
 /** The id a view's route carries, from what follows its name. */
 function withId(view: View, raw: string): Route {

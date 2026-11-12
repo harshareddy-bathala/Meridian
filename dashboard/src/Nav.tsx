@@ -7,7 +7,7 @@ const LINKS: { view: View; label: string }[] = [
   { view: "results", label: "Results" },
   { view: "areas", label: "Areas" },
   { view: "changes", label: "Changes" },
-  { view: "insights", label: "Insights" },
+  { view: "reports", label: "Reports" },
   { view: "kiosk", label: "Kiosk" },
 ];
 

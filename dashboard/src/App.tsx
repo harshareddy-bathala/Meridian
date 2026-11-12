@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactElement } from "react";
 
 import { fetchPlatformHealth, type PlatformHealth } from "./health";
-import { InsightsView } from "./Insights";
 import { Kiosk } from "./Kiosk";
 import { AreasView } from "./Areas";
 import { ChangesView } from "./Changes";
 import { Nav } from "./Nav";
+import { ReportsView } from "./Reports";
 import { ResultsView } from "./Results";
 import { Live } from "./Live";
 import type { Route } from "./route";
@@ -113,7 +113,7 @@ const VIEWS: Record<Route["view"], (route: Route, go: Go) => ReactElement> = {
   results: (_, go) => <ResultsView go={go} />,
   areas: (route, go) => <AreasView areaId={route.areaId ?? null} go={go} />,
   changes: (_, go) => <ChangesView go={go} />,
-  insights: () => <InsightsView />,
+  reports: () => <ReportsView />,
   kiosk: (_, go) => <Kiosk go={go} />,
 };
 

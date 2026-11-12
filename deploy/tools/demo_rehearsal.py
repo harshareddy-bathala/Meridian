@@ -52,12 +52,12 @@ VIEWS = (
     "results",
     "areas",
     "changes",
-    "insights",
+    "reports",
     "kiosk",
 )
-"""Every view the dashboard has (D-334, D-364, D-366)."""
+"""Every view the dashboard has (D-334, D-364, D-366, D-367)."""
 
-OUTAGE_VIEWS = ("live", "results", "insights")
+OUTAGE_VIEWS = ("live", "results", "reports")
 """The views asked for again with the api stopped: those a visitor opens first."""
 
 SETTLE_MS = 4_000

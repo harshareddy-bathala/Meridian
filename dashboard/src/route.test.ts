@@ -7,7 +7,7 @@ describe("the route in the fragment", () => {
     expect(parseRoute("#/results")).toEqual({ view: "results", stationId: null });
     expect(parseRoute("#/schedule/st_1")).toEqual({ view: "schedule", stationId: "st_1" });
     expect(parseRoute("#/stations/st_1")).toEqual({ view: "stations", stationId: "st_1" });
-    expect(parseRoute("#/insights/st_1")).toEqual({ view: "insights", stationId: null });
+    expect(parseRoute("#/reports/st_1")).toEqual({ view: "reports", stationId: null });
   });
 
   it("lands an empty, old or mistyped fragment on the live view", () => {
@@ -21,6 +21,7 @@ describe("the route in the fragment", () => {
     expect(parseRoute("#/network")).toEqual(DEFAULT_ROUTE);
     expect(parseRoute("#/live")).toEqual(DEFAULT_ROUTE);
     expect(parseRoute("#/losses")).toEqual({ view: "results", stationId: null });
+    expect(parseRoute("#/insights")).toEqual({ view: "reports", stationId: null });
   });
 
   it("names an area by its number, and lists the areas otherwise", () => {

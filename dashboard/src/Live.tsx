@@ -1,10 +1,11 @@
 import { fetchAggregates } from "./aggregates";
+import { ConditionsFigure } from "./Conditions";
 import { fetchConditions } from "./conditions";
 import { fetchEvents } from "./events";
 import { Feed } from "./Feed";
 import { formatDay, formatFrequency, livenessLabel } from "./format";
 import { TodayFigures, Week } from "./LiveFigures";
-import { Clock, Kp, Orbits, Overhead } from "./LiveNow";
+import { Clock, Orbits, Overhead } from "./LiveNow";
 import { fetchOpenWarnings, type NetworkWarning } from "./networkWarnings";
 import type { Route } from "./route";
 import { fetchNetworkPasses } from "./schedule";
@@ -21,8 +22,9 @@ import { useStations } from "./useStations";
 // What is happening now, for a reader who owns no station: the time, what is
 // overhead and where every satellite goes next, the next pass, today's passes
 // and the week's, the stations and the orbits they are scheduled from, the
-// geomagnetic index, and what just happened. No images (Stage 37). Every
-// settled pass, and the thirty days' figures, are the results page's (D-365).
+// conditions outside (the geomagnetic index and the cloud), and what just
+// happened. No images (Stage 37). Every settled pass, and the thirty days'
+// figures, are the results page's (D-365).
 // Measured and simulated figures are stated apart, each simulated one marked
 // (rule 5), and every absence is a sentence (D-086).
 
@@ -123,8 +125,8 @@ function NowSection({ live, now, go }: { live: LiveReads; now: Date; go: Go }) {
         <div className="figure">
           <h3>Orbits</h3>
           {live.tracks.value !== null && <Orbits tracks={live.tracks.value} />}
-          {live.conditions.value !== null && <Kp conditions={live.conditions.value} />}
         </div>
+        {live.conditions.value !== null && <ConditionsFigure conditions={live.conditions.value} />}
       </div>
     </>
   );
