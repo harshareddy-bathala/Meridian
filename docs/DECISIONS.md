@@ -2039,6 +2039,8 @@ This is coarsening, not a proof of privacy. A minute and a degree make the fit f
 
 *Rejected: not publishing pass geometry at all.* Stage 11 asks for upcoming passes and assignment reasons, and a scheduling reason like "peak elevation below the configured minimum" is unreadable without the elevation it refers to.
 
+*Amended 2026-11-12 (D-369):* the rule's three functions now live in `meridian/public_precision.py`, which `window_privacy.py` imports, so the evidence dataset's public cut applies the same rule without importing `meridian.api`.
+
 ---
 
 ## D-094 — The post-reception layer adds no hardware and no budget
@@ -7281,6 +7283,41 @@ D-367 left the SC figures for their own part. A sealed evaluation run judges SC-
 
 ---
 
+## D-369 — The data page publishes only the public cut of an evidence package, from an index the API checks whole
+
+**2026-11-12 · accepted** · *`meridian/public_precision.py`; `meridian/datasets/{evidence_config,evidence_public,evidence_dataset,evidence_datasheet,evidence_index}.py`; `meridian dataset publish`; `meridian/api/public/{datasets,models/datasets,window_privacy,surface}.py`; `meridian/config.py` (`EVIDENCE_INDEX`); `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `deploy/front/{nginx.conf,snapshot-routes.txt}`; `deploy/tools/front_warm.py`; `dashboard/src/{Data,datasets,apiReference,credits,InlineParts,releaseNotes}.ts(x)`; `analysis/configs/dataset.toml.example`; `docs/{THREAT-MODEL,OPERATIONS}.md`, and their tests; Stage 37. Follows D-368. Applies D-082, D-086, D-088, D-093, D-143, D-235, D-283, D-310, D-312, D-313 and D-332.*
+
+The roadmap's data page offers the evidence packages for download, with the API reference, how to cite and every source's credit. Stage 30's package was built "because a package is published" (D-310) and leaves out station coordinates, but it keeps each reception's window, the pass's acquisition and loss of signal to the millisecond, its peak elevation and azimuths to the hundredth, and the station's SNR and Doppler series with their times. D-093 found that dozens of such passes let anyone fit a station's position far more finely than its operator declared (D-082), and a timed Doppler curve is how a satellite fixes a transmitter. Served on the public API, the package would undo D-093.
+
+**Decision.**
+- **A public cut, asked for by configuration.** `[export] precision = "public"` cuts every row to D-093's rule:
+  - every window is widened to whole minutes: the assignment's, the pass's and the observation's;
+  - every other instant is floored to the minute: the first detection, and when each revision was submitted;
+  - every angle is whole degrees;
+  - the SNR and Doppler series are `null`;
+  - each diagnosis keeps the causes it tested, whether each fired and its support, but not what each test found, which reads the station's sky sample by sample.
+
+  Verdicts, outcomes, frame counts and every content hash are kept. The datasheet says the package is the cut. `"full"` stays the default and enters the hashed values only when it is not, so every package exported before the key still regenerates to its hash.
+- **One rule in one place.** `floor_minute`, `ceil_minute` and `publish_angle` move from `api/public/window_privacy.py` to `meridian/public_precision.py`, which the window module imports and the cut applies. `meridian.datasets` may not import `meridian.api` (D-143), so a copy in each would have been two rules able to disagree.
+- **Published by a command, served from an index.** `meridian dataset publish <package> --published <dir>`:
+  - reads the package through `read_directory`;
+  - refuses one that is not the cut;
+  - seals a copy at `<dir>/evidence/<hash prefix>/` whose manifest keeps the commit, Python and dependency versions but not `snapshot_path`, a path on the exporting machine (the environment is unhashed, so the hash holds, D-235);
+  - rewrites `evidence/index.json`, schema `evidence-index-1`, from every package there. A directory there that is not a cut, or not named by its hash, stops the index.
+- **The API serves the index, checked whole, and the files it lists.** `EVIDENCE_INDEX` names the index, and the checks are D-332's: no unknown key, each package named by its hash and listed once, each file once, the manifest among them, and only the simulated population labelled simulated (rule 5). `/api/v1/datasets/{name}/{file}` serves only a name and a file the index lists, as an attachment, and only while its bytes still have the digest and size the index states. The API reads no snapshot and imports nothing from `meridian.datasets`, as D-143 requires.
+- **The index names no seed.** No public answer carries a key that does (D-088). The package's own manifest, datasheet and configuration state it, and this export draws nothing from it (D-312).
+- **A download survives an outage.** The files are links on the page, not requests a view makes, so they are not in the routes file. The warmer reads them from the listing instead, and the front keeps each under its usual rule: the api is asked every time, and the copy is served only when it does not answer (D-282, D-283). A package taken down stops being served on the next request.
+- **The API reference is the platform's own description.** The page reads `/openapi.json` and lists every GET under `/api/v1` with the first paragraph of its description, so a route appears with the build that serves it. The front now keeps `/openapi.json` like a view.
+- **Citation and credits come from the files that state them.** Each package's citation is `licence.txt`'s credit line, written by the platform with the package's hash. The credits are the data-source and dependency tables of the `ATTRIBUTION.md` this build shipped with, bundled at build time as the release notes are (D-366), and drawn as elements, never as HTML.
+
+*Rejected: serving the full-precision package.* Its exact geometry is what D-093 exists to keep off the public API, and a package is regenerated from its snapshot, which is never published, so full precision would help no reader check anything.
+
+*Rejected: only simulated packages for now.* The cut is what a measured package needs before any owner could consent to more, and a virtual station has no location to protect, so waiting would publish nothing a reader can use about real stations.
+
+*Rejected: the front keeping package files for thirty days.* A package is named by its hash and never rewritten, so a long-lived copy would be safe to serve, but one taken down for a mistake would stay downloadable for a month.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7681,6 +7718,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-366 D-326 accepted; areas, changes and release notes | `docs/DECISIONS.md`; `platform/src/meridian/api/public/areas.py`; `platform/src/meridian/cli_regions.py`; `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `.dockerignore`; `dashboard/src/{Areas,AreaMap,areas,Changes,ReleaseNotes,releaseNotes,useOlderPages,Results,events,StationMap,Sparkline,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/msp_conformance/test_public_areas_endpoint.py`; `tests/unit/test_regions_summary.py` |
 | D-367 the reports page and the network's week | `platform/src/meridian/notifications/{network,network_reading,wording,facts}.py`; `platform/src/meridian/store/network_week_reads.py`; `platform/src/meridian/api/public/{reports,models/network_report,surface}.py`; `platform/src/meridian/regions/summary.py`; `platform/src/meridian/reports/summary.py`; `dashboard/src/{Reports,reports,ModelSummary,Conditions,Live,LiveNow,route,Nav,App,Kiosk}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `deploy/tools/demo_rehearsal.py`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_network_report,test_notifications_boundaries,test_public_privacy}.py`; `tests/integration/test_public_reports_endpoint.py` |
 | D-368 the success criteria, published from a sealed run | `platform/src/meridian/reports/criteria.py`; `platform/src/meridian/cli_report.py`; `platform/src/meridian/api/public/{reports,models/criteria}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Criteria,criteria,Reports}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_report_criteria,test_public_privacy}.py`; `tests/integration/test_public_reports_endpoint.py` |
+| D-369 the data page and the public cut of an evidence package | `platform/src/meridian/public_precision.py`; `platform/src/meridian/datasets/{evidence_config,evidence_public,evidence_dataset,evidence_datasheet,evidence_index}.py`; `platform/src/meridian/cli_dataset.py`; `platform/src/meridian/api/public/{datasets,models/datasets,window_privacy,surface}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `.dockerignore`; `deploy/front/{nginx.conf,snapshot-routes.txt}`; `deploy/tools/front_warm.py`; `dashboard/src/{Data,datasets,apiReference,credits,InlineParts,ReleaseNotes,releaseNotes,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `analysis/configs/dataset.toml.example`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_evidence_publish,test_evidence_config,test_public_privacy,test_front_warm,test_front_config}.py`; `tests/integration/test_public_datasets_endpoint.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

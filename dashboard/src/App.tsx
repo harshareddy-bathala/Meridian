@@ -5,6 +5,7 @@ import { Kiosk } from "./Kiosk";
 import { AreasView } from "./Areas";
 import { ChangesView } from "./Changes";
 import { Nav } from "./Nav";
+import { DataView } from "./Data";
 import { ReportsView } from "./Reports";
 import { ResultsView } from "./Results";
 import { Live } from "./Live";
@@ -114,6 +115,7 @@ const VIEWS: Record<Route["view"], (route: Route, go: Go) => ReactElement> = {
   areas: (route, go) => <AreasView areaId={route.areaId ?? null} go={go} />,
   changes: (_, go) => <ChangesView go={go} />,
   reports: () => <ReportsView />,
+  data: () => <DataView />,
   kiosk: (_, go) => <Kiosk go={go} />,
 };
 

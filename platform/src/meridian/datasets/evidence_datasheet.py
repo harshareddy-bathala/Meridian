@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-__all__ = ["LICENCE", "LICENCE_ID", "datasheet"]
+__all__ = ["CITED_AT", "LICENCE", "LICENCE_ID", "citation", "datasheet"]
 
 LICENCE_ID = "CC-BY-4.0"
 
@@ -51,6 +51,16 @@ a fact about the sky.
 """
 """The package's ``licence.txt``, the same in every package (D-313)."""
 
+CITED_AT = "https://github.com/harshareddy-bathala/Meridian"
+"""Where ``licence.txt`` asks a citation to point."""
+
+
+def citation(content_sha256: bytes) -> str:
+    """How to credit one package, in the words ``licence.txt`` gives (D-369)."""
+    return (
+        f"Meridian evidence dataset, content sha256 {content_sha256.hex()}, {CITED_AT}"
+    )
+
 
 def datasheet(  # noqa: PLR0913 — one package's facts, each by name
     *,
@@ -61,8 +71,13 @@ def datasheet(  # noqa: PLR0913 — one package's facts, each by name
     transformation_version: str,
     seed: int,
     counts: Mapping[str, int],
+    public: bool = False,
 ) -> bytes:
-    """The package's ``datasheet.md``, from its own facts alone."""
+    """The package's ``datasheet.md``, from its own facts alone.
+
+    A public cut says so in a section of its own, and a full-precision
+    package's datasheet is byte for byte what it was before the cut existed.
+    """
     populations = "\n".join(
         f"| {name} | `{_file(name)}` | {count} |" for name, count in counts.items()
     )
@@ -93,7 +108,7 @@ reception was made by a virtual station whose outcomes are drawn from a model;
 it is not evidence about the sky. Simulated receptions are in a package only
 when its configuration asked for them by name (`config.toml`).
 
-## A row
+{_PUBLIC_CUT if public else ""}## A row
 
 One JSON object per line, keys sorted, ordered by `assignment_id`. Instants are
 UTC to the millisecond; hashes are lowercase hex.
@@ -150,6 +165,28 @@ its inputs.
 That any verdict or diagnosis is correct. The package is exactly what Meridian
 concluded, so that anyone can check it, not a set of labels known to be true.
 """.encode()
+
+
+_PUBLIC_CUT = """\
+## The public cut
+
+This package was cut to what Meridian's public API may state (`precision =
+"public"` in `config.toml`), so that no station can be located from it more
+finely than its operator chose to publish:
+
+- every window, an assignment's, a pass's and an observation's, is widened to
+  whole minutes, its start floored and its end ceiled;
+- the first detection, and when each revision was submitted, are floored to
+  the minute;
+- the peak elevation and both azimuths are whole degrees;
+- `snr_samples` and `doppler_samples` are `null`;
+- each diagnosis's `candidates_json` keeps every cause tested, whether it fired
+  and its support, but not what the test found.
+
+Everything else is as in the full package, which only the holder of the
+snapshot can regenerate.
+
+"""
 
 
 def _file(population: str) -> str:

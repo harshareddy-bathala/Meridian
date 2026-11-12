@@ -1,11 +1,19 @@
-"""What an evidence package holds: which populations, and nothing else yet.
+"""What an evidence package holds: which populations, and how precisely.
 
-One table, ``[export]``, with one key:
+One table, ``[export]``, with two keys:
 
 * ``populations`` — ``["measured"]`` by default. Simulated receptions are in a
   package only when this names ``"simulated"``, and then in a file of their
   own (D-104): a researcher training on the package cannot mix the two by
   accident, and cannot get simulated rows without having asked for them.
+* ``precision`` — ``"full"`` by default, every value as the snapshot holds it.
+  ``"public"`` is the cut the public API may serve: every time to the minute,
+  every angle to the degree, and nothing that times a station's sky more
+  finely (D-093, D-369).
+
+**A full-precision configuration hashes as it did before ``precision``
+existed.** The key enters the hashed values only when it is ``"public"``, so
+every package exported before it still regenerates to its own hash.
 
 **Strict**, as the labelling configuration is: an unknown table or key, or a
 population that is neither, is refused rather than ignored.
@@ -24,14 +32,17 @@ import hashlib
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from meridian.datasets.canonical import canonical_bytes
 
 __all__ = [
     "POPULATIONS",
+    "PRECISIONS",
     "EvidenceConfig",
     "EvidenceConfigError",
     "EvidenceConfigFile",
+    "Precision",
     "evidence_config_sha256",
     "load_evidence_config",
     "parse_evidence_config",
@@ -39,6 +50,12 @@ __all__ = [
 
 POPULATIONS = ("measured", "simulated")
 """Every population, in the order a package lists them."""
+
+Precision = Literal["full", "public"]
+PRECISIONS: tuple[Precision, ...] = ("full", "public")
+"""``full`` keeps every value; ``public`` is the cut the public API serves."""
+
+_KEYS = frozenset({"populations", "precision"})
 
 
 class EvidenceConfigError(ValueError):
@@ -50,10 +67,18 @@ class EvidenceConfig:
     """The resolved evidence configuration."""
 
     populations: tuple[str, ...] = ("measured",)
+    precision: Precision = "full"
 
     def parameters(self) -> dict[str, object]:
-        """The resolved values, as the hash and the manifest record them."""
-        return {"populations": list(self.populations)}
+        """The resolved values, as the hash and the manifest record them.
+
+        ``precision`` only when it is ``public``, so a full-precision package
+        hashes as every package did before the key existed.
+        """
+        values: dict[str, object] = {"populations": list(self.populations)}
+        if self.precision == "public":
+            values["precision"] = self.precision
+        return values
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,12 +110,13 @@ def parse_evidence_config(text: bytes) -> EvidenceConfigFile:
     table = parsed.get("export", {})
     if not isinstance(table, dict):
         raise EvidenceConfigError("[export] must be a table")
-    if set(table) - {"populations"}:
-        raise EvidenceConfigError(
-            f"[export] unknown keys {sorted(set(table) - {'populations'})}"
-        )
+    if set(table) - _KEYS:
+        raise EvidenceConfigError(f"[export] unknown keys {sorted(set(table) - _KEYS)}")
     return EvidenceConfigFile(
-        config=EvidenceConfig(populations=_populations(table.get("populations"))),
+        config=EvidenceConfig(
+            populations=_populations(table.get("populations")),
+            precision=_precision(table.get("precision", "full")),
+        ),
         text=text,
     )
 
@@ -120,3 +146,12 @@ def _populations(raw: object) -> tuple[str, ...]:
     if len(set(raw)) != len(raw):
         raise EvidenceConfigError("[export] populations names one twice")
     return tuple(one for one in POPULATIONS if one in raw)
+
+
+def _precision(raw: object) -> Precision:
+    for one in PRECISIONS:
+        if raw == one:
+            return one
+    raise EvidenceConfigError(
+        f"[export] precision is one of {', '.join(PRECISIONS)}, not {raw!r}"
+    )

@@ -650,3 +650,21 @@ tr.selected {
 .criterion-met {
   font-weight: 600;
 }
+
+/* The data page: a package's digests are read and copied whole (D-369). */
+.digest {
+  overflow-wrap: anywhere;
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
+.citation {
+  overflow-wrap: anywhere;
+}
+
+.checksums {
+  overflow-x: auto;
+  font-size: 0.85em;
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+}

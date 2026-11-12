@@ -23,7 +23,9 @@ RUN npm ci --no-audit --no-fund
 COPY dashboard/ ./
 # The release notes are the changelog this build shipped with, bundled at build
 # time (D-366): src/ReleaseNotes.tsx reads ../../CHANGELOG.md, which is here.
+# The data page's credits are its ATTRIBUTION.md, the same way (D-369).
 COPY CHANGELOG.md /CHANGELOG.md
+COPY ATTRIBUTION.md /ATTRIBUTION.md
 RUN npm run build
 
 

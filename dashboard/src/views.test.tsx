@@ -24,6 +24,9 @@ import {
   warningBody,
 } from "./fixtures.test-data";
 import { criteriaBody, weeklyBody } from "./fixtures-reports.test-data";
+import { datasetsBody } from "./fixtures-data.test-data";
+import { Packages } from "./Data";
+import { decodeDatasets, type EvidencePackage } from "./datasets";
 import { decodeInsights } from "./insights";
 import { ModelPanel } from "./ModelSummary";
 import { decodeLoss } from "./losses";
@@ -257,5 +260,40 @@ describe("the areas pages", () => {
     expect(markup).toContain("NASA open data");
     expect(markup).toContain('href="https://example.org/terms"');
     expect(markup).toContain("aaaaaaaaaaaa");
+  });
+});
+
+describe("the data page", () => {
+  function packages(): EvidencePackage[] {
+    const read = decodeDatasets(datasetsBody);
+    if (!("packages" in read)) throw new Error("expected packages");
+    return read.packages;
+  }
+
+  it("marks a package holding simulated receptions, and not a measured one", () => {
+    const [measured, both] = packages();
+    if (measured === undefined || both === undefined) throw new Error("expected two packages");
+    const plain = renderToStaticMarkup(<Packages read={{ packages: [measured] }} />);
+    const mixed = renderToStaticMarkup(<Packages read={{ packages: [both] }} />);
+    expect(badges(plain)).toBe(0);
+    // Once on the package, once on its simulated population.
+    expect(badges(mixed)).toBe(2);
+  });
+
+  it("links every file under the name a check expects, with its size and the citation", () => {
+    const [measured] = packages();
+    if (measured === undefined) throw new Error("expected a package");
+    const markup = renderToStaticMarkup(<Packages read={{ packages: [measured] }} />);
+    expect(markup).toContain('href="/api/v1/datasets/abababababab/receptions.jsonl"');
+    expect(markup).toContain('download="abababababab-receptions.jsonl"');
+    expect(markup).toContain("1.3 MB");
+    expect(markup).toContain(`content sha256 ${"ab".repeat(32)}`);
+  });
+
+  it("says in words that nothing is published yet", () => {
+    const read = decodeDatasets({ status: "not_yet_computed", reason: "No evidence package has been published yet." });
+    const markup = renderToStaticMarkup(<Packages read={read} />);
+    expect(markup).toContain("No evidence package has been published yet.");
+    expect(badges(markup)).toBe(0);
   });
 });

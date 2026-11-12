@@ -10,3 +10,11 @@
 # receptions_simulated.jsonl, and simulated receptions are exported only when
 # named here (D-104), so a package nobody asked to mix cannot mix them.
 populations = ["measured"]
+
+# How precisely the package states each reception: "full", every value as the
+# snapshot holds it, or "public", the cut the public API may serve. The public
+# cut widens every window to whole minutes, rounds every angle to whole degrees,
+# leaves out the SNR and Doppler series and what each diagnosis's tests found,
+# so no station can be located from it more finely than it declared (D-093,
+# D-369). Only a public cut can be published with `meridian dataset publish`.
+precision = "full"

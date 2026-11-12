@@ -3,7 +3,8 @@
 // The file is bundled at build time (Vite's `?raw`), so the notes are always
 // the ones that shipped with this build and fetch nothing. Only the handful of
 // Markdown forms the changelog uses are read: a release heading, a section
-// heading, a bullet, a paragraph, and inline bold, code and links. Rendering
+// heading, a bullet, a paragraph, and inline bold, code, links and bare
+// addresses. The data page's credits read their cells the same way. Rendering
 // builds React elements from these parts, never HTML from text, so nothing in
 // the file can become markup.
 
@@ -27,23 +28,29 @@ export interface Release {
 /** Where a relative link in the changelog points: the repository it lives in. */
 export const REPOSITORY = "https://github.com/harshareddy-bathala/Meridian/blob/main/";
 
-const INLINE = /\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g;
+const INLINE =
+  /\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/[^\s<>|]*[^\s<>|.,;:)])/g;
 
 function href(target: string): string {
   return /^https?:\/\//.test(target) ? target : `${REPOSITORY}${target.replace(/^\.\//, "")}`;
 }
 
-function token(match: RegExpExecArray): Inline {
-  const [, strong, em, code, text = "", target = ""] = match;
-  if (strong !== undefined) return { kind: "strong", text: strong };
-  if (em !== undefined) return { kind: "em", text: em };
-  if (code !== undefined) return { kind: "code", text: code };
-  // A link whose text is code, such as [`docs/ACCEPTANCE.md`](...).
+/** A Markdown link; one whose text is code, such as [`docs/ACCEPTANCE.md`](...). */
+function link(text: string, target: string): Inline {
   const quoted = /^`(.*)`$/.exec(text);
   return { kind: "link", text: quoted?.[1] ?? text, href: href(target), code: quoted !== null };
 }
 
-/** A line's bold, code and links, and the plain text between them. */
+function token(match: RegExpExecArray): Inline {
+  const [, strong, em, code, text, target = "", bare = ""] = match;
+  if (strong !== undefined) return { kind: "strong", text: strong };
+  if (em !== undefined) return { kind: "em", text: em };
+  if (code !== undefined) return { kind: "code", text: code };
+  if (text !== undefined) return link(text, target);
+  return { kind: "link", text: bare, href: bare, code: false };
+}
+
+/** A line's bold, code, links and bare addresses, and the plain text between them. */
 export function parseInline(line: string): Inline[] {
   const parts: Inline[] = [];
   let at = 0;

@@ -40,7 +40,7 @@ def _snapshot() -> list[str]:
 def test_only_the_dashboard_and_the_public_read_api_are_kept() -> None:
     locations = _locations(_conf())
     keeping = {arg for arg, body in locations.items() if SNAPSHOT_INCLUDE in body}
-    assert keeping == {"= /", "/assets/", "/api/v1/"}
+    assert keeping == {"= /", "/assets/", "/api/v1/", "= /openapi.json"}
 
 
 def test_nothing_else_names_the_cache() -> None:

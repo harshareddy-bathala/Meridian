@@ -65,7 +65,8 @@ analysis/
 !README.md
 # The ingest image carries it: `fetch` checks a source's attribution entry
 # before opening a socket (D-134, D-352). The platform image copies named
-# directories only, so this file never reaches it.
+# directories only, so this file never reaches it; the dashboard's build stage
+# bundles it as the data page's credits (D-369), and only its output is kept.
 !ATTRIBUTION.md
 # The dashboard bundles it as its release notes (D-366). Copied into the
 # dashboard's build stage only; the runtime image takes that stage's output.

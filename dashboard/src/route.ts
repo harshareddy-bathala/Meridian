@@ -10,6 +10,7 @@
 //   #/areas[/<id>]         the published areas of interest, and one area
 //   #/changes              every change to an area, the network's events, releases
 //   #/reports              the network's week in words, area reports, the evaluation
+//   #/data                 the evidence packages, the API, how to cite, the credits
 //   #/kiosk                every view in turn, for a screen nobody touches
 //
 // Anything else is the live view, so an old or mistyped link still lands
@@ -25,6 +26,7 @@ export const VIEWS = [
   "areas",
   "changes",
   "reports",
+  "data",
   "kiosk",
 ] as const;
 export type View = (typeof VIEWS)[number];

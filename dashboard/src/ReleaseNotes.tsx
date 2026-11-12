@@ -1,36 +1,11 @@
 import changelog from "../../CHANGELOG.md?raw";
 
-import { parseReleases, type Block, type Inline } from "./releaseNotes";
+import { Parts } from "./InlineParts";
+import { parseReleases, type Block } from "./releaseNotes";
 
 // Every release, from the CHANGELOG.md this build shipped with.
 
 const RELEASES = parseReleases(changelog);
-
-function Parts({ parts }: { parts: Inline[] }) {
-  return (
-    <>
-      {parts.map((one, index) => {
-        const key = `${String(index)}:${one.text}`;
-        switch (one.kind) {
-          case "strong":
-            return <strong key={key}>{one.text}</strong>;
-          case "em":
-            return <em key={key}>{one.text}</em>;
-          case "code":
-            return <code key={key}>{one.text}</code>;
-          case "link":
-            return (
-              <a key={key} href={one.href}>
-                {one.code ? <code>{one.text}</code> : one.text}
-              </a>
-            );
-          case "text":
-            return <span key={key}>{one.text}</span>;
-        }
-      })}
-    </>
-  );
-}
 
 /** Runs of bullets become one list; headings and paragraphs stand alone. */
 function grouped(blocks: Block[]): (Block | Block[])[] {

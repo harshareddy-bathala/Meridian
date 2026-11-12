@@ -108,6 +108,12 @@ class Settings:
     ``not_yet_computed`` (D-368). Defaulted, for the reason ``verdict_model``
     is."""
 
+    evidence_index: str = ""
+    """The published evidence packages' index, as the API container sees it, or
+    empty for none: ``/api/v1/datasets`` then answers ``not_yet_computed``, and
+    each package's files are read from beside it (D-369). Defaulted, for the
+    reason ``verdict_model`` is."""
+
     @property
     def psycopg_url(self) -> str:
         """``database_url`` in the form ``psycopg.connect`` accepts (D-033)."""
@@ -315,6 +321,7 @@ def load_settings(*, secrets_held: frozenset[str] = EVERY_SECRET) -> Settings:
         verdict_model=os.environ.get("VERDICT_MODEL", "").strip(),
         report_summary=os.environ.get("REPORT_SUMMARY", "").strip(),
         report_criteria=os.environ.get("REPORT_CRITERIA", "").strip(),
+        evidence_index=os.environ.get("EVIDENCE_INDEX", "").strip(),
     )
 
     check_settings(settings, secrets_held)

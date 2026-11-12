@@ -1156,6 +1156,8 @@ Stage 35 adds six reads to the public API for the dashboard's network, schedule,
 | `GET /api/v1/events` | the last week's events, newest first and paged: a station registered, a pass first reported decoded, a loss diagnosed under the deployment's `[diagnosis]`, a receive-chain warning raised or cleared under its watch; each names the record it came from (D-363) |
 | `GET /api/v1/results[?station_id=]` | every pass classified under the deployment's `[classification]`, the most recently classified first: its window to whole minutes, its class, its `effect` on SC-4 (`captured`, `lost` or `satellite`), whether a station was confirmed listening, the report's outcome, and its diagnosed cause where the deployment's `[diagnosis]` made one (D-365) |
 | `GET /api/v1/reports/weekly[?week=]` | the network's latest settled week, or the week from a given Monday, as plain text from template `network-weekly-1`: measured and simulated stations apart, settled passes by class, the capture rate with its interval, the loss budget, losses by cause and warnings open, all counted under the deployment's `[classification]` and `[diagnosis]`; with the facts' and text's sha256 and the previous week's Monday. A day that is not a Monday, or a week whose last passes are still inside the settle margin, is `invalid_query` (D-367) |
+| `GET /api/v1/datasets` | the published evidence packages, every one the public cut, from the index `EVIDENCE_INDEX` names under `PUBLISHED_DIR`, written by `meridian dataset publish`; `not_yet_computed` while it is unset, and `server_error` if the index is refused (D-369) |
+| `GET /api/v1/datasets/{name}/{file}` | one file the index lists, as an attachment, only while it has the digest and size the index states; `not_found` for anything the index does not list (D-369) |
 | `GET /api/v1/reports/criteria` | a sealed run's success criteria, the file `REPORT_CRITERIA` names under `PUBLISHED_DIR`, written by `meridian report criteria`; `not_yet_computed` while it is unset, and `server_error` if the file is refused (D-368) |
 
 ```bash
@@ -1199,7 +1201,7 @@ Add `--skip-outage` to leave the api running, and `--chromium PATH` to use a bro
 
 A package of Meridian's own receptions — each with its current observation and lineage, its verdicts and diagnoses, and its provenance — that someone who was not in the room can regenerate to the same hash (SC-10). It is built from a raw snapshot (§ Dataset snapshots), a configuration and a seed, and nothing else: neither command opens a database or a socket.
 
-Decisions this section puts into practice: D-310 to D-316.
+Decisions this section puts into practice: D-310 to D-316, and D-369 for the data page.
 
 ### Exporting a package
 
@@ -1217,6 +1219,7 @@ It is sealed under `<datasets root>/evidence/<hash prefix>/`, or at `--output`, 
 - **What it holds** is in its `datasheet.md`: one row per reception a station held, a miss with no report included; and what was left out — station coordinates, names and notes, product locations and element-set lines (D-310).
 - **Its licence is CC BY 4.0**, in `licence.txt` (D-313).
 - **The seed changes nothing today.** The export draws nothing at random; the seed is recorded so a package names all three of its inputs (D-312).
+- **Full precision, unless asked.** `precision = "full"` is the default and keeps every value as the snapshot holds it. `precision = "public"` is the cut the data page serves: every window widened to whole minutes, every angle to whole degrees, the SNR and Doppler series left out, and only which causes each diagnosis tested, not what it found (D-093, D-369). Its datasheet says so.
 
 ### Verifying one
 
@@ -1231,6 +1234,20 @@ It finds the snapshot by hash — `--snapshot`, then the path recorded when it w
 Publish the package directory together with the raw snapshot it names, or the package alone with a note that the snapshot is held privately: **a raw snapshot holds every station's coordinates at full precision** and is not for publication. Without its snapshot a package can still be read, and its manifest checked, but not regenerated. Keep the snapshot: it cannot be retaken (D-144), and a package is lost for good only with it.
 
 CI regenerates a simulated package on a second runner on every change (`ci.yml › evidence-elsewhere`, D-315).
+
+### Putting one on the data page
+
+The dashboard's data page lists the packages in `PUBLISHED_DIR/evidence/`, with every file to download and its digest (D-369). Only a public cut goes there: a full-precision package times each pass and its Doppler curve finely enough to locate a station better than it declared (D-093), and is refused.
+
+```sh
+uv run meridian dataset export --snapshot <raw snapshot> \
+    --config <a copy of dataset.toml.example with precision = "public"> --seed 4471
+uv run meridian dataset publish <the package it printed> --published data/published
+```
+
+`publish` checks the package against its manifest, seals a copy at `data/published/evidence/<hash prefix>/` without the path it was built from, and rewrites `data/published/evidence/index.json` from every package there. Then set `EVIDENCE_INDEX=/published/evidence/index.json` on the api. Unset, `/api/v1/datasets` answers `not_yet_computed`; named and refused, `server_error` naming the setting. A file changed after it was published is refused rather than served, and the front keeps a copy of every listed file, warmed from the listing, so a download survives the api being down.
+
+To take a package down, remove its directory and run `publish` again on any package still published, which rewrites the index without it; delete `index.json` if none is left. The api stops serving it on the next request.
 
 ---
 
