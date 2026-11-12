@@ -1,10 +1,10 @@
 """``/api/v1/areas`` — areas of interest, once the team has said they may be public.
 
-Until D-137 is settled nothing about an area is published (D-227). D-326
-proposes the answer; the operator says it is accepted by setting
-``AREAS_PUBLISHED=true``, and names the file ``meridian regions summary`` wrote
-with ``AREAS_SUMMARY``. Either missing, the endpoint answers ``not_yet_computed``
-with the reason and no field a chart could read (D-086).
+D-326 answers D-137, and the team accepted it on 2026-11-07 (D-366): the team
+registers areas and a registration is public. A deployment publishes its areas
+by setting ``AREAS_PUBLISHED=true`` and naming the file ``meridian regions
+summary`` wrote with ``AREAS_SUMMARY``. Either missing, the endpoint answers
+``not_yet_computed`` with the reason and no field a chart could read (D-086).
 
 **The file, not the report.** No runtime module may import ``meridian.regions``
 (D-228), so the API reads the summary the operator published. It is read on
@@ -12,7 +12,7 @@ each request — a small file, changed by a person — and a file that cannot be
 read or does not parse is a ``server_error`` naming the setting, never a partial
 body.
 
-Reference: docs/DECISIONS.md D-086, D-137, D-227, D-228, D-326.
+Reference: docs/DECISIONS.md D-086, D-137, D-228, D-326, D-366.
 """
 
 from __future__ import annotations
@@ -52,9 +52,9 @@ def areas_of_interest() -> PublicAreas | NotYetComputed:
     if not published or not named:
         return NotYetComputed(
             reason=(
-                "Areas of interest are not published until the team settles "
-                "who may register one and whether a registration is public "
-                "(D-137, proposed by D-326)."
+                "This deployment publishes no areas of interest yet: it does so "
+                "once the team has registered areas and published their "
+                "regional report's summary (D-326)."
             ),
             available_from_stage=AREAS_STAGE,
         )

@@ -67,6 +67,9 @@ analysis/
 # before opening a socket (D-134, D-352). The platform image copies named
 # directories only, so this file never reaches it.
 !ATTRIBUTION.md
+# The dashboard bundles it as its release notes (D-366). Copied into the
+# dashboard's build stage only; the runtime image takes that stage's output.
+!CHANGELOG.md
 
 # Editors and OS
 .vscode/

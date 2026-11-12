@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import { formatDay, formatWindow } from "./format";
 import { causeWords } from "./losses";
 import { LossesSection } from "./Losses";
@@ -13,14 +11,13 @@ import {
   classWords,
   effectWords,
   fetchResults,
-  mergePages,
   type PassResult,
-  type ResultPage,
 } from "./results";
 import type { Route } from "./route";
 import { SimBadge } from "./SimBadge";
 import { SnapshotNote } from "./SnapshotNote";
 import { snapshotClass } from "./snapshot";
+import { mergeOnce, useOlderPages, type LoadPage } from "./useOlderPages";
 import { usePolled } from "./usePolled";
 
 // Every settled pass across the network and what became of it, the thirty
@@ -98,34 +95,18 @@ export function ResultRow({ result, go }: { result: PassResult; go: Go }) {
   );
 }
 
-/** Pages older than the newest, loaded on request and never polled. */
-function useOlder(nextCursor: string | null) {
-  const [older, setOlder] = useState<ResultPage>({ results: [], nextCursor: null });
-  const [error, setError] = useState<string | null>(null);
-  const cursor = older.results.length > 0 ? older.nextCursor : nextCursor;
-  const load = () => {
-    if (cursor === null) return;
-    // Not through a snapshot watch: an older page is not warmed through the front
-    // (D-283), so in an outage it fails and says so, rather than being a copy.
-    fetchResults((url, init) => fetch(url, init), cursor, new AbortController().signal)
-      .then((page) => {
-        setOlder((held) => ({ results: [...held.results, ...page.results], nextCursor: page.nextCursor }));
-        setError(null);
-      })
-      .catch((reason: unknown) => {
-        setError(String(reason));
-      });
-  };
-  return { older: older.results, more: cursor !== null, load, error };
-}
+const olderResults: LoadPage<PassResult> = async (fetcher, cursor, signal) => {
+  const page = await fetchResults(fetcher, cursor, signal);
+  return { items: page.results, nextCursor: page.nextCursor };
+};
 
 function ResultTable({ go }: { go: Go }) {
   const newest = usePolled("results", (fetcher, signal) => fetchResults(fetcher, null, signal));
-  const { older, more, load, error } = useOlder(newest.value?.nextCursor ?? null);
+  const { older, hasMore, more, error } = useOlderPages(olderResults, newest.value?.nextCursor ?? null);
   if (newest.value === null) {
     return newest.error === null ? <p className="dim">Loading the results…</p> : <p role="alert">{newest.error}</p>;
   }
-  const results = mergePages(newest.value.results, older);
+  const results = mergeOnce(newest.value.results, older, (one) => String(one.classificationId));
   if (results.length === 0) {
     return <p className="dim">No pass has settled yet. A pass settles once its settle margin has passed.</p>;
   }
@@ -152,8 +133,8 @@ function ResultTable({ go }: { go: Go }) {
         </table>
       </div>
       {error !== null && <p role="alert">{error}</p>}
-      {more && (
-        <button type="button" onClick={load}>
+      {hasMore && (
+        <button type="button" onClick={more}>
           Show older passes
         </button>
       )}

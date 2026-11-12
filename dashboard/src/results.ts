@@ -98,9 +98,3 @@ const EFFECT_WORDS: Record<PassResult["effect"], string> = {
 export function effectWords(effect: PassResult["effect"]): string {
   return EFFECT_WORDS[effect];
 }
-
-/** Older pages appended to the newest, each pass once. */
-export function mergePages(newest: PassResult[], older: PassResult[]): PassResult[] {
-  const seen = new Set(newest.map((one) => one.classificationId));
-  return [...newest, ...older.filter((one) => !seen.has(one.classificationId))];
-}

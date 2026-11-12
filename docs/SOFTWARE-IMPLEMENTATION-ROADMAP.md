@@ -91,7 +91,7 @@ flowchart TD
   - a silence shorter than D-276's ±45 minutes can be left *undetermined* when a pass after it hears the satellite. The second trial met it twice;
   - two hours settle only the first hour's passes, so a fault's own losses seldom reach the losses view in that time.
 
-**Stage 34's software is built** (2026-11-02), beside Stage 35. Its decisions are D-320 through D-326, its migration is `0032`, and `docs/OPERATIONS.md` § Element sets and the archive, and every source live, § The real-data model run, from the SatNOGS archive, and § Publishing areas, once D-137 is settled are its runbook. External data had only ever reached Meridian as fixtures; now it can arrive for real.
+**Stage 34's software is built** (2026-11-02), beside Stage 35. Its decisions are D-320 through D-326, its migration is `0032`, and `docs/OPERATIONS.md` § Element sets and the archive, and every source live, § The real-data model run, from the SatNOGS archive, and § Publishing areas are its runbook. External data had only ever reached Meridian as fixtures; now it can arrive for real.
 - **The completion gate passes.** *External data reaches every module that reads it, through `meridian-ingest` alone and labelled with its source, and the platform keeps scheduling from what it last stored when every source is unreachable.* `tests/integration/test_external_data_flow.py` loads `deploy/catalogue/meteor.json`, then a CelesTrak fetch through the raw store, and generates passes on the real propagator. It asserts:
   - every pass names a fetched set and its artefact;
   - a culmination matches the simulator's own propagation of the same lines to 0.01°;

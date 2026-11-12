@@ -4770,7 +4770,7 @@ Black Marble is published in HDF-EOS5 only. `h5py` (BSD-3-Clause, with NumPy) is
 
 ## D-227 — Until D-137 is settled, an operator registers an area, nothing about one is published, and a label cannot name a person
 
-**2026-09-29 · accepted, interim** · *`meridian regions add`, `areas_of_interest`, Stage 32. Holds D-137's place until the team settles it; D-137 stays open.*
+**2026-09-29 · accepted, interim; replaced 2026-11-07 by D-326** · *`meridian regions add`, `areas_of_interest`, Stage 32. Held D-137's place until the team settled it. Its label rules stand inside D-326.*
 
 Stage 32 needs areas to exist, and D-137 — who may register one, and whether a registration is public — is the team's question, not a document's. So the narrowest answer that lets the stage be built:
 
@@ -6606,9 +6606,9 @@ D-150 computes the passes an archive station could have heard with the element s
 
 ---
 
-## D-326 — Proposed answer to D-137: the team registers areas, a registration is public, and publishing is a switch the team throws
+## D-326 — The answer to D-137: the team registers areas, a registration is public, and publishing is a switch the team throws
 
-**2026-11-02 · proposed, for the team to accept** · *`meridian regions summary`, `GET /api/v1/areas`, `AREAS_PUBLISHED`, `AREAS_SUMMARY`, Stage 34. Settles D-137 when accepted; D-227 holds until then.*
+**2026-11-02 · proposed; accepted by the team 2026-11-07, in Stage 37 (D-366)** · *`meridian regions summary`, `GET /api/v1/areas`, `AREAS_PUBLISHED`, `AREAS_SUMMARY`, Stage 34. Settles D-137, and replaces D-227's interim answer.*
 
 D-137 asks who may register an area of interest and whether a registration is public. D-227 answered it narrowly for Stage 32: an operator registers at the command line and nothing is published. This proposes the rest.
 
@@ -7190,6 +7190,33 @@ Stage 24 left the dashboard with no view of every pass's result across the netwo
 
 ---
 
+## D-366 — The team accepts D-326; areas and changes get pages of their own, and the release notes ship with the build
+
+**2026-11-07 · accepted** · *`docs/DECISIONS.md` (D-326, D-227, D-137), `meridian/api/public/areas.py`, `meridian/cli_regions.py`, `deploy/{docker-compose.yml,.env.example,Dockerfile}`, `.dockerignore`, `dashboard/src/{Areas,AreaMap,areas,Changes,ReleaseNotes,releaseNotes,useOlderPages,Results,events,StationMap,Sparkline,route,Nav,App}.ts(x)`, `deploy/front/snapshot-routes.txt`, `docs/{THREAT-MODEL,OPERATIONS}.md`, and their tests; Stage 37. Applies D-086, D-134, D-229, D-231, D-283 and D-326.*
+
+D-326 proposed the answer to D-137 on 2026-11-02: only the team registers an area, a registration is public, and publishing is a switch the team throws. The roadmap opens the areas page once it is accepted.
+
+**Decision.**
+- **The team accepts D-326**, which settles D-137 and replaces D-227's interim answer, whose label rules stand inside D-326. Publishing is now each deployment's choice: `AREAS_PUBLISHED=true` and `AREAS_SUMMARY` naming a summary. The default stays off, because a deployment with no registered areas has nothing to publish, and the read says so in words (D-086). The wording that said publishing waited on D-137 is changed wherever it was: the endpoint's reason, the command's help, compose, the example environment, the runbook and the threat model.
+- **`#/areas` and `#/areas/<id>`.** The published areas on a map, each as its bounding box and never the polygon. Each area has:
+  - its public-product series by quantity, as small charts with every period in a table, a period without a value kept as a gap with its reason;
+  - its changes, each with its baseline and current periods, both means, the change and its interval, the verdict in words, and the reason (D-231);
+  - every source with its licence and terms (D-134), and the report the figures came from.
+  Nothing on these pages is a station's, so nothing is badged simulated, and the API says `simulated: false`.
+- **The page computes nothing from the values.** The plan asked for a cloud-clear rate. The page shows the published cloud-cover series instead: a rate worked out in the browser would be a number no sealed report holds, and nobody could regenerate it (rule 8). If a clear-sky rate is wanted, it belongs in the regional report, beside its interval.
+- **`#/changes`** has every change the published report measured, the network's events over the week with older ones on request, and every release.
+  - An area's change is a report's, read from the summary file, so it is not one of `/events`' kinds, which are database records (D-363).
+- **The release notes ship with the build.** `CHANGELOG.md` is bundled at build time, so the notes are the ones this build shipped with, and nothing is fetched. The Dockerfile copies it into the dashboard's build stage, and `.dockerignore` lets it into the context.
+  - Only the forms the changelog uses are read: release and section headings, bullets, paragraphs, and inline bold, emphasis, code and links.
+  - Rendering builds elements from those parts, never HTML from text. A relative link points at the repository.
+- **One way to show older pages.** Results and the events both load older pages on request through one hook. An older page is not warmed through the front (D-283), so in an outage it fails and says so, rather than standing in as a copy.
+
+*Rejected: switching areas on in the example environment.* It would publish an empty summary on every new deployment, and the switch is the deployment's statement that it has areas worth publishing.
+
+*Rejected: a Markdown library for the release notes.* It would add a dependency, and most of them render HTML from text, which is the path a content-security policy exists to close. Six forms, read into parts, are the whole need.
+
+---
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7218,7 +7245,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 |---|---|---|
 | **D-135** | Which cloud host and tier, on whose account, and what happens when the credit lapses. *How long a station retains an unacknowledged reception is proposed by D-281: thirty days, the platform's acceptance window* | Nothing — no gate may need a cloud host (D-130) |
 | **D-136** | Whether any ingested source's terms permit its records to be republished inside the evidence dataset | Settled for Stage 30's package by **D-313**: it republishes none, and is CC BY 4.0. Open again only for a package that would |
-| **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Publishing anything about an area. D-227 holds its place in the meantime: operator-only, unpublished. **D-326 proposes the answer** (team-registered, public, behind `AREAS_PUBLISHED`); the team accepts it |
+| **D-137** | Who may register an area of interest, and whether a registration is public — it is the first record in this system that describes a place someone cares about rather than a satellite | Settled 2026-11-07 by **D-326**, accepted in Stage 37 (D-366) |
 
 ---
 
@@ -7553,7 +7580,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-323 SatNOGS observations | `meridian_ingest/adapters/public/satnogs_network.py`; `ATTRIBUTION.md`; `tests/unit/test_satnogs_network_source.py`; `tests/integration/test_satnogs_archive_load.py` |
 | D-324 impossible values as named gaps | `meridian_ingest/normalise/samples.py`; `deploy/ingest.live.toml.example` |
 | D-325 carried sets and the model summary | migration 0032; `meridian/store/{element_sets,satellite_catalogue,snapshot_reads}.py`; `meridian/datasets/archive_passes.py`; `meridian/reports/summary.py`; `meridian/cli_report.py`; `analysis/configs/archive.toml.example`; `tests/unit/test_report_summary.py` |
-| D-326 areas, closed until D-137 is accepted (proposed) | `meridian/regions/summary.py`; `meridian/cli_regions.py`; `meridian/api/public/{areas,models/areas,surface}.py`; `THREAT-MODEL.md` §7; `tests/msp_conformance/test_public_areas_endpoint.py` |
+| D-326 areas: the team registers, a registration is public (accepted 2026-11-07) | `meridian/regions/summary.py`; `meridian/cli_regions.py`; `meridian/api/public/{areas,models/areas,surface}.py`; `THREAT-MODEL.md` §7; `tests/msp_conformance/test_public_areas_endpoint.py` |
 | — the completion gate | `tests/integration/test_external_data_flow.py`; `docs/ACCEPTANCE.md` § Real-data path |
 
 **The raw store is the first thing in this system that a database backup does not hold.** `deploy/tools/backup.py` dumps Postgres; retrieved artefacts are on disk, outside it, and cannot be recreated without going back to a source that may have withdrawn them. The tool now names that path on every run rather than leaving the gap to be discovered at restore time.
@@ -7587,6 +7614,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-363 the events feed, read back from existing records | `platform/src/meridian/store/event_reads.py`; `platform/src/meridian/api/public/{events,models/events,surface}.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/test_public_privacy.py`; `tests/integration/test_public_events_endpoint.py` |
 | D-364 the live page, the ways in, satellites as diamonds | `dashboard/src/{Live,LiveNow,LiveFigures,Sparkline,Feed,WaysIn,satelliteLayer,StationMap,route,Nav,App,Kiosk,tracks,aggregates,events,schedule,format,useNow}.ts(x)`; `dashboard/src/app.css`; `dashboard/src/{live.test.ts,views.test.tsx,route.test.ts,snapshotRoutes.test.ts,fixtures.test-data.ts}`; `deploy/front/snapshot-routes.txt` |
 | D-365 results, every settled pass with its effect | `platform/src/meridian/store/result_reads.py`; `platform/src/meridian/reliability/budget.py`; `platform/src/meridian/api/public/{results,models/results,surface}.py`; `dashboard/src/{Results,results,Losses,Live,route,Nav,App,Kiosk,events}.ts(x)`; `deploy/front/snapshot-routes.txt`; `deploy/tools/demo_rehearsal.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_reliability_daily,test_public_privacy}.py`; `tests/integration/test_public_results_endpoint.py` |
+| D-366 D-326 accepted; areas, changes and release notes | `docs/DECISIONS.md`; `platform/src/meridian/api/public/areas.py`; `platform/src/meridian/cli_regions.py`; `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `.dockerignore`; `dashboard/src/{Areas,AreaMap,areas,Changes,ReleaseNotes,releaseNotes,useOlderPages,Results,events,StationMap,Sparkline,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/msp_conformance/test_public_areas_endpoint.py`; `tests/unit/test_regions_summary.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

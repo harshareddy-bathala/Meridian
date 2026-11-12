@@ -589,3 +589,25 @@ tr.selected {
   width: 100%;
   font-variant-numeric: tabular-nums;
 }
+
+/* An area of interest: its bounding box in ink, never the polygon (D-326). */
+.area-box {
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  fill: var(--ink);
+  fill-opacity: 0.06;
+}
+
+.area-box-selected {
+  stroke-width: 3;
+  fill-opacity: 0.12;
+}
+
+.release-notes article + article {
+  margin-top: var(--space-5);
+}
+
+.release-notes h5 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: 1em;
+}

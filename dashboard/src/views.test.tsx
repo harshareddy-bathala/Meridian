@@ -7,10 +7,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { decodeAggregates } from "./aggregates";
+import { decodeAreas } from "./areas";
+import { ChangeLine, Sources } from "./Areas";
 import { decodeEvent } from "./events";
 import { Feed } from "./Feed";
 import {
   aggregatesBody,
+  areasBody,
   assignmentBody,
   eventBody,
   insightsBody,
@@ -39,6 +42,7 @@ import { decodeStationSchedule } from "./stationSchedule";
 // Leaflet reads `window` when it is imported, and these run with no DOM; the
 // map is not what is under test here.
 vi.mock("./StationMap", () => ({ StationMap: () => null }));
+vi.mock("./AreaMap", () => ({ AreaMap: () => null }));
 
 const BADGE = 'class="badge badge-simulated"';
 const go = () => undefined;
@@ -194,5 +198,32 @@ describe("the results page", () => {
     expect(row(true)).toContain("Station unavailable");
     expect(row(true)).toContain("lost: spends the loss budget");
     expect(row(true)).toContain("something blocks that part of the sky");
+  });
+});
+
+describe("the areas pages", () => {
+  const read = decodeAreas(areasBody);
+  if (!("summary" in read)) throw new Error("expected a summary");
+  const { summary } = read;
+
+  it("give a change with its interval and periods, and badge nothing: no value is a station's", () => {
+    const [change] = summary.changes;
+    if (change === undefined) throw new Error("expected a change");
+    const markup = renderToStaticMarkup(
+      <ul>
+        <ChangeLine change={change} label="Bengaluru urban" />
+      </ul>,
+    );
+    expect(markup).toContain("Bengaluru urban: Vegetation (NDVI)");
+    expect(markup).toContain("Within its threshold");
+    expect(markup).toContain("-0.0244 [-0.05, 0.03]");
+    expect(badges(markup)).toBe(0);
+  });
+
+  it("credit every source with its licence and terms, and the report they came from", () => {
+    const markup = renderToStaticMarkup(<Sources summary={summary} />);
+    expect(markup).toContain("NASA open data");
+    expect(markup).toContain('href="https://example.org/terms"');
+    expect(markup).toContain("aaaaaaaaaaaa");
   });
 });

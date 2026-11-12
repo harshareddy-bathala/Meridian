@@ -23,6 +23,14 @@ describe("the route in the fragment", () => {
     expect(parseRoute("#/losses")).toEqual({ view: "results", stationId: null });
   });
 
+  it("names an area by its number, and lists the areas otherwise", () => {
+    expect(parseRoute("#/areas/3")).toEqual({ view: "areas", stationId: null, areaId: 3 });
+    expect(parseRoute("#/areas")).toEqual({ view: "areas", stationId: null });
+    expect(parseRoute("#/areas/nope")).toEqual({ view: "areas", stationId: null });
+    expect(formatRoute({ view: "areas", stationId: null, areaId: 3 })).toBe("#/areas/3");
+    expect(parseRoute("#/changes")).toEqual({ view: "changes", stationId: null });
+  });
+
   it("round-trips a station id that needs encoding", () => {
     const route = { view: "schedule" as const, stationId: "st a/b" };
     expect(formatRoute(route)).toBe("#/schedule/st%20a%2Fb");

@@ -95,8 +95,8 @@ def add_regions_parser(
         "--output",
         type=Path,
         required=True,
-        help="for example data/published/areas.json; served only once D-137 "
-        "is settled and AREAS_PUBLISHED is set (D-326)",
+        help="for example data/published/areas.json; served once the api has "
+        "AREAS_PUBLISHED=true and AREAS_SUMMARY naming it (D-326)",
     )
 
 
@@ -218,7 +218,10 @@ def _summary(args: argparse.Namespace) -> int:
         return _refuse("summary", str(exc))
     _say(f"Wrote {args.output}")
     _say(f"  report  {summary['report_sha256']}")
-    _say("  not public until D-137 is settled and AREAS_PUBLISHED is set (D-326)")
+    _say(
+        "  not public until the api has AREAS_PUBLISHED=true"
+        " and AREAS_SUMMARY naming it (D-326)"
+    )
     return 0
 
 

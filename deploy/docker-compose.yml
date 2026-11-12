@@ -172,8 +172,8 @@ services:
       # empty answers not_yet_computed (D-332).
       REPORT_SUMMARY: ${REPORT_SUMMARY:-}
       # The areas summary under /published, served by /api/v1/areas only while
-      # AREAS_PUBLISHED is true; until the team settles D-137 it stays false
-      # and the read answers not_yet_computed (D-227, D-326).
+      # AREAS_PUBLISHED is true. Off, or with no summary named, the read answers
+      # not_yet_computed (D-326).
       AREAS_PUBLISHED: ${AREAS_PUBLISHED:-false}
       AREAS_SUMMARY: ${AREAS_SUMMARY:-}
       # A reliability.toml inside the container; empty uses the defaults. The

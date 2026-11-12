@@ -59,7 +59,7 @@ interface MapView {
   positions: L.FeatureGroup;
 }
 
-function useLeafletMap() {
+export function useLeafletMap() {
   const [view, setView] = useState<MapView | null>(null);
   const [tileStatus, setTileStatus] = useState<TileStatus>(() =>
     tileUrl() === "" ? "disabled" : "loading",
@@ -169,9 +169,15 @@ function useSatellites(view: MapView | null, satellites: Satellites | undefined)
 }
 
 const TILE_NOTE: Partial<Record<TileStatus, string>> = {
-  failed: "Map tiles could not be loaded. Stations are drawn on the graticule alone.",
-  disabled: "This build draws no map tiles. Stations are drawn on the graticule alone.",
+  failed: "Map tiles could not be loaded.",
+  disabled: "This build draws no map tiles.",
 };
+
+/** Why the map has no tiles, and that ``drawn`` are on the graticule alone; undefined when it has them. */
+export function tileNote(status: TileStatus, drawn: string): string | undefined {
+  const note = TILE_NOTE[status];
+  return note === undefined ? undefined : `${note} ${drawn} are drawn on the graticule alone.`;
+}
 
 interface MapProps {
   stations: Station[];
@@ -184,7 +190,7 @@ export function StationMap({ stations, onSelect, satellites }: MapProps) {
   const { attach, view, tileStatus } = useLeafletMap();
   useStationMarkers(view, stations, onSelect, satellites === undefined ? "stations" : "world");
   useSatellites(view, satellites);
-  const note = TILE_NOTE[tileStatus];
+  const note = tileNote(tileStatus, "Stations");
   return (
     <figure className="station-map">
       <div ref={attach} className="station-map-canvas" role="img"

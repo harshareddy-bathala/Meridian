@@ -298,3 +298,48 @@ export function resultBody(id: number, classification: string, effect: string, s
     simulated,
   };
 }
+
+/** /api/v1/areas, published: one area, two quantities, one gap, one change. */
+export const areasBody = {
+  status: "computed",
+  simulated: false,
+  summary: {
+    schema: "areas-summary-1",
+    report_sha256: "a".repeat(64),
+    method: "regions-1",
+    since: "2026-10-05T00:00:00+00:00",
+    as_of: "2026-11-02T00:00:00+00:00",
+    sources: [{ source_id: "ornl_modis_ndvi", licence: "NASA open data", terms_url: "https://example.org/terms" }],
+    areas: [{ area_id: 1, label: "Bengaluru urban", area_km2: 741.0, bbox: [77.46, 12.83, 77.75, 13.14] }],
+    series: [
+      ["2026-10-21", 0.4, null],
+      ["2026-10-05", 0.41, null],
+      ["2026-11-01", null, "no granule covered the area"],
+    ].map(([from, value, missing]) => ({
+      area_id: 1,
+      quantity: "ndvi",
+      unit: "1",
+      period_from: `${String(from)}T00:00:00+00:00`,
+      period_until: `${String(from)}T00:00:00+00:00`,
+      value,
+      missing_reason: missing,
+      count: value === null ? 0 : 3,
+      sources: ["ornl_modis_ndvi"],
+    })),
+    changes: [
+      {
+        area_id: 1,
+        quantity: "ndvi",
+        verdict: "within",
+        reason: "the 95% interval reaches -0.15 or does not cross it",
+        baseline: { from: "2026-10-05T00:00:00+00:00", until: "2026-10-21T00:00:00+00:00" },
+        current: { from: "2026-10-21T00:00:00+00:00", until: "2026-11-02T00:00:00+00:00" },
+        baseline_mean: 0.41,
+        current_mean: 0.4,
+        change: -0.0244,
+        low: -0.05,
+        high: 0.03,
+      },
+    ],
+  },
+};

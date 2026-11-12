@@ -17,19 +17,29 @@ interface SparklineProps {
   settled: boolean[];
   labels: string[];
   max: number;
+  /** The value at the bottom of the chart; 0 unless a series can go below it. */
+  min?: number;
   /** A level worth seeing, such as a budget fully spent; drawn as a dashed rule. */
   reference?: number;
   format: (value: number | null) => string;
+  /** What the last point is called in the caption: "today", "latest". */
+  latest?: string;
 }
 
-function point(index: number, value: number, count: number, max: number): [number, number] {
+interface Scale {
+  min: number;
+  max: number;
+}
+
+function point(index: number, value: number, count: number, scale: Scale): [number, number] {
   const x = count === 1 ? WIDTH / 2 : PAD + (index * (WIDTH - 2 * PAD)) / (count - 1);
-  const y = HEIGHT - PAD - (Math.min(value, max) / max) * (HEIGHT - 2 * PAD);
-  return [x, y];
+  const span = scale.max - scale.min || 1;
+  const share = (Math.min(Math.max(value, scale.min), scale.max) - scale.min) / span;
+  return [x, HEIGHT - PAD - share * (HEIGHT - 2 * PAD)];
 }
 
 /** The line's runs, broken wherever a day has no value. */
-function runs(values: (number | null)[], max: number): string[] {
+function runs(values: (number | null)[], scale: Scale): string[] {
   const paths: string[] = [];
   let current: string[] = [];
   values.forEach((value, index) => {
@@ -38,20 +48,22 @@ function runs(values: (number | null)[], max: number): string[] {
       current = [];
       return;
     }
-    const [x, y] = point(index, value, values.length, max);
+    const [x, y] = point(index, value, values.length, scale);
     current.push(`${current.length === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`);
   });
   if (current.length > 1) paths.push(current.join(" "));
   return paths;
 }
 
-export function Sparkline({ title, values, settled, labels, max, reference, format }: SparklineProps) {
+export function Sparkline(props: SparklineProps) {
+  const { title, values, settled, labels, max, min = 0, reference, format, latest = "today" } = props;
+  const scale = { min, max };
   const last = values[values.length - 1] ?? null;
-  const summary = `${title}, ${labels[0] ?? ""} to ${labels[labels.length - 1] ?? ""}; today ${format(last)}.`;
+  const summary = `${title}, ${labels[0] ?? ""} to ${labels[labels.length - 1] ?? ""}; ${latest} ${format(last)}.`;
   return (
     <figure className="sparkline">
       <figcaption>
-        {title}: <strong>{format(last)}</strong> today
+        {title}, {latest}: <strong>{format(last)}</strong>
       </figcaption>
       <svg viewBox={`0 0 ${String(WIDTH)} ${String(HEIGHT)}`} role="img" aria-label={summary}>
         {reference !== undefined && (
@@ -59,16 +71,16 @@ export function Sparkline({ title, values, settled, labels, max, reference, form
             className="sparkline-reference"
             x1={PAD}
             x2={WIDTH - PAD}
-            y1={point(0, reference, 2, max)[1]}
-            y2={point(0, reference, 2, max)[1]}
+            y1={point(0, reference, 2, scale)[1]}
+            y2={point(0, reference, 2, scale)[1]}
           />
         )}
-        {runs(values, max).map((d) => (
+        {runs(values, scale).map((d) => (
           <path key={d} className="sparkline-line" d={d} />
         ))}
         {values.map((value, index) => {
           if (value === null) return null;
-          const [x, y] = point(index, value, values.length, max);
+          const [x, y] = point(index, value, values.length, scale);
           const label = labels[index] ?? "";
           return (
             <g key={label} className={settled[index] === true ? "sparkline-day" : "sparkline-day sparkline-unsettled"}>

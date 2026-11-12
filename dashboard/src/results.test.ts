@@ -3,7 +3,8 @@
 import { describe, expect, it } from "vitest";
 
 import { resultBody } from "./fixtures.test-data";
-import { classWords, decodeResult, effectWords, mergePages } from "./results";
+import { classWords, decodeResult, effectWords } from "./results";
+import { mergeOnce } from "./useOlderPages";
 
 describe("a settled pass", () => {
   it("is decoded with its effect, which the platform reads, not the page", () => {
@@ -22,6 +23,8 @@ describe("a settled pass", () => {
   it("is listed once when an older page overlaps the newest", () => {
     const newest = [3, 2].map((id) => decodeResult(resultBody(id, "successful_reception", "captured"), "r"));
     const older = [2, 1].map((id) => decodeResult(resultBody(id, "successful_reception", "captured"), "r"));
-    expect(mergePages(newest, older).map((one) => one.classificationId)).toEqual([3, 2, 1]);
+    expect(mergeOnce(newest, older, (one) => String(one.classificationId)).map((one) => one.classificationId)).toEqual([
+      3, 2, 1,
+    ]);
   });
 });

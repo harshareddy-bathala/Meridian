@@ -1162,7 +1162,7 @@ curl -s "localhost:8000/api/v1/schedule?station_id=<id>&hours=6" | python -m jso
 curl -s localhost:8000/api/v1/schedule-runs/latest | python -m json.tool
 ```
 
-**The dashboard's views read them** (D-334), each at its own address: `/#/live` (D-364; `/#/network` opens it too), `/#/stations/<id>`, `/#/schedule/<id>`, `/#/results` (D-365; `/#/losses` opens it), `/#/insights`, and `/#/kiosk`, which shows the four in turn every 20 seconds for a screen nobody touches and holds still for a minute after a touch. Every request the views make is warmed through the front (`deploy/front/snapshot-routes.txt`), so each is served marked *not live* when the api is down.
+**The dashboard's views read them** (D-334), each at its own address: `/#/live` (D-364; `/#/network` opens it too), `/#/stations/<id>`, `/#/schedule/<id>`, `/#/results` (D-365; `/#/losses` opens it), `/#/areas[/<id>]` and `/#/changes` (D-366), `/#/insights`, and `/#/kiosk`, which shows the four in turn every 20 seconds for a screen nobody touches and holds still for a minute after a touch. Every request the views make is warmed through the front (`deploy/front/snapshot-routes.txt`), so each is served marked *not live* when the api is down.
 
 **A loss's findings are a reviewed subset.** The full record of what each cause's test read is the operator's, through `meridian diagnosis explain`; the public list withholds the obstruction sectors, the raw noise levels and every internal id (`THREAT-MODEL.md` §7).
 
@@ -1506,7 +1506,7 @@ Stage 32 watches places, not Meridian. Its decisions are D-227 to D-233. **It is
 
 ### Areas of interest
 
-An area is a place and a label, registered by an operator — there is no endpoint that creates one, and nothing about an area is published until the team settles D-137 (D-227).
+An area is a place and a label, registered by an operator — there is no endpoint that creates one, and an area is published only once a deployment publishes its regional summary (D-326, accepted 2026-11-07).
 
 | Task | Command |
 |---|---|
@@ -1546,7 +1546,7 @@ Each alert is recorded in `region_alerts` once — recording the same report aga
 ---
 
 
-### Publishing areas, once D-137 is settled
+### Publishing areas
 
 Nothing about an area is public until the team accepts D-326 (D-227). Until then `/api/v1/areas` answers `not_yet_computed`. To prepare, and later to publish:
 
@@ -1563,7 +1563,7 @@ Nothing about an area is public until the team accepts D-326 (D-227). Until then
    meridian regions summary <report directory> --output data/published/areas.json
    ```
    The summary holds each active area's label, size and box, its series and changes, and the sources behind them: no note, no polygon, no reception count.
-3. **Publish only on the team's acceptance of D-326**: set `AREAS_PUBLISHED=true` and `AREAS_SUMMARY=/published/areas.json` on the api, and record the acceptance in the same change.
+3. **Publish**: set `AREAS_PUBLISHED=true` and `AREAS_SUMMARY=/published/areas.json` on the api. The team accepted D-326 on 2026-11-07 (D-366), so publishing is now each deployment's choice; the dashboard's areas and changes pages read what this serves.
 
 ## Stored measurements and profiles
 

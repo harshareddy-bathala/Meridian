@@ -21,6 +21,9 @@ WORKDIR /dashboard
 COPY dashboard/package.json dashboard/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY dashboard/ ./
+# The release notes are the changelog this build shipped with, bundled at build
+# time (D-366): src/ReleaseNotes.tsx reads ../../CHANGELOG.md, which is here.
+COPY CHANGELOG.md /CHANGELOG.md
 RUN npm run build
 
 

@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import routesFile from "../../deploy/front/snapshot-routes.txt?raw";
 import type { Fetcher } from "./api";
 import { fetchAggregates } from "./aggregates";
+import { fetchAreas } from "./areas";
 import { fetchConditions } from "./conditions";
 import { fetchEvents } from "./events";
 import { fetchInsights } from "./insights";
@@ -70,6 +71,7 @@ async function requests(): Promise<string[]> {
     fetchAggregates(fetcher, signal),
     fetchEvents(fetcher, signal),
     fetchResults(fetcher, null, signal),
+    fetchAreas(fetcher, signal),
   ];
   await Promise.allSettled(calls);
   return urls;

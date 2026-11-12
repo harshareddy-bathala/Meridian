@@ -44,9 +44,24 @@ export function decodeEvent(value: unknown, path: string): NetworkEvent {
   };
 }
 
+export interface EventPage {
+  events: NetworkEvent[];
+  nextCursor: string | null;
+}
+
+/** One page of events: the newest when ``cursor`` is null. */
+export async function fetchEventPage(fetcher: Fetcher, cursor: string | null, signal: AbortSignal): Promise<EventPage> {
+  const query = new URLSearchParams({ limit: String(FEED_LIMIT) });
+  if (cursor !== null) {
+    query.set("cursor", cursor);
+  }
+  const body = await getJson(fetcher, `/api/v1/events?${query.toString()}`, "the events feed", signal);
+  const page = decodeItems(body, decodeEvent);
+  return { events: page.items, nextCursor: page.nextCursor };
+}
+
 export async function fetchEvents(fetcher: Fetcher, signal: AbortSignal): Promise<NetworkEvent[]> {
-  const url = `/api/v1/events?limit=${String(FEED_LIMIT)}`;
-  return decodeItems(await getJson(fetcher, url, "the events feed", signal), decodeEvent).items;
+  return (await fetchEventPage(fetcher, null, signal)).events;
 }
 
 function satellite(event: NetworkEvent): string {

@@ -8,9 +8,10 @@ Stage 35's gate has two halves. The platform's, that every step of
 ``tests/integration/test_demo_rehearsal.py``. This is the browser's, run against
 the ``demo`` profile as a visitor meets it, through the front:
 
-1. **Every view renders** (live, stations, schedule, results, insights and
-   the kiosk), with no error on the console and **no content-security-policy
-   violation** (D-208), the policy the platform sends being the one in force.
+1. **Every view renders** (live, stations, schedule, results, areas, changes,
+   insights and the kiosk), with no error on the console and **no
+   content-security-policy violation** (D-208), the policy the platform sends
+   being the one in force.
 2. **Simulated figures say so.** The network and a station's schedule, drawn
    from a simulated fleet, carry the simulated badge (rule 5).
 3. **A pass is explained.** Choosing a station and one of its passes opens the
@@ -44,8 +45,17 @@ from typing import Any
 from compose_db import Compose, ToolError, add_compose_arguments, compose_from
 from front_drill import run, wait_for_api
 
-VIEWS = ("live", "stations", "schedule", "results", "insights", "kiosk")
-"""Every view the dashboard has (D-334, D-364)."""
+VIEWS = (
+    "live",
+    "stations",
+    "schedule",
+    "results",
+    "areas",
+    "changes",
+    "insights",
+    "kiosk",
+)
+"""Every view the dashboard has (D-334, D-364, D-366)."""
 
 OUTAGE_VIEWS = ("live", "results", "insights")
 """The views asked for again with the api stopped: those a visitor opens first."""
