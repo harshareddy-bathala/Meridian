@@ -221,6 +221,19 @@ jobs:
       - name: Unit tests
         run: uv run pytest -m "not integration and not e2e and not msp_conformance"
 
+      # The restore drill runs pg_dump and pg_restore from this runner against
+      # the service database, so they must be the server's major version. The
+      # runner's own are whatever its image ships: ubuntu-latest moved to 26.04
+      # in November 2026 and brought 18, whose dumps a 16 server refuses. The
+      # version is read from TIMESCALE_IMAGE, so the two cannot drift apart.
+      - name: PostgreSQL client at the server's major version
+        run: |
+          major=$(sed -E 's/.*-pg([0-9]+)@.*/\1/' <<<"$TIMESCALE_IMAGE")
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq "postgresql-client-$major"
+          echo "/usr/lib/postgresql/$major/bin" >> "$GITHUB_PATH"
+
       - name: Integration tests
         run: uv run pytest -m integration
         env:
