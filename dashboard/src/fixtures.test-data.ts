@@ -343,29 +343,3 @@ export const areasBody = {
     ],
   },
 };
-
-/** `/api/v1/reports/weekly`, with a simulated section as the template writes it. */
-export const weeklyBody = {
-  status: "computed",
-  template: "network-weekly-1",
-  period_start: "2026-11-02T00:00:00Z",
-  period_end: "2026-11-09T00:00:00Z",
-  previous_week: "2026-10-26",
-  as_of: "2026-11-12T06:20:51Z",
-  includes_simulated: true,
-  subject: "Meridian network, week of 2026-11-02",
-  body: [
-    "Week: 2026-11-02 to 2026-11-09, Monday to Monday UTC. A pass belongs to the week its window closed in.",
-    "",
-    "MEASURED STATIONS",
-    "No measured station is registered.",
-    "",
-    "SIMULATED STATIONS — not real receptions.",
-    "Stations: 12 registered, 12 heard from during the week.",
-    "Passes settled: 36; decoded 2, station unavailable 34.",
-    "",
-    "Written from Meridian's stored results by template network-weekly-1; no part of it was generated.",
-  ].join("\n"),
-  inputs_sha256: "7d".repeat(32),
-  content_sha256: "dd".repeat(32),
-};

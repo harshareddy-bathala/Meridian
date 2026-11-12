@@ -171,6 +171,9 @@ services:
       # A sealed model run's summary under /published, for /api/v1/insights/model;
       # empty answers not_yet_computed (D-332).
       REPORT_SUMMARY: ${REPORT_SUMMARY:-}
+      # A sealed run's success criteria under /published, for
+      # /api/v1/reports/criteria; empty answers not_yet_computed (D-368).
+      REPORT_CRITERIA: ${REPORT_CRITERIA:-}
       # The areas summary under /published, served by /api/v1/areas only while
       # AREAS_PUBLISHED is true. Off, or with no summary named, the read answers
       # not_yet_computed (D-326).

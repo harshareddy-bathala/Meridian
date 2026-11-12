@@ -1,17 +1,20 @@
-"""``/api/v1/reports/weekly`` against a real database and the real application.
+"""``/api/v1/reports/*`` against a real database and the real application.
 
 Pins the network's weekly report (D-367): the latest settled week by default,
 counted from the classifications under the deployment's configuration, the
 measured and simulated stations in sections of their own, and a refusal for a
-day that is not a Monday or a week still settling.
+day that is not a Monday or a week still settling. And the published success
+criteria (D-368): ``not_yet_computed`` with none named, the file as it states
+them, and a refusal naming the setting for a file missing or damaged.
 
 Marked ``integration`` by the directory hook in ``tests/conftest.py``.
 
-Reference: docs/DECISIONS.md D-182, D-306, D-367.
+Reference: docs/DECISIONS.md D-182, D-306, D-332, D-367, D-368.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -171,3 +174,95 @@ def test_a_network_with_no_station_says_so(client: TestClient) -> None:
     assert "No measured station is registered." in body["body"]
     assert body["includes_simulated"] is False
     assert body["previous_week"] is None
+
+
+CRITERIA = {
+    "schema": "criteria-summary-1",
+    "run_sha256": "ab" * 32,
+    "method": "report-7",
+    "since": "2026-10-01T00:00:00+00:00",
+    "as_of": "2026-10-31T00:00:00+00:00",
+    "criteria": [
+        {
+            "id": "SC-5",
+            "simulated": True,
+            "proposed": False,
+            "status": "measured",
+            "reason": None,
+            "figures": [
+                {
+                    "name": "slowest_detection_s",
+                    "value": 68.15,
+                    "low": None,
+                    "high": None,
+                    "target": 90.0,
+                    "direction": "at_most",
+                    "n": 123,
+                }
+            ],
+            "met": True,
+            "interval_clears": None,
+            "claimable": True,
+            "caveat": None,
+        },
+        {
+            "id": "SC-4",
+            "simulated": False,
+            "proposed": False,
+            "status": "not_measured",
+            "reason": "no measured pass settled",
+            "figures": [],
+            "met": None,
+            "interval_clears": None,
+            "claimable": False,
+            "caveat": None,
+        },
+    ],
+}
+"""A valid summary; ``tests/unit/test_report_criteria.py`` checks the format."""
+
+
+@pytest.fixture
+def named(
+    rollback: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> Iterator[tuple[TestClient, Any]]:
+    """An app whose ``REPORT_CRITERIA`` names a file in ``tmp_path``."""
+    path = tmp_path / "criteria.json"
+    monkeypatch.setenv("REPORT_CRITERIA", str(path))
+    app = create_app()
+    app.dependency_overrides[get_connection] = lambda: rollback
+    with TestClient(app, raise_server_exceptions=False) as started:
+        yield started, path
+
+
+def test_no_criteria_named_is_not_yet_computed(client: TestClient) -> None:
+    body = client.get("/api/v1/reports/criteria").json()
+    assert body["status"] == "not_yet_computed"
+    assert body["available_from_stage"] == 37
+
+
+def test_named_criteria_are_served_as_the_file_states_them(
+    named: tuple[TestClient, Any],
+) -> None:
+    client, path = named
+    path.write_text(json.dumps(CRITERIA))
+
+    body = client.get("/api/v1/reports/criteria").json()
+
+    assert body["status"] == "computed"
+    assert body["schema"] == "criteria-summary-1"
+    assert body["criteria"] == CRITERIA["criteria"]
+
+
+def test_named_criteria_missing_or_damaged_are_refused(
+    named: tuple[TestClient, Any],
+) -> None:
+    client, path = named
+    missing = client.get("/api/v1/reports/criteria")
+    path.write_text(json.dumps({**CRITERIA, "schema": "criteria-summary-2"}))
+    damaged = client.get("/api/v1/reports/criteria")
+
+    for response in (missing, damaged):
+        assert response.status_code == 500
+        assert response.json()["error"] == "server_error"
+        assert "REPORT_CRITERIA" in response.json()["message"]

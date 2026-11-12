@@ -22,13 +22,15 @@ import {
   runBody,
   tracksBody,
   warningBody,
-  weeklyBody,
 } from "./fixtures.test-data";
+import { criteriaBody, weeklyBody } from "./fixtures-reports.test-data";
 import { decodeInsights } from "./insights";
 import { ModelPanel } from "./ModelSummary";
 import { decodeLoss } from "./losses";
 import { LossRow } from "./Losses";
 import { Warnings } from "./Live";
+import { CriteriaPanel } from "./Criteria";
+import { decodeCriteria } from "./criteria";
 import { AreaReports, WeekText } from "./Reports";
 import { decodeWeekly } from "./reports";
 import { Population, ResultRow } from "./Results";
@@ -113,21 +115,6 @@ describe("the simulated badge", () => {
     expect(badges(renderToStaticMarkup(<ModelPanel read={simulated} />))).toBe(1);
   });
 
-  it("marks the weekly report's simulated section, and only that one", () => {
-    const markup = renderToStaticMarkup(<WeekText week={decodeWeekly(weeklyBody)} />);
-    expect(badges(markup)).toBe(1);
-    expect(markup).toContain("SIMULATED STATIONS — not real receptions.");
-    const measured = weeklyBody.body.split("\n\nSIMULATED")[0] ?? "";
-    const plain = decodeWeekly({ ...weeklyBody, body: measured, includes_simulated: false });
-    expect(badges(renderToStaticMarkup(<WeekText week={plain} />))).toBe(0);
-  });
-
-  it("is absent from the area reports, which hold no station's figure", () => {
-    const markup = renderToStaticMarkup(<AreaReports read={decodeAreas(areasBody)} />);
-    expect(badges(markup)).toBe(0);
-    expect(markup).toContain('href="#/areas/1"');
-    expect(markup).toContain("Vegetation (NDVI): 0.4 for");
-  });
 });
 
 describe("an absence", () => {
@@ -140,6 +127,32 @@ describe("an absence", () => {
     expect(
       renderToStaticMarkup(<ModelPanel read={{ notYetComputed: "No run yet." }} />),
     ).toContain("Not yet computed. No run yet.");
+  });
+});
+
+describe("the reports page", () => {
+  it("marks the weekly report's simulated section, and only that one", () => {
+    const markup = renderToStaticMarkup(<WeekText week={decodeWeekly(weeklyBody)} />);
+    expect(badges(markup)).toBe(1);
+    expect(markup).toContain("SIMULATED STATIONS — not real receptions.");
+    const measured = weeklyBody.body.split("\n\nSIMULATED")[0] ?? "";
+    const plain = decodeWeekly({ ...weeklyBody, body: measured, includes_simulated: false });
+    expect(badges(renderToStaticMarkup(<WeekText week={plain} />))).toBe(0);
+  });
+
+  it("marks a criterion measured on simulated runs, and only that one", () => {
+    const markup = renderToStaticMarkup(<CriteriaPanel read={decodeCriteria(criteriaBody)} />);
+    expect(badges(markup)).toBe(1);
+    expect(markup).toContain("SC-5 Failures are detected quickly");
+    expect(markup).toContain("Not claimed: measured over 7 days");
+    expect(markup).toContain("D was not fitted.");
+  });
+
+  it("is absent from the area reports, which hold no station's figure", () => {
+    const markup = renderToStaticMarkup(<AreaReports read={decodeAreas(areasBody)} />);
+    expect(badges(markup)).toBe(0);
+    expect(markup).toContain('href="#/areas/1"');
+    expect(markup).toContain("Vegetation (NDVI): 0.4 for");
   });
 });
 

@@ -15,6 +15,8 @@ Three verbs:
 
 * ``summary <run> --output FILE`` writes an archive run's model figures as
   ``model-summary-1``, copied from its results files, for the dashboard.
+* ``criteria <run> --output FILE`` writes the run's success criteria as
+  ``criteria-summary-1``, the same way (D-368).
 
 None opens a database or a socket: a report is computed from a snapshot,
 never from the live tables (D-143) and never from a service (rule 8).
@@ -53,6 +55,7 @@ from meridian.reports.build import (
     with_environment,
 )
 from meridian.reports.config import load_report_config
+from meridian.reports.criteria import criteria_summary
 from meridian.reports.environment import run_environment
 from meridian.reports.summary import (
     NotSummarisableError,
@@ -157,6 +160,23 @@ def add_report_parser(
         required=True,
         help="where to write it, for example data/published/model-summary.json",
     )
+    criteria = actions.add_parser(
+        "criteria",
+        help="write a run's success criteria for the dashboard to publish",
+        description=(
+            "Writes criteria-summary-1 from a sealed run's own results files: "
+            "for SC-1 to SC-5 and SC-7 to SC-9, whether each was measured, on "
+            "whose passes, its figures, intervals and target, and the section's "
+            "own verdict. Nothing is recomputed (D-368). Run `verify` first."
+        ),
+    )
+    criteria.add_argument("run", type=Path, help="a run directory")
+    criteria.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="where to write it, for example data/published/criteria.json",
+    )
     verify = actions.add_parser("verify", help="regenerate a run and compare")
     verify.add_argument("run", type=Path, help="a run directory")
     verify.add_argument(
@@ -198,7 +218,12 @@ def run_report(args: argparse.Namespace) -> int:
     does not install (D-155); without it they say what to install rather than
     raise, as ``meridian model`` does.
     """
-    actions = {"build": _build, "verify": _verify, "summary": _summary}
+    actions = {
+        "build": _build,
+        "verify": _verify,
+        "summary": _summary,
+        "criteria": _criteria,
+    }
     try:
         return actions[args.action](args)
     except ModuleNotFoundError as exc:
@@ -319,6 +344,25 @@ def _summary(args: argparse.Namespace) -> int:
     _say(f"Wrote {args.output}")
     _say(f"  run      {summary['run_sha256']}")
     _say(f"  label    {summary['label']}")
+    return 0
+
+
+def _criteria(args: argparse.Namespace) -> int:
+    """``meridian report criteria``: copied from the run, so no extra is needed."""
+    try:
+        run = read_directory(args.run)
+    except DamagedSnapshotError as exc:
+        _refuse("criteria", str(exc))
+        return EXIT_CORRUPT
+    try:
+        summary = criteria_summary(run)
+        write_summary(args.output, summary)
+    except (NotSummarisableError, OSError) as exc:
+        return _refuse("criteria", str(exc))
+    _say(f"Wrote {args.output}")
+    _say(f"  run      {summary['run_sha256']}")
+    for one in summary["criteria"]:  # type: ignore[attr-defined]
+        _say(f"  {one['id']:<8} {one['status']}")
     return 0
 
 

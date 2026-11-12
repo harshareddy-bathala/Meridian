@@ -633,3 +633,20 @@ tr.selected {
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+
+/* The success criteria: one item each, its verdict the run's own (D-368). */
+.criteria {
+  padding-left: var(--space-4);
+}
+
+.criterion + .criterion {
+  margin-top: var(--space-3);
+}
+
+.criterion ul {
+  margin: var(--space-1) 0;
+}
+
+.criterion-met {
+  font-weight: 600;
+}

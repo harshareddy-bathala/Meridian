@@ -7243,13 +7243,41 @@ The roadmap gives Stage 37 a reports page: a plain-language weekly report on the
 - **A settled week only** (D-306): Monday to Monday UTC, served once its last passes are past the settle margin. An earlier week is asked for by its Monday, back to the week of the first station still registered. A day that is not a Monday, or a week still settling, is an `invalid_query` that says which.
 - **Rendered on each request, and stored nowhere.** An owner's report names its rows because a sender must prove what it sends (D-302); nothing is sent here. The body carries the facts' and the text's sha256, so two reads can be compared. Records are append-only, so in a settled week only a late diagnosis or a removed station changes them.
 - **The area reports** are the published regional summary (D-366), read again: the report's hash and span, each area's latest published value per quantity, and its changes, each linking to the area's page. The page computes nothing from the values (rule 8).
-- **Not yet here: the SC figures.** Each sealed section writes its criterion as a row of its own shape: SC-1's relative gain, SC-5's slowest detection, SC-8's recall per cause. Publishing them needs a summary that states each one the same way, written by `meridian report summary` beside `model-summary-1`, and checked whole. That is the next part of this stage.
+- **Not yet here: the SC figures.** Each sealed section writes its criterion as a row of its own shape: SC-1's relative gain, SC-5's slowest detection, SC-8's recall per cause. Publishing them needs a summary that states each one the same way, written by `meridian report summary` beside `model-summary-1`, and checked whole. That is the next part of this stage (D-368).
 
 *Rejected: a weekly-reports table filled by the jobs service.* Stage 37 has no migration reserved, and a stored copy would prove nothing that the hashes do not already show, since no recipient needs the copy that was sent.
 
 *Rejected: writing the week's sentences in the browser.* They would be words no template version holds and no hash pins. The same sentence would then read differently on the site, in a report and on the page.
 
 *Rejected: verdict bands in the network's week.* The verdict model's calibration is SC-7's question, answered by the sealed evaluation. A count of bands would mix that question into a reliability report.
+
+---
+
+## D-368 — The success criteria are a published summary of their own, copied from a sealed run and checked whole
+
+**2026-11-12 · accepted** · *`meridian/reports/criteria.py`, `meridian report criteria`, `meridian/api/public/{reports,models/criteria}.py`, `meridian/config.py` (`REPORT_CRITERIA`), `deploy/{docker-compose.yml,.env.example}`, `dashboard/src/{Criteria,criteria,Reports}.ts(x)`, `deploy/front/snapshot-routes.txt`, `docs/{THREAT-MODEL,OPERATIONS}.md`, and their tests; Stage 37. Follows D-367. Applies D-086, D-278, D-325 and D-332.*
+
+D-367 left the SC figures for their own part. A sealed evaluation run judges SC-1 to SC-5 and SC-7 to SC-9, and each section writes its criterion as a row of its own shape.
+
+**Decision.**
+- **A file of its own, `criteria-summary-1`.** `meridian report criteria <run> --output <file>` writes it, and the api serves the file `REPORT_CRITERIA` names at `/api/v1/reports/criteria`. It is not part of `model-summary-1`, because the two come from different runs: the model summary describes an archive run (D-322), and the criteria are judged on our own stations, which an archive run cannot fit beyond configuration A (D-156).
+- **Every criterion stated the same way.** Each has:
+  - whether it was measured;
+  - figures of `value`, `low`, `high`, `target` and which side of the target meets it, with `n`, the count each is over;
+  - the section's own verdict;
+  - whether the whole interval clears the target, where the section judged that.
+
+  SC-8 states each cause's recall and the wrong-cause fraction, and SC-9 the warned-first share and the false-alarm rate, each from its section's supporting rows.
+- **Copied, never recomputed.** Every number and verdict is a field of the run's own rows, read through `read_directory`, which refuses a run whose files no longer match its manifest. A row of an unexpected shape refuses the whole summary.
+- **Not measured, or not run, is said.** A criterion the section could not judge carries the section's reason. One whose row is absent carries what the run was not given, such as "the run was given no health-watch run". Neither carries a number or a verdict (D-086).
+- **Met is not always claimable.** SC-4's target is over thirty days, so a shorter window can meet it without claiming it, and the summary says over how many days. SC-8 is not claimed until the injected faults' effects are reviewed (D-278).
+- **Whose passes.** SC-5, SC-8 and SC-9 are measured on simulated fault runs and labelled simulated. The others are on our measured stations, since the fits, the replay and the reliability section leave simulated ones out. The api refuses a file whose label disagrees with its criterion (rule 5).
+- **Checked whole, as D-332's file is.** No unknown key, nothing coerced, each criterion once, and no figure beside a reason. A refused file is a `server_error` naming the setting.
+- **On the reports page**, each criterion's claim, as `EVALUATION.md` states it, sits above the run's verdict and its figures in words. A proposed target is marked, and SC-6 and SC-10 point to `ACCEPTANCE.md`, because no evaluation run judges them.
+
+*Rejected: reading the run's `report.md` into the page.* It is Markdown written for a reader of the whole report, and the page would have to parse prose to find a number.
+
+*Rejected: judging the targets in the browser.* A comparison made on the page is a verdict no sealed run holds; whether SC-4 counts over a short window is the section's question, not the page's.
 
 ---
 
@@ -7651,7 +7679,8 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-364 the live page, the ways in, satellites as diamonds | `dashboard/src/{Live,LiveNow,LiveFigures,Sparkline,Feed,WaysIn,satelliteLayer,StationMap,route,Nav,App,Kiosk,tracks,aggregates,events,schedule,format,useNow}.ts(x)`; `dashboard/src/app.css`; `dashboard/src/{live.test.ts,views.test.tsx,route.test.ts,snapshotRoutes.test.ts,fixtures.test-data.ts}`; `deploy/front/snapshot-routes.txt` |
 | D-365 results, every settled pass with its effect | `platform/src/meridian/store/result_reads.py`; `platform/src/meridian/reliability/budget.py`; `platform/src/meridian/api/public/{results,models/results,surface}.py`; `dashboard/src/{Results,results,Losses,Live,route,Nav,App,Kiosk,events}.ts(x)`; `deploy/front/snapshot-routes.txt`; `deploy/tools/demo_rehearsal.py`; `docs/THREAT-MODEL.md`; `docs/OPERATIONS.md`; `tests/unit/{test_reliability_daily,test_public_privacy}.py`; `tests/integration/test_public_results_endpoint.py` |
 | D-366 D-326 accepted; areas, changes and release notes | `docs/DECISIONS.md`; `platform/src/meridian/api/public/areas.py`; `platform/src/meridian/cli_regions.py`; `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `.dockerignore`; `dashboard/src/{Areas,AreaMap,areas,Changes,ReleaseNotes,releaseNotes,useOlderPages,Results,events,StationMap,Sparkline,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/msp_conformance/test_public_areas_endpoint.py`; `tests/unit/test_regions_summary.py` |
-| D-367 the reports page and the network's week | `platform/src/meridian/notifications/{network,network_reading,wording,facts}.py`; `platform/src/meridian/store/network_week_reads.py`; `platform/src/meridian/api/public/{reports,models/network_report,surface}.py`; `platform/src/meridian/regions/summary.py`; `platform/src/meridian/reports/summary.py`; `dashboard/src/{Reports,reports,ModelSummary,Conditions,Live,LiveNow,route,Nav,App,Kiosk}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `deploy/tools/demo_rehearsal.py`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_network_report,test_notifications_boundaries,test_public_privacy}.py`; `tests/integration/test_public_network_report.py` |
+| D-367 the reports page and the network's week | `platform/src/meridian/notifications/{network,network_reading,wording,facts}.py`; `platform/src/meridian/store/network_week_reads.py`; `platform/src/meridian/api/public/{reports,models/network_report,surface}.py`; `platform/src/meridian/regions/summary.py`; `platform/src/meridian/reports/summary.py`; `dashboard/src/{Reports,reports,ModelSummary,Conditions,Live,LiveNow,route,Nav,App,Kiosk}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `deploy/tools/demo_rehearsal.py`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_network_report,test_notifications_boundaries,test_public_privacy}.py`; `tests/integration/test_public_reports_endpoint.py` |
+| D-368 the success criteria, published from a sealed run | `platform/src/meridian/reports/criteria.py`; `platform/src/meridian/cli_report.py`; `platform/src/meridian/api/public/{reports,models/criteria}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Criteria,criteria,Reports}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_report_criteria,test_public_privacy}.py`; `tests/integration/test_public_reports_endpoint.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

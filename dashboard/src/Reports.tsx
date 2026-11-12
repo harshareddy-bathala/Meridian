@@ -9,6 +9,8 @@ import {
   quantityWords,
   seriesByQuantity,
 } from "./areas";
+import { CriteriaPanel } from "./Criteria";
+import { fetchCriteria } from "./criteria";
 import { formatDay } from "./format";
 import { fetchInsights } from "./insights";
 import { ModelPanel } from "./ModelSummary";
@@ -19,8 +21,8 @@ import { oldest, snapshotClass } from "./snapshot";
 import { usePolled, type Polled } from "./usePolled";
 
 // The reports, for a reader who wants it said in words: the network's latest
-// settled week (D-367), the published area reports (D-366) and the sealed
-// evaluation summary (D-332). Every text and figure is the platform's or a
+// settled week (D-367), the published area reports (D-366), and the sealed
+// evaluation: its success criteria (D-368) and its model summary (D-332). Every text and figure is the platform's or a
 // sealed report's; the page writes no sentence of its own about the data, and a
 // simulated section is badged as well as said (rule 5).
 
@@ -163,13 +165,14 @@ export function ReportsView() {
   const [monday, setMonday] = useState<string | null>(null);
   const week = useWeek(monday);
   const areas = usePolled("areas", fetchAreas, REPORTS_REFRESH_MS);
+  const criteria = usePolled("criteria", fetchCriteria, REPORTS_REFRESH_MS);
   const model = usePolled("insights", fetchInsights, REPORTS_REFRESH_MS);
-  const snapshot = oldest(oldest(week.snapshot, areas.snapshot), model.snapshot);
+  const snapshot = [areas, criteria, model].reduce((held, one) => oldest(held, one.snapshot), week.snapshot);
   return (
     <section aria-labelledby="reports-heading" className={snapshotClass("view", snapshot)}>
       <h2 id="reports-heading">Reports</h2>
       <SnapshotNote snapshot={snapshot} what="This view shows" />
-      {[week.error, areas.error, model.error]
+      {[week.error, areas.error, criteria.error, model.error]
         .filter((one) => one !== null)
         .map((one) => (
           <p role="alert" key={one}>
@@ -181,6 +184,7 @@ export function ReportsView() {
       <h3>Area reports</h3>
       {areas.value !== null && <AreaReports read={areas.value} />}
       <h3>The evaluation</h3>
+      {criteria.value !== null && <CriteriaPanel read={criteria.value} />}
       <div className="figures">{model.value !== null && <ModelPanel read={model.value} />}</div>
     </section>
   );

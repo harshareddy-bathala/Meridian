@@ -32,3 +32,4 @@
 /api/v1/results?limit=50
 /api/v1/areas
 /api/v1/reports/weekly
+/api/v1/reports/criteria

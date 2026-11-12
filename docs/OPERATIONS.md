@@ -1156,6 +1156,7 @@ Stage 35 adds six reads to the public API for the dashboard's network, schedule,
 | `GET /api/v1/events` | the last week's events, newest first and paged: a station registered, a pass first reported decoded, a loss diagnosed under the deployment's `[diagnosis]`, a receive-chain warning raised or cleared under its watch; each names the record it came from (D-363) |
 | `GET /api/v1/results[?station_id=]` | every pass classified under the deployment's `[classification]`, the most recently classified first: its window to whole minutes, its class, its `effect` on SC-4 (`captured`, `lost` or `satellite`), whether a station was confirmed listening, the report's outcome, and its diagnosed cause where the deployment's `[diagnosis]` made one (D-365) |
 | `GET /api/v1/reports/weekly[?week=]` | the network's latest settled week, or the week from a given Monday, as plain text from template `network-weekly-1`: measured and simulated stations apart, settled passes by class, the capture rate with its interval, the loss budget, losses by cause and warnings open, all counted under the deployment's `[classification]` and `[diagnosis]`; with the facts' and text's sha256 and the previous week's Monday. A day that is not a Monday, or a week whose last passes are still inside the settle margin, is `invalid_query` (D-367) |
+| `GET /api/v1/reports/criteria` | a sealed run's success criteria, the file `REPORT_CRITERIA` names under `PUBLISHED_DIR`, written by `meridian report criteria`; `not_yet_computed` while it is unset, and `server_error` if the file is refused (D-368) |
 
 ```bash
 curl -s localhost:8000/api/v1/losses?limit=5 | python -m json.tool
@@ -1354,6 +1355,17 @@ The first model fitted on receptions nobody here invented (D-322, D-325). The fi
 4. **Publish** by setting `REPORT_SUMMARY=/published/model-summary.json` on the api (D-332). The dashboard's reports view reads the file and nothing else; a file it refuses is a `server_error` naming the setting, never a partial page.
 
 **What it is and is not.** Only configuration A, elevation, can be fitted on an archive: C and D appear as not computable, with the reason (D-156). The completeness ratio and the weighting are in the run's data section, because the archive holds only passes its stations chose to observe. **Never compare its totals with ours**, on the site, a slide or a poster (D-053).
+
+### Publishing the success criteria
+
+The reports page states each success criterion a sealed run judged, SC-1 to SC-5 and SC-7 to SC-9, from a file of its own (D-368). It comes from a run on our own stations, not the archive run above, because only our own run measures them:
+
+```bash
+meridian report verify <run>
+meridian report criteria <run> --output data/published/criteria.json
+```
+
+Then set `REPORT_CRITERIA=/published/criteria.json` on the api. Every figure is copied from the run's own rows, and each verdict is the run's own. A criterion the run could not judge is published with its reason, and one measured on simulated fault runs is labelled so. Unset, `/api/v1/reports/criteria` answers `not_yet_computed`. Named and refused, it answers `server_error` naming the setting, as `REPORT_SUMMARY` does.
 
 ### The completion gate, at a prompt
 

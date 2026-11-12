@@ -15,6 +15,7 @@ import type { Fetcher } from "./api";
 import { fetchAggregates } from "./aggregates";
 import { fetchAreas } from "./areas";
 import { fetchConditions } from "./conditions";
+import { fetchCriteria } from "./criteria";
 import { fetchEvents } from "./events";
 import { fetchInsights } from "./insights";
 import { fetchLosses } from "./losses";
@@ -74,6 +75,7 @@ async function requests(): Promise<string[]> {
     fetchResults(fetcher, null, signal),
     fetchAreas(fetcher, signal),
     fetchWeekly(fetcher, signal),
+    fetchCriteria(fetcher, signal),
   ];
   await Promise.allSettled(calls);
   return urls;

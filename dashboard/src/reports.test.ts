@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { weeklyBody } from "./fixtures.test-data";
+import { weeklyBody } from "./fixtures-reports.test-data";
 import { blocksOf, decodeWeekly, fetchWeekOf } from "./reports";
 
 describe("the network's weekly report", () => {
