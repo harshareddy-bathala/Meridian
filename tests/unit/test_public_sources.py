@@ -615,10 +615,19 @@ def test_a_quantity_with_no_stated_range_is_not_checked() -> None:
 
 
 def test_no_ingest_module_can_decode_an_image() -> None:
-    """D-133 by construction: no image library is imported, so no pixel is read."""
+    """D-133 by construction: no image library is imported, so no pixel is read.
+
+    Outside one package. ``meridian_ingest.imagery`` decodes scenes to draw them
+    (D-371), and its own boundary — no loader, no store, so no pixel becomes a
+    sample — is held by ``test_imagery_boundaries.py``. Every adapter and
+    normaliser stays under this rule unchanged.
+    """
     source = Path(__file__).parents[2] / "ingest" / "src"
+    imagery = source / "meridian_ingest" / "imagery"
     banned = ("PIL", "imageio", "cv2", "skimage", "matplotlib", "rasterio")
     for path in source.rglob("*.py"):
+        if path.is_relative_to(imagery):
+            continue
         text = path.read_text("utf-8")
         for name in banned:
             assert f"import {name}" not in text, path
