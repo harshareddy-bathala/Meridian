@@ -46,9 +46,29 @@ flowchart TD
 
 # Where the build has got to
 
-*Snapshot taken 2026-11-02. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
+*Snapshot taken 2026-11-14. The stages below are written as instructions and stay in that tense once built, so this is the one place that says which of them are behind you. If this note looks old, trust `git log` over it.*
 
 **Stages 36 to 41 were added on 2026-11-07, after every earlier stage was built**: the platform in a cloud, monitored (36); the dashboard for readers who own no station (37); open imagery, placed and explained (38); the station owner's page (39); a real station joining (40); and first light and completion (41).
+
+**Stage 37's software is built** (2026-11-14). Its decisions are D-360 through D-370, D-370 taking the first of Stage 38's range, which now starts at D-371. `docs/OPERATIONS.md` § Publishing areas, § Publishing the success criteria, § Putting one on the data page and § Giving the station planner a model are its runbook, and it added no migration. Stage 38 is next.
+- **The completion gate passes, rehearsed on the demonstration stack.** *A reader with no station, in a browser, finds what is happening now, every pass's result, an area's changes, a plain report and a downloadable dataset, each on its own page, each labelled simulated or measured, and each served as a stale copy with the api stopped.*
+  - `demo_rehearsal.py`, extended to every view, the planner and a 360 px screen: 52 checks passed and none failed, through the front of a stack built from this branch. With the api stopped, all six of the gate's pages were served as copies marked Not live, and each was live again once the api was back. The planner said no copy was kept.
+  - The area shown was a stand-in summary. The dataset was a real public cut of the simulated fleet. Production publishes no area yet: that is the team's switch (D-366).
+- **Ten pages, each on its own route:** Live (the new first page), Stations, Schedule, Results, Areas, Changes, Reports, Data, Plan and the kiosk. Every page names the way in a reader wants.
+- **WCAG 2.2 AA on every view**, measured with axe-core 4.10.3 in both themes at 360 and 1280 px, with an area published. The first run found two failures, both fixed: the maps hid their own controls behind `role="img"`, and a table frame that scrolls sideways could not be reached by keyboard.
+- **The site links to the live pages:** `/data/` to Results and Data, `/areas/` to Areas, with its status now that D-326 is accepted, and `/stations/` to the planner.
+- **Found on the way, fixed:**
+  - the restore drill needed client tools at the server's major version;
+  - an evidence package kept a station's exact pass geometry, so only its public cut is published (D-369);
+  - a 48-hour pass search took 3.6 s a satellite, now 0.31 s, with every pass unchanged (D-370);
+  - the front would have kept every planner answer, and the access log would have recorded every place asked about (D-370);
+  - a running front does not pick up a changed `nginx.conf` until it is recreated. The runbook now says so.
+- **Owed, not done:**
+  - deploying this to the cloud host: recreate the front, as the runbook says, so it stops keeping planner answers;
+  - a configuration A model for `PLAN_MODEL`, fitted on measured or archive receptions. Until one is published, each pass is listed without a yield, and says why.
+- **Known limits:**
+  - the planner's yield is configuration A's, a typical station of the network, not a roof's own horizon and interference;
+  - `test_ground_truth_gate.py` failed twice locally while this stage was built and could not be reproduced: nine passes since, on this branch and on the commit before it, and green in CI.
 
 **Stage 36's software is built and running** (2026-11-07). Its decisions are D-352 and D-353, `deploy/cloud/aws/README.md` and `docs/OPERATIONS.md` § Ingest as a container and § Datadog, instead of the metrics profile are its runbook, and it added no migration. Stage 37 is next.
 - **The completion gate passes, on the cloud host.** *The public hostname serves the dashboard from the cloud host through the tunnel alone; `verify_public_surface.py` passes against it with the edge's rate limit; the front drill shows every view as Not live with the api stopped; a restore drill passes on the host; stopping the api fires a monitor.*
