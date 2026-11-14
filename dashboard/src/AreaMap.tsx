@@ -57,7 +57,7 @@ export function AreaMap({ areas, selected, onSelect }: AreaMapProps) {
   const note = tileNote(tileStatus, "Areas");
   return (
     <figure className="station-map">
-      <div ref={attach} className="station-map-canvas" role="img" aria-label="Map of the areas of interest" />
+      <div ref={attach} className="station-map-canvas" role="region" aria-label="Map of the areas of interest" />
       {note !== undefined && <figcaption className="dim">{note}</figcaption>}
     </figure>
   );

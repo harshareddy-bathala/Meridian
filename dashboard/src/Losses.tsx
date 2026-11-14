@@ -5,6 +5,7 @@ import { SimBadge } from "./SimBadge";
 import { SnapshotNote } from "./SnapshotNote";
 import { snapshotClass } from "./snapshot";
 import { usePolled } from "./usePolled";
+import { TableScroll } from "./TableScroll";
 
 // Every lost pass the platform diagnosed: the cause, or *undetermined* said
 // plainly with the reason, and every cause tested beside it, fired or not,
@@ -75,7 +76,7 @@ export function LossesSection({ go }: { go: Go }) {
           has none yet.
         </p>
       ) : (
-        <div className="table-scroll">
+        <TableScroll label="Diagnosed losses">
           <table>
             <caption>The most recently diagnosed first, with every cause tested.</caption>
             <thead>
@@ -92,7 +93,7 @@ export function LossesSection({ go }: { go: Go }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
     </section>
   );

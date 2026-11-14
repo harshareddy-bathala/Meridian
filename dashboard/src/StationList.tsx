@@ -1,6 +1,7 @@
 import { formatAge, livenessLabel, precisionLabel } from "./format";
 import { SimBadge } from "./SimBadge";
 import type { Station } from "./stations";
+import { TableScroll } from "./TableScroll";
 
 export type Select = (stationId: string) => void;
 
@@ -58,7 +59,7 @@ export function StationList({ stations, now, selectedId, onSelect }: ListProps) 
   }
   const simulated = stations.filter((station) => station.simulated).length;
   return (
-    <div className="table-scroll">
+    <TableScroll label="The station directory">
       <table>
         <caption>
           {stations.length} {stations.length === 1 ? "station" : "stations"}, {simulated}{" "}
@@ -85,6 +86,6 @@ export function StationList({ stations, now, selectedId, onSelect }: ListProps) 
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }

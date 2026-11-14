@@ -19,6 +19,7 @@ import {
 import { STALE_ORBIT_DAYS } from "./stationSchedule";
 import { describeOrbitAge } from "./tracks";
 import { JOIN_URL } from "./WaysIn";
+import { TableScroll } from "./TableScroll";
 
 // The station planner (D-370), for someone deciding whether a station is worth
 // building: a place in, the next two days of passes over it out, each with its
@@ -37,18 +38,13 @@ function percent(value: number): string {
 }
 
 function YieldCell({ predicted }: { predicted: PlanYield }) {
-  return "probability" in predicted ? (
-    <>{percent(predicted.probability)}</>
-  ) : (
-    <span className="dim">not measured</span>
-  );
+  return "probability" in predicted ? <>{percent(predicted.probability)}</> : <span className="dim">not measured</span>;
 }
 
 function Summary({ plan }: { plan: Plan }) {
   const expected = expectedDecodes(plan.passes);
   const highest = plan.passes.reduce<PlanPass | null>(
-    (best, one) =>
-      best === null || one.maxElevationDeg > best.maxElevationDeg ? one : best,
+    (best, one) => (best === null || one.maxElevationDeg > best.maxElevationDeg ? one : best),
     null,
   );
   return (
@@ -58,8 +54,7 @@ function Summary({ plan }: { plan: Plan }) {
         <dd>
           {plan.passes.length}{" "}
           <span className="dim">
-            from {plan.satellites.length}{" "}
-            {plan.satellites.length === 1 ? "satellite" : "satellites"}, above{" "}
+            from {plan.satellites.length} {plan.satellites.length === 1 ? "satellite" : "satellites"}, above{" "}
             {plan.minElevationDeg}°
           </span>
         </dd>
@@ -71,8 +66,7 @@ function Summary({ plan }: { plan: Plan }) {
             <span className="dim">not measured</span>
           ) : (
             <>
-              about {expected.toFixed(1)}{" "}
-              <span className="dim">by configuration A</span>
+              about {expected.toFixed(1)} <span className="dim">by configuration A</span>
             </>
           )}
         </dd>
@@ -84,10 +78,7 @@ function Summary({ plan }: { plan: Plan }) {
             <span className="dim">none</span>
           ) : (
             <>
-              {highest.maxElevationDeg}°{" "}
-              <span className="dim">
-                at {formatMinute(highest.maxElevationAt)}
-              </span>
+              {highest.maxElevationDeg}° <span className="dim">at {formatMinute(highest.maxElevationAt)}</span>
             </>
           )}
         </dd>
@@ -101,21 +92,18 @@ function YieldNote({ plan }: { plan: Plan }) {
   if ("notYetComputed" in model) {
     return (
       <p className="dim">
-        {model.notYetComputed} The passes and their peaks are still computed; a
-        pass's peak is the strongest single sign of whether it decodes.
+        {model.notYetComputed} The passes and their peaks are still computed; a pass's peak is the strongest single sign
+        of whether it decodes.
       </p>
     );
   }
-  const whose =
-    model.population === "own" ? "Meridian's own stations" : "a public archive";
+  const whose = model.population === "own" ? "Meridian's own stations" : "a public archive";
   return (
     <p className="dim">
-      Each yield is configuration A's: a model that reads only how high a pass
-      climbs, fitted on receptions by {whose} up to {formatMinute(model.asOf)}{" "}
-      (model <span className="mono">{model.modelSha256.slice(0, 12)}</span>). It
-      says how a typical station of the network would do with the pass. A roof's
-      own horizon and interference are not in it: a station learns those from
-      its own receptions once it joins.
+      Each yield is configuration A's: a model that reads only how high a pass climbs, fitted on receptions by {whose}{" "}
+      up to {formatMinute(model.asOf)} (model <span className="mono">{model.modelSha256.slice(0, 12)}</span>). It says
+      how a typical station of the network would do with the pass. A roof's own horizon and interference are not in it:
+      a station learns those from its own receptions once it joins.
     </p>
   );
 }
@@ -123,12 +111,9 @@ function YieldNote({ plan }: { plan: Plan }) {
 function Satellites({ plan }: { plan: Plan }) {
   const grouped = passesBySatellite(plan);
   return (
-    <div className="table-scroll">
+    <TableScroll label="Each satellite searched">
       <table>
-        <caption>
-          Each satellite searched, what to tune to, and its passes over the
-          place
-        </caption>
+        <caption>Each satellite searched, what to tune to, and its passes over the place</caption>
         <thead>
           <tr>
             <th scope="col">Satellite</th>
@@ -147,54 +132,34 @@ function Satellites({ plan }: { plan: Plan }) {
                 <th scope="row">{one.name}</th>
                 <td>
                   {one.downlinks.map((downlink) => (
-                    <span
-                      key={`${String(downlink.centreFreqHz)}-${downlink.mode}`}
-                      className="downlink"
-                    >
-                      {formatFrequency(downlink.centreFreqHz)}{" "}
-                      {downlink.mode.toUpperCase()}
+                    <span key={`${String(downlink.centreFreqHz)}-${downlink.mode}`} className="downlink">
+                      {formatFrequency(downlink.centreFreqHz)} {downlink.mode.toUpperCase()}
                     </span>
                   ))}
                 </td>
                 <td>{passes.length}</td>
-                <td>
-                  {expected === null ? (
-                    <span className="dim">not measured</span>
-                  ) : (
-                    expected.toFixed(1)
-                  )}
-                </td>
-                <td>
-                  {describeOrbitAge(one.elementSetAgeS, STALE_ORBIT_DAYS)}
-                </td>
+                <td>{expected === null ? <span className="dim">not measured</span> : expected.toFixed(1)}</td>
+                <td>{describeOrbitAge(one.elementSetAgeS, STALE_ORBIT_DAYS)}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
 function Passes({ plan }: { plan: Plan }) {
-  const names = new Map(
-    plan.satellites.map((one) => [one.satelliteId, one.name]),
-  );
+  const names = new Map(plan.satellites.map((one) => [one.satelliteId, one.name]));
   if (plan.passes.length === 0) {
     return (
-      <p className="dim">
-        No satellite rises above {plan.minElevationDeg}° over this place in the
-        next 48 hours.
-      </p>
+      <p className="dim">No satellite rises above {plan.minElevationDeg}° over this place in the next 48 hours.</p>
     );
   }
   return (
-    <div className="table-scroll">
+    <TableScroll label="Every pass over the place">
       <table>
-        <caption>
-          Every pass, in the order they rise. Windows are widened to whole
-          minutes.
-        </caption>
+        <caption>Every pass, in the order they rise. Windows are widened to whole minutes.</caption>
         <thead>
           <tr>
             <th scope="col">Satellite</th>
@@ -207,14 +172,11 @@ function Passes({ plan }: { plan: Plan }) {
         <tbody>
           {plan.passes.map((one) => (
             <tr key={`${one.satelliteId}-${one.aos}`}>
-              <th scope="row">
-                {names.get(one.satelliteId) ?? one.satelliteId}
-              </th>
+              <th scope="row">{names.get(one.satelliteId) ?? one.satelliteId}</th>
               <td>{formatWindow(one.aos, one.los)}</td>
               <td>{one.maxElevationDeg}°</td>
               <td>
-                {compassPoint(one.aosAzimuthDeg)} to{" "}
-                {compassPoint(one.losAzimuthDeg)}
+                {compassPoint(one.aosAzimuthDeg)} to {compassPoint(one.losAzimuthDeg)}
               </td>
               <td>
                 <YieldCell predicted={one.predictedYield} />
@@ -223,7 +185,7 @@ function Passes({ plan }: { plan: Plan }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
@@ -245,8 +207,7 @@ function Answer({ plan }: { plan: Plan }) {
         </ul>
       )}
       <p>
-        Worth building?{" "}
-        <a href={JOIN_URL}>What a station needs, and how it joins</a>.
+        Worth building? <a href={JOIN_URL}>What a station needs, and how it joins</a>.
       </p>
     </>
   );
@@ -330,27 +291,13 @@ function PlaceForm({ ask }: { ask: (place: Place) => void }) {
   return (
     <>
       <form className="plan-form" onSubmit={submit} noValidate>
-        <Coordinate
-          label="Latitude, degrees north"
-          limit={90}
-          placeholder="12.9"
-          value={lat}
-          onChange={setLat}
-        />
-        <Coordinate
-          label="Longitude, degrees east"
-          limit={180}
-          placeholder="77.6"
-          value={lon}
-          onChange={setLon}
-        />
+        <Coordinate label="Latitude, degrees north" limit={90} placeholder="12.9" value={lat} onChange={setLat} />
+        <Coordinate label="Longitude, degrees east" limit={180} placeholder="77.6" value={lon} onChange={setLon} />
         <button type="submit">Show the passes</button>
       </form>
       <p id="plan-privacy" className="dim">
-        The place is rounded to a tenth of a degree, about 11 km, before it
-        leaves this page. Nothing about it is stored: not in this page's
-        address, not on the platform, not in its log. South and west are
-        negative.
+        The place is rounded to a tenth of a degree, about 11 km, before it leaves this page. Nothing about it is
+        stored: not in this page's address, not on the platform, not in its log. South and west are negative.
       </p>
       {problem !== null && <p role="alert">{problem}</p>}
     </>
@@ -363,19 +310,13 @@ export function PlanView() {
     <section aria-labelledby="plan-heading" className="view">
       <h2 id="plan-heading">Plan a station</h2>
       <p>
-        Give a place, and see what would pass over it in the next two days: how
-        high each satellite would climb, and how likely each pass is to decode.
+        Give a place, and see what would pass over it in the next two days: how high each satellite would climb, and how
+        likely each pass is to decode.
       </p>
       <PlaceForm ask={ask} />
       <div aria-live="polite">
-        {load.kind === "loading" && (
-          <p className="dim">
-            Searching the next 48 hours over {formatPlace(load.place)}…
-          </p>
-        )}
-        {load.kind === "failed" && (
-          <p role="alert">The planner could not answer: {load.reason}</p>
-        )}
+        {load.kind === "loading" && <p className="dim">Searching the next 48 hours over {formatPlace(load.place)}…</p>}
+        {load.kind === "failed" && <p role="alert">The planner could not answer: {load.reason}</p>}
         {load.kind === "loaded" && <Answer plan={load.plan} />}
       </div>
     </section>

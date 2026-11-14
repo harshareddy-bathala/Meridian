@@ -8,14 +8,7 @@
 // keeping a copy, so it is not in snapshot-routes.txt and is never warmed.
 
 import { getJson, type Fetcher } from "./api";
-import {
-  asNumber,
-  asObject,
-  asOneOf,
-  asString,
-  DecodeError,
-  type Fields,
-} from "./decode";
+import { asNumber, asObject, asOneOf, asString, DecodeError, type Fields } from "./decode";
 
 /** A tenth of a degree, about 11 km: what the platform uses (D-082, D-370). */
 export const PLACE_DECIMALS = 1;
@@ -75,8 +68,7 @@ export interface Plan {
 
 /** The place as it is sent: to a tenth of a degree, never ``-0``. */
 export function roundPlace(place: Place): Place {
-  const round = (value: number) =>
-    Math.round(value * 10 ** PLACE_DECIMALS) / 10 ** PLACE_DECIMALS + 0;
+  const round = (value: number) => Math.round(value * 10 ** PLACE_DECIMALS) / 10 ** PLACE_DECIMALS + 0;
   return { latDeg: round(place.latDeg), lonDeg: round(place.lonDeg) };
 }
 
@@ -94,9 +86,7 @@ export function placeProblem(latText: string, lonText: string): string | null {
 /** Whether typed text is a number of degrees no further than ``limit`` from 0. */
 function withinDegrees(text: string, limit: number): boolean {
   const value = Number(text);
-  return (
-    text.trim() !== "" && Number.isFinite(value) && Math.abs(value) <= limit
-  );
+  return text.trim() !== "" && Number.isFinite(value) && Math.abs(value) <= limit;
 }
 
 /** The request for a place, rounded first. */
@@ -119,12 +109,7 @@ function list(fields: Fields, key: string, path: string): unknown[] {
 
 function decodeYield(value: unknown, path: string): PlanYield {
   const fields = asObject(value, path);
-  const status = asOneOf(
-    fields,
-    "status",
-    ["computed", "not_measured"] as const,
-    path,
-  );
+  const status = asOneOf(fields, "status", ["computed", "not_measured"] as const, path);
   return status === "computed"
     ? { probability: asNumber(fields, "probability", path) }
     : { notMeasured: asString(fields, "reason", path) };
@@ -140,10 +125,7 @@ function decodePass(value: unknown, path: string): PlanPass {
     maxElevationAt: asString(fields, "max_elevation_at", path),
     aosAzimuthDeg: asNumber(fields, "aos_azimuth_deg", path),
     losAzimuthDeg: asNumber(fields, "los_azimuth_deg", path),
-    predictedYield: decodeYield(
-      fields.predicted_yield,
-      `${path}.predicted_yield`,
-    ),
+    predictedYield: decodeYield(fields.predicted_yield, `${path}.predicted_yield`),
   };
 }
 
@@ -171,12 +153,7 @@ function decodeOmission(value: unknown, path: string): PlanOmission {
   return {
     satelliteId: asString(fields, "satellite_id", path),
     name: asString(fields, "name", path),
-    reason: asOneOf(
-      fields,
-      "reason",
-      ["no_element_set", "propagation_failed", "over_limit"] as const,
-      path,
-    ),
+    reason: asOneOf(fields, "reason", ["no_element_set", "propagation_failed", "over_limit"] as const, path),
   };
 }
 
@@ -188,12 +165,7 @@ function decodeYieldModel(value: unknown, path: string): YieldModel {
   asOneOf(fields, "status", ["computed"] as const, path);
   return {
     configuration: asOneOf(fields, "configuration", ["A"] as const, path),
-    population: asOneOf(
-      fields,
-      "population",
-      ["own", "archive"] as const,
-      path,
-    ),
+    population: asOneOf(fields, "population", ["own", "archive"] as const, path),
     modelSha256: asString(fields, "model_sha256", path),
     asOf: asString(fields, "as_of", path),
   };
@@ -216,23 +188,15 @@ export function decodePlan(body: unknown): Plan {
     satellites: list(fields, "satellites", path).map((one, index) =>
       decodeSatellite(one, `${path}.satellites[${String(index)}]`),
     ),
-    passes: list(fields, "passes", path).map((one, index) =>
-      decodePass(one, `${path}.passes[${String(index)}]`),
-    ),
+    passes: list(fields, "passes", path).map((one, index) => decodePass(one, `${path}.passes[${String(index)}]`)),
     omitted: list(fields, "omitted", path).map((one, index) =>
       decodeOmission(one, `${path}.omitted[${String(index)}]`),
     ),
   };
 }
 
-export async function fetchPlan(
-  fetcher: Fetcher,
-  place: Place,
-  signal: AbortSignal,
-): Promise<Plan> {
-  return decodePlan(
-    await getJson(fetcher, planUrl(place), "the station planner", signal),
-  );
+export async function fetchPlan(fetcher: Fetcher, place: Place, signal: AbortSignal): Promise<Plan> {
+  return decodePlan(await getJson(fetcher, planUrl(place), "the station planner", signal));
 }
 
 /** "12.3° N, 77.6° E": a place as a reader writes it. */
@@ -246,8 +210,7 @@ const POINTS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
 
 /** "NE": the eighth of the compass a bearing falls in. */
 export function compassPoint(azimuthDeg: number): string {
-  const index =
-    Math.round((((azimuthDeg % 360) + 360) % 360) / 45) % POINTS.length;
+  const index = Math.round((((azimuthDeg % 360) + 360) % 360) / 45) % POINTS.length;
   return POINTS[index] ?? "N";
 }
 
@@ -267,9 +230,7 @@ export function expectedDecodes(passes: PlanPass[]): number | null {
 
 /** Each searched satellite's passes, in the response's order. */
 export function passesBySatellite(plan: Plan): Map<string, PlanPass[]> {
-  const grouped = new Map<string, PlanPass[]>(
-    plan.satellites.map((one) => [one.satelliteId, []]),
-  );
+  const grouped = new Map<string, PlanPass[]>(plan.satellites.map((one) => [one.satelliteId, []]));
   for (const one of plan.passes) {
     grouped.get(one.satelliteId)?.push(one);
   }

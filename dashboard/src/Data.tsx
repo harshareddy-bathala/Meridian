@@ -17,6 +17,7 @@ import { SimBadge } from "./SimBadge";
 import { SnapshotNote } from "./SnapshotNote";
 import { oldest, snapshotClass } from "./snapshot";
 import { usePolled } from "./usePolled";
+import { TableScroll } from "./TableScroll";
 
 // The data, for a reader who wants to take it away (D-369): the evidence
 // packages with their files and digests, the public API's routes, how to cite
@@ -53,7 +54,7 @@ function Populations({ pkg }: { pkg: EvidencePackage }) {
 
 function Files({ pkg }: { pkg: EvidencePackage }) {
   return (
-    <div className="table-scroll">
+    <TableScroll label="The package's files">
       <table>
         <caption>Every file of the package, with the digest a download must have</caption>
         <thead>
@@ -77,7 +78,7 @@ function Files({ pkg }: { pkg: EvidencePackage }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
@@ -142,7 +143,7 @@ export function Packages({ read }: { read: DatasetsRead }) {
 
 function Routes({ reference }: { reference: ApiReference }) {
   return (
-    <div className="table-scroll">
+    <TableScroll label="The API's routes">
       <table>
         <caption>Every public route of version {reference.version}, each a GET</caption>
         <thead>
@@ -162,14 +163,14 @@ function Routes({ reference }: { reference: ApiReference }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
 function Credits() {
   return (
     <>
-      <div className="table-scroll">
+      <TableScroll label="Data sources and their terms">
         <table>
           <caption>Data Meridian takes from others, and the terms it comes under</caption>
           <thead>
@@ -195,8 +196,8 @@ function Credits() {
             ))}
           </tbody>
         </table>
-      </div>
-      <div className="table-scroll">
+      </TableScroll>
+      <TableScroll label="Software Meridian is built on">
         <table>
           <caption>Software Meridian is built on</caption>
           <thead>
@@ -222,7 +223,7 @@ function Credits() {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </>
   );
 }

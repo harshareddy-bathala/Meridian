@@ -10,16 +10,13 @@ export function WaysIn() {
   return (
     <aside className="ways-in" aria-label="Ways in">
       <p>
-        <strong>Exploring the data?</strong> Every page here is open to read,
-        with no sign-in.
+        <strong>Exploring the data?</strong> Every page here is open to read, with no sign-in.
       </p>
       <p>
-        <strong>Run a station?</strong> Owners will sign in with an owner key.
-        That is still being built.
+        <strong>Run a station?</strong> Owners will sign in with an owner key. That is still being built.
       </p>
       <p>
-        <strong>Want to run one?</strong>{" "}
-        <a href="#/plan">See what would pass over your place</a>, and{" "}
+        <strong>Want to run one?</strong> <a href="#/plan">See what would pass over your place</a>, and{" "}
         <a href={JOIN_URL}>what a station needs</a>.
       </p>
     </aside>

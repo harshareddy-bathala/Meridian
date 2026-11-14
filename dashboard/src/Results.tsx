@@ -19,6 +19,7 @@ import { SnapshotNote } from "./SnapshotNote";
 import { snapshotClass } from "./snapshot";
 import { mergeOnce, useOlderPages, type LoadPage } from "./useOlderPages";
 import { usePolled } from "./usePolled";
+import { TableScroll } from "./TableScroll";
 
 // Every settled pass across the network and what became of it, the thirty
 // days' capture rate and loss budget, and every diagnosed loss (D-365). This is
@@ -113,7 +114,7 @@ function ResultTable({ go }: { go: Go }) {
   return (
     <>
       <SnapshotNote snapshot={newest.snapshot} what="This list shows" />
-      <div className={snapshotClass("table-scroll", newest.snapshot)}>
+      <TableScroll label="Settled passes" className={snapshotClass("table-scroll", newest.snapshot)}>
         <table>
           <caption>The most recently settled first.</caption>
           <thead>
@@ -131,7 +132,7 @@ function ResultTable({ go }: { go: Go }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
       {error !== null && <p role="alert">{error}</p>}
       {hasMore && (
         <button type="button" onClick={more}>

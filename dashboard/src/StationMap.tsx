@@ -193,7 +193,7 @@ export function StationMap({ stations, onSelect, satellites }: MapProps) {
   const note = tileNote(tileStatus, "Stations");
   return (
     <figure className="station-map">
-      <div ref={attach} className="station-map-canvas" role="img"
+      <div ref={attach} className="station-map-canvas" role="region"
         aria-label={satellites === undefined ? "Map of stations" : "Map of stations, and of satellites with their next ninety minutes"}
       />
       {note !== undefined && <figcaption className="dim">{note}</figcaption>}

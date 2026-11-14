@@ -27,9 +27,7 @@ const PASS = {
   predicted_yield: { status: "computed", probability: 0.81 },
 };
 
-function body(
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+function body(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     status: "computed",
     at: "2026-11-14T09:37:00Z",
@@ -78,12 +76,8 @@ describe("the place a reader gives", () => {
       latDeg: 12.3,
       lonDeg: 77.7,
     });
-    expect(planUrl({ latDeg: -0.04, lonDeg: -0.01 })).toBe(
-      "/api/v1/plan?lat=0.0&lon=0.0",
-    );
-    expect(planUrl({ latDeg: 12.345678, lonDeg: -77.654321 })).toBe(
-      "/api/v1/plan?lat=12.3&lon=-77.7",
-    );
+    expect(planUrl({ latDeg: -0.04, lonDeg: -0.01 })).toBe("/api/v1/plan?lat=0.0&lon=0.0");
+    expect(planUrl({ latDeg: 12.345678, lonDeg: -77.654321 })).toBe("/api/v1/plan?lat=12.3&lon=-77.7");
   });
 
   it("is refused in words when it is off the globe or not a number", () => {
@@ -97,12 +91,8 @@ describe("the place a reader gives", () => {
   });
 
   it("is written as a reader writes one", () => {
-    expect(formatPlace({ latDeg: 12.3, lonDeg: 77.6 })).toBe(
-      "12.3° N, 77.6° E",
-    );
-    expect(formatPlace({ latDeg: -33.9, lonDeg: -70.7 })).toBe(
-      "33.9° S, 70.7° W",
-    );
+    expect(formatPlace({ latDeg: 12.3, lonDeg: 77.6 })).toBe("12.3° N, 77.6° E");
+    expect(formatPlace({ latDeg: -33.9, lonDeg: -70.7 })).toBe("33.9° S, 70.7° W");
   });
 
   it("never reaches the fragment, so it stays out of the browser's history", () => {
@@ -120,11 +110,7 @@ describe("the place a reader gives", () => {
       asked.push(url);
       return Promise.resolve(new Response(JSON.stringify(body())));
     };
-    await fetchPlan(
-      fetcher,
-      { latDeg: 12.34, lonDeg: 77.56 },
-      new AbortController().signal,
-    );
+    await fetchPlan(fetcher, { latDeg: 12.34, lonDeg: 77.56 }, new AbortController().signal);
 
     expect(asked).toEqual(["/api/v1/plan?lat=12.3&lon=77.6"]);
     expect(routesFile).not.toMatch(/\/api\/v1\/plan/);
@@ -143,14 +129,10 @@ describe("the planner's answer", () => {
       modelSha256: "ab".repeat(32),
       asOf: "2026-11-01T00:00:00Z",
     });
-    expect(plan.satellites[0]?.downlinks).toEqual([
-      { centreFreqHz: 137_900_000, mode: "lrpt" },
-    ]);
-    expect(
-      describeOmission(
-        plan.omitted[0] ?? { satelliteId: "", name: "", reason: "over_limit" },
-      ),
-    ).toBe("Meteor-M2-3 was not searched: no orbit is held for it.");
+    expect(plan.satellites[0]?.downlinks).toEqual([{ centreFreqHz: 137_900_000, mode: "lrpt" }]);
+    expect(describeOmission(plan.omitted[0] ?? { satelliteId: "", name: "", reason: "over_limit" })).toBe(
+      "Meteor-M2-3 was not searched: no orbit is held for it.",
+    );
   });
 });
 
@@ -189,16 +171,8 @@ describe("what the page works out from it", () => {
 
   it("refuses an answer it does not understand rather than drawing it", () => {
     expect(() => decodePlan(body({ status: "not_yet_computed" }))).toThrow();
-    expect(() =>
-      decodePlan(
-        body({ passes: [{ ...PASS, predicted_yield: { status: "maybe" } }] }),
-      ),
-    ).toThrow();
-    expect(() =>
-      decodePlan(
-        body({ omitted: [{ satellite_id: "x", name: "x", reason: "bored" }] }),
-      ),
-    ).toThrow();
+    expect(() => decodePlan(body({ passes: [{ ...PASS, predicted_yield: { status: "maybe" } }] }))).toThrow();
+    expect(() => decodePlan(body({ omitted: [{ satellite_id: "x", name: "x", reason: "bored" }] }))).toThrow();
   });
 
   it("names the eighth of the compass a pass rises and sets in", () => {
