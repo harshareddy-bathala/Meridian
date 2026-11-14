@@ -11,6 +11,7 @@
 //   #/changes              every change to an area, the network's events, releases
 //   #/reports              the network's week in words, area reports, the evaluation
 //   #/data                 the evidence packages, the API, how to cite, the credits
+//   #/plan                 the passes over a place, for deciding on a station
 //   #/kiosk                every view in turn, for a screen nobody touches
 //
 // Anything else is the live view, so an old or mistyped link still lands
@@ -27,6 +28,7 @@ export const VIEWS = [
   "changes",
   "reports",
   "data",
+  "plan",
   "kiosk",
 ] as const;
 export type View = (typeof VIEWS)[number];

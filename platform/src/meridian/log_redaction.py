@@ -14,6 +14,9 @@ uvicorn's and the libraries'. It removes three things:
   registration key, a password, a pepper, a secret — in the ``name=value``,
   ``name: value`` and ``'name': 'value'`` spellings logs and reprs use;
 - the password in a URL's ``user:password@``;
+- the query of a request to the station planner, ``/api/v1/plan?lat=…&lon=…``,
+  which is where a reader is thinking of putting a station: not a secret, but
+  personal, and the planner promises to keep nothing of it (D-370);
 
 and, beyond the patterns, every secret value this process has loaded, wherever
 it appears. :func:`meridian.config.load_settings` registers those, so a process
@@ -22,7 +25,7 @@ that reads a secret cannot log it verbatim, however it got into the line.
 The message is formatted, redacted and stored back on the record, and so is its
 traceback, so a formatter further down sees only the redacted text.
 
-Reference: docs/DECISIONS.md D-004, D-114, D-204.
+Reference: docs/DECISIONS.md D-004, D-114, D-204, D-370.
 """
 
 from __future__ import annotations
@@ -64,6 +67,8 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     # postgresql://user:password@host — any scheme, any user.
     (re.compile(r"(\b[a-z][a-z0-9+.-]*://[^:/@\s]*:)([^@\s]+)(@)"), rf"\1{REDACTED}\3"),
+    # `GET /api/v1/plan?lat=12.3&lon=77.6`: the place, in uvicorn's access line.
+    (re.compile(r"(/api/v1/plan)\?[^\s'\"]*"), rf"\1?{REDACTED}"),
 )
 
 _known: set[str] = set()

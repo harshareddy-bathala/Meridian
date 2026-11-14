@@ -540,6 +540,58 @@ REVIEWED = {
     },
     "SatelliteTracks": {"at", "horizon_s", "omitted", "satellites", "status", "step_s"},
     "TrackPoint": {"lat_deg", "lon_deg", "t"},
+    # The station planner (D-370). The place is the reader's, used and echoed
+    # to a tenth of a degree; windows and angles as every pass's (D-093).
+    "PublicPlan": {
+        "at",
+        "min_elevation_deg",
+        "omitted",
+        "passes",
+        "place",
+        "satellites",
+        "status",
+        "until",
+        "yield_model",
+    },
+    "PlanPlace": {"alt_m", "lat_deg", "lon_deg"},
+    "PlanYieldModel": {
+        "as_of",
+        "configuration",
+        "model_sha256",
+        "population",
+        "status",
+    },
+    "PlanYield": {"probability", "status"},
+    "PlanPass": {
+        "aos",
+        "aos_azimuth_deg",
+        "los",
+        "los_azimuth_deg",
+        "max_elevation_at",
+        "max_elevation_deg",
+        "predicted_yield",
+        "satellite_id",
+    },
+    "PlanDownlink": {"centre_freq_hz", "mode"},
+    "PlanSatellite": {
+        "downlinks",
+        "element_set_age_s",
+        "element_set_epoch",
+        "element_set_source",
+        "name",
+        "satellite_id",
+    },
+    # Read from PUBLISHED_DIR, never served as it stands: its figures reach a
+    # reader only as PlanYieldModel's and each pass's probability.
+    "PlanModelFile": {
+        "as_of",
+        "configuration",
+        "dataset_sha256",
+        "fitted",
+        "model_sha256",
+        "population",
+        "schema_",
+    },
     "StationLiveness": {"last_heartbeat_at", "liveness", "simulated", "station_id"},
     "WeighedPass": {"assignment_id", "decision", "pass_id", "value"},
 }

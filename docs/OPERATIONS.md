@@ -1159,6 +1159,7 @@ Stage 35 adds six reads to the public API for the dashboard's network, schedule,
 | `GET /api/v1/datasets` | the published evidence packages, every one the public cut, from the index `EVIDENCE_INDEX` names under `PUBLISHED_DIR`, written by `meridian dataset publish`; `not_yet_computed` while it is unset, and `server_error` if the index is refused (D-369) |
 | `GET /api/v1/datasets/{name}/{file}` | one file the index lists, as an attachment, only while it has the digest and size the index states; `not_found` for anything the index does not list (D-369) |
 | `GET /api/v1/reports/criteria` | a sealed run's success criteria, the file `REPORT_CRITERIA` names under `PUBLISHED_DIR`, written by `meridian report criteria`; `not_yet_computed` while it is unset, and `server_error` if the file is refused (D-368) |
+| `GET /api/v1/plan?lat=&lon=` | the station planner: every satellite with a live downlink, searched over the place rounded to 0.1° at sea level against a 10° floor, for the passes under way now or rising in the next 48 hours, each window to whole minutes with its peak and, when `PLAN_MODEL` names a model, configuration A's predicted yield. Nothing is stored: the front forwards it without a copy, the log withholds the query, and the planner has its own rate of six places then one every ten seconds per caller. A place off the globe is `invalid_query`; a refused model is `server_error` (D-370) |
 
 ```bash
 curl -s localhost:8000/api/v1/losses?limit=5 | python -m json.tool
@@ -1250,6 +1251,17 @@ uv run meridian dataset publish <the package it printed> --published data/publis
 To take a package down, remove its directory and run `publish` again on any package still published, which rewrites the index without it; delete `index.json` if none is left. The api stops serving it on the next request.
 
 ---
+
+### Giving the station planner a model
+
+The planner on the dashboard's `#/plan` lists each pass's peak with or without a model; with one, each pass also carries configuration A's predicted yield. The api is not given the datasets root (D-332), so a configuration A model is copied out to `PUBLISHED_DIR`:
+
+```bash
+meridian model planner data/datasets/models/<hash prefix> \
+  --output data/published/plan-model.json
+```
+
+It refuses anything but configuration A reading `max_elevation_deg` alone, fitted on the feature code this checkout runs. Then set `PLAN_MODEL=/published/plan-model.json` on the api. Unset, every pass's yield is `not_measured` and the page says why; named and refused, `/api/v1/plan` answers `server_error` naming the setting, and the log says why. Write the file again after fitting a newer model, and after any change to `FEATURE_VERSION`, which refuses the old one.
 
 ## Evaluation reports
 

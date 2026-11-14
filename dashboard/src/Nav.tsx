@@ -9,6 +9,7 @@ const LINKS: { view: View; label: string }[] = [
   { view: "changes", label: "Changes" },
   { view: "reports", label: "Reports" },
   { view: "data", label: "Data" },
+  { view: "plan", label: "Plan" },
   { view: "kiosk", label: "Kiosk" },
 ];
 

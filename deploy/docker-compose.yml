@@ -177,6 +177,9 @@ services:
       # The published evidence packages' index under /published, for
       # /api/v1/datasets; empty answers not_yet_computed (D-369).
       EVIDENCE_INDEX: ${EVIDENCE_INDEX:-}
+      # Configuration A's model for the station planner under /published, for
+      # /api/v1/plan; empty lists each pass with no predicted yield (D-370).
+      PLAN_MODEL: ${PLAN_MODEL:-}
       # The areas summary under /published, served by /api/v1/areas only while
       # AREAS_PUBLISHED is true. Off, or with no summary named, the read answers
       # not_yet_computed (D-326).

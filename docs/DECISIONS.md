@@ -4413,6 +4413,8 @@ Heartbeats and observations have separate buckets so that a queue flush can neve
 
 *Rejected: a shared store such as Redis.* It would give exact network-wide figures, at the cost of a service on the Pi that must be up for the platform to answer at all. The edge already gives the network-wide figure for the public API.
 
+*Amended 2026-11-14 (D-370):* the station planner draws on a fifth bucket beside the public one, six places then one every ten seconds per caller, because a new place costs an orbit search where any other read costs a query.
+
 ---
 
 ## D-203 — The public API takes no body, and its query string is capped
@@ -4455,6 +4457,8 @@ Values shorter than 16 characters are left to the patterns. The real secrets are
 *Rejected: logging a generic message for a validation failure.* It removes the one leak found, not the class, and leaves an operator unable to see why a station's requests are refused.
 
 *Rejected: structured logging with a deny-list of keys.* It needs every call site rewritten to pass fields, and a secret interpolated into a message string would still pass straight through.
+
+*Amended 2026-11-14 (D-370):* the filter also withholds the query of `/api/v1/plan`, a place a reader typed: personal rather than secret, and the planner promises to keep nothing of it.
 
 ---
 
@@ -5937,6 +5941,8 @@ D-135 asks how long a station retains an unacknowledged reception. **The code al
 
 *Rejected: a snapshot file the jobs process writes each round.* It needs a serving process anyway, and a second copy of every public response shaped differently from the api's, which the dashboard would have to read two ways.
 
+*Amended 2026-11-14 (D-370):* `/api/v1/plan` is forwarded and never kept, by an exact `location`. Its answer is about a place a reader typed, and a copy keyed by the request would be a list of those places.
+
 ---
 
 ## D-283 — Every view is warmed through the front, from one list the dashboard is checked against
@@ -7172,6 +7178,8 @@ The dashboard opened on the network view: a map, two populations' thirty-day fig
 
 *Rejected: a colour for satellites.* The palette's hues already mean liveness, a snapshot, a warning and the horizon. A shape carries the difference without adding one more colour to learn.
 
+*Amended 2026-11-14 (D-370):* "Want to run one?" now leads to the station planner as well as the site's station page.
+
 ---
 
 ## D-365 — Results is every settled pass with its effect on SC-4, read from the reliability module, and the losses are part of it
@@ -7315,6 +7323,31 @@ The roadmap's data page offers the evidence packages for download, with the API 
 *Rejected: only simulated packages for now.* The cut is what a measured package needs before any owner could consent to more, and a virtual station has no location to protect, so waiting would publish nothing a reader can use about real stations.
 
 *Rejected: the front keeping package files for thirty days.* A package is named by its hash and never rewritten, so a long-lived copy would be safe to serve, but one taken down for a mistake would stay downloadable for a month.
+
+---
+
+## D-370 — The station planner searches a rounded place on request, keeps nothing of it, and scores with a published configuration A model
+
+**2026-11-14 · accepted** · *`meridian/api/public/{plan,plan_search,plan_model,models/plan,models/plan_model,surface}.py`; `meridian/orbit/{pass_search,skyfield_service,range_rate}.py`; `meridian/prediction/planner_file.py`, `meridian model planner`; `meridian/config.py` (`PLAN_MODEL`); `meridian/api/rate_limits.py` (`PLAN_CLIENT_RATE`); `meridian/log_redaction.py`; `deploy/front/nginx.conf`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Plan,plan,route,Nav,App,WaysIn}.ts(x)`, `app.css`; `docs/{THREAT-MODEL,OPERATIONS}.md`, and their tests; Stage 37, which reserved D-360–D-369 and used them all, so this takes the first of Stage 38's, which now starts at D-371. Applies D-061, D-063, D-082, D-085, D-086, D-093, D-155, D-160, D-202, D-203, D-204, D-255, D-282, D-283, D-332 and D-361.*
+
+The roadmap's last page is for someone who owns no station and is deciding whether to build one: give a place, see the next two days of passes over it, each with its peak and configuration A's predicted yield, with nothing stored. Three things stood in the way. A 48-hour pass search took 3.6 s a satellite. The yield needs a fitted model, which lives under the datasets root the API is not given (D-332), and the code that verifies one imports `meridian.datasets`, which the API may not (D-143). And "nothing is stored" was false twice over: the front keeps every `/api/v1/` answer for thirty days keyed by its URL, query included (D-282), and uvicorn's access line logs the query.
+
+**Decision.**
+- **`GET /api/v1/plan?lat=&lon=`.** Latitude −90 to 90 and longitude −180 to 180, finite, or `invalid_query`. The place is rounded to a tenth of a degree, about 11 km: MSP's coarsest declared precision (D-082) and the grain `/conditions` publishes a point at. Only the rounded place is used or echoed, at sea level, because a site's height moves a pass by seconds and a published window is a minute. The dashboard rounds it before sending, so an exact address never travels, and keeps it out of the fragment, so it stays out of the browser's history.
+- **What is searched.** Every catalogued satellite with a live downlink, in catalogue order, from the element set current at the minute, as pass generation would choose it (D-361), against a 10° floor: the floor MSP-SPEC.md §4.1's registration example declares. At most 20 satellites; the first beyond is named `over_limit`. A satellite with no set, or one SGP4 cannot place, is named with its reason, never dropped (D-086).
+- **What is answered.** The pass under way at the current minute and every pass rising before 48 hours after it. Windows widened to whole minutes, the culmination floored to its minute and angles to whole degrees (D-093), not for a station's privacy, since the place is the reader's, but so one rule covers every published pass. Each satellite's downlinks and its element set's epoch, age and source go with it.
+- **The yield is configuration A's, or a stated absence.** A reads a pass's peak elevation and nothing else (D-160), so it can score a place no station has stood on. `meridian model planner <model> --output FILE` copies a verified configuration A model out as `plan-model-1`, with its hash, training population, `as_of` and dataset, and `model.json` unchanged inside. `PLAN_MODEL` names it under `/published`. The API reads it checked whole, as D-332's summaries are, scores with `meridian.prediction.score`, which imports the standard library alone (D-155), and refuses anything but A with no history reading `max_elevation_deg` alone. The feature version is written a second time in `plan_model.py`, because `meridian.prediction.features` imports `meridian.datasets`, and a test holds the two equal as D-061 holds the speed of light (D-255). Each pass is scored from its unrounded peak, as the scheduler scores one, and published to a hundredth. With no model each yield is `not_measured`, and the passes are still listed. The page says A describes a typical station of the network, not a roof's own horizon and interference, which a station learns once it joins.
+- **Nothing is kept.** No row is written. The front answers `/api/v1/plan` from an exact `location` that forwards and keeps nothing, so no copy keyed by a place reaches its disk; the routes file does not list it and the warmer never asks (D-283). The redacting filter withholds the planner's query from every log line, uvicorn's access line included (D-204). What a process does keep is the windows of the last 64 rounded places, in memory, keyed by place, hour and each satellite's set.
+- **One search a place an hour, and a rate of its own.** A place's windows are searched from twenty minutes before the hour to 49 hours after it, so every minute of the hour is answered from one search. One search runs at a time behind a lock. Beside the public bucket, a caller gets six new places at once and then one every ten seconds, `PLAN_CLIENT_RATE` (D-202).
+- **The coarse scan is batched, for every caller.** `find_elevation_passes` takes an optional `elevations_at` that answers all coarse samples in one call, and `SkyfieldOrbitService.pass_windows` supplies it from one Skyfield `Time` array, keeping the last array for the next search over the same grid. Skyfield computes the Earth's orientation once per `Time` object, and that was nearly all of the 3.6 s. A satellite's 48 hours now take 0.31 s at 12.9° N, and about twice that far north, where there are more passes to refine: most of what is left is the per-instant refinement, which is unchanged. A new place on the demonstration database, two satellites, is answered in 0.75 to 1.6 s, and the same place again in 20 ms. Pass generation searches every station and satellite over one horizon, so it gains the same. A batched elevation differs from a per-instant one by at most 3 × 10⁻¹⁴°, which could move a coarse sample across the floor only if it lay that close to it, and the boundaries and culmination are still refined per instant, so a pass's identity does not move (D-063). A test compares every field of every pass, batched and per instant, at four sites and two floors.
+
+*Rejected: storing the planner's answers, or a planner table.* "Nothing is stored" is the page's whole promise to a reader typing where they live.
+
+*Rejected: a coarser coarse step for the planner.* The step is a correctness parameter (`PassSearch.coarse_step_s`): a pass shorter than it is not found at all.
+
+*Rejected: copying the model directory into `/published` and verifying its manifest in the API.* It needs `meridian.datasets` in the API, which D-143 forbids, for a check the command already made on the datasets machine.
+
+*Rejected: the browser's geolocation.* A precise position the page would then have to round, from a permission prompt, for a place a reader can type in two numbers.
 
 ---
 
@@ -7719,6 +7752,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-367 the reports page and the network's week | `platform/src/meridian/notifications/{network,network_reading,wording,facts}.py`; `platform/src/meridian/store/network_week_reads.py`; `platform/src/meridian/api/public/{reports,models/network_report,surface}.py`; `platform/src/meridian/regions/summary.py`; `platform/src/meridian/reports/summary.py`; `dashboard/src/{Reports,reports,ModelSummary,Conditions,Live,LiveNow,route,Nav,App,Kiosk}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `deploy/tools/demo_rehearsal.py`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_network_report,test_notifications_boundaries,test_public_privacy}.py`; `tests/integration/test_public_reports_endpoint.py` |
 | D-368 the success criteria, published from a sealed run | `platform/src/meridian/reports/criteria.py`; `platform/src/meridian/cli_report.py`; `platform/src/meridian/api/public/{reports,models/criteria}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Criteria,criteria,Reports}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_report_criteria,test_public_privacy}.py`; `tests/integration/test_public_reports_endpoint.py` |
 | D-369 the data page and the public cut of an evidence package | `platform/src/meridian/public_precision.py`; `platform/src/meridian/datasets/{evidence_config,evidence_public,evidence_dataset,evidence_datasheet,evidence_index}.py`; `platform/src/meridian/cli_dataset.py`; `platform/src/meridian/api/public/{datasets,models/datasets,window_privacy,surface}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `.dockerignore`; `deploy/front/{nginx.conf,snapshot-routes.txt}`; `deploy/tools/front_warm.py`; `dashboard/src/{Data,datasets,apiReference,credits,InlineParts,ReleaseNotes,releaseNotes,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `analysis/configs/dataset.toml.example`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_evidence_publish,test_evidence_config,test_public_privacy,test_front_warm,test_front_config}.py`; `tests/integration/test_public_datasets_endpoint.py` |
+| D-370 the station planner, and the batched coarse scan | `platform/src/meridian/api/public/{plan,plan_search,plan_model,models/plan,models/plan_model,surface}.py`; `platform/src/meridian/orbit/{pass_search,skyfield_service,range_rate}.py`; `platform/src/meridian/prediction/planner_file.py`; `platform/src/meridian/cli_model.py`; `platform/src/meridian/config.py`; `platform/src/meridian/api/rate_limits.py`; `platform/src/meridian/log_redaction.py`; `deploy/front/nginx.conf`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Plan,plan,route,Nav,App,WaysIn}.ts(x)`; `dashboard/src/app.css`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_station_plan,test_pass_search,test_pass_windows_reference,test_public_privacy,test_front_config,test_log_redaction}.py`; `tests/integration/test_public_plan_endpoint.py`; `dashboard/src/plan.test.ts` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

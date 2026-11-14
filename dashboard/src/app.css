@@ -668,3 +668,49 @@ tr.selected {
   padding: var(--space-2);
   border: 1px solid var(--rule);
 }
+
+/* The station planner's place (D-370). Two numbers and a button, each a
+   target a thumb can hit (WCAG 2.5.8), wrapping to one a line on a phone. */
+.plan-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.plan-form label {
+  display: grid;
+  gap: var(--space-1);
+  flex: 1 1 12rem;
+}
+
+.plan-form input,
+.plan-form button {
+  min-height: var(--target);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ink-dim);
+  border-radius: var(--radius-1);
+  font: inherit;
+}
+
+.plan-form input {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.plan-form button {
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.plan-form input:focus-visible,
+.plan-form button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.downlink + .downlink::before {
+  content: ", ";
+}

@@ -101,3 +101,36 @@ def test_the_filter_redacts_the_arguments_and_the_traceback() -> None:
     assert record.exc_text is not None
     assert "hunter2" not in record.exc_text
     assert "hunter2" not in logging.Formatter().format(record)
+
+
+def test_the_planners_place_is_withheld_from_the_access_line() -> None:
+    """The planner keeps nothing of a place, its log line included (D-370)."""
+    line = '172.18.0.5:41234 - "GET /api/v1/plan?lat=12.3&lon=77.6 HTTP/1.1" 200'
+
+    redacted = redact(line)
+
+    assert redacted == f'172.18.0.5:41234 - "GET /api/v1/plan?{REDACTED} HTTP/1.1" 200'
+
+
+def test_another_route_keeps_its_query() -> None:
+    """Only the planner's query is a place; a cursor is worth having in a log."""
+    line = '"GET /api/v1/passes?limit=50&station_id=st_1 HTTP/1.1" 200'
+    assert redact(line) == line
+
+
+def test_the_filter_withholds_the_place_from_uvicorns_own_record() -> None:
+    """uvicorn passes the path as an argument; the filter formats it first."""
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("10.0.0.1:5", "GET", "/api/v1/plan?lat=-33.9&lon=151.2", "1.1", 200),
+        None,
+    )
+
+    RedactingFilter().filter(record)
+
+    assert "151.2" not in record.getMessage()
+    assert "/api/v1/plan?" in record.getMessage()

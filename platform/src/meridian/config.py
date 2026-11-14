@@ -114,6 +114,12 @@ class Settings:
     each package's files are read from beside it (D-369). Defaulted, for the
     reason ``verdict_model`` is."""
 
+    plan_model: str = ""
+    """Configuration A's model for the station planner, as ``plan-model-1``, as
+    the API container sees it, or empty for none: ``/api/v1/plan`` then lists
+    each pass's peak with no predicted yield (D-370). Defaulted, for the reason
+    ``verdict_model`` is."""
+
     @property
     def psycopg_url(self) -> str:
         """``database_url`` in the form ``psycopg.connect`` accepts (D-033)."""
@@ -322,6 +328,7 @@ def load_settings(*, secrets_held: frozenset[str] = EVERY_SECRET) -> Settings:
         report_summary=os.environ.get("REPORT_SUMMARY", "").strip(),
         report_criteria=os.environ.get("REPORT_CRITERIA", "").strip(),
         evidence_index=os.environ.get("EVIDENCE_INDEX", "").strip(),
+        plan_model=os.environ.get("PLAN_MODEL", "").strip(),
     )
 
     check_settings(settings, secrets_held)
