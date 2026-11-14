@@ -19,8 +19,9 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 
 # `--package meridian-ingest` installs it and what it depends on, which is
 # `meridian` and httpx; the client and simulator are not among them. The `hdf5`
-# extra is night-time lights' reader (D-226): this image is where that source
-# runs, so it carries the library the platform image never does.
+# extra is night-time lights' reader (D-226), and `imagery` is rasterio, NumPy
+# and Pillow for open imagery (D-371): this image is where those run, so it
+# carries the libraries the platform image never does.
 COPY pyproject.toml uv.lock ./
 COPY platform/pyproject.toml platform/
 COPY client/pyproject.toml client/
@@ -32,19 +33,25 @@ RUN mkdir -p platform/src/meridian client/src/meridian_client simulator/src/meri
             client/src/meridian_client/__init__.py \
             simulator/src/meridian_sim/__init__.py \
             ingest/src/meridian_ingest/__init__.py \
-    && uv sync --frozen --no-dev --no-editable --package meridian-ingest --extra hdf5
+    && uv sync --frozen --no-dev --no-editable --package meridian-ingest --extra hdf5 --extra imagery
 
 COPY platform/ platform/
 COPY ingest/ ingest/
-RUN uv sync --frozen --no-dev --no-editable --package meridian-ingest --extra hdf5
+RUN uv sync --frozen --no-dev --no-editable --package meridian-ingest --extra hdf5 --extra imagery
 
 
 FROM python:3.11.17-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf AS runtime
 
 # Security updates at build time, and the base image's unused pip removed, for
 # the reasons deploy/Dockerfile gives (D-205).
+#
+# libexpat1 is the one shared library rasterio's wheel does not bundle: GDAL
+# links it for XML, and the slim base leaves it out, so without it `import
+# rasterio` fails in the image while passing on every developer's machine
+# (D-371). CI's image job imports it to keep that true.
 RUN apt-get update \
     && apt-get -y upgrade --no-install-recommends \
+    && apt-get -y install --no-install-recommends libexpat1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 RUN python -m pip uninstall --yes --no-cache-dir pip setuptools wheel

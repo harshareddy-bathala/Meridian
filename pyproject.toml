@@ -27,7 +27,7 @@ dev = [
     "meridian[fit]",
     "meridian-client",
     "meridian-sim",
-    "meridian-ingest[hdf5]",
+    "meridian-ingest[hdf5,imagery]",
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.11",
