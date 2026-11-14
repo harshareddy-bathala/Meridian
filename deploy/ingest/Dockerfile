@@ -10,7 +10,7 @@
 # The same bases as deploy/Dockerfile, pinned by the same digests (D-256), so one
 # Dependabot update moves both.
 
-FROM python:3.11.17-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf AS build
+FROM python:3.11.18-slim-bookworm@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 AS build
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.20@sha256:eaa5f1a3305307aaf9e67fe2bbba1d85ebbb2d8a63bce23af21797bfafbe0f8b /uv /usr/local/bin/uv
 
@@ -39,7 +39,7 @@ COPY ingest/ ingest/
 RUN uv sync --frozen --no-dev --no-editable --package meridian-ingest --extra hdf5
 
 
-FROM python:3.11.17-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf AS runtime
+FROM python:3.11.18-slim-bookworm@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 AS runtime
 
 # Security updates at build time, and the base image's unused pip removed, for
 # the reasons deploy/Dockerfile gives (D-205).
