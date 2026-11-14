@@ -15,12 +15,18 @@ A package is a sealed directory of kind ``evidence_dataset``:
   from;
 * ``datasheet.md`` and ``licence.txt`` (D-313).
 
+**A configuration may ask for the public cut** (``precision = "public"``):
+every row is then cut by :func:`~meridian.datasets.evidence_public.public_row`,
+to the minute and the degree, and only a package built so may be published
+on the public API (D-369).
+
 Its manifest names the snapshot by hash, the transformation, the
 configuration's hash, the seed and the populations. When and where it was
 built, and from which code, are the manifest's environment, which is not
 hashed (D-235, D-312).
 
-Reference: docs/DECISIONS.md D-102, D-104, D-143, D-144, D-235, D-310 to D-314;
+Reference: docs/DECISIONS.md D-102, D-104, D-143, D-144, D-235, D-310 to D-314,
+D-369;
 docs/EVALUATION.md §11.5.
 """
 
@@ -38,6 +44,7 @@ from meridian.datasets.evidence_config import (
     parse_evidence_config,
 )
 from meridian.datasets.evidence_datasheet import LICENCE, LICENCE_ID, datasheet
+from meridian.datasets.evidence_public import public_row
 from meridian.datasets.evidence_rows import reception_rows
 from meridian.datasets.manifest import Manifest, content_sha256, file_entry
 from meridian.datasets.publish import (
@@ -110,7 +117,11 @@ def build_evidence_dataset(
         message = f"the seed must be 0..{MASTER_SEED_MAX}, not {seed}"
         raise NotAnEvidencePackageError(message)
     populations = config.config.populations
-    rows = reception_rows(raw, populations)
+    public = config.config.precision == "public"
+    rows = {
+        name: [public_row(one) for one in found] if public else found
+        for name, found in reception_rows(raw, populations).items()
+    }
     counts = {name: len(rows[name]) for name in populations}
     snapshot = content_sha256(raw.manifest)
     files: dict[str, bytes] = {
@@ -126,6 +137,7 @@ def build_evidence_dataset(
         transformation_version=TRANSFORMATION_VERSION,
         seed=seed,
         counts=counts,
+        public=public,
     )
     files["licence.txt"] = LICENCE
     manifest = Manifest(
@@ -141,7 +153,7 @@ def build_evidence_dataset(
         config_sha256=evidence_config_sha256(config.config),
         parameters={
             "seed": seed,
-            "populations": list(populations),
+            **config.config.parameters(),
             "licence": LICENCE_ID,
         },
     )

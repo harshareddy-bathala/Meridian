@@ -1,11 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 
 import { fetchPlatformHealth, type PlatformHealth } from "./health";
-import { InsightsView } from "./Insights";
 import { Kiosk } from "./Kiosk";
-import { LossesView } from "./Losses";
+import { AreasView } from "./Areas";
+import { ChangesView } from "./Changes";
 import { Nav } from "./Nav";
-import { Network } from "./Network";
+import { DataView } from "./Data";
+import { PlanView } from "./Plan";
+import { ReportsView } from "./Reports";
+import { ResultsView } from "./Results";
+import { Live } from "./Live";
 import type { Route } from "./route";
 import { ScheduleView } from "./ScheduleTimeline";
 import { StationDetail } from "./StationDetail";
@@ -15,6 +19,7 @@ import { SnapshotNote } from "./SnapshotNote";
 import { StationMap } from "./StationMap";
 import { useRoute } from "./useRoute";
 import { useStations } from "./useStations";
+import { WaysIn } from "./WaysIn";
 
 type Load =
   | { kind: "loading" }
@@ -101,21 +106,23 @@ function Stations({ selectedId, go }: { selectedId: string | null; go: (route: R
   );
 }
 
-function View({ route, go }: { route: Route; go: (route: Route) => void }) {
-  switch (route.view) {
-    case "network":
-      return <Network go={go} />;
-    case "stations":
-      return <Stations selectedId={route.stationId} go={go} />;
-    case "schedule":
-      return <ScheduleView stationId={route.stationId} go={go} />;
-    case "losses":
-      return <LossesView go={go} />;
-    case "insights":
-      return <InsightsView />;
-    case "kiosk":
-      return <Kiosk go={go} />;
-  }
+type Go = (route: Route) => void;
+
+const VIEWS: Record<Route["view"], (route: Route, go: Go) => ReactElement> = {
+  live: (_, go) => <Live go={go} />,
+  stations: (route, go) => <Stations selectedId={route.stationId} go={go} />,
+  schedule: (route, go) => <ScheduleView stationId={route.stationId} go={go} />,
+  results: (_, go) => <ResultsView go={go} />,
+  areas: (route, go) => <AreasView areaId={route.areaId ?? null} go={go} />,
+  changes: (_, go) => <ChangesView go={go} />,
+  reports: () => <ReportsView />,
+  data: () => <DataView />,
+  plan: () => <PlanView />,
+  kiosk: (_, go) => <Kiosk go={go} />,
+};
+
+function View({ route, go }: { route: Route; go: Go }) {
+  return VIEWS[route.view](route, go);
 }
 
 export function App() {
@@ -127,6 +134,7 @@ export function App() {
         <h1>Meridian</h1>
         <PlatformStatus load={load} />
         <Nav route={route} />
+        {route.view !== "kiosk" && <WaysIn />}
       </header>
       <View route={route} go={go} />
     </main>

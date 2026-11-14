@@ -3,8 +3,9 @@
 MSP's heartbeat and observations are limited by the station's bearer token, so a
 station is one caller wherever its requests come from. Every MSP request and
 every public API request is also limited by the caller's address, which bounds
-anyone rotating tokens. ``/``, ``/assets/``, ``/healthz`` and ``/metrics`` are
-not limited.
+anyone rotating tokens. The station planner, which searches orbits for every
+place it is asked about, has a stricter bucket of its own beside that (D-370).
+``/``, ``/assets/``, ``/healthz`` and ``/metrics`` are not limited.
 
 A refused request is answered before routing, with MSP §6's ``rate_limited`` on
 an MSP path or the public API's ``rate_limited`` on ``/api/v1``, and a
@@ -16,7 +17,7 @@ The limiter is built by the application's lifespan from ``Settings`` and read
 from ``app.state`` per request, so a process with ``RATE_LIMITS=off`` — or a
 test that never started the lifespan — has none and passes everything through.
 
-Reference: docs/MSP-SPEC.md §6; docs/DECISIONS.md D-051, D-088, D-202.
+Reference: docs/MSP-SPEC.md §6; docs/DECISIONS.md D-051, D-088, D-202, D-370.
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ __all__ = [
     "HEARTBEAT_RATE",
     "MSP_CLIENT_RATE",
     "OBSERVATIONS_RATE",
+    "PLAN_CLIENT_RATE",
     "PUBLIC_CLIENT_RATE",
     "RateLimitMiddleware",
     "RateLimiter",
@@ -58,6 +60,15 @@ MSP_CLIENT_RATE = Rate(capacity=300, per_second=10)
 PUBLIC_CLIENT_RATE = Rate(capacity=50, per_second=5)
 """Per client on ``/api/v1``: the edge rule's own 50 per 10 s (D-088)."""
 
+PLAN_CLIENT_RATE = Rate(capacity=6, per_second=1 / 10)
+"""Per client on ``/api/v1/plan``, as well as the public bucket. A new place
+costs a search of every satellite, under a second each, where any other
+read costs a query. Six places at once, then one every ten seconds:
+more than a person trying places on a map, and far less than a script
+walking the globe (D-370)."""
+
+_PLAN_PATH = "/api/v1/plan"
+
 _MSP_PREFIX = "/msp/"
 _TOKEN_ENDPOINTS = {"/heartbeat": "heartbeat", "/observations": "observations"}
 _BEARER = b"bearer "
@@ -65,7 +76,7 @@ _UNKNOWN_CLIENT = "unknown"
 
 
 class RateLimiter:
-    """The four buckets of D-202, and which of them a request draws on."""
+    """The four buckets of D-202 and the planner's, and which a request draws on."""
 
     def __init__(
         self, *, clock: Clock = time.monotonic, client_header: str = ""
@@ -83,6 +94,7 @@ class RateLimiter:
             "observations": BucketStore(OBSERVATIONS_RATE, clock=clock),
             "msp": BucketStore(MSP_CLIENT_RATE, clock=clock),
             "public": BucketStore(PUBLIC_CLIENT_RATE, clock=clock),
+            "plan": BucketStore(PLAN_CLIENT_RATE, clock=clock),
         }
 
     def admit(self, scope: Scope) -> float:
@@ -105,7 +117,10 @@ class RateLimiter:
         path = cast(str, scope["path"])
         headers = _headers(scope)
         if is_public_surface(path):
-            return [("public", self._client(scope, headers))]
+            client = self._client(scope, headers)
+            if path == _PLAN_PATH:
+                return [("public", client), ("plan", client)]
+            return [("public", client)]
         if not path.startswith(_MSP_PREFIX):
             return []
         charges = [("msp", self._client(scope, headers))]

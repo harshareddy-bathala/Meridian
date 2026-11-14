@@ -4,7 +4,7 @@
 the run's hash, what the figures are and whose they are, the archive's
 completeness, and for configurations A, C and D the Brier score against the
 base rate, the skill, their intervals and the reliability diagram's ten bins.
-The dashboard's insights view reads the file and nothing else (D-325, D-332),
+The dashboard's reports view reads the file and nothing else (D-325, D-332),
 because the API may not import the report module that sealed it.
 
 **Copied, never recomputed.** Every number is read from the run's own results

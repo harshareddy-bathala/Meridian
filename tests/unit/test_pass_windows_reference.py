@@ -24,6 +24,7 @@ MIT. See also ATTRIBUTION.md.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -35,6 +36,11 @@ import pytest
 from skyfield.api import EarthSatellite, load, wgs84  # noqa: TID251
 
 from meridian.orbit import skyfield_service
+from meridian.orbit.pass_search import (
+    ElevationPass,
+    ElevationScan,
+    find_elevation_passes,
+)
 from meridian.orbit.skyfield_service import SkyfieldOrbitService
 from meridian.orbit.types import ElementSet, GroundSite, PassSearch
 
@@ -325,3 +331,64 @@ def test_a_naive_datetime_is_refused_at_this_boundary(
         service.pass_windows(
             search_over(iss, WINDOW_START.replace(tzinfo=None), WINDOW_END)
         )
+
+
+SITES = (
+    BLUFFTON,
+    GroundSite(lat_deg=-33.9, lon_deg=151.2, alt_m=40.0),
+    GroundSite(lat_deg=64.1, lon_deg=-21.9, alt_m=0.0),
+    GroundSite(lat_deg=0.0, lon_deg=0.0, alt_m=0.0),
+)
+"""Four sites far apart, so the comparison below meets many crossings."""
+
+
+def test_the_batched_coarse_scan_finds_exactly_the_per_instant_passes(
+    service: SkyfieldOrbitService, iss: ElementSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every field of every pass, equal, over twelve hours at four sites and two floors.
+
+    The coarse scan computes its samples in one Skyfield call (D-370). A batched
+    elevation differs from a per-instant one in the last bits only, and the
+    boundaries and culmination are still refined per instant, so the passes
+    must be the same ones to the microsecond: a pass's identity (D-063) rests
+    on its acquisition.
+    """
+    start, end = WINDOW_START, WINDOW_START + timedelta(hours=12)
+    searches = [
+        PassSearch(iss, site, start, end, min_elevation_deg=floor_deg)
+        for site in SITES
+        for floor_deg in (0.0, 10.0)
+    ]
+    batched = [service.pass_windows(search) for search in searches]
+
+    def per_instant(
+        elevation_at: Callable[[datetime], float], scan: ElevationScan, **_: object
+    ) -> list[ElevationPass]:
+        return find_elevation_passes(elevation_at, scan)
+
+    monkeypatch.setattr(skyfield_service, "find_elevation_passes", per_instant)
+    unbatched = [service.pass_windows(search) for search in searches]
+
+    assert sum(len(windows) for windows in batched) > 15
+    assert batched == unbatched
+
+
+def test_searches_over_one_interval_share_one_time_grid(
+    iss: ElementSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Earth's orientation is computed once for every site searched."""
+    service = SkyfieldOrbitService()
+    timescale = service._timescale
+    built: list[int] = []
+    original = timescale.from_datetimes
+
+    def counted(times: list[datetime]) -> object:
+        built.append(len(times))
+        return original(times)
+
+    monkeypatch.setattr(timescale, "from_datetimes", counted)
+    for site in SITES:
+        service.pass_windows(PassSearch(iss, site, WINDOW_START, WINDOW_END))
+    service.pass_windows(PassSearch(iss, BLUFFTON, WINDOW_START, SPLIT))
+
+    assert len(built) == 2

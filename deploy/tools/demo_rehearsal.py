@@ -8,15 +8,22 @@ Stage 35's gate has two halves. The platform's, that every step of
 ``tests/integration/test_demo_rehearsal.py``. This is the browser's, run against
 the ``demo`` profile as a visitor meets it, through the front:
 
-1. **Every view renders** (network, stations, schedule, losses, insights and
-   the kiosk), with no error on the console and **no content-security-policy
-   violation** (D-208), the policy the platform sends being the one in force.
+1. **Every view renders** (live, stations, schedule, results, areas, changes,
+   reports, data, the planner and the kiosk), with no error on the console and
+   **no content-security-policy violation** (D-208), the policy the platform
+   sends being the one in force, and **no sideways scroll on a phone**, at
+   360 px as well as 1280 px.
 2. **Simulated figures say so.** The network and a station's schedule, drawn
    from a simulated fleet, carry the simulated badge (rule 5).
 3. **A pass is explained.** Choosing a station and one of its passes opens the
    explanation, with the orbit's age.
-4. **The api stops,** as an operator would stop it, and every view is served
-   from the front's copy **marked not live** (D-282, D-284).
+   **A place is planned.** The planner answers for a typed place, asks the
+   platform for it to a tenth of a degree only, and leaves the page's address
+   as it was (D-370).
+4. **The api stops,** as an operator would stop it, and every page Stage 37's
+   gate names is served from the front's copy **marked not live** (D-282,
+   D-284). The planner, which
+   the front never keeps, says in words that no copy was kept.
 5. **The api starts again,** always, whatever happened above, and the next
    refresh clears every mark.
 
@@ -30,7 +37,7 @@ browser binary when Playwright's own download is not wanted.
 Exit status: 0 the rehearsal passed, 1 it did not, or could not be run.
 
 Reference: docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md Stage 35's completion gate;
-docs/DECISIONS.md D-208, D-282, D-284, D-334, D-335.
+docs/DECISIONS.md D-208, D-282, D-284, D-334, D-335, D-370.
 """
 
 from __future__ import annotations
@@ -44,11 +51,33 @@ from typing import Any
 from compose_db import Compose, ToolError, add_compose_arguments, compose_from
 from front_drill import run, wait_for_api
 
-VIEWS = ("network", "stations", "schedule", "losses", "insights", "kiosk")
-"""Every view the dashboard has (D-334)."""
+VIEWS = (
+    "live",
+    "stations",
+    "schedule",
+    "results",
+    "areas",
+    "changes",
+    "reports",
+    "data",
+    "plan",
+    "kiosk",
+)
+"""Every view the dashboard has (D-334, D-364, D-366, D-367, D-369, D-370)."""
 
-OUTAGE_VIEWS = ("network", "losses", "insights")
-"""The views asked for again with the api stopped: those a visitor opens first."""
+PHONE = {"width": 360, "height": 740}
+"""The narrowest screen the dashboard is checked at (D-341, D-348)."""
+
+PLACE = ("12.97164", "77.59456")
+"""A place typed to more decimals than the planner may send."""
+
+PLACE_QUERY = "lat=13.0&lon=77.6"
+"""The only form of it the platform may be asked about (D-370)."""
+
+OUTAGE_VIEWS = ("live", "results", "areas", "changes", "reports", "data")
+"""The views asked for again with the api stopped: every page Stage 37's gate
+names, what is happening now, every pass's result, an area's changes, a plain
+report and the downloadable dataset."""
 
 SETTLE_MS = 4_000
 """How long a view is given to make its requests and draw."""
@@ -92,12 +121,60 @@ def rehearse_views(page: Any, base: str, verdict: Verdict, errors: list[str]) ->
         verdict.check(page.locator("main h2").count() > 0, f"{view}: the view renders")
         verdict.check(not violations, f"{view}: no policy violation {violations or ''}")
     verdict.check(not errors, f"no console error {errors[:3] or ''}")
-    open_view(page, base, "network")
+    open_view(page, base, "live")
     verdict.check(
         page.locator(".badge-simulated").count() > 0,
-        "network: the fleet is marked simulated",
+        "live: the fleet is marked simulated",
     )
     explain_a_pass(page, base, verdict)
+    plan_a_place(page, base, verdict)
+
+
+def rehearse_phone(browser: Any, base: str, verdict: Verdict) -> None:
+    """Step 1 on a phone: every view fits its width."""
+    page = browser.new_page(viewport=PHONE)
+    for view in VIEWS:
+        open_view(page, base, view)
+        width = page.evaluate("document.documentElement.scrollWidth")
+        verdict.check(
+            width <= PHONE["width"],
+            f"{view} at 360 px: no sideways scroll ({width} px)",
+        )
+    page.close()
+
+
+def ask_the_planner(page: Any, base: str) -> list[str]:
+    """Type :data:`PLACE` into the planner and ask; the URLs the page requested."""
+    asked: list[str] = []
+    page.on(
+        "request",
+        lambda one: asked.append(one.url) if "/api/v1/plan" in one.url else None,
+    )
+    open_view(page, base, "plan")
+    page.get_by_label("Latitude, degrees north").fill(PLACE[0])
+    page.get_by_label("Longitude, degrees east").fill(PLACE[1])
+    page.get_by_role("button", name="Show the passes").click()
+    return asked
+
+
+def plan_a_place(page: Any, base: str, verdict: Verdict) -> None:
+    """Step 3: the planner answers, and only the rounded place leaves the page."""
+    asked = ask_the_planner(page, base)
+    answer = page.locator("main table, main p.dim:has-text('No satellite rises')")
+    try:
+        answer.first.wait_for(timeout=NOT_LIVE_MS)
+        answered = True
+    except Exception:
+        answered = False
+    verdict.check(answered, "plan: a typed place gets its passes")
+    verdict.check(
+        bool(asked) and all(url.endswith(PLACE_QUERY) for url in asked),
+        f"plan: only the rounded place is asked about {asked}",
+    )
+    verdict.check(
+        page.evaluate("location.hash") == "#/plan",
+        "plan: the place is not put in the page's address",
+    )
 
 
 def explain_a_pass(page: Any, base: str, verdict: Verdict) -> None:
@@ -142,6 +219,14 @@ def rehearse_outage(page: Any, base: str, compose: Compose, verdict: Verdict) ->
                 "Not live." in said,
                 f"{view}: with the api stopped, it says it is not live",
             )
+        ask_the_planner(page, base)
+        refusal = page.locator("p[role=alert]:has-text('no copy of it was kept')")
+        try:
+            refusal.first.wait_for(timeout=NOT_LIVE_MS)
+            kept_none = True
+        except Exception:
+            kept_none = False
+        verdict.check(kept_none, "plan: with the api stopped, it says no copy was kept")
     finally:
         print("-> start the api", flush=True)
         run(compose, "start", "api")
@@ -171,6 +256,7 @@ def rehearse(args: argparse.Namespace) -> Verdict:
         errors: list[str] = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         rehearse_views(page, args.base, verdict, errors)
+        rehearse_phone(browser, args.base, verdict)
         if not args.skip_outage:
             rehearse_outage(page, args.base, compose_from(args), verdict)
         browser.close()

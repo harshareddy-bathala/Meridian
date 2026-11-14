@@ -6,12 +6,42 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { assignmentBody, insightsBody, lossBody, runBody, warningBody } from "./fixtures.test-data";
+import { decodeAggregates } from "./aggregates";
+import { decodeAreas } from "./areas";
+import { ChangeLine, Sources } from "./Areas";
+import { decodeEvent } from "./events";
+import { Feed } from "./Feed";
+import {
+  aggregatesBody,
+  areasBody,
+  assignmentBody,
+  eventBody,
+  insightsBody,
+  lossBody,
+  resultBody,
+  runBody,
+  tracksBody,
+  warningBody,
+} from "./fixtures.test-data";
+import { criteriaBody, weeklyBody } from "./fixtures-reports.test-data";
+import { datasetsBody } from "./fixtures-data.test-data";
+import { Packages } from "./Data";
+import { decodeDatasets, type EvidencePackage } from "./datasets";
 import { decodeInsights } from "./insights";
-import { ModelPanel } from "./Insights";
+import { ModelPanel } from "./ModelSummary";
 import { decodeLoss } from "./losses";
 import { LossRow } from "./Losses";
-import { Population, Warnings } from "./Network";
+import { Warnings } from "./Live";
+import { CriteriaPanel } from "./Criteria";
+import { decodeCriteria } from "./criteria";
+import { AreaReports, WeekText } from "./Reports";
+import { decodeWeekly } from "./reports";
+import { Population, ResultRow } from "./Results";
+import { decodeResult } from "./results";
+import { TodayFigures, Week } from "./LiveFigures";
+import { Orbits, Overhead } from "./LiveNow";
+import { decodeAssignment } from "./schedule";
+import { decodeTracks } from "./tracks";
 import { decodeNetworkWarning } from "./networkWarnings";
 import { decodeScheduleRun } from "./scheduleRun";
 import { Explanation, LatestRound, Planned } from "./ScheduleTimeline";
@@ -20,6 +50,7 @@ import { decodeStationSchedule } from "./stationSchedule";
 // Leaflet reads `window` when it is imported, and these run with no DOM; the
 // map is not what is under test here.
 vi.mock("./StationMap", () => ({ StationMap: () => null }));
+vi.mock("./AreaMap", () => ({ AreaMap: () => null }));
 
 const BADGE = 'class="badge badge-simulated"';
 const go = () => undefined;
@@ -86,6 +117,7 @@ describe("the simulated badge", () => {
     const simulated = decodeInsights({ ...insightsBody, simulated: true });
     expect(badges(renderToStaticMarkup(<ModelPanel read={simulated} />))).toBe(1);
   });
+
 });
 
 describe("an absence", () => {
@@ -98,5 +130,170 @@ describe("an absence", () => {
     expect(
       renderToStaticMarkup(<ModelPanel read={{ notYetComputed: "No run yet." }} />),
     ).toContain("Not yet computed. No run yet.");
+  });
+});
+
+describe("the reports page", () => {
+  it("marks the weekly report's simulated section, and only that one", () => {
+    const markup = renderToStaticMarkup(<WeekText week={decodeWeekly(weeklyBody)} />);
+    expect(badges(markup)).toBe(1);
+    expect(markup).toContain("SIMULATED STATIONS — not real receptions.");
+    const measured = weeklyBody.body.split("\n\nSIMULATED")[0] ?? "";
+    const plain = decodeWeekly({ ...weeklyBody, body: measured, includes_simulated: false });
+    expect(badges(renderToStaticMarkup(<WeekText week={plain} />))).toBe(0);
+  });
+
+  it("marks a criterion measured on simulated runs, and only that one", () => {
+    const markup = renderToStaticMarkup(<CriteriaPanel read={decodeCriteria(criteriaBody)} />);
+    expect(badges(markup)).toBe(1);
+    expect(markup).toContain("SC-5 Failures are detected quickly");
+    expect(markup).toContain("Not claimed: measured over 7 days");
+    expect(markup).toContain("D was not fitted.");
+  });
+
+  it("is absent from the area reports, which hold no station's figure", () => {
+    const markup = renderToStaticMarkup(<AreaReports read={decodeAreas(areasBody)} />);
+    expect(badges(markup)).toBe(0);
+    expect(markup).toContain('href="#/areas/1"');
+    expect(markup).toContain("Vegetation (NDVI): 0.4 for");
+  });
+});
+
+describe("the live page", () => {
+  const aggregates = decodeAggregates(aggregatesBody);
+  const names = new Map([["st_1", "Rooftop"]]);
+
+  it("marks today's and the week's simulated figures, and not the measured ones", () => {
+    const simulated = renderToStaticMarkup(<TodayFigures population={aggregates.simulated} marginS={86_400} />);
+    expect(badges(simulated)).toBe(1);
+    expect(simulated).toContain("40, 22 closed so far");
+    expect(simulated).toContain("once a day has passed");
+    expect(badges(renderToStaticMarkup(<Week population={aggregates.simulated} />))).toBe(1);
+    expect(badges(renderToStaticMarkup(<TodayFigures population={aggregates.measured} marginS={86_400} />))).toBe(0);
+  });
+
+  it("marks a simulated event and pass, and not a measured event", () => {
+    const simulated = renderToStaticMarkup(
+      <Feed events={[decodeEvent(eventBody("pass_decoded"), "e")]} names={names} go={go} />,
+    );
+    expect(badges(simulated)).toBe(1);
+    expect(simulated).toContain("Rooftop");
+    const measured = renderToStaticMarkup(
+      <Feed events={[decodeEvent(eventBody("station_joined", false), "e")]} names={names} go={go} />,
+    );
+    expect(badges(measured)).toBe(0);
+    const pass = decodeAssignment(assignmentBody("as_1"), "a");
+    const now = new Date(Date.parse(pass.startAt) + 60_000);
+    expect(badges(renderToStaticMarkup(<Overhead passes={[pass]} now={now} names={names} />))).toBe(1);
+  });
+
+  it("draws an unsettled day hollow, and says so in words beside it", () => {
+    const week = renderToStaticMarkup(<Week population={aggregates.simulated} />);
+    expect(week.split("sparkline-unsettled").length - 1).toBe(4);
+    expect(week).toContain("not settled yet");
+    expect(week).toContain("not yet");
+  });
+
+  it("says every absence in words", () => {
+    expect(renderToStaticMarkup(<TodayFigures population={aggregates.measured} marginS={86_400} />)).toContain(
+      "No pass is scheduled to close today.",
+    );
+    expect(renderToStaticMarkup(<Week population={aggregates.measured} />)).toContain(
+      "No pass was classified this week.",
+    );
+    expect(renderToStaticMarkup(<Feed events={[]} names={names} go={go} />)).toContain(
+      "Nothing was recorded in the last week.",
+    );
+    const quiet = renderToStaticMarkup(<Overhead passes={[]} now={new Date()} names={names} />);
+    expect(quiet).toContain("No scheduled pass is under way.");
+    expect(quiet).toContain("No later pass is scheduled yet.");
+    expect(renderToStaticMarkup(<Orbits tracks={{ at: "", satellites: [], omitted: [] }} />)).toContain(
+      "No satellite is tracked yet.",
+    );
+    expect(renderToStaticMarkup(<Orbits tracks={decodeTracks(tracksBody)} />)).toContain("no orbit is held for it");
+  });
+});
+
+describe("the results page", () => {
+  const row = (simulated: boolean) =>
+    renderToStaticMarkup(
+      <table>
+        <tbody>
+          <ResultRow result={decodeResult(resultBody(1, "station_unavailable", "lost", simulated), "r")} go={go} />
+        </tbody>
+      </table>,
+    );
+
+  it("marks a simulated pass, and not a measured one", () => {
+    expect(badges(row(true))).toBe(1);
+    expect(badges(row(false))).toBe(0);
+  });
+
+  it("says what the pass did, and the cause it was diagnosed with", () => {
+    expect(row(true)).toContain("Station unavailable");
+    expect(row(true)).toContain("lost: spends the loss budget");
+    expect(row(true)).toContain("something blocks that part of the sky");
+  });
+});
+
+describe("the areas pages", () => {
+  const read = decodeAreas(areasBody);
+  if (!("summary" in read)) throw new Error("expected a summary");
+  const { summary } = read;
+
+  it("give a change with its interval and periods, and badge nothing: no value is a station's", () => {
+    const [change] = summary.changes;
+    if (change === undefined) throw new Error("expected a change");
+    const markup = renderToStaticMarkup(
+      <ul>
+        <ChangeLine change={change} label="Bengaluru urban" />
+      </ul>,
+    );
+    expect(markup).toContain("Bengaluru urban: Vegetation (NDVI)");
+    expect(markup).toContain("Within its threshold");
+    expect(markup).toContain("-0.0244 [-0.05, 0.03]");
+    expect(badges(markup)).toBe(0);
+  });
+
+  it("credit every source with its licence and terms, and the report they came from", () => {
+    const markup = renderToStaticMarkup(<Sources summary={summary} />);
+    expect(markup).toContain("NASA open data");
+    expect(markup).toContain('href="https://example.org/terms"');
+    expect(markup).toContain("aaaaaaaaaaaa");
+  });
+});
+
+describe("the data page", () => {
+  function packages(): EvidencePackage[] {
+    const read = decodeDatasets(datasetsBody);
+    if (!("packages" in read)) throw new Error("expected packages");
+    return read.packages;
+  }
+
+  it("marks a package holding simulated receptions, and not a measured one", () => {
+    const [measured, both] = packages();
+    if (measured === undefined || both === undefined) throw new Error("expected two packages");
+    const plain = renderToStaticMarkup(<Packages read={{ packages: [measured] }} />);
+    const mixed = renderToStaticMarkup(<Packages read={{ packages: [both] }} />);
+    expect(badges(plain)).toBe(0);
+    // Once on the package, once on its simulated population.
+    expect(badges(mixed)).toBe(2);
+  });
+
+  it("links every file under the name a check expects, with its size and the citation", () => {
+    const [measured] = packages();
+    if (measured === undefined) throw new Error("expected a package");
+    const markup = renderToStaticMarkup(<Packages read={{ packages: [measured] }} />);
+    expect(markup).toContain('href="/api/v1/datasets/abababababab/receptions.jsonl"');
+    expect(markup).toContain('download="abababababab-receptions.jsonl"');
+    expect(markup).toContain("1.3 MB");
+    expect(markup).toContain(`content sha256 ${"ab".repeat(32)}`);
+  });
+
+  it("says in words that nothing is published yet", () => {
+    const read = decodeDatasets({ status: "not_yet_computed", reason: "No evidence package has been published yet." });
+    const markup = renderToStaticMarkup(<Packages read={read} />);
+    expect(markup).toContain("No evidence package has been published yet.");
+    expect(badges(markup)).toBe(0);
   });
 });

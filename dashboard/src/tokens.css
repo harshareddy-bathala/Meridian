@@ -1,0 +1,45 @@
+/* Generated from site/style.css by site/tools/dashboard_tokens.py. Do not
+   edit: change the site's stylesheet and run the tool, and CI fails until this
+   file matches it (D-341, D-360). The dashboard's own colours, for liveness,
+   snapshots and warnings, are in app.css. */
+
+:root {
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --step--1: 0.875rem;
+  --step-0: clamp(1.0625rem, 1rem + 0.28vw, 1.1875rem);
+  --step-1: clamp(1.1875rem, 1.08rem + 0.48vw, 1.4375rem);
+  --step-2: clamp(1.625rem, 1.3rem + 1.4vw, 2.5rem);
+  --step-3: clamp(2.375rem, 1.6rem + 3.4vw, 4rem);
+  --radius-1: 8px;
+  --radius-2: 16px;
+  --radius-pill: 999px;
+  --target: 2.75rem;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --bg: #F6F4EF;
+  --surface: #EDEAE3;
+  --rule: #CFC8BB;
+  --ink: #16181D;
+  --ink-dim: #3D424A;
+  --muted: #5A5F69;
+  --simulated: #5B3FA0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #08090D;
+    --surface: #101319;
+    --rule: #333944;
+    --ink: #E8E6E1;
+    --ink-dim: #A9A6A0;
+    --muted: #787E8A;
+    --simulated: #B9A3EC;
+  }
+}

@@ -1,6 +1,6 @@
 """``meridian regions summary``: a report's areas, series and changes, nothing more.
 
-What the public read API may serve once D-137 is settled (D-326): active areas
+What the public read API may serve once a deployment publishes it (D-326): active areas
 only, a label and a bounding box but never a note or a polygon, and no coverage,
 which counts our own receptions and may be simulated.
 

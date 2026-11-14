@@ -9,8 +9,9 @@ The front keeps the last good answer to a request it has forwarded (D-282). A
 view nobody opened before an outage has no copy, and a visitor arriving during
 the outage would find that station's page empty. This makes the requests the
 dashboard would make, for every station the directory lists, through the front:
-the page, the assets the page names, and each route in
-``deploy/front/snapshot-routes.txt`` (D-283).
+the page, the assets the page names, each route in
+``deploy/front/snapshot-routes.txt`` (D-283), and every file of every evidence
+package ``/api/v1/datasets`` lists, which the data page links to (D-369).
 
 **It goes through the front, never to the api directly,** because a copy is kept
 only of what passes through the front, under the exact path and query a browser
@@ -56,6 +57,10 @@ STATION = "{station}"
 DIRECTORY = "/api/v1/stations?limit=200"
 """The directory's first page, as the dashboard asks for it; later pages add
 ``&cursor=``, which the dashboard appends after ``limit`` in the same way."""
+DATASETS = "/api/v1/datasets"
+"""The published evidence packages. Their files are links on the data page, not
+requests a view makes, so they are not in the routes file: they are read from
+this answer."""
 
 PACE_S = 0.25
 """Four requests a second, under the public API's five (D-202)."""
@@ -163,6 +168,22 @@ def assets_of(html: bytes) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+def dataset_files(body: bytes) -> list[str]:
+    """Every file of every package the datasets answer lists, as the page links it."""
+    try:
+        listed = json.loads(body)
+    except ValueError:
+        return []
+    if not isinstance(listed, dict) or listed.get("status") != "computed":
+        return []
+    return [
+        f"{DATASETS}/{path_segment(str(package['name']))}"
+        f"/{path_segment(str(one['name']))}"
+        for package in listed.get("packages", [])
+        for one in package.get("files", [])
+    ]
+
+
 def station_ids(fetch: Fetch, first: str = DIRECTORY) -> tuple[list[str], list[Answer]]:
     """Every station in the directory, following ``next_cursor`` as the dashboard."""
     ids: list[str] = []
@@ -203,8 +224,11 @@ def warm(fetch: Fetch, routes: Iterable[str]) -> Round:
             continue
         if STATION in route:
             result.answers.extend(fetch(expand(route, station)) for station in ids)
-        else:
-            result.answers.append(fetch(route))
+            continue
+        answer = fetch(route)
+        result.answers.append(answer)
+        if route == DATASETS and answer.status == 200:
+            result.answers.extend(fetch(path) for path in dataset_files(answer.body))
     return result
 
 

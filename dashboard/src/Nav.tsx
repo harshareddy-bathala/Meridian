@@ -1,11 +1,15 @@
 import type { Route, View } from "./route";
 
 const LINKS: { view: View; label: string }[] = [
-  { view: "network", label: "Network" },
+  { view: "live", label: "Live" },
   { view: "stations", label: "Stations" },
   { view: "schedule", label: "Schedule" },
-  { view: "losses", label: "Losses" },
-  { view: "insights", label: "Insights" },
+  { view: "results", label: "Results" },
+  { view: "areas", label: "Areas" },
+  { view: "changes", label: "Changes" },
+  { view: "reports", label: "Reports" },
+  { view: "data", label: "Data" },
+  { view: "plan", label: "Plan" },
   { view: "kiosk", label: "Kiosk" },
 ];
 

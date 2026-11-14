@@ -81,3 +81,28 @@ export function formatDay(iso: string): string {
 export function formatFrequency(hz: number): string {
   return `${String(Math.round(hz / 100_000) / 10)} MHz`;
 }
+
+/** "14:03:27 UTC": the platform's time, which every window is published in. */
+export function formatUtcClock(instant: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${hhmm(instant)}:${pad(instant.getUTCSeconds())} UTC`;
+}
+
+/** "in 42 s", "in 7 min 05 s", "in 2 h 14 min": how long until an instant. */
+export function formatCountdown(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  const pad = (value: number) => String(value).padStart(2, "0");
+  if (seconds < 60) {
+    return `in ${String(seconds)} s`;
+  }
+  if (seconds < 3600) {
+    return `in ${String(Math.floor(seconds / 60))} min ${pad(seconds % 60)} s`;
+  }
+  return `in ${String(Math.floor(seconds / 3600))} h ${pad(Math.floor((seconds % 3600) / 60))} min`;
+}
+
+/** "14:03 UTC, 7 Nov": the minute something happened. */
+export function formatMinute(iso: string): string {
+  const instant = new Date(iso);
+  return `${hhmm(instant)} UTC, ${String(instant.getUTCDate())} ${MONTHS[instant.getUTCMonth()] ?? ""}`;
+}

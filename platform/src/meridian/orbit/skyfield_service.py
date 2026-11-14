@@ -39,6 +39,8 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from skyfield.api import EarthSatellite, load, wgs84
+from skyfield.timelib import Time
+from skyfield.vectorlib import VectorSum
 
 from meridian.orbit.azimuth_continuity import unwrap_azimuth_deg
 from meridian.orbit.doppler import doppler_offset_hz
@@ -48,6 +50,7 @@ from meridian.orbit.pass_search import (
     ElevationScan,
     find_elevation_passes,
 )
+from meridian.orbit.range_rate import range_and_rate
 from meridian.orbit.time_sampling import aligned_to_grid, half_open_sample_times
 from meridian.orbit.types import (
     DopplerSample,
@@ -111,6 +114,7 @@ class SkyfieldOrbitService:
         # station has to work with the network down and a library default could
         # change in a future release without us noticing.
         self._timescale = load.timescale(builtin=True)
+        self._grid: tuple[tuple[datetime, ...], Time] | None = None
 
     def look_angles(
         self,
@@ -161,10 +165,15 @@ class SkyfieldOrbitService:
         for, so one pass gets one answer no matter which horizon found it —
         see :func:`_aligned_to_grid`.
         """
+        relative_position = self._relative_position(search.element_set, search.site)
         look_angle_at = self._look_angle_at(search.element_set, search.site)
 
         def elevation_deg_at(t: datetime) -> float:
             return look_angle_at(t).elevation_deg
+
+        def elevations_deg_at(times: Sequence[datetime]) -> list[float]:
+            topocentric = relative_position.at(self._grid_time(times))
+            return [float(value) for value in topocentric.altaz()[0].degrees]
 
         margin = timedelta(seconds=PASS_SEARCH_MARGIN_S)
         found = find_elevation_passes(
@@ -177,6 +186,7 @@ class SkyfieldOrbitService:
                 min_elevation_deg=search.min_elevation_deg,
                 coarse_step_s=search.coarse_step_s,
             ),
+            elevations_at=elevations_deg_at,
         )
         return [
             self._to_pass_window(look_angle_at, search.element_set, elevation_pass)
@@ -314,19 +324,12 @@ class SkyfieldOrbitService:
         Azimuth comes back still wrapped at north, because unwrapping needs the
         sample before this one and a single instant does not have it.
         """
-        satellite = EarthSatellite(
-            element_set.line1,
-            element_set.line2,
-            element_set.satellite_id,
-            self._timescale,
-        )
-        observer = wgs84.latlon(site.lat_deg, site.lon_deg, elevation_m=site.alt_m)
-        relative_position = satellite - observer
+        relative_position = self._relative_position(element_set, site)
 
         def look_angle_at(t: datetime) -> LookAngle:
             topocentric = relative_position.at(self._timescale.from_datetime(t))
             elevation, azimuth, _ = topocentric.altaz()
-            range_km, range_rate_km_s = _range_and_rate(
+            range_km, range_rate_km_s = range_and_rate(
                 [float(component) for component in topocentric.xyz.km],
                 [float(component) for component in topocentric.velocity.km_per_s],
             )
@@ -340,38 +343,44 @@ class SkyfieldOrbitService:
 
         return look_angle_at
 
+    def _relative_position(
+        self, element_set: ElementSet, site: GroundSite
+    ) -> VectorSum:
+        """The satellite as the site sees it, ready to be placed at any time."""
+        satellite = EarthSatellite(
+            element_set.line1,
+            element_set.line2,
+            element_set.satellite_id,
+            self._timescale,
+        )
+        observer = wgs84.latlon(site.lat_deg, site.lon_deg, elevation_m=site.alt_m)
+        return satellite - observer
 
-def _range_and_rate(
-    position_km: list[float], velocity_km_s: list[float]
-) -> tuple[float, float]:
-    """Distance along the line of sight, and how fast it is changing.
+    def _grid_time(self, times: Sequence[datetime]) -> Time:
+        """One Skyfield time array for these instants, kept for the next search.
 
-    Args:
-        position_km: Station-to-satellite vector, in km.
-        velocity_km_s: Its rate of change, in km/s. Both are topocentric and in
-            the same frame; this function does no conversion and would return a
-            confidently wrong number if handed vectors from two different ones.
+        Placing the site at an instant needs the Earth's orientation then, and
+        Skyfield computes that once per ``Time`` and keeps it on the object. A
+        search per instant pays for it at every sample, which was nearly all of
+        a 48-hour search's three seconds. One array for the whole scan pays for
+        it once, and keeping the array means the next satellite or site
+        searched over the same grid does not pay again: pass generation
+        searches every station and satellite over one horizon, and the
+        planner every satellite over one hour's grid (D-370).
 
-    Returns:
-        Range in km, and range rate in km/s. **Positive range rate means
-        receding**, matching :class:`~meridian.orbit.types.LookAngle`'s
-        documented sign.
-
-    Note:
-        Range rate is ``(r · v) / |r|`` — the component of the relative velocity
-        along the unit vector pointing at the satellite. The perpendicular
-        components change where the antenna points but not how far away the
-        satellite is, so they do not shift the frequency.
-
-        Getting the sign wrong here is silent: every magnitude stays plausible
-        and only the direction of the Doppler shift inverts, which looks exactly
-        like a correct answer until a station retunes the wrong way.
-
-        Reference: Vallado, ch. 4.
-    """
-    range_km = math.sqrt(sum(component**2 for component in position_km))
-    radial_km2_s = sum(r * v for r, v in zip(position_km, velocity_km_s, strict=True))
-    return range_km, radial_km2_s / range_km
+        Only the last grid is kept, keyed by its instants exactly. A batched
+        elevation differs from the per-instant one by a few times 1e-14°,
+        which moves a coarse sample across the floor only if it lies that
+        close to it; the boundaries and culmination are refined per instant
+        as before, so a pass's identity (D-063) does not change.
+        """
+        key = tuple(times)
+        kept = self._grid
+        if kept is not None and kept[0] == key:
+            return kept[1]
+        grid = self._timescale.from_datetimes(list(times))
+        self._grid = (key, grid)
+        return grid
 
 
 if TYPE_CHECKING:

@@ -8,8 +8,8 @@ into the scratch database, checked against its manifest, and the scratch
 database dropped.
 
 It needs ``pg_dump``, ``pg_restore`` and ``psql`` on the ``PATH``, at the server's
-major version. Without them the test skips on a workstation and fails in CI,
-where a skipped drill would read as a passed one.
+major version, and checks both before it starts. Without them the test skips on
+a workstation and fails in CI, where a skipped drill would read as a passed one.
 
 Reference: docs/DECISIONS.md D-115, D-209.
 """
@@ -18,13 +18,16 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
+import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+import psycopg
 import pytest
 from psycopg import conninfo
 
@@ -32,11 +35,47 @@ TOOLS = Path(__file__).resolve().parents[2] / "deploy/tools"
 BINARIES = ("pg_dump", "pg_restore", "psql")
 
 
-@pytest.fixture(scope="module")
-def tools() -> Iterator[dict[str, ModuleType]]:
+def _client_major(binary: str) -> int:
+    """The major version a client binary reports, as in `pg_dump (PostgreSQL) 16.4`."""
+    output = subprocess.run(
+        [binary, "--version"], capture_output=True, text=True, check=True
+    ).stdout
+    found = re.search(r"\(PostgreSQL\) (\d+)", output)
+    assert found is not None, f"{binary} --version said {output!r}"
+    return int(found.group(1))
+
+
+def _server_major(database_url: str) -> int:
+    with psycopg.connect(database_url) as conn:
+        row = conn.execute("show server_version_num").fetchone()
+    assert row is not None
+    return int(row[0]) // 10000
+
+
+def _unusable_binaries(database_url: str) -> str | None:
+    """Why the binaries on the PATH cannot run the drill, or ``None``.
+
+    A newer `pg_dump` writes settings an older server does not know, such as 17's
+    `transaction_timeout`, so a mismatch fails mid-restore with an error about the
+    setting rather than the versions. Said here first, in its own words.
+    """
     missing = [b for b in BINARIES if shutil.which(b) is None]
     if missing:
-        message = f"the restore drill needs {', '.join(missing)} on the PATH"
+        return f"the restore drill needs {', '.join(missing)} on the PATH"
+    server = _server_major(database_url)
+    wrong = [b for b in BINARIES if _client_major(b) != server]
+    if wrong:
+        return (
+            f"the restore drill needs {', '.join(wrong)} at the server's major"
+            f" version, {server}, first on the PATH"
+        )
+    return None
+
+
+@pytest.fixture(scope="module")
+def tools(database_url: str) -> Iterator[dict[str, ModuleType]]:
+    message = _unusable_binaries(database_url)
+    if message is not None:
         if os.environ.get("CI"):
             pytest.fail(message)
         pytest.skip(message)

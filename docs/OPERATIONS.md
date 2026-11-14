@@ -87,8 +87,9 @@ compose exec api python -c "import urllib.request; print(urllib.request.urlopen(
 
 ### The front
 
-`front` is nginx before the api (D-282). It forwards every request, and keeps the last good copy of the dashboard and the public read API. **A visitor gets the api's answer whenever the api gives one**; a kept copy is served only when the api does not answer, marked `Meridian-Cache: STALE` and carrying the time the api made it. MSP, `/metrics` and `/healthz` are never kept.
+`front` is nginx before the api (D-282). It forwards every request, and keeps the last good copy of the dashboard and the public read API. **A visitor gets the api's answer whenever the api gives one**; a kept copy is served only when the api does not answer, marked `Meridian-Cache: STALE` and carrying the time the api made it. MSP, `/metrics`, `/healthz` and the station planner's `/api/v1/plan` are never kept (D-370).
 
+- **A change to `deploy/front/` reaches a running front only when it is recreated.** `nginx.conf` and `snapshot.conf` are bind-mounted, nginx reads them once at start, and `compose up -d` does not recreate a container whose mounted file changed. After an upgrade that touches them, `compose up -d --force-recreate front`. Measured on Stage 37: a front left running from before D-370 went on keeping planner answers until it was recreated. To check one, `curl -sI 'http://localhost:8080/api/v1/plan?lat=0&lon=0'` carries no `Meridian-Cache` header.
 - **On a laptop or in CI** the dashboard is on `http://localhost:8080` through the front, and on `:8000` straight from the api. Set `FRONT_PORT` in `deploy/.env` to move it.
 - **A recreated api is unseen for up to twenty seconds.** `compose up` recreates the api when its configuration changes, and secret rotation does it on purpose; the new container has a new address, and the front looks the name up every ten seconds and holds a failed lookup as long. Until it finds the api, views are served as copies, marked `STALE`, and MSP requests fail and are retried by the stations. `front_drill.py` gives the front half a minute before it judges.
 - **On the public deployment** the front has no host port, like the api. **Set the tunnel's origin to `http://front:8080`** in Cloudflare's dashboard, under the tunnel's public hostname; the token carries it, not this repository. An origin left at `http://api:8000` still works, but bypasses the front, so the dashboard goes down with the api.
@@ -1141,7 +1142,7 @@ diff one.txt two.txt                                                          # 
 
 ## The network's public views
 
-Stage 35 adds six reads to the public API for the dashboard's network, schedule, losses and insights views (D-331). Each follows the surface's rules: windows to whole minutes and angles to whole degrees (D-093), keyset cursors (D-085), `simulated` on every body that has results, and a stated absence rather than a zero (D-086).
+Stage 35 adds six reads to the public API for the dashboard's network, schedule, losses and insights views (D-331), and Stage 37 adds the reads its pages need, from D-361 on. Each follows the surface's rules: windows to whole minutes and angles to whole degrees (D-093), keyset cursors (D-085), `simulated` on every body that has results, and a stated absence rather than a zero (D-086).
 
 | Read | What it answers |
 |---|---|
@@ -1151,6 +1152,15 @@ Stage 35 adds six reads to the public API for the dashboard's network, schedule,
 | `GET /api/v1/schedule-runs/latest` | the newest round's record; its gain over a baseline is `not_measured` live, and is `meridian schedule evaluate`'s (D-172) |
 | `GET /api/v1/conditions` | the newest Kp and each point's cloud cover for this hour, credited to its source; Kp is `not_measured` until `meridian-ingest follow` has run |
 | `GET /api/v1/insights/model` | a sealed model run's summary, the file `REPORT_SUMMARY` names under `PUBLISHED_DIR` (`/published` in the container); `not_yet_computed` while it is unset, and `server_error` if the file is refused (D-332) |
+| `GET /api/v1/satellites/tracks` | every tracked satellite's ground track, a point a minute from the current minute for ninety minutes, sampled by the orbit service from the element set pass generation would use, with that set's epoch, age and source; each satellite without one is listed with why. Computed once a minute per api worker (D-361) |
+| `GET /api/v1/aggregates` | for measured and simulated stations apart, today's passes as counts (scheduled, closed, classified by class, confirmed listening, and closed but not yet classified) and seven UTC days of capture rate and loss budget, each day marked settled once its last window is past the settle margin; counted from `pass_classifications` under the deployment's `[classification]`, as `/reliability` is (D-362) |
+| `GET /api/v1/events` | the last week's events, newest first and paged: a station registered, a pass first reported decoded, a loss diagnosed under the deployment's `[diagnosis]`, a receive-chain warning raised or cleared under its watch; each names the record it came from (D-363) |
+| `GET /api/v1/results[?station_id=]` | every pass classified under the deployment's `[classification]`, the most recently classified first: its window to whole minutes, its class, its `effect` on SC-4 (`captured`, `lost` or `satellite`), whether a station was confirmed listening, the report's outcome, and its diagnosed cause where the deployment's `[diagnosis]` made one (D-365) |
+| `GET /api/v1/reports/weekly[?week=]` | the network's latest settled week, or the week from a given Monday, as plain text from template `network-weekly-1`: measured and simulated stations apart, settled passes by class, the capture rate with its interval, the loss budget, losses by cause and warnings open, all counted under the deployment's `[classification]` and `[diagnosis]`; with the facts' and text's sha256 and the previous week's Monday. A day that is not a Monday, or a week whose last passes are still inside the settle margin, is `invalid_query` (D-367) |
+| `GET /api/v1/datasets` | the published evidence packages, every one the public cut, from the index `EVIDENCE_INDEX` names under `PUBLISHED_DIR`, written by `meridian dataset publish`; `not_yet_computed` while it is unset, and `server_error` if the index is refused (D-369) |
+| `GET /api/v1/datasets/{name}/{file}` | one file the index lists, as an attachment, only while it has the digest and size the index states; `not_found` for anything the index does not list (D-369) |
+| `GET /api/v1/reports/criteria` | a sealed run's success criteria, the file `REPORT_CRITERIA` names under `PUBLISHED_DIR`, written by `meridian report criteria`; `not_yet_computed` while it is unset, and `server_error` if the file is refused (D-368) |
+| `GET /api/v1/plan?lat=&lon=` | the station planner: every satellite with a live downlink, searched over the place rounded to 0.1° at sea level against a 10° floor, for the passes under way now or rising in the next 48 hours, each window to whole minutes with its peak and, when `PLAN_MODEL` names a model, configuration A's predicted yield. Nothing is stored: the front forwards it without a copy, the log withholds the query, and the planner has its own rate of six places then one every ten seconds per caller. A place off the globe is `invalid_query`; a refused model is `server_error` (D-370) |
 
 ```bash
 curl -s localhost:8000/api/v1/losses?limit=5 | python -m json.tool
@@ -1158,7 +1168,7 @@ curl -s "localhost:8000/api/v1/schedule?station_id=<id>&hours=6" | python -m jso
 curl -s localhost:8000/api/v1/schedule-runs/latest | python -m json.tool
 ```
 
-**The dashboard's views read them** (D-334), each at its own address: `/#/network`, `/#/stations/<id>`, `/#/schedule/<id>`, `/#/losses`, `/#/insights`, and `/#/kiosk`, which shows the four in turn every 20 seconds for a screen nobody touches and holds still for a minute after a touch. Every request the views make is warmed through the front (`deploy/front/snapshot-routes.txt`), so each is served marked *not live* when the api is down.
+**The dashboard's views read them** (D-334), each at its own address: `/#/live` (D-364; `/#/network` opens it too), `/#/stations/<id>`, `/#/schedule/<id>`, `/#/results` (D-365; `/#/losses` opens it), `/#/areas[/<id>]` and `/#/changes` (D-366), `/#/reports` (D-367; `/#/insights` opens it), and `/#/kiosk`, which shows live, schedule, results and reports in turn every 20 seconds for a screen nobody touches and holds still for a minute after a touch. Every request the views make is warmed through the front (`deploy/front/snapshot-routes.txt`), so each is served marked *not live* when the api is down.
 
 **A loss's findings are a reviewed subset.** The full record of what each cause's test read is the operator's, through `meridian diagnosis explain`; the public list withholds the obstruction sectors, the raw noise levels and every internal id (`THREAT-MODEL.md` §7).
 
@@ -1193,7 +1203,7 @@ Add `--skip-outage` to leave the api running, and `--chromium PATH` to use a bro
 
 A package of Meridian's own receptions — each with its current observation and lineage, its verdicts and diagnoses, and its provenance — that someone who was not in the room can regenerate to the same hash (SC-10). It is built from a raw snapshot (§ Dataset snapshots), a configuration and a seed, and nothing else: neither command opens a database or a socket.
 
-Decisions this section puts into practice: D-310 to D-316.
+Decisions this section puts into practice: D-310 to D-316, and D-369 for the data page.
 
 ### Exporting a package
 
@@ -1211,6 +1221,7 @@ It is sealed under `<datasets root>/evidence/<hash prefix>/`, or at `--output`, 
 - **What it holds** is in its `datasheet.md`: one row per reception a station held, a miss with no report included; and what was left out — station coordinates, names and notes, product locations and element-set lines (D-310).
 - **Its licence is CC BY 4.0**, in `licence.txt` (D-313).
 - **The seed changes nothing today.** The export draws nothing at random; the seed is recorded so a package names all three of its inputs (D-312).
+- **Full precision, unless asked.** `precision = "full"` is the default and keeps every value as the snapshot holds it. `precision = "public"` is the cut the data page serves: every window widened to whole minutes, every angle to whole degrees, the SNR and Doppler series left out, and only which causes each diagnosis tested, not what it found (D-093, D-369). Its datasheet says so.
 
 ### Verifying one
 
@@ -1226,7 +1237,32 @@ Publish the package directory together with the raw snapshot it names, or the pa
 
 CI regenerates a simulated package on a second runner on every change (`ci.yml › evidence-elsewhere`, D-315).
 
+### Putting one on the data page
+
+The dashboard's data page lists the packages in `PUBLISHED_DIR/evidence/`, with every file to download and its digest (D-369). Only a public cut goes there: a full-precision package times each pass and its Doppler curve finely enough to locate a station better than it declared (D-093), and is refused.
+
+```sh
+uv run meridian dataset export --snapshot <raw snapshot> \
+    --config <a copy of dataset.toml.example with precision = "public"> --seed 4471
+uv run meridian dataset publish <the package it printed> --published data/published
+```
+
+`publish` checks the package against its manifest, seals a copy at `data/published/evidence/<hash prefix>/` without the path it was built from, and rewrites `data/published/evidence/index.json` from every package there. Then set `EVIDENCE_INDEX=/published/evidence/index.json` on the api. Unset, `/api/v1/datasets` answers `not_yet_computed`; named and refused, `server_error` naming the setting. A file changed after it was published is refused rather than served, and the front keeps a copy of every listed file, warmed from the listing, so a download survives the api being down.
+
+To take a package down, remove its directory and run `publish` again on any package still published, which rewrites the index without it; delete `index.json` if none is left. The api stops serving it on the next request.
+
 ---
+
+### Giving the station planner a model
+
+The planner on the dashboard's `#/plan` lists each pass's peak with or without a model; with one, each pass also carries configuration A's predicted yield. The api is not given the datasets root (D-332), so a configuration A model is copied out to `PUBLISHED_DIR`:
+
+```bash
+meridian model planner data/datasets/models/<hash prefix> \
+  --output data/published/plan-model.json
+```
+
+It refuses anything but configuration A reading `max_elevation_deg` alone, fitted on the feature code this checkout runs. Then set `PLAN_MODEL=/published/plan-model.json` on the api. Unset, every pass's yield is `not_measured` and the page says why; named and refused, `/api/v1/plan` answers `server_error` naming the setting, and the log says why. Write the file again after fitting a newer model, and after any change to `FEATURE_VERSION`, which refuses the old one.
 
 ## Evaluation reports
 
@@ -1346,9 +1382,20 @@ The first model fitted on receptions nobody here invented (D-322, D-325). The fi
    meridian report summary <run> --output data/published/model-summary.json
    ```
    `build` and `verify` need the `fit` extra (D-155); `summary` does not.
-4. **Publish** by setting `REPORT_SUMMARY=/published/model-summary.json` on the api (D-332). The dashboard's insights view reads the file and nothing else; a file it refuses is a `server_error` naming the setting, never a partial page.
+4. **Publish** by setting `REPORT_SUMMARY=/published/model-summary.json` on the api (D-332). The dashboard's reports view reads the file and nothing else; a file it refuses is a `server_error` naming the setting, never a partial page.
 
 **What it is and is not.** Only configuration A, elevation, can be fitted on an archive: C and D appear as not computable, with the reason (D-156). The completeness ratio and the weighting are in the run's data section, because the archive holds only passes its stations chose to observe. **Never compare its totals with ours**, on the site, a slide or a poster (D-053).
+
+### Publishing the success criteria
+
+The reports page states each success criterion a sealed run judged, SC-1 to SC-5 and SC-7 to SC-9, from a file of its own (D-368). It comes from a run on our own stations, not the archive run above, because only our own run measures them:
+
+```bash
+meridian report verify <run>
+meridian report criteria <run> --output data/published/criteria.json
+```
+
+Then set `REPORT_CRITERIA=/published/criteria.json` on the api. Every figure is copied from the run's own rows, and each verdict is the run's own. A criterion the run could not judge is published with its reason, and one measured on simulated fault runs is labelled so. Unset, `/api/v1/reports/criteria` answers `not_yet_computed`. Named and refused, it answers `server_error` naming the setting, as `REPORT_SUMMARY` does.
 
 ### The completion gate, at a prompt
 
@@ -1502,7 +1549,7 @@ Stage 32 watches places, not Meridian. Its decisions are D-227 to D-233. **It is
 
 ### Areas of interest
 
-An area is a place and a label, registered by an operator — there is no endpoint that creates one, and nothing about an area is published until the team settles D-137 (D-227).
+An area is a place and a label, registered by an operator — there is no endpoint that creates one, and an area is published only once a deployment publishes its regional summary (D-326, accepted 2026-11-07).
 
 | Task | Command |
 |---|---|
@@ -1542,7 +1589,7 @@ Each alert is recorded in `region_alerts` once — recording the same report aga
 ---
 
 
-### Publishing areas, once D-137 is settled
+### Publishing areas
 
 Nothing about an area is public until the team accepts D-326 (D-227). Until then `/api/v1/areas` answers `not_yet_computed`. To prepare, and later to publish:
 
@@ -1559,7 +1606,7 @@ Nothing about an area is public until the team accepts D-326 (D-227). Until then
    meridian regions summary <report directory> --output data/published/areas.json
    ```
    The summary holds each active area's label, size and box, its series and changes, and the sources behind them: no note, no polygon, no reception count.
-3. **Publish only on the team's acceptance of D-326**: set `AREAS_PUBLISHED=true` and `AREAS_SUMMARY=/published/areas.json` on the api, and record the acceptance in the same change.
+3. **Publish**: set `AREAS_PUBLISHED=true` and `AREAS_SUMMARY=/published/areas.json` on the api. The team accepted D-326 on 2026-11-07 (D-366), so publishing is now each deployment's choice; the dashboard's areas and changes pages read what this serves.
 
 ## Stored measurements and profiles
 

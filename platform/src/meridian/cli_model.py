@@ -14,13 +14,18 @@ Three verbs, none of which opens a database:
   manifest records, so there is no ``--config`` to get wrong.
 * ``show <model>`` prints what the model is: its inputs, coefficients,
   calibration map and dates.
+* ``planner <model> --output FILE`` writes a configuration A model as
+  ``plan-model-1``, for the station planner to score with (D-370). The api
+  container is not given the datasets root, so the planner reads this file
+  from ``PUBLISHED_DIR`` instead, and the model in it is ``model.json``
+  unchanged.
 
 **The fitter is imported inside ``fit`` and ``evaluate``, never at the top.**
 scikit-learn is the ``fit`` extra, which the platform image does not install
 (D-155), and ``meridian`` there must still start — ``show`` included. Without
 the extra those two verbs say what to install instead of raising.
 
-Reference: docs/DECISIONS.md D-155, D-162, D-163, D-164.
+Reference: docs/DECISIONS.md D-155, D-162, D-163, D-164, D-370.
 """
 
 from __future__ import annotations
@@ -54,13 +59,20 @@ from meridian.prediction.lineage import (
 )
 from meridian.prediction.model_config import ModelConfigError, load_model_config
 from meridian.prediction.model_files import MODEL_FILE, publish_model, read_model
+from meridian.prediction.planner_file import planner_document, write_planner_file
 from meridian.prediction.score import Linear, MalformedModelError
 from meridian.prediction.splits import SplitError
 
 if TYPE_CHECKING:
     from meridian.prediction.model_files import FittedDirectory
 
-__all__ = ["FIT_EXTRA", "NEEDS_EXTRA", "add_model_parser", "run_model", "show_lines"]
+__all__ = [
+    "FIT_EXTRA",
+    "NEEDS_EXTRA",
+    "add_model_parser",
+    "run_model",
+    "show_lines",
+]
 
 EXIT_FAILED = 1
 """Matches ``meridian.cli.EXIT_FAILED``."""
@@ -132,6 +144,21 @@ def add_model_parser(
     )
     show = actions.add_parser("show", help="print what a model is")
     show.add_argument("model", type=Path, help="a model directory")
+    planner = actions.add_parser(
+        "planner",
+        help="write a configuration A model for the station planner to publish",
+        description=(
+            "Writes plan-model-1 from a verified configuration A model, for"
+            " PLAN_MODEL to name (D-370)."
+        ),
+    )
+    planner.add_argument("model", type=Path, help="a configuration A model directory")
+    planner.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="where to write it, for example data/published/plan-model.json",
+    )
 
 
 def run_model(args: argparse.Namespace) -> int:
@@ -152,7 +179,7 @@ def run_model(args: argparse.Namespace) -> int:
 
 def _dispatch(action: str, args: argparse.Namespace) -> int:
     """The action, once what it reads is known to be a directory."""
-    actions = {"fit": _fit, "evaluate": _evaluate, "show": _show}
+    actions = {"fit": _fit, "evaluate": _evaluate, "show": _show, "planner": _planner}
     target = args.dataset if action == "fit" else args.model
     if not Path(target).is_dir():
         return _refuse(action, f"{target} is not a directory")
@@ -233,6 +260,17 @@ def _show(args: argparse.Namespace) -> int:
     held = read_model(args.model)
     for line in show_lines(held):
         _say(line)
+    return 0
+
+
+def _planner(args: argparse.Namespace) -> int:
+    """``meridian model planner``: reads the file, and never imports the fitter."""
+    held = read_model(args.model)
+    document = planner_document(held)
+    write_planner_file(args.output, document)
+    _say(f"Wrote {args.output}")
+    _say(f"  model    {document['model_sha256']}")
+    _say(f"  fitted   on {document['population']}, as of {document['as_of']}")
     return 0
 
 

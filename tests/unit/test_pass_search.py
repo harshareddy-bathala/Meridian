@@ -12,6 +12,7 @@ Marked as a unit test by living in ``tests/unit``.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -247,3 +248,29 @@ def test_a_naive_datetime_is_refused_at_this_boundary() -> None:
     )
     with pytest.raises(ValueError, match="naive"):
         find_elevation_passes(sine_elevation_deg, naive)
+
+
+def test_coarse_samples_asked_for_in_one_call_give_the_same_passes() -> None:
+    """``elevations_at`` replaces the per-step calls and nothing else."""
+    asked: list[int] = []
+
+    def in_one_call(times: Sequence[datetime]) -> list[float]:
+        asked.append(len(times))
+        return [sine_elevation_deg(t) for t in times]
+
+    scan = scan_of(-300, 2700, coarse_step_s=COARSE_STEP_S)
+    batched = find_elevation_passes(sine_elevation_deg, scan, elevations_at=in_one_call)
+
+    assert batched == find_elevation_passes(sine_elevation_deg, scan)
+    assert len(batched) == 3
+    assert len(asked) == 1
+
+
+def test_coarse_samples_of_the_wrong_length_are_refused() -> None:
+    """A batch that drops an instant would shift every bracket after it."""
+    with pytest.raises(ValueError, match="values for"):
+        find_elevation_passes(
+            sine_elevation_deg,
+            scan_of(-300, 900, coarse_step_s=COARSE_STEP_S),
+            elevations_at=lambda times: [0.0] * (len(times) - 1),
+        )

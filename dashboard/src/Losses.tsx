@@ -5,6 +5,7 @@ import { SimBadge } from "./SimBadge";
 import { SnapshotNote } from "./SnapshotNote";
 import { snapshotClass } from "./snapshot";
 import { usePolled } from "./usePolled";
+import { TableScroll } from "./TableScroll";
 
 // Every lost pass the platform diagnosed: the cause, or *undetermined* said
 // plainly with the reason, and every cause tested beside it, fired or not,
@@ -59,11 +60,12 @@ export function LossRow({ loss, go }: { loss: Loss; go: Go }) {
   );
 }
 
-export function LossesView({ go }: { go: Go }) {
+/** The list, a part of the results page since Stage 37 (D-365). */
+export function LossesSection({ go }: { go: Go }) {
   const losses = usePolled("losses", (fetcher, signal) => fetchLosses(fetcher, null, signal));
   return (
-    <section aria-labelledby="losses-heading" className={snapshotClass("view", losses.snapshot)}>
-      <h2 id="losses-heading">Losses</h2>
+    <section aria-labelledby="losses-heading" className={snapshotClass("", losses.snapshot)}>
+      <h3 id="losses-heading">Losses</h3>
       <SnapshotNote snapshot={losses.snapshot} what="This list shows" />
       {losses.error !== null && <p role="alert">{losses.error}</p>}
       {losses.value === null ? (
@@ -74,7 +76,7 @@ export function LossesView({ go }: { go: Go }) {
           has none yet.
         </p>
       ) : (
-        <div className="table-scroll">
+        <TableScroll label="Diagnosed losses">
           <table>
             <caption>The most recently diagnosed first, with every cause tested.</caption>
             <thead>
@@ -91,7 +93,7 @@ export function LossesView({ go }: { go: Go }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
     </section>
   );

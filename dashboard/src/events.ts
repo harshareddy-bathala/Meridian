@@ -1,0 +1,87 @@
+// What just happened across the network, newest first (D-363).
+//
+// /api/v1/events reads each event back from the record that says so: a
+// station's registration, a decode, a diagnosed loss, a receive-chain warning
+// raised or cleared. Each carries ``simulated`` from its record (rule 5).
+
+import { decodeItems, getJson, type Fetcher } from "./api";
+import { asBoolean, asNullableString, asObject, asOneOf, asString } from "./decode";
+import { causeWords } from "./losses";
+
+export const EVENT_KINDS = [
+  "loss_diagnosed",
+  "pass_decoded",
+  "station_joined",
+  "warning_cleared",
+  "warning_raised",
+] as const;
+
+export interface NetworkEvent {
+  at: string;
+  kind: (typeof EVENT_KINDS)[number];
+  ref: string;
+  stationId: string;
+  simulated: boolean;
+  satelliteId: string | null;
+  assignmentId: string | null;
+  cause: string | null;
+}
+
+/** How many the live page lists. */
+export const FEED_LIMIT = 20;
+
+export function decodeEvent(value: unknown, path: string): NetworkEvent {
+  const fields = asObject(value, path);
+  return {
+    at: asString(fields, "at", path),
+    kind: asOneOf(fields, "kind", EVENT_KINDS, path),
+    ref: asString(fields, "ref", path),
+    stationId: asString(fields, "station_id", path),
+    simulated: asBoolean(fields, "simulated", path),
+    satelliteId: asNullableString(fields, "satellite_id", path),
+    assignmentId: asNullableString(fields, "assignment_id", path),
+    cause: asNullableString(fields, "cause", path),
+  };
+}
+
+export interface EventPage {
+  events: NetworkEvent[];
+  nextCursor: string | null;
+}
+
+/** One page of events: the newest when ``cursor`` is null. */
+export async function fetchEventPage(fetcher: Fetcher, cursor: string | null, signal: AbortSignal): Promise<EventPage> {
+  const query = new URLSearchParams({ limit: String(FEED_LIMIT) });
+  if (cursor !== null) {
+    query.set("cursor", cursor);
+  }
+  const body = await getJson(fetcher, `/api/v1/events?${query.toString()}`, "the events feed", signal);
+  const page = decodeItems(body, decodeEvent);
+  return { events: page.items, nextCursor: page.nextCursor };
+}
+
+export async function fetchEvents(fetcher: Fetcher, signal: AbortSignal): Promise<NetworkEvent[]> {
+  return (await fetchEventPage(fetcher, null, signal)).events;
+}
+
+function satellite(event: NetworkEvent): string {
+  return event.satelliteId ?? "a satellite";
+}
+
+function cause(event: NetworkEvent): string {
+  const words = causeWords(event.cause ?? "undetermined");
+  return words === "undetermined" ? "cause undetermined" : words;
+}
+
+const WORDS: Record<NetworkEvent["kind"], (event: NetworkEvent) => string> = {
+  station_joined: () => "joined the network",
+  pass_decoded: (event) => `decoded a pass of ${satellite(event)}`,
+  loss_diagnosed: (event) => `lost a pass of ${satellite(event)}: ${cause(event)}`,
+  warning_raised: () => "receive chain fell short of its baseline",
+  warning_cleared: () => "receive chain recovered",
+};
+
+/** What happened, in words, with the station named by the caller. */
+export function describeEvent(event: NetworkEvent): string {
+  return WORDS[event.kind](event);
+}

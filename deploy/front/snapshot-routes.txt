@@ -9,11 +9,12 @@
 #
 # One route a line. `{station}` is every station the directory lists. The
 # directory itself is followed through `next_cursor`, as the dashboard does.
-# The page and the assets it names are warmed too, and are not listed here.
+# The page and the assets it names are warmed too, and are not listed here, and
+# so is every file of every package /api/v1/datasets lists, which the data page
+# links to rather than fetches (D-369).
 
 /api/v1/stations?limit=200
 /api/v1/reliability
-/api/v1/assignments?limit=10
 /api/v1/stations/{station}/heartbeats?limit=1
 /api/v1/assignments?limit=10&station_id={station}
 /api/v1/stations/{station}/profiles
@@ -26,3 +27,13 @@
 /api/v1/schedule-runs/latest
 /api/v1/conditions
 /api/v1/insights/model
+/api/v1/satellites/tracks
+/api/v1/assignments?limit=50&decision=scheduled
+/api/v1/aggregates
+/api/v1/events?limit=20
+/api/v1/results?limit=50
+/api/v1/areas
+/api/v1/reports/weekly
+/api/v1/reports/criteria
+/api/v1/datasets
+/openapi.json

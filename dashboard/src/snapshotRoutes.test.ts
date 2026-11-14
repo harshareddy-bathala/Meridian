@@ -12,18 +12,27 @@ import { describe, expect, it } from "vitest";
 
 import routesFile from "../../deploy/front/snapshot-routes.txt?raw";
 import type { Fetcher } from "./api";
+import { fetchAggregates } from "./aggregates";
+import { fetchApiReference } from "./apiReference";
+import { fetchAreas } from "./areas";
 import { fetchConditions } from "./conditions";
+import { fetchCriteria } from "./criteria";
+import { fetchDatasets } from "./datasets";
+import { fetchEvents } from "./events";
 import { fetchInsights } from "./insights";
 import { fetchLosses } from "./losses";
 import { fetchOpenWarnings } from "./networkWarnings";
 import { fetchProfiles } from "./profiles";
 import { fetchRecentReceptions } from "./receptions";
 import { fetchReceiveChains } from "./receiveChain";
+import { fetchWeekly } from "./reports";
 import { fetchNetworkReliability, fetchStationCapture } from "./reliability";
-import { fetchLatestHeartbeat, fetchUpcomingAssignments } from "./schedule";
+import { fetchResults } from "./results";
+import { fetchLatestHeartbeat, fetchNetworkPasses, fetchUpcomingAssignments } from "./schedule";
 import { fetchLatestRun } from "./scheduleRun";
 import { fetchStationSchedule } from "./stationSchedule";
 import { fetchAllStations } from "./stations";
+import { fetchTracks } from "./tracks";
 import { fetchUptime } from "./uptime";
 
 // What the warmer substitutes; a station id as the platform mints them.
@@ -48,7 +57,6 @@ async function requests(): Promise<string[]> {
   const calls: Promise<unknown>[] = [
     fetchAllStations(fetcher, signal),
     fetchStationCapture(fetcher, STATION_ID, signal),
-    fetchUpcomingAssignments(fetcher, null, signal),
     fetchLatestHeartbeat(fetcher, STATION_ID, signal),
     fetchUpcomingAssignments(fetcher, STATION_ID, signal),
     fetchProfiles(fetcher, STATION_ID, signal),
@@ -62,6 +70,16 @@ async function requests(): Promise<string[]> {
     fetchLatestRun(fetcher, signal),
     fetchConditions(fetcher, signal),
     fetchInsights(fetcher, signal),
+    fetchTracks(fetcher, signal),
+    fetchNetworkPasses(fetcher, signal),
+    fetchAggregates(fetcher, signal),
+    fetchEvents(fetcher, signal),
+    fetchResults(fetcher, null, signal),
+    fetchAreas(fetcher, signal),
+    fetchWeekly(fetcher, signal),
+    fetchCriteria(fetcher, signal),
+    fetchDatasets(fetcher, signal),
+    fetchApiReference(fetcher, signal),
   ];
   await Promise.allSettled(calls);
   return urls;

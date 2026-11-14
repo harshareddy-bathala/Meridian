@@ -1,15 +1,15 @@
-"""``/api/v1/areas``: closed until areas are declared public, then exactly the file.
+"""``/api/v1/areas``: closed until a deployment publishes, then exactly the file.
 
-D-227 holds every area unpublished until D-137 is settled; D-326 proposes the
-answer, and ``AREAS_PUBLISHED`` is how an operator records that it was
-accepted. Closed, the body is D-086's placeholder. Open, it is the summary
+D-326, accepted on 2026-11-07 (D-366), makes a registration public, and
+``AREAS_PUBLISHED`` is how a deployment chooses to publish its areas. Closed,
+the body is D-086's placeholder. Open, it is the summary
 ``meridian regions summary`` wrote, parsed strictly: a file with a key it does
 not know, or another schema, is a ``server_error``, never part of a page.
 
 No database: the endpoint reads a file. Marked ``msp_conformance`` by the
 directory hook.
 
-Reference: docs/DECISIONS.md D-086, D-227, D-326.
+Reference: docs/DECISIONS.md D-086, D-326, D-366.
 """
 
 from __future__ import annotations
@@ -101,7 +101,7 @@ def test_closed_by_default_with_no_field_a_chart_could_read(client: TestClient) 
     body = client.get("/api/v1/areas").json()
     assert set(body) == {"status", "reason", "available_from_stage"}
     assert body["status"] == "not_yet_computed"
-    assert "D-137" in body["reason"]
+    assert "D-326" in body["reason"]
 
 
 def test_a_file_without_the_flag_stays_closed(

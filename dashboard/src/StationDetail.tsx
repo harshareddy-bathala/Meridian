@@ -13,6 +13,7 @@ import { oldest, snapshotClass } from "./snapshot";
 import type { Station } from "./stations";
 import { useStationCapture } from "./useStationCapture";
 import { useStationDetail } from "./useStationDetail";
+import { TableScroll } from "./TableScroll";
 
 function ListeningState({ heartbeat }: { heartbeat: LatestHeartbeat | null | undefined }) {
   if (heartbeat === undefined) {
@@ -73,7 +74,7 @@ function Assignments({ assignments, showStation }: { assignments: Assignment[]; 
     return <p>No assignment is coming up.</p>;
   }
   return (
-    <div className="table-scroll">
+    <TableScroll label="Assignments coming up">
       <table>
         <thead>
           <tr>
@@ -91,7 +92,7 @@ function Assignments({ assignments, showStation }: { assignments: Assignment[]; 
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
@@ -100,7 +101,7 @@ function Receptions({ receptions }: { receptions: Reception[] }) {
     return <p>This station has reported no reception yet.</p>;
   }
   return (
-    <div className="table-scroll">
+    <TableScroll label="Receptions reported">
       <table>
         <thead>
           <tr>
@@ -127,7 +128,7 @@ function Receptions({ receptions }: { receptions: Reception[] }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 

@@ -22,30 +22,16 @@
   font-display: swap;
 }
 
-/* The site's grounds and ink (site/brand/README.md). The signal colours there
-   mean above horizon, below horizon and predicted, so liveness does not borrow
-   them: it has its own tokens, and always a text label beside the colour. */
+/* The grounds, the ink, the spacing and the type are the site's, generated into
+   tokens.css from site/style.css (D-360). The signal colours there mean above
+   horizon, below horizon and predicted, so liveness does not borrow them: it
+   has its own tokens here, and always a text label beside the colour. */
 :root {
   color-scheme: light dark;
-  font-family: "IBM Plex Sans", system-ui, sans-serif;
-  /* One spacing scale, so views laid out apart still line up. */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.5rem;
-  --space-6: 2rem;
-  --space-7: 3rem;
-  --space-8: 4rem;
-  --bg: #f6f4ef;
-  --surface: #edeae3;
-  --rule: #cfc8bb;
-  --ink: #16181d;
-  --dim: #5a5f69;
+  font-family: var(--sans);
   --online: #1f6f8b;
   --stale: #8a5a00;
   --offline: #6b6f76;
-  --simulated: #5b3fa0;
   /* A view showing the front's kept copy, not the platform's answer (D-284).
      Its own token: "stale" already means a station's liveness. */
   --snapshot: #9a3412;
@@ -56,15 +42,9 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #08090d;
-    --surface: #101319;
-    --rule: #333944;
-    --ink: #e8e6e1;
-    --dim: #a9a6a0;
     --online: #6fb7d1;
     --stale: #d9a441;
     --offline: #9aa0a8;
-    --simulated: #b9a3ec;
     --snapshot: #f0915c;
     --warning: #f97066;
   }
@@ -82,11 +62,11 @@ main {
 }
 
 .dim {
-  color: var(--dim);
+  color: var(--muted);
 }
 
 .mono {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--mono);
   font-size: 0.9em;
 }
 
@@ -102,7 +82,7 @@ table {
 caption {
   text-align: start;
   padding-block: 0.5rem;
-  color: var(--dim);
+  color: var(--muted);
 }
 
 th,
@@ -231,13 +211,13 @@ tr.selected {
 }
 
 .badge-skipped {
-  color: var(--dim);
+  color: var(--muted);
 }
 
 /* Outcomes, in words: only a decode is coloured, and nothing is coloured as a
    failure, because a quiet pass is not a miss until the platform says so. */
 .badge-outcome {
-  color: var(--dim);
+  color: var(--muted);
 }
 
 .badge-outcome.badge-decoded {
@@ -285,9 +265,9 @@ tr.selected {
 }
 
 .horizon-learned {
-  fill: var(--dim);
+  fill: var(--muted);
   fill-opacity: 0.25;
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-width: 0.8;
 }
 
@@ -299,7 +279,7 @@ tr.selected {
 }
 
 .horizon-label {
-  fill: var(--dim);
+  fill: var(--muted);
   font-size: 9px;
 }
 
@@ -367,7 +347,7 @@ tr.selected {
 }
 
 .figure dt {
-  color: var(--dim);
+  color: var(--muted);
 }
 
 .figure dd {
@@ -419,7 +399,7 @@ tr.selected {
 
 .timeline-skipped rect {
   fill: none;
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-dasharray: 6 4;
 }
 
@@ -447,7 +427,7 @@ tr.selected {
 }
 
 .calibration-ideal {
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-dasharray: 4 4;
 }
 
@@ -478,4 +458,259 @@ tr.selected {
   .timeline-pass text {
     font-size: 22px;
   }
+}
+
+/* Ways in (Stage 37): three short lines under the nav, on every page. */
+.ways-in {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin-block: 0 var(--space-4);
+  padding-block: var(--space-3);
+  border-block: 1px solid var(--rule);
+  color: var(--muted);
+}
+
+.ways-in p {
+  margin: 0;
+}
+
+.ways-in strong {
+  color: var(--ink);
+}
+
+/* The live page (D-361 to D-363). */
+.clock {
+  margin: 0 0 var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--step-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.overhead {
+  margin-block-end: var(--space-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.under-way,
+.orbits,
+.feed {
+  padding-inline-start: var(--space-5);
+}
+
+.feed li + li {
+  margin-top: var(--space-1);
+}
+
+.figure h4 {
+  margin: 0 0 var(--space-2);
+}
+
+/* A satellite and its next ninety minutes: ink, never a liveness colour or the
+   site's signal colours, which mean above and below the horizon. A satellite
+   from a stale orbit is hollow and dashed, so the warning survives without
+   colour. */
+.track {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  fill: none;
+}
+
+/* The diamond is drawn by a box inside the marker. Leaflet places the marker
+   itself with an inline transform, and CSS applies a `rotate` before
+   `transform`, which would turn that translation by 45° too. */
+.satellite::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  rotate: 45deg;
+  background: var(--ink);
+  border: 2px solid var(--bg);
+}
+
+.satellite-stale::before {
+  background: var(--bg);
+  border: 2px dashed var(--ink);
+}
+
+/* Small charts: one series in ink, a hollow mark for a day not settled. */
+.sparkline {
+  margin: 0 0 var(--space-3);
+}
+
+.sparkline figcaption {
+  color: var(--muted);
+}
+
+.sparkline figcaption strong {
+  color: var(--ink);
+}
+
+.sparkline svg {
+  display: block;
+  width: 100%;
+  max-width: 21rem;
+  height: auto;
+}
+
+.sparkline-line {
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  fill: none;
+}
+
+.sparkline-reference {
+  stroke: var(--rule);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.sparkline-mark {
+  fill: var(--ink);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.sparkline-unsettled .sparkline-mark {
+  fill: var(--surface);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.sparkline-hit {
+  fill: transparent;
+}
+
+.figure details table {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An area of interest: its bounding box in ink, never the polygon (D-326). */
+.area-box {
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  fill: var(--ink);
+  fill-opacity: 0.06;
+}
+
+.area-box-selected {
+  stroke-width: 3;
+  fill-opacity: 0.12;
+}
+
+.release-notes article + article {
+  margin-top: var(--space-5);
+}
+
+.release-notes h5 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: 1em;
+}
+
+/* The weekly report is the template's text, kept line for line (D-367). */
+.report-text {
+  max-width: 72ch;
+}
+
+.report-text h4 {
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.report-block {
+  margin-bottom: var(--space-3);
+}
+
+.report-block p {
+  margin: 0 0 var(--space-1);
+}
+
+.report-heading {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* The success criteria: one item each, its verdict the run's own (D-368). */
+.criteria {
+  padding-left: var(--space-4);
+}
+
+.criterion + .criterion {
+  margin-top: var(--space-3);
+}
+
+.criterion ul {
+  margin: var(--space-1) 0;
+}
+
+.criterion-met {
+  font-weight: 600;
+}
+
+/* The data page: a package's digests are read and copied whole (D-369). */
+.digest {
+  overflow-wrap: anywhere;
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
+.citation {
+  overflow-wrap: anywhere;
+}
+
+.checksums {
+  overflow-x: auto;
+  font-size: 0.85em;
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+}
+
+/* The station planner's place (D-370). Two numbers and a button, each a
+   target a thumb can hit (WCAG 2.5.8), wrapping to one a line on a phone. */
+.plan-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.plan-form label {
+  display: grid;
+  gap: var(--space-1);
+  flex: 1 1 12rem;
+}
+
+.plan-form input,
+.plan-form button {
+  min-height: var(--target);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ink-dim);
+  border-radius: var(--radius-1);
+  font: inherit;
+}
+
+.plan-form input {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.plan-form button {
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.plan-form input:focus-visible,
+.plan-form button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.downlink + .downlink::before {
+  content: ", ";
 }

@@ -40,7 +40,7 @@ def _snapshot() -> list[str]:
 def test_only_the_dashboard_and_the_public_read_api_are_kept() -> None:
     locations = _locations(_conf())
     keeping = {arg for arg, body in locations.items() if SNAPSHOT_INCLUDE in body}
-    assert keeping == {"= /", "/assets/", "/api/v1/"}
+    assert keeping == {"= /", "/assets/", "/api/v1/", "= /openapi.json"}
 
 
 def test_nothing_else_names_the_cache() -> None:
@@ -86,3 +86,13 @@ def test_the_api_is_found_by_name_whenever_it_appears() -> None:
 def test_the_readiness_route_answers_inside_the_container_only() -> None:
     body = _locations(_conf())["= /front-ready"]
     assert "allow 127.0.0.1;" in body and "deny all;" in body
+
+
+def test_the_station_planner_is_forwarded_and_never_kept() -> None:
+    """A copy keyed by ``lat`` and ``lon`` would list the places people asked about.
+
+    nginx takes an exact ``location =`` before any prefix, so this block, not
+    ``/api/v1/``'s, answers ``/api/v1/plan`` whatever its query (D-370).
+    """
+    body = _locations(_conf())["= /api/v1/plan"]
+    assert body.strip() == "proxy_pass http://platform;"

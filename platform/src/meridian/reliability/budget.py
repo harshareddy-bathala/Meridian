@@ -24,6 +24,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from meridian.reliability.classification import (
     CAPTURED,
@@ -36,7 +37,9 @@ __all__ = [
     "DEBIT_REASONS",
     "Debit",
     "LossBudget",
+    "PassEffect",
     "allowed_losses",
+    "effect_of",
     "loss_budget",
     "remaining_ratio_of",
 ]
@@ -45,6 +48,22 @@ DEBIT_REASONS: tuple[str, ...] = tuple(
     one for one in PASS_CLASSES if one not in CAPTURED | SATELLITE_CLASSES
 )
 """Every class that spends the budget, in the classification's order."""
+
+PassEffect = Literal["captured", "lost", "satellite"]
+
+
+def effect_of(classification: str) -> PassEffect:
+    """What a pass of this class does to SC-4: captured, lost, or neither.
+
+    The one place the dashboard's results read this, so the browser never
+    restates which classes spend the budget (D-182, D-185, D-365).
+    """
+    if classification in CAPTURED:
+        return "captured"
+    if classification in SATELLITE_CLASSES:
+        return "satellite"
+    return "lost"
+
 
 _ALLOWED_PLACES = 9
 """Decimal places ``allowed`` is rounded to: far below one pass, far above the

@@ -72,7 +72,10 @@ def test_each_route_is_encoded_where_the_station_sits(warm: ModuleType) -> None:
 def test_the_routes_file_lists_only_public_views(warm: ModuleType) -> None:
     routes = warm.read_routes()
     assert routes[0] == warm.DIRECTORY
-    assert all(route.startswith("/api/v1/") for route in routes)
+    # The api's own description, which the data page reads (D-369).
+    assert all(
+        route.startswith("/api/v1/") or route == "/openapi.json" for route in routes
+    )
     assert len(routes) == len(set(routes))
 
 
@@ -131,6 +134,43 @@ def test_a_round_walks_the_directory_and_asks_for_every_station(
         assert f"/api/v1/observations?limit=10&station_id={station}" in asked
     assert asked.count(warm.DIRECTORY) == 1
     assert len(asked) == len(set(asked))
+
+
+def test_a_round_asks_for_every_file_of_every_published_package(
+    warm: ModuleType,
+) -> None:
+    bodies = _site(warm)
+    bodies[warm.DATASETS] = json.dumps(
+        {
+            "status": "computed",
+            "packages": [
+                {
+                    "name": "abababababab",
+                    "files": [{"name": "manifest.json"}, {"name": "receptions.jsonl"}],
+                }
+            ],
+        }
+    ).encode()
+    asked: list[str] = []
+
+    def fetch(path: str) -> object:
+        asked.append(path)
+        return warm.Answer(path, 200, "MISS", bodies.get(path, b"{}"))
+
+    warm.warm(fetch, warm.read_routes())
+
+    at = asked.index(warm.DATASETS)
+    assert asked[at + 1 : at + 3] == [
+        "/api/v1/datasets/abababababab/manifest.json",
+        "/api/v1/datasets/abababababab/receptions.jsonl",
+    ]
+
+
+def test_nothing_published_asks_for_no_package_file(warm: ModuleType) -> None:
+    not_yet = json.dumps({"status": "not_yet_computed", "reason": "none"}).encode()
+
+    assert warm.dataset_files(not_yet) == []
+    assert warm.dataset_files(b"not json") == []
 
 
 def test_a_round_answered_from_copies_is_not_a_good_round(warm: ModuleType) -> None:
