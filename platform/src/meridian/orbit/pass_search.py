@@ -19,6 +19,7 @@ Reference: docs/SOFTWARE-IMPLEMENTATION-ROADMAP.md Stage 6;
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -35,11 +36,21 @@ __all__ = [
     "ElevationAt",
     "ElevationPass",
     "ElevationScan",
+    "ElevationsAt",
     "find_elevation_passes",
 ]
 
 ElevationAt = ValueAt
 """A curve whose value is elevation above the horizon, in degrees."""
+
+ElevationsAt = Callable[[Sequence[datetime]], Sequence[float]]
+"""The same curve at many instants in one call, in the order given.
+
+The coarse scan asks for every sample before it looks at any, so a propagator
+that is cheaper per instant in bulk can answer it in one go. It must return
+what :data:`ElevationAt` would at each instant: the scan only reads which
+samples are above the floor and which is highest, and every boundary and
+culmination is still refined one instant at a time."""
 
 REFINEMENT_TOLERANCE_S = 0.05
 """How precisely a boundary or a culmination is located before refining stops.
@@ -121,26 +132,34 @@ class _CoarseSamples:
 
 
 def find_elevation_passes(
-    elevation_at: ElevationAt, scan: ElevationScan
+    elevation_at: ElevationAt,
+    scan: ElevationScan,
+    *,
+    elevations_at: ElevationsAt | None = None,
 ) -> list[ElevationPass]:
     """Every interval in ``scan`` spent at or above the elevation floor.
 
     Args:
         elevation_at: Elevation in degrees at an instant. Called once per
-            coarse step, plus about ten per boundary and forty per culmination
-            — so a whole pass costs roughly sixty calls beyond the scan itself,
-            and an expensive implementation should expect that rather than be
-            surprised by it. The culmination dominates because a ternary search
-            spends two calls a step to shrink the bracket by a third, where
-            bisection spends one to halve it.
+            coarse step unless ``elevations_at`` is given, plus about ten per
+            boundary and forty per culmination — so a whole pass costs roughly
+            sixty calls beyond the scan itself, and an expensive implementation
+            should expect that rather than be surprised by it. The culmination
+            dominates because a ternary search spends two calls a step to
+            shrink the bracket by a third, where bisection spends one to halve
+            it.
         scan: The interval, the floor and the coarse step.
+        elevations_at: The coarse samples in one call, when the caller has a
+            cheaper way to compute many at once; ``None`` asks
+            ``elevation_at`` once per step.
 
     Returns:
         Passes in ascending order of acquisition.
 
     Raises:
-        ValueError: ``scan.coarse_step_s`` is not positive, or either bound is
-            naive or not UTC.
+        ValueError: ``scan.coarse_step_s`` is not positive, either bound is
+            naive or not UTC, or ``elevations_at`` returned a different number
+            of values than it was asked for.
     """
     if scan.coarse_step_s <= 0:
         raise ValueError(f"coarse_step_s must be positive, got {scan.coarse_step_s}")
@@ -153,7 +172,17 @@ def find_elevation_passes(
     if len(times) < SAMPLES_NEEDED_TO_BRACKET:
         return []
 
-    samples = _CoarseSamples(times, [elevation_at(t) for t in times])
+    if elevations_at is None:
+        coarse_deg = [elevation_at(t) for t in times]
+    else:
+        coarse_deg = [float(value) for value in elevations_at(times)]
+        if len(coarse_deg) != len(times):
+            message = (
+                f"elevations_at returned {len(coarse_deg)} values for"
+                f" {len(times)} instants"
+            )
+            raise ValueError(message)
+    samples = _CoarseSamples(times, coarse_deg)
     above = [
         elevation_deg >= scan.min_elevation_deg
         for elevation_deg in samples.elevations_deg
