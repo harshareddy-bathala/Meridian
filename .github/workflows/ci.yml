@@ -361,7 +361,7 @@ jobs:
           docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.ingest.yml config --quiet
           docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.ingest.yml build ingest
           docker run --rm --network none meridian-ingest:local \
-            python -c "import meridian_ingest, meridian, h5py; import importlib.util as u; assert u.find_spec('meridian_client') is None"
+            python -c "import meridian_ingest, meridian, h5py, rasterio, PIL, numpy; from meridian_ingest.imagery import require_imagery; require_imagery(); import importlib.util as u; assert u.find_spec('meridian_client') is None"
           docker run --rm --network none --read-only --tmpfs /tmp \
             -v "$PWD/deploy/ingest.toml:/run/config/ingest.toml:ro" \
             -e MERIDIAN_INGEST_CONFIG=/run/config/ingest.toml \

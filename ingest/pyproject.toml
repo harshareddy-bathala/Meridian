@@ -31,6 +31,11 @@ dependencies = [
 # that never takes that source never carries a C library for it (D-226).
 [project.optional-dependencies]
 hdf5 = ["h5py>=3.10"]
+# Open imagery is decoded, reprojected and drawn by one package,
+# `meridian_ingest.imagery`, and only there (D-371). An extra, as HDF5 is, so
+# an installation that never renders a scene never carries GDAL; and kept out
+# of every normaliser by a test, so no pixel becomes a sample (D-133).
+imagery = ["rasterio>=1.4", "numpy>=2.0", "Pillow>=11.0"]
 
 # One binary, not a `meridian` subcommand: `meridian.cli` imports every `cli_*`
 # module eagerly, so a subcommand would make the platform import the archive

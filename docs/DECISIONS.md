@@ -7351,6 +7351,48 @@ The roadmap's last page is for someone who owns no station and is deciding wheth
 
 ---
 
+## D-371 — Open imagery is decoded in one package of the archive layer, behind an extra, and its sources were credited before any was fetched
+
+**2026-11-14 · accepted** · *`ingest/src/meridian_ingest/imagery/{__init__,available,model}.py`; `ingest/pyproject.toml` (`[imagery]`); root `pyproject.toml`; `uv.lock`; `deploy/ingest/Dockerfile`; `.github/workflows/ci.yml` (`image`); `ATTRIBUTION.md`; `tests/conftest.py` (the `gdal` layer); `tests/unit/{test_imagery_boundaries,test_imagery_model,test_public_sources}.py`; Stage 38. Narrows D-133's construction, not its rule. Applies D-134, D-138, D-141, D-142, D-226 and D-326.*
+
+Stage 38 publishes the clearest recent open scene over each published area, with latitude and longitude drawn by our own code and every marker cited. Three things had to be settled before any of it is written. Rendering a scene means decoding it, and since Stage 31 a test has forbidden every image library anywhere in `meridian_ingest`: that is how D-133 was made true by construction. GDAL, which reads a window of a remote scene, does its own HTTP in C, where the network guard of D-142 cannot see it. And four new sources need their terms recorded before the first fetch (D-134).
+
+**Decision.**
+- **One package decodes, and its edges are tested.** `meridian_ingest.imagery` may import an image library; nothing else in the distribution may, so every adapter and normaliser stays under Stage 31's test unchanged. D-133's rule is that no number comes from a picture, and four boundary rules keep it here:
+  - nothing outside the package imports it, except the command that runs it;
+  - it imports no loader and nothing from `meridian.store`, so nothing it computes from a pixel has a way to become a sample. It may read records, such as a FIRMS normaliser's output or a published summary;
+  - its record-only modules (the model, the annotator, the caption and the gazetteer) import no image library and no NumPy, so a marker cannot be placed by reading the scene;
+  - GDAL is reached by one door: rasterio is called as `rasterio.open` and never bound early, and one module alone may write a `/vsicurl/` path.
+- **A fourth layer for the network guard.** `network_guard` now patches `rasterio.open` to refuse any path naming one of GDAL's network file systems, or any URL scheme. With the rules above, that is where every network read must enter. It has its own positive controls, as the socket layer has, and a local scene still opens under it. Like `psycopg`, it can be left alone by name.
+- **An extra, `meridian-ingest[imagery]`: rasterio, NumPy and Pillow.** An installation that never renders carries no GDAL, as one that never reads night-time lights carries no HDF5 (D-226). The ingest image installs it, and CI's image job checks that the image imports it and still has no station client. The image also installs `libexpat1`, the one library rasterio's wheel does not bundle. Without it, `import rasterio` failed in the image while passing on every development machine, which the first local build showed. The platform image does not install it (D-138). A missing extra is refused by name before any work starts. The lock has a manylinux aarch64 wheel for every new package, because the cloud host is arm64.
+- **No tiling library.** The plan named rio-tiler. Its current release depends on an HTTP client this project has not vetted, plus some twenty STAC extension packages. A tile pyramid is rasterio's own reprojection over each Web Mercator tile's bounds, and those bounds are five lines of arithmetic with a ground-truth test. The extra stays at three libraries.
+- **The shapes come first.** `imagery/model.py` defines the stored window, the citation, the marker, the manifest (`imagery-manifest-1`) and the index (`imagery-index-1`), in stdlib only. Each refuses a rule broken when it is made, and any field it does not know when it is read back:
+  - a marker cites at least one record;
+  - a fire or a place is a point inside the scene;
+  - an area or its change is the area's box, never its polygon (D-326);
+  - a caption hashes to the digest its manifest states;
+  - a stored address has no query, which is where a provider's token rides;
+  - a window's longest side is at most 4096 px;
+  - a file's name is one we chose, never a source's string (D-141).
+
+  The publication time lives in the index, not the manifest. In the manifest it would give the same scene a new digest every day.
+- **The sources, credited first.** The new entries in `ATTRIBUTION.md`:
+  - Sentinel‑2 L2A on Earth Search (Copernicus free, full and open; adapted data carries "Contains modified Copernicus Sentinel data [Year]");
+  - Landsat Collection 2 Level‑2 through Planetary Computer (public domain);
+  - GeoNames cities1000 (CC BY 4.0);
+  - Natural Earth populated places (public domain).
+
+  Each was read from its own page on 2026-11-14, Planetary Computer's in a browser because its page renders only there. Its supplemental terms forbid sharing a token with a third party, which is why no address is stored with its query. The GIBS row now quotes its acknowledgement as its page gives it today: "Earth Science Data and Information System (ESDIS)", where the row had EOSDIS.
+
+*Rejected: deleting Stage 31's test.* It is the reason no adapter can read a pixel, and that is still true of every adapter.
+
+*Rejected: a second distribution for imagery.* The scene's provenance belongs in the same raw store, under the same attribution check and the same politeness, and a fifth distribution would have to depend on this one to reach them.
+
+*Rejected: guarding GDAL with its own configuration, such as a proxy that leads nowhere.* That still opens a connection, which is the thing a guard must refuse, and it would pass quietly if GDAL ignored the option.
+
+---
+
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7753,6 +7795,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-368 the success criteria, published from a sealed run | `platform/src/meridian/reports/criteria.py`; `platform/src/meridian/cli_report.py`; `platform/src/meridian/api/public/{reports,models/criteria}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Criteria,criteria,Reports}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_report_criteria,test_public_privacy}.py`; `tests/integration/test_public_reports_endpoint.py` |
 | D-369 the data page and the public cut of an evidence package | `platform/src/meridian/public_precision.py`; `platform/src/meridian/datasets/{evidence_config,evidence_public,evidence_dataset,evidence_datasheet,evidence_index}.py`; `platform/src/meridian/cli_dataset.py`; `platform/src/meridian/api/public/{datasets,models/datasets,window_privacy,surface}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `.dockerignore`; `deploy/front/{nginx.conf,snapshot-routes.txt}`; `deploy/tools/front_warm.py`; `dashboard/src/{Data,datasets,apiReference,credits,InlineParts,ReleaseNotes,releaseNotes,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `analysis/configs/dataset.toml.example`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_evidence_publish,test_evidence_config,test_public_privacy,test_front_warm,test_front_config}.py`; `tests/integration/test_public_datasets_endpoint.py` |
 | D-370 the station planner, and the batched coarse scan | `platform/src/meridian/api/public/{plan,plan_search,plan_model,models/plan,models/plan_model,surface}.py`; `platform/src/meridian/orbit/{pass_search,skyfield_service,range_rate}.py`; `platform/src/meridian/prediction/planner_file.py`; `platform/src/meridian/cli_model.py`; `platform/src/meridian/config.py`; `platform/src/meridian/api/rate_limits.py`; `platform/src/meridian/log_redaction.py`; `deploy/front/nginx.conf`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Plan,plan,route,Nav,App,WaysIn}.ts(x)`; `dashboard/src/app.css`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_station_plan,test_pass_search,test_pass_windows_reference,test_public_privacy,test_front_config,test_log_redaction}.py`; `tests/integration/test_public_plan_endpoint.py`; `dashboard/src/plan.test.ts` |
+| D-371 imagery decoded in one package, behind an extra; its sources credited first | `ingest/src/meridian_ingest/imagery/{__init__,available,model}.py`; `ingest/pyproject.toml`; `pyproject.toml`; `uv.lock`; `deploy/ingest/Dockerfile`; `.github/workflows/ci.yml`; `ATTRIBUTION.md`; `tests/conftest.py`; `tests/unit/{test_imagery_boundaries,test_imagery_model,test_public_sources}.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 
