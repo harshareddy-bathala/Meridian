@@ -7392,6 +7392,40 @@ Stage 38 publishes the clearest recent open scene over each published area, with
 
 ---
 
+## D-372 — A scene is chosen by the cloud its own classification layer counts over the area, and what was read is kept in the raw store
+
+**2026-11-18 · accepted** · *`ingest/src/meridian_ingest/imagery/{areas,sources,stac,pixels,cloud,stored,search}.py`; `ingest/src/meridian_ingest/{cli,cli_imagery,config}.py`; `pyproject.toml` (mypy, `rasterio.*`); `tests/unit/{test_imagery_catalogue,test_imagery_search,test_imagery_boundaries,test_ingest_config}.py`; Stage 38. Applies D-133, D-134, D-141, D-142, D-220, D-326 and D-371.*
+
+A published area needs one scene from each archive: the clearest recent one that shows it. Three things had to be settled first. Which areas are imaged at all. What "clearest" is measured by, when the only number a catalogue gives is a whole granule's cloud cover. And what is kept, so that the choice and the pixels can be checked later without going back to the archive.
+
+**Decision.**
+- **The areas are the published file's.** `meridian-ingest imagery search` reads `areas-summary-1`, the file `meridian regions summary` wrote and `AREAS_SUMMARY` names, and never `areas_of_interest`. An area that is registered but not published has no image, because nothing here can see it (D-326). Only each area's id, label and box are read. An area entry carrying any other field, a polygon above all, is refused.
+- **Clearest means least cloud over the area, counted from the product's own classification layer.**
+  - Sentinel‑2's SCL: classes 8, 9 and 10 are cloud, and 0 and 1 are not valid.
+  - Landsat's QA_PIXEL: bits 1, 2 and 3 are cloud, and bit 0 is fill.
+
+  The count runs over the window around the area's box on the scene's own grid. The visual asset is never consulted, because a cloud fraction read from the picture would be a number measured off a rendering (D-133). Scene-wide `eo:cloud_cover` only orders the passes and drops any over 80 %. The six least cloudy passes are counted. A pass that leaves more than 1 % of the box without data does not cover it and is refused, with its share said. A tie goes to the newer scene. The lookback is 30 days for Sentinel‑2 and 90 for Landsat. Landsat means 8 and 9 only, since Landsat 7's scenes since 2003 carry stripes of missing data.
+- **One pass is one scene, on one grid.** Granules of one acquisition are grouped: Sentinel‑2's datatake, or Landsat's platform, day and WRS-2 path. They are placed side by side on their shared grid, the first valid pixel in item-id order winning where they overlap. A pass across a UTM zone boundary becomes two candidate scenes, one per zone. So does a pass whose granules' overview grids do not line up. Joining either would mean resampling one granule onto another's grid.
+- **A window is the source's own pixels.** GDAL reads it over `/vsicurl/` by range requests, through `imagery/pixels.py`, the one door (D-371). It is cut outward to whole pixels on the source's grid, at native resolution, or at the finest of the source's own overviews that brings the longer side to 4096 px or under. Nothing is resampled.
+- **What is kept, and as what.** Everything goes into the raw store's existing layout (D-141):
+  - the search answer, exactly as it arrived;
+  - every classification window that was counted, so the choice can be checked again from the raw store alone;
+  - the chosen scene's display windows.
+
+  A window is a deflated GeoTIFF that gives the same bytes for the same pixels. It carries its `SceneWindow` record as a tag: item, asset, address without its query, grid and overview level. Its `source_version` is the item's own `updated` time, else its `created` time.
+- **The payload kinds stay `data` and `tile`.** The plan named two new kinds, `catalogue` and `scene`. `ingest_records.payload_kind` is CHECKed to the two existing kinds (0016), so a third kind would be a migration for rows that are never written: the imagery sources are not in the fetch registry, and `load` never visits them. A search answer and a classification window are `data`, records a number is read from. A display window and a GIBS tile are `tile`, pictures that are never sampled.
+- **GIBS is the daily wide view, with no cloud fraction.** It has no catalogue and no classification layer. The view is the previous UTC day's NOAA-20 VIIRS true colour, kept as tiles at level 8 of the geographic `250m` set, about 244 m a pixel. It states no cloud fraction rather than one guessed from the picture. NOAA-20 is used, not the Terra MODIS layer the display adapter uses, because Terra is decades past its design life. Part 9's live fetch confirms the layer is served at that level.
+- **A token is used in memory only.** Planetary Computer's anonymous read token is asked for through the retriever, paid from the budget, and never published. It is appended to an address at the door alone. A reader's `repr` and every message GDAL raises have it withheld. A test checks that no stored byte under `landsat_c2_l2/` contains it.
+- **Held to the same rules as `fetch`.** A source is refused unless its `ATTRIBUTION.md` entry is found (D-134). No imagery source runs unless one is named or listed in `[imagery] sources` (D-220). A run spends one budget per source across every area: the search, the token, and one request per window read. One area's failure stops no other.
+
+*Rejected: choosing by `eo:cloud_cover`.* It describes a 110 km granule. A few kilometres of city can sit under the one cloud of a clear scene, or in the one clear corner of a cloudy one.
+
+*Rejected: storing only the chosen scene's classification window.* Then the published fraction could be checked, but not the choice it won.
+
+*Rejected: the ETag as a window's version.* GDAL's range reads do not hand the response headers back. The item's own `updated` time names the same thing: which version of the scene the catalogue pointed at.
+
+---
+
 
 ## Open
 
@@ -7796,6 +7830,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-369 the data page and the public cut of an evidence package | `platform/src/meridian/public_precision.py`; `platform/src/meridian/datasets/{evidence_config,evidence_public,evidence_dataset,evidence_datasheet,evidence_index}.py`; `platform/src/meridian/cli_dataset.py`; `platform/src/meridian/api/public/{datasets,models/datasets,window_privacy,surface}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `.dockerignore`; `deploy/front/{nginx.conf,snapshot-routes.txt}`; `deploy/tools/front_warm.py`; `dashboard/src/{Data,datasets,apiReference,credits,InlineParts,ReleaseNotes,releaseNotes,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `analysis/configs/dataset.toml.example`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_evidence_publish,test_evidence_config,test_public_privacy,test_front_warm,test_front_config}.py`; `tests/integration/test_public_datasets_endpoint.py` |
 | D-370 the station planner, and the batched coarse scan | `platform/src/meridian/api/public/{plan,plan_search,plan_model,models/plan,models/plan_model,surface}.py`; `platform/src/meridian/orbit/{pass_search,skyfield_service,range_rate}.py`; `platform/src/meridian/prediction/planner_file.py`; `platform/src/meridian/cli_model.py`; `platform/src/meridian/config.py`; `platform/src/meridian/api/rate_limits.py`; `platform/src/meridian/log_redaction.py`; `deploy/front/nginx.conf`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Plan,plan,route,Nav,App,WaysIn}.ts(x)`; `dashboard/src/app.css`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_station_plan,test_pass_search,test_pass_windows_reference,test_public_privacy,test_front_config,test_log_redaction}.py`; `tests/integration/test_public_plan_endpoint.py`; `dashboard/src/plan.test.ts` |
 | D-371 imagery decoded in one package, behind an extra; its sources credited first | `ingest/src/meridian_ingest/imagery/{__init__,available,model}.py`; `ingest/pyproject.toml`; `pyproject.toml`; `uv.lock`; `deploy/ingest/Dockerfile`; `.github/workflows/ci.yml`; `ATTRIBUTION.md`; `tests/conftest.py`; `tests/unit/{test_imagery_boundaries,test_imagery_model,test_public_sources}.py` |
+| D-372 a scene chosen by its own classification layer, and what was read kept | `ingest/src/meridian_ingest/imagery/{areas,sources,stac,pixels,cloud,stored,search}.py`; `ingest/src/meridian_ingest/{cli,cli_imagery,config}.py`; `pyproject.toml`; `tests/unit/{test_imagery_catalogue,test_imagery_search,test_imagery_boundaries,test_ingest_config}.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 
