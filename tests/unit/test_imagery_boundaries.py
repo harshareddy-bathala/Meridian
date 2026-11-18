@@ -44,8 +44,19 @@ WRITERS = ("meridian_ingest.load", "meridian_ingest.load_rows", "meridian.store"
 """Where a sample is written. ``load`` prefixes ``load_report`` and
 ``load_element_sets`` too, which is intended: none of them is imagery's."""
 
-RECORD_ONLY = ("model", "available", "annotate", "caption", "gazetteer")
-"""Imagery modules built from records alone, by name or name prefix."""
+RECORD_ONLY = (
+    "model",
+    "available",
+    "areas",
+    "sources",
+    "stac",
+    "annotate",
+    "caption",
+    "gazetteer",
+)
+"""Imagery modules built from records alone, by name or name prefix. The first
+five are also what ``cli_imagery`` imports eagerly, so an installation without
+the extra can still start the command and be told what it lacks."""
 
 NETWORK_DOOR = "pixels.py"
 """The one imagery module allowed to write a ``/vsicurl/`` path (D-372)."""
