@@ -36,14 +36,17 @@ from pathlib import Path
 
 from meridian_ingest.adapters import REGISTRY
 from meridian_ingest.config_extent import PLACE_KEYS, SourcePlaces, parse_places
+from meridian_ingest.config_imagery import (
+    ImagerySettings,
+    ImagerySettingsError,
+    parse_imagery,
+)
 from meridian_ingest.credentials import ENV_NAME
 from meridian_ingest.politeness import RetryPolicy
-from meridian_ingest.provenance import SOURCE_ID
 
 __all__ = [
     "CONFIG_ENV",
     "DEFAULT_CONFIG_NAME",
-    "DEFAULT_IMAGERY_BUDGET",
     "DEFAULT_RAW_ROOT",
     "ConfigurationError",
     "ImagerySettings",
@@ -63,14 +66,9 @@ belong to somebody else."""
 DEFAULT_REQUEST_BUDGET = 50
 DEFAULT_TIMEOUT_S = 30.0
 
-DEFAULT_IMAGERY_BUDGET = 200
-"""Requests one imagery source may make in one run, across every published
-area: a search, a token, and one per window read (D-372)."""
-
 _TOP_LEVEL = frozenset(
     {"raw_root", "timeout_s", "contact", "retry", "sources", "imagery"}
 )
-_IMAGERY_KEYS = frozenset({"summary", "sources", "request_budget"})
 _RETRY_KEYS = frozenset({"attempts", "base_delay_s", "max_delay_s"})
 _SOURCE_KEYS = frozenset(
     {"enabled", "base_url", "request_budget", "api_key_env", *PLACE_KEYS}
@@ -125,26 +123,6 @@ class SourceSettings:
     def key_env(self) -> str | None:
         """The variable the key is read from: the file's, else the registry's."""
         return self.api_key_env or REGISTRY[self.source_id].key_env
-
-
-@dataclass(frozen=True, slots=True)
-class ImagerySettings:
-    """What ``meridian-ingest imagery`` images, and from where (D-372).
-
-    The imagery sources are not in the registry — they are never fetched by
-    ``fetch`` and never loaded — so their ids are checked by the imagery
-    command, against its own list, rather than here.
-    """
-
-    summary: Path | None = None
-    """The published ``areas-summary-1`` file. Only an area in it is imaged,
-    because only a published area may be shown (D-326)."""
-
-    sources: tuple[str, ...] = ()
-    """The imagery sources a run uses when none is named. Empty by default, as
-    every real source is off until an operator turns it on (D-220)."""
-
-    request_budget: int = DEFAULT_IMAGERY_BUDGET
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,30 +302,10 @@ def _sources(table: Mapping[str, object], found: Path) -> dict[str, SourceSettin
 
 
 def _imagery(table: Mapping[str, object], found: Path) -> ImagerySettings:
-    """The ``[imagery]`` table, its path resolved against the settings file."""
-    value = table.get("imagery", {})
-    if not isinstance(value, dict):
-        message = f"imagery must be a table, not {type(value).__name__}"
-        raise ConfigurationError(message)
-    _only_known(value, _IMAGERY_KEYS, f"{found} [imagery]")
-    summary = value.get("summary")
-    if summary is not None and (not isinstance(summary, str) or not summary.strip()):
-        message = f"imagery.summary must be a non-empty path, not {summary!r}"
-        raise ConfigurationError(message)
-    sources = value.get("sources", [])
-    if not isinstance(sources, list) or not all(
-        isinstance(one, str) and SOURCE_ID.fullmatch(one) for one in sources
-    ):
-        message = f"imagery.sources must be a list of source ids, not {sources!r}"
-        raise ConfigurationError(message)
-    return ImagerySettings(
-        summary=None if summary is None else (found.parent / summary).resolve(),
-        sources=tuple(sources),
-        request_budget=_whole(
-            value.get("request_budget", DEFAULT_IMAGERY_BUDGET),
-            "imagery.request_budget",
-        ),
-    )
+    try:
+        return parse_imagery(table.get("imagery", {}), found)
+    except ImagerySettingsError as exc:
+        raise ConfigurationError(str(exc)) from exc
 
 
 def _source(source_id: str, entry: object, found: Path) -> SourceSettings:

@@ -29,8 +29,6 @@ Reference: docs/DECISIONS.md D-133, D-141, D-326, D-372.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 
 from meridian_ingest.adapters.public.common import version_from_headers
@@ -38,28 +36,30 @@ from meridian_ingest.adapters.public.gibs import BASE as GIBS_BASE
 from meridian_ingest.adapters.public.gibs import tile_span_deg, tiles_covering
 from meridian_ingest.extent import BoundingBox
 from meridian_ingest.imagery.areas import PublishedArea
-from meridian_ingest.imagery.cloud import CloudCount, count_cloud
+from meridian_ingest.imagery.cloud import count_cloud
 from meridian_ingest.imagery.model import SceneWindow
+from meridian_ingest.imagery.outcome import (
+    Considered,
+    Granule,
+    SceneSearch,
+    SearchContext,
+)
 from meridian_ingest.imagery.pixels import (
     OffSceneError,
     PixelReader,
-    ReadWindow,
     WindowError,
     read_window,
 )
 from meridian_ingest.imagery.sources import GibsSource, ImagerySource, StacSource
 from meridian_ingest.imagery.stac import (
     Acquisition,
-    SceneCandidate,
     acquisitions,
     parse_search,
     search_artefact,
 )
 from meridian_ingest.imagery.stored import MEDIA_TYPE, window_bytes
-from meridian_ingest.politeness import RequestBudget
 from meridian_ingest.provenance import Provenance
-from meridian_ingest.raw_store import RawStore
-from meridian_ingest.retrieval import RemoteArtefact, RetrievalError, Retriever
+from meridian_ingest.retrieval import RemoteArtefact, RetrievalError
 
 __all__ = [
     "MAX_EVALUATED",
@@ -73,77 +73,6 @@ MAX_EVALUATED = 6
 """Passes whose classification window is read, least cloudy first by the
 catalogue. Six covers a month of Sentinel‑2 revisits that are not plainly
 overcast, at a dozen requests an area."""
-
-
-@dataclass(slots=True)
-class SearchContext:
-    """What one run searches with: the network seams, the store, and the clock.
-
-    ``now`` is the instant the run asks about, fixed for the run, so every
-    area's lookback ends at the same moment. ``clock`` stamps each artefact as
-    it arrives.
-    """
-
-    retriever: Retriever
-    pixels: PixelReader
-    store: RawStore
-    budget: RequestBudget
-    now: datetime
-    clock: Callable[[], datetime] = field(default=lambda: datetime.now(tz=UTC))
-
-
-@dataclass(frozen=True, slots=True)
-class _Granule:
-    """One asset's window, read from one granule of a pass."""
-
-    candidate: SceneCandidate
-    asset: str
-    window: ReadWindow
-
-
-@dataclass(frozen=True, slots=True)
-class Considered:
-    """One pass that was read, and what its classification layer said."""
-
-    key: str
-    acquired_at: datetime
-    item_ids: tuple[str, ...]
-    scene_cloud: float | None
-    cloud: CloudCount | None
-    refused: str | None
-    """Why it cannot be chosen, or None when it can."""
-
-    raw_paths: tuple[str, ...]
-    """The classification windows it was counted from."""
-
-    @property
-    def cloud_fraction(self) -> float | None:
-        """The share of the box behind cloud, or None if it was never counted."""
-        return None if self.cloud is None else self.cloud.fraction
-
-
-@dataclass(frozen=True, slots=True)
-class SceneSearch:
-    """One area's search of one source: what was considered and what was kept."""
-
-    area: PublishedArea
-    source: ImagerySource
-    search_path: str | None
-    considered: tuple[Considered, ...]
-    chosen: Considered | None
-    windows: tuple[str, ...]
-    """The display windows (or tiles) of the chosen scene, in the raw store."""
-
-    notes: tuple[str, ...]
-
-    @property
-    def skipped(self) -> str | None:
-        """Why no scene was chosen, or None when one was."""
-        if self.chosen is not None:
-            return None
-        if not self.considered:
-            return "no scene in the lookback reaches the box under the cloud ceiling"
-        return "no pass read covers the box with valid pixels"
 
 
 def search_area(
@@ -244,7 +173,7 @@ def _windows(
     one: Acquisition,
     pixels: PixelReader,
     context: SearchContext,
-) -> list[_Granule]:
+) -> list[Granule]:
     """One asset's window from each granule of a pass, all at one level.
 
     The first granule that reaches the box chooses the overview level; the
@@ -255,7 +184,7 @@ def _windows(
         OffSceneError: No granule of the pass reaches the box.
         WindowError: A window could not be read.
     """
-    read: list[_Granule] = []
+    read: list[Granule] = []
     level: int | None = None
     for candidate in one.candidates:
         context.budget.spend(f"{candidate.item_id}/{asset}")
@@ -266,7 +195,7 @@ def _windows(
         except OffSceneError:
             continue
         level = window.overview_level
-        read.append(_Granule(candidate, asset, window))
+        read.append(Granule(candidate, asset, window))
     if not read:
         message = f"no granule of {one.key} has {asset} pixels over the box"
         raise OffSceneError(message)
@@ -385,7 +314,7 @@ def _keep_window(
     context: SearchContext,
     source: StacSource,
     area: PublishedArea,
-    granule: _Granule,
+    granule: Granule,
     payload_kind: str,
 ) -> str:
     """Publish one window, its record inside, to the raw store."""
