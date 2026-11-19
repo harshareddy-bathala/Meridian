@@ -53,10 +53,15 @@ RECORD_ONLY = (
     "annotate",
     "caption",
     "gazetteer",
+    "graticule",
+    "webmercator",
 )
-"""Imagery modules built from records alone, by name or name prefix. The first
-five are also what ``cli_imagery`` imports eagerly, so an installation without
-the extra can still start the command and be told what it lacks."""
+"""Imagery modules built from records alone, or from arithmetic on them, by
+name or name prefix. The first five are also what ``cli_imagery`` imports
+eagerly, so an installation without the extra can still start the command and
+be told what it lacks. The graticule and the tile grid are here so that where
+a latitude line or a tile falls is worked out from coordinates, never from a
+picture (D-373)."""
 
 NETWORK_DOOR = "pixels.py"
 """The one imagery module allowed to write a ``/vsicurl/`` path (D-372)."""
