@@ -103,6 +103,7 @@ def a_manifest(**overrides: object) -> ImageryManifest:
         "resolution_m": 10.0,
         "cloud_fraction": 0.04,
         "cloud_method": "share of the box the scene classification layer calls cloud",
+        "rendering": "the visual asset as published, reprojected to EPSG:4326",
         "zoom_min": 10,
         "zoom_max": 14,
         "credit": "Contains modified Copernicus Sentinel data 2026",

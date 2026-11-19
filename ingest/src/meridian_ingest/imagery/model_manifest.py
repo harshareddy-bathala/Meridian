@@ -44,6 +44,7 @@ _MANIFEST_FIELDS = frozenset(
         "resolution_m",
         "cloud_fraction",
         "cloud_method",
+        "rendering",
         "zoom_min",
         "zoom_max",
         "credit",
@@ -70,7 +71,8 @@ class ImageryManifest:
     ``cloud_fraction`` is the share of the area's box the product's own
     classification layer calls cloud, in ``[0, 1]``; ``None`` when the source
     has no such layer, and ``cloud_method`` then says so. It is never read from
-    the picture (D-133).
+    the picture (D-133). ``rendering`` is how the source's pixels became the
+    picture, in its source's words (D-373).
     """
 
     area_id: int
@@ -85,6 +87,7 @@ class ImageryManifest:
     resolution_m: float
     cloud_fraction: float | None
     cloud_method: str
+    rendering: str
     zoom_min: int
     zoom_max: int
     credit: str
@@ -142,6 +145,7 @@ class ImageryManifest:
         ):
             raise check.fail("cloud_fraction must lie in [0, 1]")
         check.text(self.cloud_method, "cloud_method", maximum=300)
+        check.text(self.rendering, "rendering", maximum=400)
         check.text(self.credit, "credit", maximum=500)
         check.text(self.licence, "licence", maximum=200)
         check.text(self.caption, "caption", maximum=check.TEXT_MAX * 2)
@@ -191,6 +195,7 @@ class ImageryManifest:
             "resolution_m": self.resolution_m,
             "cloud_fraction": self.cloud_fraction,
             "cloud_method": self.cloud_method,
+            "rendering": self.rendering,
             "zoom_min": self.zoom_min,
             "zoom_max": self.zoom_max,
             "credit": self.credit,
@@ -237,6 +242,7 @@ class ImageryManifest:
             if cloud is None
             else check.number(cloud, "cloud_fraction"),
             cloud_method=check.text(fields["cloud_method"], "cloud_method"),
+            rendering=check.text(fields["rendering"], "rendering", maximum=400),
             zoom_min=check.integer(fields["zoom_min"], "zoom_min"),
             zoom_max=check.integer(fields["zoom_max"], "zoom_max"),
             credit=check.text(fields["credit"], "credit"),

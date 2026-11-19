@@ -24,23 +24,27 @@ Reference: docs/DECISIONS.md D-133, D-134, D-220, D-371, D-372.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from meridian_ingest.adapters.protocol import SourceDescriptor
 from meridian_ingest.adapters.public.gibs import GIBS
 from meridian_ingest.imagery.model import SourceClass
 
 __all__ = [
+    "GIBS_CREDIT",
     "GIBS_LEVEL",
     "GIBS_SOURCE",
     "IMAGERY_SOURCES",
     "LANDSAT",
     "LANDSAT_SOURCE",
+    "LANDSAT_WHITE",
     "SENTINEL2",
     "SENTINEL2_SOURCE",
     "GibsSource",
     "ImagerySource",
     "StacSource",
     "UnknownImagerySourceError",
+    "credit_for",
     "imagery_source",
 ]
 
@@ -76,6 +80,9 @@ LANDSAT = SourceDescriptor(
 )
 
 
+Colour = Literal["as_published", "surface_reflectance"]
+
+
 @dataclass(frozen=True, slots=True)
 class StacSource:
     """An archive searched through a STAC API and read by windows of its COGs.
@@ -96,11 +103,21 @@ class StacSource:
     """How the classification asset is read: ``scl`` or ``qa_pixel``."""
 
     instrument: str
+    rendering: str
+    """How its display assets become a true-colour picture, as a manifest says."""
+
+    credit: str
+    """The credit every file rendered from it carries; ``{year}`` is the
+    acquisition year."""
+
     token_url: str | None = None
     """Where an anonymous read token is asked for, if the archive needs one.
     The token is held in memory for one run and never written (D-372)."""
 
     platforms: tuple[str, ...] = ()
+    colour: Colour = "as_published"
+    """``as_published`` when the display assets are already a picture;
+    ``surface_reflectance`` when they are reflectance, stretched to one."""
 
     @property
     def source_id(self) -> str:
@@ -118,6 +135,8 @@ class GibsSource:
     level: int
     platform: str
     instrument: str
+    rendering: str
+    credit: str
 
     @property
     def source_id(self) -> str:
@@ -137,7 +156,17 @@ SENTINEL2_SOURCE = StacSource(
     classification_asset="scl",
     classifier="scl",
     instrument="MSI",
+    rendering=(
+        "the visual asset (true colour from B04, B03 and B02, 8-bit) as "
+        "published, reprojected to EPSG:4326 by bilinear resampling"
+    ),
+    credit="Contains modified Copernicus Sentinel data {year}",
 )
+
+LANDSAT_WHITE = 0.25
+"""The surface reflectance drawn as full brightness in a Landsat picture. Most
+land lies well under it, so fields and streets keep their detail; cloud and
+bright roofs above it are clipped to white."""
 
 LANDSAT_SOURCE = StacSource(
     descriptor=LANDSAT,
@@ -149,8 +178,16 @@ LANDSAT_SOURCE = StacSource(
     classification_asset="qa_pixel",
     classifier="qa_pixel",
     instrument="OLI",
+    rendering=(
+        "surface reflectance from the red, green and blue assets (SR_B4, SR_B3, "
+        "SR_B2), scaled by 0.0000275 and offset by -0.2 as the product states, "
+        f"reflectance 0 to {LANDSAT_WHITE} mapped linearly to 0-255 and clipped "
+        "above, reprojected to EPSG:4326 by bilinear resampling"
+    ),
+    credit="Landsat imagery courtesy of the U.S. Geological Survey",
     token_url="https://planetarycomputer.microsoft.com/api/sas/v1/token/landsat-c2-l2",
     platforms=("landsat-8", "landsat-9"),
+    colour="surface_reflectance",
 )
 """Landsat 8 and 9 only. Landsat 7's scan-line corrector failed in 2003, and
 its scenes since carry stripes of missing data across any area."""
@@ -159,6 +196,13 @@ GIBS_LEVEL = 8
 """In GIBS's geographic ``250m`` tile matrix set, a level-8 tile is 1.125° on
 512 pixels: about 244 m a pixel at the equator, the level nearest 250 m."""
 
+GIBS_CREDIT = (
+    "We acknowledge the use of imagery provided by services from NASA's Global "
+    "Imagery Browse Services (GIBS), part of NASA's Earth Science Data and "
+    "Information System (ESDIS)."
+)
+"""GIBS's acknowledgement, as its page gave it on 2026-11-14 (ATTRIBUTION.md)."""
+
 GIBS_SOURCE = GibsSource(
     descriptor=GIBS,
     source_class="daily_wide",
@@ -166,6 +210,12 @@ GIBS_SOURCE = GibsSource(
     level=GIBS_LEVEL,
     platform="NOAA-20",
     instrument="VIIRS",
+    rendering=(
+        "its corrected-reflectance true-colour tiles as published, placed side "
+        "by side on their own EPSG:4326 grid and cut to the area's box, not "
+        "resampled"
+    ),
+    credit=GIBS_CREDIT,
 )
 """NOAA-20's VIIRS rather than the Terra MODIS layer the display adapter uses.
 Terra launched in 1999 on a six-year design life, and a daily view published
@@ -175,6 +225,11 @@ fetch confirms the layer is served at this level."""
 IMAGERY_SOURCES: dict[str, ImagerySource] = {
     one.source_id: one for one in (SENTINEL2_SOURCE, LANDSAT_SOURCE, GIBS_SOURCE)
 }
+
+
+def credit_for(source: ImagerySource, year: int) -> str:
+    """The credit line for a picture acquired in ``year``."""
+    return source.credit.format(year=year)
 
 
 class UnknownImagerySourceError(LookupError):
