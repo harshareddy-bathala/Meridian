@@ -63,7 +63,7 @@ services:
         "writer": {"type": "header", "name": "Authorization", "value": "Bearer <TOKEN>"}}}]}}
 
   datadog-agent:
-    image: gcr.io/datadoghq/agent:7.85.2@sha256:17bf6cf89c24696110f2807cf7146080efad18c20f91c6515d6fc382c55d7b42
+    image: gcr.io/datadoghq/agent:7.85.4@sha256:d0df2a5f7dcda4f702a1d47ef9bd25bdf772421140ef964537562d906129260a
     restart: unless-stopped
     logging: *logging
     # Hardened like every service (D-206), and seen to run and scrape so on the

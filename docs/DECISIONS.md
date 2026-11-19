@@ -7351,6 +7351,118 @@ The roadmap's last page is for someone who owns no station and is deciding wheth
 
 ---
 
+## D-371 — Open imagery is decoded in one package of the archive layer, behind an extra, and its sources were credited before any was fetched
+
+**2026-11-14 · accepted** · *`ingest/src/meridian_ingest/imagery/{__init__,available,model,model_checks,model_geometry,model_files,model_manifest}.py`; `ingest/pyproject.toml` (`[imagery]`); root `pyproject.toml`; `uv.lock`; `deploy/ingest/Dockerfile`; `.github/workflows/ci.yml` (`image`); `ATTRIBUTION.md`; `tests/conftest.py` (the `gdal` layer); `tests/unit/{test_imagery_boundaries,test_imagery_model,test_public_sources}.py`; Stage 38. Narrows D-133's construction, not its rule. Applies D-134, D-138, D-141, D-142, D-226 and D-326.*
+
+Stage 38 publishes the clearest recent open scene over each published area, with latitude and longitude drawn by our own code and every marker cited. Three things had to be settled before any of it is written. Rendering a scene means decoding it, and since Stage 31 a test has forbidden every image library anywhere in `meridian_ingest`: that is how D-133 was made true by construction. GDAL, which reads a window of a remote scene, does its own HTTP in C, where the network guard of D-142 cannot see it. And four new sources need their terms recorded before the first fetch (D-134).
+
+**Decision.**
+- **One package decodes, and its edges are tested.** `meridian_ingest.imagery` may import an image library; nothing else in the distribution may, so every adapter and normaliser stays under Stage 31's test unchanged. D-133's rule is that no number comes from a picture, and four boundary rules keep it here:
+  - nothing outside the package imports it, except the command that runs it;
+  - it imports no loader and nothing from `meridian.store`, so nothing it computes from a pixel has a way to become a sample. It may read records, such as a FIRMS normaliser's output or a published summary;
+  - its record-only modules (the model, the annotator, the caption and the gazetteer) import no image library and no NumPy, so a marker cannot be placed by reading the scene;
+  - GDAL is reached by one door: rasterio is called as `rasterio.open` and never bound early, and one module alone may write a `/vsicurl/` path.
+- **A fourth layer for the network guard.** `network_guard` now patches `rasterio.open` to refuse any path naming one of GDAL's network file systems, or any URL scheme. With the rules above, that is where every network read must enter. It has its own positive controls, as the socket layer has, and a local scene still opens under it. Like `psycopg`, it can be left alone by name.
+- **An extra, `meridian-ingest[imagery]`: rasterio, NumPy and Pillow.** An installation that never renders carries no GDAL, as one that never reads night-time lights carries no HDF5 (D-226). The ingest image installs it, and CI's image job checks that the image imports it and still has no station client. The image also installs `libexpat1`, the one library rasterio's wheel does not bundle. Without it, `import rasterio` failed in the image while passing on every development machine, which the first local build showed. The platform image does not install it (D-138). A missing extra is refused by name before any work starts. The lock has a manylinux aarch64 wheel for every new package, because the cloud host is arm64.
+- **No tiling library.** The plan named rio-tiler. Its current release depends on an HTTP client this project has not vetted, plus some twenty STAC extension packages. A tile pyramid is rasterio's own reprojection over each Web Mercator tile's bounds, and those bounds are five lines of arithmetic with a ground-truth test. The extra stays at three libraries.
+- **The shapes come first.** `imagery/model.py` defines the stored window, the citation, the marker, the manifest (`imagery-manifest-1`) and the index (`imagery-index-1`), in stdlib only. Everything imports them from `model.py`, which gathers them from four modules (the shared checks, the markers, the window and its files, the manifest and its index), so that each stays under `CODE-STANDARDS.md`'s 400 lines. Each refuses a rule broken when it is made, and any field it does not know when it is read back:
+  - a marker cites at least one record;
+  - a fire or a place is a point inside the scene;
+  - an area or its change is the area's box, never its polygon (D-326);
+  - a caption hashes to the digest its manifest states;
+  - a stored address has no query, which is where a provider's token rides;
+  - a window's longest side is at most 4096 px;
+  - a file's name is one we chose, never a source's string (D-141).
+
+  The publication time lives in the index, not the manifest. In the manifest it would give the same scene a new digest every day.
+- **The sources, credited first.** The new entries in `ATTRIBUTION.md`:
+  - Sentinel‑2 L2A on Earth Search (Copernicus free, full and open; adapted data carries "Contains modified Copernicus Sentinel data [Year]");
+  - Landsat Collection 2 Level‑2 through Planetary Computer (public domain);
+  - GeoNames cities1000 (CC BY 4.0);
+  - Natural Earth populated places (public domain).
+
+  Each was read from its own page on 2026-11-14, Planetary Computer's in a browser because its page renders only there. Its supplemental terms forbid sharing a token with a third party, which is why no address is stored with its query. The GIBS row now quotes its acknowledgement as its page gives it today: "Earth Science Data and Information System (ESDIS)", where the row had EOSDIS.
+
+*Rejected: deleting Stage 31's test.* It is the reason no adapter can read a pixel, and that is still true of every adapter.
+
+*Rejected: a second distribution for imagery.* The scene's provenance belongs in the same raw store, under the same attribution check and the same politeness, and a fifth distribution would have to depend on this one to reach them.
+
+*Rejected: guarding GDAL with its own configuration, such as a proxy that leads nowhere.* That still opens a connection, which is the thing a guard must refuse, and it would pass quietly if GDAL ignored the option.
+
+---
+
+## D-372 — A scene is chosen by the cloud its own classification layer counts over the area, and what was read is kept in the raw store
+
+**2026-11-18 · accepted** · *`ingest/src/meridian_ingest/imagery/{areas,sources,stac,pixels,cloud,stored,search,outcome}.py`; `ingest/src/meridian_ingest/{cli,cli_imagery,config,config_imagery}.py`; `pyproject.toml` (mypy, `rasterio.*`); `tests/unit/{test_imagery_catalogue,test_imagery_search,test_imagery_boundaries,test_ingest_config}.py`; Stage 38. Applies D-133, D-134, D-141, D-142, D-220, D-326 and D-371.*
+
+A published area needs one scene from each archive: the clearest recent one that shows it. Three things had to be settled first. Which areas are imaged at all. What "clearest" is measured by, when the only number a catalogue gives is a whole granule's cloud cover. And what is kept, so that the choice and the pixels can be checked later without going back to the archive.
+
+**Decision.**
+- **The areas are the published file's.** `meridian-ingest imagery search` reads `areas-summary-1`, the file `meridian regions summary` wrote and `AREAS_SUMMARY` names, and never `areas_of_interest`. An area that is registered but not published has no image, because nothing here can see it (D-326). Only each area's id, label and box are read. An area entry carrying any other field, a polygon above all, is refused.
+- **Clearest means least cloud over the area, counted from the product's own classification layer.**
+  - Sentinel‑2's SCL: classes 8, 9 and 10 are cloud, and 0 and 1 are not valid.
+  - Landsat's QA_PIXEL: bits 1, 2 and 3 are cloud, and bit 0 is fill.
+
+  The count runs over the window around the area's box on the scene's own grid. The visual asset is never consulted, because a cloud fraction read from the picture would be a number measured off a rendering (D-133). Scene-wide `eo:cloud_cover` only orders the passes and drops any over 80 %. The six least cloudy passes are counted. A pass that leaves more than 1 % of the box without data does not cover it and is refused, with its share said. A tie goes to the newer scene. The lookback is 30 days for Sentinel‑2 and 90 for Landsat. Landsat means 8 and 9 only, since Landsat 7's scenes since 2003 carry stripes of missing data.
+- **One pass is one scene, on one grid.** Granules of one acquisition are grouped: Sentinel‑2's datatake, or Landsat's platform, day and WRS-2 path. They are placed side by side on their shared grid, the first valid pixel in item-id order winning where they overlap. A pass across a UTM zone boundary becomes two candidate scenes, one per zone. So does a pass whose granules' overview grids do not line up. Joining either would mean resampling one granule onto another's grid.
+- **A window is the source's own pixels.** GDAL reads it over `/vsicurl/` by range requests, through `imagery/pixels.py`, the one door (D-371). It is cut outward to whole pixels on the source's grid, at native resolution, or at the finest of the source's own overviews that brings the longer side to 4096 px or under. Nothing is resampled.
+- **What is kept, and as what.** Everything goes into the raw store's existing layout (D-141):
+  - the search answer, exactly as it arrived;
+  - every classification window that was counted, so the choice can be checked again from the raw store alone;
+  - the chosen scene's display windows.
+
+  A window is a deflated GeoTIFF that gives the same bytes for the same pixels. It carries its `SceneWindow` record as a tag: item, asset, address without its query, grid and overview level. Its `source_version` is the item's own `updated` time, else its `created` time.
+- **The payload kinds stay `data` and `tile`.** The plan named two new kinds, `catalogue` and `scene`. `ingest_records.payload_kind` is CHECKed to the two existing kinds (0016), so a third kind would be a migration for rows that are never written: the imagery sources are not in the fetch registry, and `load` never visits them. A search answer and a classification window are `data`, records a number is read from. A display window and a GIBS tile are `tile`, pictures that are never sampled.
+- **GIBS is the daily wide view, with no cloud fraction.** It has no catalogue and no classification layer. The view is the previous UTC day's NOAA-20 VIIRS true colour, kept as tiles at level 8 of the geographic `250m` set, about 244 m a pixel. It states no cloud fraction rather than one guessed from the picture. NOAA-20 is used, not the Terra MODIS layer the display adapter uses, because Terra is decades past its design life. Part 9's live fetch confirms the layer is served at that level.
+- **A token is used in memory only.** Planetary Computer's anonymous read token is asked for through the retriever, paid from the budget, and never published. It is appended to an address at the door alone. A reader's `repr` and every message GDAL raises have it withheld. A test checks that no stored byte under `landsat_c2_l2/` contains it.
+- **Held to the same rules as `fetch`.** A source is refused unless its `ATTRIBUTION.md` entry is found (D-134). No imagery source runs unless one is named or listed in `[imagery] sources` (D-220). A run spends one budget per source across every area: the search, the token, and one request per window read. One area's failure stops no other.
+
+*Rejected: choosing by `eo:cloud_cover`.* It describes a 110 km granule. A few kilometres of city can sit under the one cloud of a clear scene, or in the one clear corner of a cloudy one.
+
+*Rejected: storing only the chosen scene's classification window.* Then the published fraction could be checked, but not the choice it won.
+
+*Rejected: the ETag as a window's version.* GDAL's range reads do not hand the response headers back. The item's own `updated` time names the same thing: which version of the scene the catalogue pointed at.
+
+---
+
+## D-373 — A scene is rendered from the raw store alone, with latitude and longitude drawn by our own arithmetic
+
+**2026-11-19 · accepted** · *`ingest/src/meridian_ingest/imagery/{scene,render,display,encode,graticule,webmercator,sources,model_manifest}.py`; `ingest/src/meridian_ingest/imagery/fonts/` (IBM Plex Sans Regular and its `OFL.txt`); `ATTRIBUTION.md`; `tests/unit/{test_imagery_render,test_imagery_graticule,test_imagery_boundaries,test_imagery_model}.py`; Stage 38. Applies D-133, D-141, D-326, D-371 and D-372.*
+
+A search keeps the source's own pixels over an area (D-372). What is published is something else: a picture a person can look at and a file a GIS tool can open in the right place. Four things had to be settled. What rendering may read. How each archive's pixels become colour. Which files a scene publishes. And how latitude and longitude get onto the picture without a library deciding where they go.
+
+**Decision.**
+- **Rendering reads the raw store and nothing else.** `render_scene(store, raw_paths, bounds, directory)` takes no address and no client, so a published scene can be made again from what was kept, with every archive offline (rule 8). Only `tile` payloads are drawn: a classification window is a record, and is refused. One picture comes from one source.
+- **The picture is EPSG:4326, north-up, from the box's north-west corner.** A projected scene is reprojected onto pixels as long on the ground as the source's own, in each direction, at the box's centre latitude, using the WGS 84 length of a degree there. So the pixels stay square on the ground and the resolution a manifest states is the one drawn. Granules are placed in item-id order, the first to cover a pixel winning, as the cloud count placed them. Coverage travels through the warp as an alpha band, not as a nodata value: a nodata value is per band, so a valid pixel with one band at 0 would lose that band, and GDAL moves a valid value off the nodata value as it writes. The first synthetic test showed both.
+- **Each archive's colour is its source's `rendering`, stated in the manifest's new `rendering` field.**
+  - Sentinel‑2: the `visual` asset as published, reprojected by bilinear resampling.
+  - Landsat: surface reflectance from the red, green and blue assets, scaled and offset as the product states, with reflectance 0 to 0.25 drawn as 0 to 255 and clipped above.
+  - GIBS: its tiles side by side on their own geographic grid, cut outward to whole pixels around the box, never resampled.
+- **The files.**
+  - `scene.tif`: a cloud-optimised GeoTIFF, red, green, blue and alpha. Deflate at level 9 with the horizontal predictor, 256-pixel blocks, averaged overviews, one encoding thread and no date tag.
+  - `scene.png` with `scene.pgw`. A world file names the centre of the top-left pixel, where the transform names its corner, so its origin is moved in by half a pixel.
+  - `tiles/<z>/<x>/<y>.webp`: 256-pixel Web Mercator tiles at quality 82, with no tile written where the scene shows nothing. The deepest zoom is the first whose pixel at the box's centre latitude is no larger than the scene's own, capped at 18. Three zooms above it are cut too. A tile's bounds are our own arithmetic, checked against the tile OpenStreetMap serves London from (D-371 dropped the tiling library).
+  - `display.png`: the picture people look at, described next.
+- **The display picture.** The scene is drawn at 1,200 px on its longer side, enlarged by repeating pixels, so a 30 m scene still looks like 30 m pixels, or reduced by averaging. Around it are:
+  - **the graticule.** Its interval is the finest of 0.01°, 0.02°, 0.05°, 0.1°, 0.2°, 0.5° and 1° that puts at most five lines across the longer side. Lines are held as whole hundredths of a degree, so none drifts. Each is taken to a pixel row or column through the picture's own affine transform and labelled like `12.90°N` and `77.60°E`.
+  - **a scale bar**: the longest 1, 2 or 5 × 10ⁿ m that fits in a quarter of the width.
+  - **a north arrow**, which on a north-up grid points up the picture.
+  - **the source's credit**, wrapped to fit: "Contains modified Copernicus Sentinel data [Year]", the USGS's courtesy line, and GIBS's acknowledgement in full.
+
+  Text is IBM Plex Sans, carried inside the package with its licence so the ingest image needs no system font. It is laid out by FreeType's basic layout, so the result does not depend on whether a shaping library is installed.
+- **The same inputs write the same bytes.** Every encoder has fixed options and nothing that carries a time, and a test renders a scene twice and compares every file. That is what lets Part 5 name a directory by its contents and check it by rendering it again.
+- **Where a line or a tile falls is arithmetic on coordinates.** `graticule.py` and `webmercator.py` are stdlib only and join the record-only list in the boundary test, so neither can read a pixel (D-133).
+
+*Rejected: a mapping library for the graticule.* In an EPSG:4326 picture every latitude and longitude line is straight. The arithmetic is a few lines with a ground-truth test, and a plotting stack would be the largest dependency in the image.
+
+*Rejected: a per-scene stretch for Landsat, such as cutting at percentiles.* Two scenes of one area would then not be comparable in brightness, and a picture's colour would depend on how much cloud was in it.
+
+*Rejected: cutting tiles straight from the source windows.* That would save one resampling, the source to EPSG:4326 and then to Web Mercator. But each tile would repeat the granule merge, and the picture it is cut from is already at the source's resolution, so the second resampling loses little.
+
+---
+
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7753,6 +7865,9 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-368 the success criteria, published from a sealed run | `platform/src/meridian/reports/criteria.py`; `platform/src/meridian/cli_report.py`; `platform/src/meridian/api/public/{reports,models/criteria}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Criteria,criteria,Reports}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_report_criteria,test_public_privacy}.py`; `tests/integration/test_public_reports_endpoint.py` |
 | D-369 the data page and the public cut of an evidence package | `platform/src/meridian/public_precision.py`; `platform/src/meridian/datasets/{evidence_config,evidence_public,evidence_dataset,evidence_datasheet,evidence_index}.py`; `platform/src/meridian/cli_dataset.py`; `platform/src/meridian/api/public/{datasets,models/datasets,window_privacy,surface}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `.dockerignore`; `deploy/front/{nginx.conf,snapshot-routes.txt}`; `deploy/tools/front_warm.py`; `dashboard/src/{Data,datasets,apiReference,credits,InlineParts,ReleaseNotes,releaseNotes,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `analysis/configs/dataset.toml.example`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_evidence_publish,test_evidence_config,test_public_privacy,test_front_warm,test_front_config}.py`; `tests/integration/test_public_datasets_endpoint.py` |
 | D-370 the station planner, and the batched coarse scan | `platform/src/meridian/api/public/{plan,plan_search,plan_model,models/plan,models/plan_model,surface}.py`; `platform/src/meridian/orbit/{pass_search,skyfield_service,range_rate}.py`; `platform/src/meridian/prediction/planner_file.py`; `platform/src/meridian/cli_model.py`; `platform/src/meridian/config.py`; `platform/src/meridian/api/rate_limits.py`; `platform/src/meridian/log_redaction.py`; `deploy/front/nginx.conf`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Plan,plan,route,Nav,App,WaysIn}.ts(x)`; `dashboard/src/app.css`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_station_plan,test_pass_search,test_pass_windows_reference,test_public_privacy,test_front_config,test_log_redaction}.py`; `tests/integration/test_public_plan_endpoint.py`; `dashboard/src/plan.test.ts` |
+| D-371 imagery decoded in one package, behind an extra; its sources credited first | `ingest/src/meridian_ingest/imagery/{__init__,available,model,model_checks,model_geometry,model_files,model_manifest}.py`; `ingest/pyproject.toml`; `pyproject.toml`; `uv.lock`; `deploy/ingest/Dockerfile`; `.github/workflows/ci.yml`; `ATTRIBUTION.md`; `tests/conftest.py`; `tests/unit/{test_imagery_boundaries,test_imagery_model,test_public_sources}.py` |
+| D-372 a scene chosen by its own classification layer, and what was read kept | `ingest/src/meridian_ingest/imagery/{areas,sources,stac,pixels,cloud,stored,search,outcome}.py`; `ingest/src/meridian_ingest/{cli,cli_imagery,config,config_imagery}.py`; `pyproject.toml`; `tests/unit/{test_imagery_catalogue,test_imagery_search,test_imagery_boundaries,test_ingest_config}.py` |
+| D-373 a scene rendered from the raw store alone, its graticule our own arithmetic | `ingest/src/meridian_ingest/imagery/{scene,render,display,encode,graticule,webmercator,sources,model_manifest}.py`; `ingest/src/meridian_ingest/imagery/fonts/`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_render,test_imagery_graticule,test_imagery_boundaries,test_imagery_model}.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

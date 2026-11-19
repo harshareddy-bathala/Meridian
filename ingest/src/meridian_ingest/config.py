@@ -36,6 +36,11 @@ from pathlib import Path
 
 from meridian_ingest.adapters import REGISTRY
 from meridian_ingest.config_extent import PLACE_KEYS, SourcePlaces, parse_places
+from meridian_ingest.config_imagery import (
+    ImagerySettings,
+    ImagerySettingsError,
+    parse_imagery,
+)
 from meridian_ingest.credentials import ENV_NAME
 from meridian_ingest.politeness import RetryPolicy
 
@@ -44,6 +49,7 @@ __all__ = [
     "DEFAULT_CONFIG_NAME",
     "DEFAULT_RAW_ROOT",
     "ConfigurationError",
+    "ImagerySettings",
     "IngestSettings",
     "SourceSettings",
     "find_config",
@@ -60,7 +66,9 @@ belong to somebody else."""
 DEFAULT_REQUEST_BUDGET = 50
 DEFAULT_TIMEOUT_S = 30.0
 
-_TOP_LEVEL = frozenset({"raw_root", "timeout_s", "contact", "retry", "sources"})
+_TOP_LEVEL = frozenset(
+    {"raw_root", "timeout_s", "contact", "retry", "sources", "imagery"}
+)
 _RETRY_KEYS = frozenset({"attempts", "base_delay_s", "max_delay_s"})
 _SOURCE_KEYS = frozenset(
     {"enabled", "base_url", "request_budget", "api_key_env", *PLACE_KEYS}
@@ -132,6 +140,7 @@ class IngestSettings:
     """
 
     sources: Mapping[str, SourceSettings] = field(default_factory=dict)
+    imagery: ImagerySettings = field(default_factory=ImagerySettings)
 
     def for_source(self, source_id: str) -> SourceSettings:
         """This source's settings, or the defaults where the file said nothing.
@@ -221,6 +230,7 @@ def load_settings(
         timeout_s=_positive(table.get("timeout_s", DEFAULT_TIMEOUT_S), "timeout_s"),
         contact=_optional_text(table.get("contact"), "contact"),
         sources=_sources(table, found),
+        imagery=_imagery(table, found),
     )
 
 
@@ -289,6 +299,13 @@ def _sources(table: Mapping[str, object], found: Path) -> dict[str, SourceSettin
         source_id: _source(source_id, entry, found)
         for source_id, entry in sorted(value.items())
     }
+
+
+def _imagery(table: Mapping[str, object], found: Path) -> ImagerySettings:
+    try:
+        return parse_imagery(table.get("imagery", {}), found)
+    except ImagerySettingsError as exc:
+        raise ConfigurationError(str(exc)) from exc
 
 
 def _source(source_id: str, entry: object, found: Path) -> SourceSettings:

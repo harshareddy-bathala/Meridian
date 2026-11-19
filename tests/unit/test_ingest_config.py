@@ -135,7 +135,7 @@ def test_an_unknown_top_level_key_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_refusal_names_the_keys_that_do_exist(tmp_path: Path) -> None:
-    with pytest.raises(ConfigurationError, match="known: contact, raw_root"):
+    with pytest.raises(ConfigurationError, match="known: contact, imagery, raw_root"):
         load_settings(written(tmp_path, "nonsense = 1\n"))
 
 
