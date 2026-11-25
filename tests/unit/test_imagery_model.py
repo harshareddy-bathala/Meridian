@@ -55,6 +55,7 @@ def a_fire(lat: float = 12.97, lon: float = 77.59) -> Annotation:
     return Annotation(
         kind="fire",
         geometry=Point(lat, lon),
+        label="Fire",
         text="Active fire, 12.4 MW, detected 2026-11-12 08:10 UTC",
         citations=(a_citation(),),
     )
@@ -156,15 +157,17 @@ def test_a_box_contains_its_edges() -> None:
 def test_a_marker_must_cite_a_record() -> None:
     """The rule the whole stage rests on: no statement on an image without a source."""
     with pytest.raises(MalformedImageryError, match="must cite at least one record"):
-        Annotation("fire", Point(12.9, 77.6), "A fire", citations=())
+        Annotation("fire", Point(12.9, 77.6), "Fire", "A fire", citations=())
 
 
 def test_an_area_is_placed_by_its_box_never_a_point_or_polygon() -> None:
     """D-326 publishes an area's box and never its polygon."""
     with pytest.raises(MalformedImageryError, match="placed by a Bounds"):
-        Annotation("area", Point(12.9, 77.6), "Bengaluru urban", (a_citation(),))
+        Annotation(
+            "area", Point(12.9, 77.6), "Area", "Bengaluru urban", (a_citation(),)
+        )
     with pytest.raises(MalformedImageryError, match="placed by a Point"):
-        Annotation("place", BOX, "Bengaluru", (a_citation(),))
+        Annotation("place", BOX, "Bengaluru", "Bengaluru", (a_citation(),))
 
 
 def test_a_citation_names_an_https_source() -> None:
@@ -172,6 +175,20 @@ def test_a_citation_names_an_https_source() -> None:
         a_citation(url="http://firms.modaps.eosdis.nasa.gov/")
     with pytest.raises(MalformedImageryError, match="is not a source id"):
         a_citation(source_id="NASA FIRMS")
+
+
+@pytest.mark.parametrize("url", ["/api/v1/areas", "/api/v1/imagery/ab12"])
+def test_a_citation_may_name_the_platforms_own_api(url: str) -> None:
+    """Meridian's own record is cited where it is served, on any deployment."""
+    assert a_citation(url=url).url == url
+
+
+@pytest.mark.parametrize(
+    "url", ["/areas", "//evil.invalid/api/v1/areas", "/api/v1/../x", "/api/v1/a?b"]
+)
+def test_no_other_relative_address_is_a_citation(url: str) -> None:
+    with pytest.raises(MalformedImageryError, match="an /api/v1/ path"):
+        a_citation(url=url)
 
 
 def test_a_marker_reads_back_as_it_was_written() -> None:

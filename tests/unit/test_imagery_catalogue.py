@@ -337,3 +337,32 @@ def test_an_unknown_imagery_key_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="sumary"):
         load_settings(config)
+
+
+def test_an_area_may_name_its_own_gazetteer(tmp_path: Path) -> None:
+    """The rule picks by the box's size; one area may override it (D-374)."""
+    config = tmp_path / "ingest.toml"
+    config.write_text(
+        '[imagery.areas."3"]\ngazetteer = "geonames_cities1000"\n[imagery.areas."4"]\n',
+        encoding="utf-8",
+    )
+
+    assert load_settings(config).imagery.gazetteers == {3: "geonames_cities1000"}
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ('[imagery.areas."x"]\ngazetteer = "geonames_cities1000"\n', "named by its id"),
+        ('[imagery.areas."3"]\ngazetteer = "osm"\n', "must be one of geonames"),
+        ('[imagery.areas."3"]\npolygon = []\n', "the only key is gazetteer"),
+    ],
+)
+def test_an_area_override_that_cannot_be_obeyed_is_refused(
+    tmp_path: Path, body: str, message: str
+) -> None:
+    config = tmp_path / "ingest.toml"
+    config.write_text(body, encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match=message):
+        load_settings(config)

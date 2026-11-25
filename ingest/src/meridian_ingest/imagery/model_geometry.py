@@ -123,6 +123,10 @@ class Citation:
 
     ``record_id`` names the record itself, not the source: a FIRMS artefact's
     digest and the row in it, a regional report's hash, a gazetteer row's id.
+    ``url`` is where a reader can look the record up: the source's page, or,
+    for a record Meridian publishes itself, the path it is served at on the
+    same host as the image (``/api/v1/areas``), which is right wherever the
+    platform is deployed.
     """
 
     source_id: str
@@ -134,7 +138,7 @@ class Citation:
         """Refuse a record that breaks one of this module's rules."""
         check.source_id(self.source_id)
         check.text(self.record_id, "record_id", maximum=200)
-        check.https(self.url, "url")
+        check.citation_url(self.url, "url")
         check.text(self.licence, "licence", maximum=200)
 
     def to_json(self) -> dict[str, object]:
@@ -174,10 +178,17 @@ drawn as the area's box, because a box is all D-326 publishes about one."""
 
 @dataclass(frozen=True)
 class Annotation:
-    """A marker on an image: where, what kind, what it says, and its sources."""
+    """A marker on an image: where, what kind, what it says, and its sources.
+
+    ``label`` is what the picture and the map write beside the marker — a
+    place's name, "Fire", the area's name — and ``text`` is the explanation a
+    reader opens it for. Two fields, so nothing has to cut a label out of a
+    sentence.
+    """
 
     kind: AnnotationKind
     geometry: Geometry
+    label: str
     text: str
     citations: tuple[Citation, ...]
 
@@ -191,6 +202,7 @@ class Annotation:
             raise check.fail(
                 f"a {self.kind} annotation is placed by a {expected.__name__}"
             )
+        check.text(self.label, "label", maximum=64)
         check.text(self.text, "text", maximum=500)
         if not self.citations:
             raise check.fail(f"a {self.kind} annotation must cite at least one record")
@@ -202,6 +214,7 @@ class Annotation:
         return {
             "kind": self.kind,
             "geometry": self.geometry.to_json(),
+            "label": self.label,
             "text": self.text,
             "citations": [item.to_json() for item in self.citations],
         }
@@ -210,7 +223,9 @@ class Annotation:
     def from_json(cls, stored: object) -> Annotation:
         """Read the record back, refusing a field this version does not know."""
         fields = check.fields(
-            stored, frozenset({"kind", "geometry", "text", "citations"}), "annotation"
+            stored,
+            frozenset({"kind", "geometry", "label", "text", "citations"}),
+            "annotation",
         )
         kind = fields["kind"]
         if kind not in ANNOTATION_KINDS:
@@ -220,6 +235,7 @@ class Annotation:
         return cls(
             kind,
             _geometry_from_json(fields["geometry"]),
+            check.text(fields["label"], "label"),
             check.text(fields["text"], "text"),
             tuple(
                 Citation.from_json(item)

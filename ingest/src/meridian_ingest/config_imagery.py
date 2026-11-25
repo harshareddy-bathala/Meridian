@@ -1,4 +1,4 @@
-"""The ``[imagery]`` table of the settings file: which areas, which sources.
+"""The ``[imagery]`` table of the settings file: areas, sources and place names.
 
 Split from :mod:`meridian_ingest.config` as the places a source is asked about
 are (:mod:`meridian_ingest.config_extent`): one table, its own rules, read by
@@ -6,18 +6,26 @@ one command. It cannot check its source ids against the imagery package's
 list, because nothing outside that package may import it (D-371), so
 ``meridian-ingest imagery`` checks them when it runs.
 
-Reference: docs/DECISIONS.md D-220, D-326, D-372.
+An area's place names come from GeoNames when its box is at most 50 km on its
+longer side and from Natural Earth above that (D-374). ``[imagery.areas."<id>"]
+gazetteer = "<source id>"`` overrides the rule for one area: a long, thin area
+may want a town's names although its box is long.
+
+Reference: docs/DECISIONS.md D-220, D-326, D-372, D-374.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from meridian_ingest.adapters.public.gazetteers import GEONAMES, NATURAL_EARTH
 from meridian_ingest.provenance import SOURCE_ID
 
 __all__ = [
     "DEFAULT_IMAGERY_BUDGET",
+    "GAZETTEERS",
     "ImagerySettings",
     "ImagerySettingsError",
     "parse_imagery",
@@ -27,7 +35,10 @@ DEFAULT_IMAGERY_BUDGET = 200
 """Requests one imagery source may make in one run, across every published
 area: a search, a token, and one per window read (D-372)."""
 
-_IMAGERY_KEYS = frozenset({"summary", "sources", "request_budget"})
+_IMAGERY_KEYS = frozenset({"summary", "sources", "request_budget", "areas"})
+_AREA_KEYS = frozenset({"gazetteer"})
+GAZETTEERS = (GEONAMES.source_id, NATURAL_EARTH.source_id)
+"""The sources an area's place names may come from."""
 
 
 class ImagerySettingsError(ValueError):
@@ -52,6 +63,9 @@ class ImagerySettings:
     every real source is off until an operator turns it on (D-220)."""
 
     request_budget: int = DEFAULT_IMAGERY_BUDGET
+
+    gazetteers: Mapping[int, str] = field(default_factory=dict)
+    """An area's chosen gazetteer, by area id, where it overrides the rule."""
 
 
 def parse_imagery(value: object, found: Path) -> ImagerySettings:
@@ -83,7 +97,35 @@ def parse_imagery(value: object, found: Path) -> ImagerySettings:
         summary=None if summary is None else (found.parent / summary).resolve(),
         sources=tuple(sources),
         request_budget=_budget(value.get("request_budget", DEFAULT_IMAGERY_BUDGET)),
+        gazetteers=_gazetteers(value.get("areas", {}), found),
     )
+
+
+def _gazetteers(value: object, found: Path) -> dict[int, str]:
+    """``[imagery.areas."<id>"]`` tables, as each area's gazetteer."""
+    if not isinstance(value, dict):
+        message = f"imagery.areas must be a table, not {type(value).__name__}"
+        raise ImagerySettingsError(message)
+    chosen = {}
+    for key, table in value.items():
+        if not key.isdigit() or int(key) < 1:
+            message = f'imagery.areas."{key}": an area is named by its id, like "3"'
+            raise ImagerySettingsError(message)
+        if not isinstance(table, dict) or not set(table) <= _AREA_KEYS:
+            known = ", ".join(sorted(_AREA_KEYS))
+            message = f'{found} [imagery.areas."{key}"]: the only key is {known}'
+            raise ImagerySettingsError(message)
+        gazetteer = table.get("gazetteer")
+        if gazetteer is None:
+            continue
+        if gazetteer not in GAZETTEERS:
+            message = (
+                f'imagery.areas."{key}".gazetteer must be one of '
+                f"{', '.join(GAZETTEERS)}, not {gazetteer!r}"
+            )
+            raise ImagerySettingsError(message)
+        chosen[int(key)] = gazetteer
+    return chosen
 
 
 def _budget(value: object) -> int:

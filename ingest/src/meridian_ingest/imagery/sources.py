@@ -31,6 +31,7 @@ from meridian_ingest.adapters.public.gibs import GIBS
 from meridian_ingest.imagery.model import SourceClass
 
 __all__ = [
+    "GIBS_CLOUD_METHOD",
     "GIBS_CREDIT",
     "GIBS_LEVEL",
     "GIBS_SOURCE",
@@ -44,6 +45,7 @@ __all__ = [
     "ImagerySource",
     "StacSource",
     "UnknownImagerySourceError",
+    "cloud_method_for",
     "credit_for",
     "imagery_source",
 ]
@@ -225,6 +227,22 @@ fetch confirms the layer is served at this level."""
 IMAGERY_SOURCES: dict[str, ImagerySource] = {
     one.source_id: one for one in (SENTINEL2_SOURCE, LANDSAT_SOURCE, GIBS_SOURCE)
 }
+
+
+_CLOUD_METHODS = {
+    "scl": "as counted from the product's scene classification layer (SCL)",
+    "qa_pixel": "as counted from the product's pixel quality layer (QA_PIXEL)",
+}
+GIBS_CLOUD_METHOD = (
+    "GIBS publishes no cloud layer for this view, and none is read from the picture"
+)
+
+
+def cloud_method_for(source: ImagerySource) -> str:
+    """How a scene's cloud fraction was found, in words a caption can end on."""
+    if isinstance(source, GibsSource):
+        return GIBS_CLOUD_METHOD
+    return _CLOUD_METHODS[source.classifier]
 
 
 def credit_for(source: ImagerySource, year: int) -> str:

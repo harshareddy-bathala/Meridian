@@ -126,6 +126,19 @@ def https(value: object, field: str) -> str:
     return written
 
 
+SAME_ORIGIN = re.compile(r"^/api/v1/[a-z0-9/_-]{1,100}$")
+"""A path on the platform's own public API, the one relative address a
+citation may give."""
+
+
+def citation_url(value: object, field: str) -> str:
+    """``value`` as an https URL, or a path on the platform's own public API."""
+    written = text(value, field)
+    if not written.startswith("https://") and not SAME_ORIGIN.match(written):
+        raise fail(f"{field} must be an https URL or an /api/v1/ path")
+    return written
+
+
 def instant(value: datetime, field: str) -> str:
     """An aware instant written as ``2026-11-14T05:30:00Z``."""
     if value.tzinfo is None or value.utcoffset() is None:
