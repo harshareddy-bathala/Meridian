@@ -1,4 +1,4 @@
-"""The picture people look at: the scene, its graticule, a scale bar, north and credit.
+"""The picture people look at: a scene, its markers, graticule, scale and credit.
 
 The scene is drawn at :data:`DISPLAY_SIDE` pixels on its longer side, on the
 same EPSG:4326 grid enlarged or reduced as one, inside a margin that holds the
@@ -11,16 +11,21 @@ interval and takes each latitude and longitude through this picture's own
 affine transform to a pixel row or column. Nothing here estimates a position
 from the image (D-133, D-373).
 
+**Markers are drawn the same way** (:mod:`.display_markers`), numbered as
+the manifest lists them, with a key under the picture and the credit each
+marked source asks for beside the image's own (D-374).
+
 **The same scene draws the same bytes.** Text is laid out by FreeType's basic
 layout, not by a shaping library that may or may not be installed, in IBM Plex
 Sans, which travels inside the package with its licence.
 
-Reference: docs/DECISIONS.md D-133, D-373.
+Reference: docs/DECISIONS.md D-133, D-373, D-374.
 """
 
 from __future__ import annotations
 
 import io
+from collections.abc import Sequence
 from functools import cache
 from importlib import resources
 
@@ -30,6 +35,8 @@ from rasterio.enums import Resampling
 from rasterio.transform import Affine
 from rasterio.warp import reproject
 
+from meridian_ingest.imagery.annotate import marker_key
+from meridian_ingest.imagery.display_markers import draw_markers
 from meridian_ingest.imagery.encode import png_bytes
 from meridian_ingest.imagery.graticule import (
     column_of,
@@ -37,6 +44,7 @@ from meridian_ingest.imagery.graticule import (
     row_of,
     scale_bar,
 )
+from meridian_ingest.imagery.model import Annotation
 from meridian_ingest.imagery.scene import WGS84, Rgba, Scene
 from meridian_ingest.imagery.sources import credit_for
 
@@ -96,17 +104,29 @@ def _drawn(scene: Scene) -> tuple[Rgba, Affine6]:
     return drawn, transform
 
 
-def display_png(scene: Scene) -> bytes:
-    """The scene with its graticule, scale bar, north arrow and credit, as a PNG."""
+def display_png(
+    scene: Scene, markers: Sequence[Annotation] = (), credits: Sequence[str] = ()
+) -> bytes:
+    """The scene with its markers, graticule, scale bar, north arrow and credit.
+
+    Args:
+        scene: The picture.
+        markers: Its markers, in manifest order; each is numbered by its place.
+        credits: What each marked source asks to be credited with.
+    """
     drawn, transform = _drawn(scene)
     height, width = drawn.shape[1:]
     label, small = _font(14), _font(13)
     centre = (scene.bounds.south + scene.bounds.north) / 2.0
     ruler = scale_bar(transform, centre, max(1, width // 4))
-    credit = _wrapped(
-        credit_for(scene.source, scene.acquired_at.year),
+    room = max(200, width - ruler.pixels - 3 * _GAP)
+    key = marker_key(markers)
+    credit = (_wrapped(key, small, room) if key else []) + _wrapped(
+        " ".join(
+            (_sentence(credit_for(scene.source, scene.acquired_at.year)), *credits)
+        ),
         small,
-        max(200, width - ruler.pixels - 3 * _GAP),
+        room,
     )
     below = _TOP + height + _TICK + _GAP + _LINE_HEIGHT + _GAP
     total = below + max(len(credit) * _LINE_HEIGHT, 2 * _LINE_HEIGHT) + _BOTTOM_PAD
@@ -116,6 +136,7 @@ def display_png(scene: Scene) -> bytes:
     # the pixels it covers, and no other pixel is touched.
     draw = ImageDraw.Draw(canvas, "RGBA")
     _graticule(draw, scene, transform, (height, width), label)
+    draw_markers(draw, markers, transform, (_LEFT, _TOP), label)
     draw.rectangle(
         (_LEFT - 1, _TOP - 1, _LEFT + width, _TOP + height), outline=_INK, width=1
     )
@@ -191,6 +212,11 @@ def _north(
     draw.polygon(
         ((x, tip), (x - 8, tip + 26), (x, tip + 19), (x + 8, tip + 26)), fill=_INK
     )
+
+
+def _sentence(text: str) -> str:
+    """``text`` ending in a full stop, so a credit after it reads as its own."""
+    return text if text.endswith(".") else f"{text}."
 
 
 def _wrapped(text: str, font: ImageFont.FreeTypeFont, width: int) -> list[str]:

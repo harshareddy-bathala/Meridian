@@ -7462,6 +7462,47 @@ A search keeps the source's own pixels over an area (D-372). What is published i
 
 ---
 
+## D-374 — Markers are placed from records and cite them, and the caption is a versioned function of the facts
+
+**2026-11-25 · accepted** · *`ingest/src/meridian_ingest/imagery/{annotate,annotate_fires,gazetteer,caption,display,display_markers,render,sources,model_checks,model_geometry}.py`; `ingest/src/meridian_ingest/adapters/public/{gazetteers,registrations}.py`; `ingest/src/meridian_ingest/config_imagery.py`; `deploy/ingest{,.live}.toml.example`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_annotate,test_gazetteer_sources,test_imagery_render,test_imagery_model,test_imagery_catalogue,test_public_sources,test_ingest_config}.py`; `tests/integration/test_environment_load.py`; Stage 38. Applies D-133, D-141, D-221, D-303, D-326 and D-371 to D-373.*
+
+The gate asks for every marker on a scene to be explained and cited, and for a caption that regenerates. Four things had to be settled. What a marker may be placed from. Where place names come from, for a city and for a forest a hundred kilometres across. How a fire that nobody looked for differs from a fire that was not there. And what the caption says, so that it is also the picture's alt text.
+
+**Decision.**
+- **A marker comes from a record, never from the picture.** The annotator takes records and a box and returns records. It and the caption are on the boundary test's record-only list, so neither can import an image library or NumPy (D-371). A scene's markers come in one order, numbered from one, and the number on the picture is the marker's index in the manifest:
+  - **the area**, drawn as the box `areas-summary-1` publishes, never its polygon (D-326);
+  - **its changes**, each as the summary states it: the quantity, both periods, the change and its interval, the verdict and its reason;
+  - **fires** from NASA FIRMS;
+  - **places** from a gazetteer.
+- **Each marker has a short `label` beside its `text`.** The label is what the picture and the map write next to the marker: a place's name, "Fire", the area's name. The text is the explanation. With two fields, nothing has to cut a label out of a sentence. `Annotation` gains the field, and a manifest is still `imagery-manifest-1`, since none has been published yet.
+- **Meridian's own records are cited where they are served.** The area and its changes cite `/api/v1/areas`, with the sealed report's hash as the record id. A citation's address is an https URL or a path under `/api/v1/`, and nothing else. A path is right on any deployment, where a hostname written into ingest would point a self-hosted copy at someone else's site.
+- **Fires are FIRMS detections inside the box within a day of the scene.** The window touches up to three UTC days. Each day is read from the newest FIRMS artefact that covers all of that day and a box holding the area's, because FIRMS revises a near-real-time day as it settles. The detections are re-read by the same `FirmsNormaliser` that `load` uses, so a marker and a stored sample are one reading of the same bytes. Each marker cites the artefact's digest and its CSV row. At most 30 are marked, the most powerful first, and the caption says how many were found.
+- **A day nobody fetched is not a day without fire.** The record keeps which days were held. The caption says "no active fire detected" only for held days. Days not held are "not checked", which is rule 7's distinction applied to someone else's records.
+- **Places come from two registered gazetteers, chosen by the area's size.**
+  - The sources are `geonames_cities1000` (CC BY 4.0) and `natural_earth_places` (public domain), each one file fetched by `follow` once a month.
+  - Each normaliser reads its file whole, to refuse one that is not the format, and returns an empty batch. So `load` records where the file came from and writes no sample: a place name labels a picture and is never a quantity.
+  - Their class is `regional_product`, the nearest of the classes `ingest_sources` is CHECKed against. Nothing reads the class to decide anything, and a new one would be a migration for no behaviour.
+  - Natural Earth comes as GeoJSON from the project's own repository, which its download page links to. The standard library reads it, where the zipped shapefile would need a shapefile reader.
+  - GeoNames labels a box at most 50 km on its longer side, where a 10 m scene shows towns. Natural Earth labels a larger box. `[imagery.areas."<id>"] gazetteer` overrides the rule for one area. When the chosen gazetteer has never been fetched, the scene has no labels and says so, and does not fall back to the other.
+  - Labels are thinned the same way every time: by population, then name, then id. A place closer than a tenth of the box's longer side to one already kept is dropped, and at most 12 are kept.
+- **Markers are drawn on the display picture, and only there.** The area and its changes share one outlined box, numbered in its corner. A fire is a numbered dot and a place is a named ring. Each is placed through the picture's own transform, as the graticule is. A key under the picture says what the numbers are. The credits each marked source asks for are added to the image's own: GeoNames' CC BY credit, FIRMS' requested citation, and Natural Earth's, which it does not ask for. The GeoTIFF, the PNG and the tiles carry the scene's pixels and nothing drawn over them, and a test checks that a marked render differs from an unmarked one in `display.png` alone. A GIS tool or the viewer draws markers as layers of its own.
+- **The caption is `imagery-caption-1`, a plain-text function of its facts (D-303).**
+  - It states what the picture is, of which area, from which satellite and instrument, and when.
+  - It gives the box's extent and the pixel size the files keep.
+  - It gives the cloud over the area's box and the layer that counted it. GIBS states no share, and says why.
+  - It names each kind of marker with its source, and closes with the image's credit.
+  - No clock, locale or environment enters it. A test pins its digest on fixed facts, so a changed sentence is a new version, and a published caption still hashes to its manifest's digest. It is also the alt text.
+
+*Rejected: placing a marker where the picture shows it*, such as a burn scar or a town's roofs. That is a number read off a rendering (D-133), and a marker nobody could cite.
+
+*Rejected: drawing markers into the GeoTIFF and the tiles.* The download would no longer be the archive's pixels, and the viewer could not turn a layer off.
+
+*Rejected: the scene's own day only, for fires.* A daytime scene and the night's overpass would then never meet, and a fire detected an hour after midnight UTC would vanish from a morning scene.
+
+*Rejected: a `reference` source class.* It would be a migration to a CHECKed column for a class that changes nothing.
+
+---
+
 
 ## Open
 
@@ -7868,6 +7909,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-371 imagery decoded in one package, behind an extra; its sources credited first | `ingest/src/meridian_ingest/imagery/{__init__,available,model,model_checks,model_geometry,model_files,model_manifest}.py`; `ingest/pyproject.toml`; `pyproject.toml`; `uv.lock`; `deploy/ingest/Dockerfile`; `.github/workflows/ci.yml`; `ATTRIBUTION.md`; `tests/conftest.py`; `tests/unit/{test_imagery_boundaries,test_imagery_model,test_public_sources}.py` |
 | D-372 a scene chosen by its own classification layer, and what was read kept | `ingest/src/meridian_ingest/imagery/{areas,sources,stac,pixels,cloud,stored,search,outcome}.py`; `ingest/src/meridian_ingest/{cli,cli_imagery,config,config_imagery}.py`; `pyproject.toml`; `tests/unit/{test_imagery_catalogue,test_imagery_search,test_imagery_boundaries,test_ingest_config}.py` |
 | D-373 a scene rendered from the raw store alone, its graticule our own arithmetic | `ingest/src/meridian_ingest/imagery/{scene,render,display,encode,graticule,webmercator,sources,model_manifest}.py`; `ingest/src/meridian_ingest/imagery/fonts/`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_render,test_imagery_graticule,test_imagery_boundaries,test_imagery_model}.py` |
+| D-374 markers placed from records and cited, and the caption a versioned function | `ingest/src/meridian_ingest/imagery/{annotate,annotate_fires,gazetteer,caption,display,display_markers,render,sources,model_checks,model_geometry}.py`; `ingest/src/meridian_ingest/adapters/public/{gazetteers,registrations}.py`; `ingest/src/meridian_ingest/config_imagery.py`; `deploy/ingest{,.live}.toml.example`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_annotate,test_gazetteer_sources,test_imagery_render,test_imagery_model,test_imagery_catalogue,test_public_sources,test_ingest_config}.py`; `tests/integration/test_environment_load.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

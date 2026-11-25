@@ -29,8 +29,14 @@ from meridian_ingest.imagery.display import (  # noqa: E402
     _TOP,
     display_transform,
 )
-from meridian_ingest.imagery.graticule import row_of  # noqa: E402
-from meridian_ingest.imagery.model import Bounds, SceneWindow  # noqa: E402
+from meridian_ingest.imagery.graticule import column_of, row_of  # noqa: E402
+from meridian_ingest.imagery.model import (  # noqa: E402
+    Annotation,
+    Bounds,
+    Citation,
+    Point,
+    SceneWindow,
+)
 from meridian_ingest.imagery.pixels import ReadWindow  # noqa: E402
 from meridian_ingest.imagery.render import render_scene  # noqa: E402
 from meridian_ingest.imagery.scene import RenderError, compose  # noqa: E402
@@ -374,3 +380,68 @@ def test_render_will_not_write_over_a_directory(tmp_path: Path) -> None:
 
     with pytest.raises(FileExistsError):
         render_scene(store, [_store_window(store)], BOX, tmp_path / "out")
+
+
+# --- markers, drawn where their records place them (D-374) ------------------------
+
+
+def _markers() -> tuple[Annotation, ...]:
+    cites = (Citation("nasa_firms", "ab12 row 1", "https://firms.invalid/", "open"),)
+    return (
+        Annotation(
+            "area", Bounds(77.585, 12.965, 77.595, 12.975), "Area", "The area", cites
+        ),
+        Annotation("fire", Point(12.97, 77.59), "Fire", "A fire", cites),
+    )
+
+
+def test_a_fire_is_drawn_on_the_pixel_its_coordinates_fall_in(tmp_path: Path) -> None:
+    store = RawStore(tmp_path / "raw")
+    paths = [_store_window(store, colour=(20, 20, 20))]
+    render_scene(store, paths, BOX, tmp_path / "out", markers=_markers())
+    transform, _ = display_transform(compose(store, paths, BOX))
+    drawn = _png(tmp_path / "out" / "display.png")
+
+    row = _TOP + row_of(transform, 12.97)
+    column = _LEFT + column_of(transform, 77.59)
+
+    assert drawn[row, column, :3].tolist() == [232, 72, 28]
+
+
+def test_the_areas_box_is_outlined_on_its_own_edges(tmp_path: Path) -> None:
+    store = RawStore(tmp_path / "raw")
+    paths = [_store_window(store, colour=(20, 20, 20))]
+    render_scene(store, paths, BOX, tmp_path / "out", markers=_markers())
+    transform, _ = display_transform(compose(store, paths, BOX))
+    drawn = _png(tmp_path / "out" / "display.png")
+
+    top = _TOP + row_of(transform, 12.975)
+    middle = _LEFT + column_of(transform, 77.5875)
+
+    assert drawn[top, middle, :3].tolist() == [255, 196, 40]
+    assert drawn[top + 6, middle, :3].tolist() == [20, 20, 20]
+
+
+def test_markers_are_drawn_on_the_picture_and_never_into_the_data(
+    tmp_path: Path,
+) -> None:
+    """The GeoTIFF, the PNG and the tiles are pixels; a viewer draws its own layers."""
+    store = RawStore(tmp_path / "raw")
+    paths = [_store_window(store)]
+
+    plain = render_scene(store, paths, BOX, tmp_path / "plain")
+    marked = render_scene(
+        store,
+        paths,
+        BOX,
+        tmp_path / "marked",
+        markers=_markers(),
+        credits=("Fire detections: NASA FIRMS.",),
+    )
+
+    differ = {
+        one.path
+        for one, two in zip(plain.files, marked.files, strict=True)
+        if one != two
+    }
+    assert differ == {"display.png"}

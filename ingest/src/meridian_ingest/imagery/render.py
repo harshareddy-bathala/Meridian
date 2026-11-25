@@ -40,7 +40,7 @@ from rasterio.warp import reproject
 
 from meridian_ingest.imagery.display import display_png
 from meridian_ingest.imagery.encode import png_bytes, webp_bytes, world_file
-from meridian_ingest.imagery.model import Bounds, PublishedFile
+from meridian_ingest.imagery.model import Annotation, Bounds, PublishedFile
 from meridian_ingest.imagery.scene import WGS84, Scene, compose
 from meridian_ingest.imagery.sources import ImagerySource
 from meridian_ingest.imagery.webmercator import (
@@ -81,10 +81,20 @@ class RenderedScene:
     files: tuple[PublishedFile, ...]
 
 
-def render_scene(
-    store: RawStore, raw_paths: Sequence[str], bounds: Bounds, directory: Path
+def render_scene(  # noqa: PLR0913 — what is drawn, where, and what is marked on it
+    store: RawStore,
+    raw_paths: Sequence[str],
+    bounds: Bounds,
+    directory: Path,
+    *,
+    markers: Sequence[Annotation] = (),
+    credits: Sequence[str] = (),
 ) -> RenderedScene:
     """Write a scene's files into ``directory``, which must not exist yet.
+
+    ``markers`` and ``credits`` reach the display picture alone; the GeoTIFF,
+    the PNG and the tiles are the scene's pixels and nothing drawn over them,
+    so a GIS tool or the viewer draws markers as layers of its own (D-374).
 
     Raises:
         RenderError: The raw paths cannot be made into one picture.
@@ -98,7 +108,7 @@ def render_scene(
         "scene.tif": geotiff_bytes(scene),
         "scene.png": png_bytes(scene.rgba),
         "scene.pgw": world_file(scene.transform).encode("ascii"),
-        "display.png": display_png(scene),
+        "display.png": display_png(scene, markers, credits),
     }
     files.update(tile_bytes(scene, zoom_min, zoom_max))
     written = []
