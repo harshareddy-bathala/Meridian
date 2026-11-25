@@ -1,11 +1,11 @@
-"""The public sources, as the registry lists them: Stage 31's nine and Stage 34's.
+"""The public sources, as the registry lists them: Stage 31's, 34's and 38's.
 
 Each row pairs an adapter with its normaliser and says how the source is
 reached. Limits are the source's own published figures, and only where we
 could read them; the per-fetch request budget applies to every source either
 way (D-223). Every row is disabled by default (D-220).
 
-Reference: docs/DECISIONS.md D-220, D-223, D-225, D-320.
+Reference: docs/DECISIONS.md D-220, D-223, D-225, D-320, D-374.
 """
 
 from __future__ import annotations
@@ -20,6 +20,16 @@ from meridian_ingest.adapters.public.celestrak import (
     CelestrakNormaliser,
 )
 from meridian_ingest.adapters.public.firms import FirmsAdapter, FirmsNormaliser
+from meridian_ingest.adapters.public.gazetteers import (
+    GEONAMES,
+    GEONAMES_URL,
+    NATURAL_EARTH,
+    NATURAL_EARTH_URL,
+    GazetteerAdapter,
+    GazetteerNormaliser,
+    read_geonames,
+    read_natural_earth,
+)
 from meridian_ingest.adapters.public.gibs import GibsAdapter
 from meridian_ingest.adapters.public.open_meteo import (
     OPEN_METEO_AEROSOL,
@@ -105,5 +115,21 @@ PUBLIC: tuple[Registration, ...] = (
     ),
     Registration(
         BhuvanAdapter(), DisplayOnlyNormaliser("bhuvan-display-1"), cadence_s=7 * DAY
+    ),
+    # Each gazetteer is one file that changes a few times a year, so once a
+    # month keeps its labels current without asking for the same file daily.
+    Registration(
+        GazetteerAdapter(GEONAMES, GEONAMES_URL, "cities1000.zip"),
+        GazetteerNormaliser(read_geonames, "geonames-cities1000-1"),
+        cadence_s=30 * DAY,
+    ),
+    Registration(
+        GazetteerAdapter(
+            NATURAL_EARTH,
+            NATURAL_EARTH_URL,
+            "ne_10m_populated_places_simple.geojson",
+        ),
+        GazetteerNormaliser(read_natural_earth, "natural-earth-places-1"),
+        cadence_s=30 * DAY,
     ),
 )

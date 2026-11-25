@@ -19,6 +19,16 @@ raw_root = "../data/ingest/raw"
 [sources.reference_archive]
 enabled = false
 
+# --- Stage 38 --------------------------------------------------------------
+
+# Place names for labelling imagery, one file each, fetched monthly. Labels
+# only: loading one records the file and writes no sample (D-374).
+[sources.geonames_cities1000]
+enabled = true
+
+[sources.natural_earth_places]
+enabled = true
+
 # --- Stage 34 --------------------------------------------------------------
 
 # Current element sets for the satellites the catalogue holds (D-320). Load

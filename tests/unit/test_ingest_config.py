@@ -333,8 +333,10 @@ def test_the_live_example_enables_every_keyless_real_source() -> None:
 
     assert settings.enabled_sources() == (
         "celestrak_gp",
+        "geonames_cities1000",
         "nasa_gibs",
         "nasa_power_precipitation",
+        "natural_earth_places",
         "noaa_swpc_kp",
         "open_meteo_aerosol",
         "open_meteo_cloud",
