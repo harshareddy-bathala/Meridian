@@ -356,3 +356,19 @@ export function tileTemplate(scene: SceneDetail): string {
 export function citationHref(citation: Citation): string | null {
   return citation.url.startsWith("https://") || citation.url.startsWith("/api/v1/") ? citation.url : null;
 }
+
+/** The scene's source, as a card names it: "Sentinel-2B MSI, sharpest recent view". */
+export function sourceLine(
+  platform: string,
+  instrument: string,
+  sourceClass: SourceClass,
+  simulated: boolean,
+): string {
+  if (simulated) return SIMULATED_SOURCE;
+  return `${platform} ${instrument}, ${CLASS_LABEL[sourceClass].toLowerCase()}`;
+}
+
+/** What a simulated scene is, wherever a source would be named (rule 5, D-378). */
+export const SIMULATED_SOURCE = "Synthetic pixels for the demonstration, not a satellite's";
+export const ARCHIVE_KIND = "Public archive imagery, credited.";
+export const SIMULATED_KIND = "Simulated, for the demonstration: synthetic pixels, not a satellite's.";

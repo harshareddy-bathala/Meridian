@@ -7,7 +7,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { imageryBody, sceneBody, sceneItem } from "./fixtures-imagery.test-data";
-import { AreaScenes, Gallery, MarkerTable, NewImagery, SceneBody } from "./Imagery";
+import { AreaScenes, Gallery, NewImagery } from "./Imagery";
+import { MarkerTable, SceneBody } from "./SceneViewer";
 import { decodeImagery, decodeSceneDetail, type SceneDetail } from "./imagery";
 import liveSource from "./Live.tsx?raw";
 import liveFiguresSource from "./LiveFigures.tsx?raw";
@@ -131,5 +132,48 @@ describe("imagery on the other pages", () => {
     for (const source of [liveSource, liveNowSource, liveFiguresSource]) {
       expect(source).not.toMatch(/from "\.\/(imagery|Imagery)"/);
     }
+  });
+});
+
+describe("a simulated scene", () => {
+  const simulated = decodeImagery({ status: "computed", items: [sceneItem({ simulated: true })] });
+
+  it("has a section of its own in the gallery, never the archive's", () => {
+    const markup = renderToStaticMarkup(<Gallery read={simulated} now={imageryNow} />);
+    const archive = markup.indexOf("Public archive imagery, credited");
+    const own = markup.indexOf("Simulated, for the demonstration");
+    const card = markup.indexOf('class="scene-card"');
+    expect(own).toBeGreaterThan(archive);
+    expect(card).toBeGreaterThan(own);
+    expect(markup.slice(archive, own)).toContain("No archive scene is published yet.");
+  });
+
+  it("is worded as synthetic wherever a source would be named", () => {
+    const viewer = renderToStaticMarkup(
+      <SceneBody
+        scene={scene(sceneBody({ simulated: true }))}
+        selected={null}
+        onSelect={go}
+        tiles="loaded"
+        onTiles={go}
+      />,
+    );
+    const changes = renderToStaticMarkup(
+      <NewImagery
+        read={decodeImagery({
+          status: "computed",
+          items: [sceneItem({ simulated: true, published_at: "2026-11-19T06:00:00Z" })],
+        })}
+        now={imageryNow}
+      />,
+    );
+    for (const markup of [viewer, changes]) {
+      expect(markup).toContain("Synthetic pixels for the demonstration, not a satellite&#x27;s");
+      expect(markup).not.toContain("Sentinel-2B MSI");
+    }
+    expect(viewer).not.toContain("Public archive imagery, credited.");
+    expect(renderToStaticMarkup(<AreaScenes read={simulated} now={imageryNow} />)).not.toContain(
+      "Public archive imagery",
+    );
   });
 });
