@@ -19,6 +19,7 @@ import { fetchConditions } from "./conditions";
 import { fetchCriteria } from "./criteria";
 import { fetchDatasets } from "./datasets";
 import { fetchEvents } from "./events";
+import { fetchImagery } from "./imagery";
 import { fetchInsights } from "./insights";
 import { fetchLosses } from "./losses";
 import { fetchOpenWarnings } from "./networkWarnings";
@@ -76,6 +77,9 @@ async function requests(): Promise<string[]> {
     fetchEvents(fetcher, signal),
     fetchResults(fetcher, null, signal),
     fetchAreas(fetcher, signal),
+    // A scene's detail is warmed from this listing, as a package's files are
+    // from the datasets', so fetchScene is not one of these (D-376).
+    fetchImagery(fetcher, signal),
     fetchWeekly(fetcher, signal),
     fetchCriteria(fetcher, signal),
     fetchDatasets(fetcher, signal),

@@ -714,3 +714,123 @@ tr.selected {
 .downlink + .downlink::before {
   content: ", ";
 }
+
+/* Imagery (D-377): the gallery's cards, and one scene's viewer. */
+.scene-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: var(--space-4);
+  list-style: none;
+  margin: 0 0 var(--space-5);
+  padding: 0;
+}
+
+.scene-card {
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  padding: var(--space-3);
+}
+
+.scene-card img,
+.scene-display {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.scene-card h4 {
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.scene-card dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0 var(--space-3);
+  margin: 0;
+}
+
+.scene-card dt {
+  color: var(--muted);
+}
+
+.scene-card dd {
+  margin: 0;
+}
+
+.scene-display {
+  max-width: 75rem;
+  margin: 0 0 var(--space-4);
+}
+
+.scene-map {
+  margin: 0 0 var(--space-4);
+}
+
+.scene-map-canvas {
+  height: min(70vh, 34rem);
+  border: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+/* Over a satellite picture in either theme: light lines, read against it. */
+.graticule-scene {
+  stroke: #fff;
+  stroke-opacity: 0.75;
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.leaflet-tooltip.graticule-label {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  text-shadow: 0 0 2px #000, 0 0 2px #000;
+}
+
+.leaflet-tooltip.graticule-label::before {
+  display: none;
+}
+
+.scene-marker {
+  stroke: #fff;
+  stroke-width: 2;
+  fill: none;
+}
+
+.scene-marker-area,
+.scene-marker-change {
+  stroke-width: 2;
+}
+
+.scene-marker-fire {
+  stroke: #fff;
+  fill: #d92d20;
+  fill-opacity: 0.9;
+}
+
+.scene-marker-place {
+  stroke: #fff;
+  fill: #16181d;
+  fill-opacity: 0.6;
+}
+
+.scene-marker-selected {
+  stroke: #fdb022;
+  stroke-width: 4;
+}
+
+.scene-cursor {
+  font-variant-numeric: tabular-nums;
+}
+
+.citations {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.downloads li + li {
+  margin-top: var(--space-2);
+}

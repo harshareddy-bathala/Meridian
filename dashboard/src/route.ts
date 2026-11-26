@@ -8,6 +8,7 @@
 //   #/schedule[/<id>]      one station's next hours, and why
 //   #/results              every settled pass, the thirty days, every loss
 //   #/areas[/<id>]         the published areas of interest, and one area
+//   #/imagery[/<hash>]     pictures of the published areas, and one scene
 //   #/changes              every change to an area, the network's events, releases
 //   #/reports              the network's week in words, area reports, the evaluation
 //   #/data                 the evidence packages, the API, how to cite, the credits
@@ -25,6 +26,7 @@ export const VIEWS = [
   "schedule",
   "results",
   "areas",
+  "imagery",
   "changes",
   "reports",
   "data",
@@ -39,6 +41,8 @@ export interface Route {
   stationId: string | null;
   /** The area an areas view is about; absent for every other view. */
   areaId?: number;
+  /** The scene an imagery view opens, by its twelve-digit name; absent otherwise. */
+  sceneHash?: string;
 }
 
 export const DEFAULT_ROUTE: Route = { view: "live", stationId: null };
@@ -51,6 +55,10 @@ function withId(view: View, raw: string): Route {
   if (view === "areas") {
     // An area's id is a whole number; anything else is the list of areas.
     return /^\d+$/.test(raw) ? { view, stationId: null, areaId: Number(raw) } : { view, stationId: null };
+  }
+  if (view === "imagery") {
+    // A scene is named by twelve hex digits; anything else is the gallery.
+    return /^[0-9a-f]{12}$/.test(raw) ? { view, stationId: null, sceneHash: raw } : { view, stationId: null };
   }
   const takesStation = view === "stations" || view === "schedule";
   return { view, stationId: takesStation && raw !== "" ? decodeURIComponent(raw) : null };
@@ -66,5 +74,6 @@ export function parseRoute(hash: string): Route {
 export function formatRoute(route: Route): string {
   const station = route.stationId === null ? "" : `/${encodeURIComponent(route.stationId)}`;
   const area = route.areaId === undefined ? "" : `/${String(route.areaId)}`;
-  return `#/${route.view}${station}${area}`;
+  const scene = route.sceneHash === undefined ? "" : `/${route.sceneHash}`;
+  return `#/${route.view}${station}${area}${scene}`;
 }

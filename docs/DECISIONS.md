@@ -7577,6 +7577,37 @@ Part 5 publishes each scene as a directory named by its manifest, with an index 
 
 ---
 
+## D-377 — The Imagery page keeps Meridian's own pictures apart from the archive's, and its viewer draws every marker from the manifest
+
+**2026-11-26 · accepted** · *`dashboard/src/{imagery,Imagery,SceneMap,graticule,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `dashboard/src/{imagery,route,views,snapshotRoutes}.test.ts(x)`; `dashboard/src/fixtures-imagery.test-data.ts`; Stage 38. Applies D-086, D-091, D-092, D-208, D-282, D-284, D-326, D-341, D-373, D-374 and D-376.*
+
+The API now serves each published scene, its manifest and its files (D-376). The dashboard has to show them. Four things had to be settled. How pictures Meridian received are told apart from an archive's, when there are none of the first kind yet. What the viewer draws, and from what. How a reader without a pointer or without sight reads the markers. And what the page says when the platform is away.
+
+**Decision.**
+- **Two views, linked as every view is.** `#/imagery` is the gallery and `#/imagery/<hash>` is one scene, by its twelve-digit name. Anything else after `#/imagery/` opens the gallery. "Imagery" joins the navigation after "Areas".
+- **Two kinds, never mixed.** The gallery's first section, *Received by Meridian*, says in words that Meridian's stations have received no image yet (D-086). Stage 40 fills it. The second section, *Public archive imagery, credited*, holds the cards.
+  - A card shows the display picture, with its caption as its alt text. Beside it are the area, the satellite and instrument with the class in a reader's words, when the scene was taken, the cloud share over the area, how long ago it was published, and the credit.
+  - A test checks that no picture appears in the first section, and that the archive's section comes after it.
+  - The simulated badge is drawn only when the platform says a scene is simulated. No archive scene is, so no badge appears today, and a test checks both cases (rule 5).
+- **The viewer is the manifest, drawn.**
+  - The published display picture, with its caption.
+  - The scene's facts: source, time, pixel size, cloud and how it was counted, rendering, credit and licence.
+  - A map of the scene's own tiles, same-origin, bounded to the scene and zoomed to its pyramid.
+  - Every marker, numbered as on the picture, with the records it cites.
+  - The files to keep, each named by the scene's digest.
+- **The map's graticule is the picture's.** `graticule.ts` gains `sceneStep` and `sceneGraticule`, written to ingest's rule: the finest of 0.01° to 1° that puts at most five lines a side, with values held as whole hundredths and labelled to the decimals the step needs. A test pins the answers ingest gives for three boxes, so the map's lines fall where the picture's do. Each line is labelled at the scene's edge, latitudes at the west and longitudes at the south, so no label covers a marker. The first browser check had them mid-line, which is why.
+- **Markers are layers built from the manifest, and nothing is HTML.** An area or its change is its box, never a polygon (D-326); a fire or a place is a point. Each label, tooltip and citation is set as text, so a place name with angle brackets is shown as written. Choosing a marker shows its number, its explanation and every record it cites. A citation is a link only when its address is `https://` or the API's own `/api/v1/` path. The decoder refuses a marker with no citation, so the page cannot show one.
+- **Under the pointer, the latitude and longitude.** The map says where the pointer is, to four decimals. The first check put the pointer on a fire and read back the fire's own coordinates.
+- **Every marker is in a table too.** It is in a `TableScroll` (D-341), numbered as on the picture, with its kind, its explanation and its sources, for a keyboard or a screen reader. The map's region label says so.
+- **When the platform is away.** The gallery and the scene's description are views like any other, kept by the front and marked *Not live* with their age (D-284). Each card also says how long ago its scene was published, which is the gate's "says how old it is". The files are never kept (D-376). So when the map's tiles fail before any has loaded, the page says in words that the map shows its graticule and markers without the picture.
+- **The routes file gains `/api/v1/imagery`,** with `fetchImagery` in the test that holds the file to the dashboard's requests. A scene's detail is warmed from the listing, as a package's files are from the datasets listing, so `fetchScene` is not in that test. The area page's route comes with it in Part 8.
+
+*Rejected: drawing the markers into the map as an image overlay of the display picture.* The picture's markers are pixels. As layers, each can be chosen, read and cited, and the tiles stay the archive's pixels (D-374).
+
+*Rejected: a fixed 0.1° graticule on the map, as the station map's is fixed at 10°.* On a 2 km box it would draw no line at all, and its lines would not match the published picture's.
+
+---
+
 
 ## Open
 
@@ -7986,6 +8017,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-374 markers placed from records and cited, and the caption a versioned function | `ingest/src/meridian_ingest/imagery/{annotate,annotate_fires,gazetteer,caption,display,display_markers,render,sources,model_checks,model_geometry}.py`; `ingest/src/meridian_ingest/adapters/public/{gazetteers,registrations}.py`; `ingest/src/meridian_ingest/config_imagery.py`; `deploy/ingest{,.live}.toml.example`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_annotate,test_gazetteer_sources,test_imagery_render,test_imagery_model,test_imagery_catalogue,test_public_sources,test_ingest_config}.py`; `tests/integration/test_environment_load.py` |
 | D-375 a scene published under its manifest's digest, capped, and made again | `ingest/src/meridian_ingest/imagery/{build,publish,render,caption,sources,model_checks}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run,config_imagery}.py`; `deploy/docker-compose.ingest.yml`; `deploy/ingest{,.live}.toml.example`; `tests/unit/{test_imagery_publish,test_imagery_boundaries,test_imagery_annotate,test_imagery_catalogue,test_compose_hardening}.py` |
 | D-376 scenes listed only while their area is, each file served while it matches | `platform/src/meridian/api/public/{imagery,areas,envelope,surface}.py`; `platform/src/meridian/api/public/models/imagery.py`; `platform/src/meridian/api/{imagery_files,rate_limits,app}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example}`; `deploy/front/nginx.conf`; `deploy/tools/front_warm.py`; `docs/THREAT-MODEL.md`; `tests/unit/{test_imagery_endpoint_models,test_public_privacy,test_front_config,test_front_warm}.py`; `tests/msp_conformance/{test_public_imagery_endpoint,test_rate_limits}.py` |
+| D-377 the Imagery page: Meridian's own pictures apart, every marker from the manifest | `dashboard/src/{imagery,Imagery,SceneMap,graticule,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `dashboard/src/{imagery,route,views,snapshotRoutes}.test.ts(x)`; `dashboard/src/fixtures-imagery.test-data.ts` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

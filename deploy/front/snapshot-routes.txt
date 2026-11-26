@@ -11,7 +11,9 @@
 # directory itself is followed through `next_cursor`, as the dashboard does.
 # The page and the assets it names are warmed too, and are not listed here, and
 # so is every file of every package /api/v1/datasets lists, which the data page
-# links to rather than fetches (D-369).
+# links to rather than fetches (D-369), and the detail of every scene
+# /api/v1/imagery lists, which the viewer opens (D-376). A scene's files are
+# never warmed: the front never keeps them.
 
 /api/v1/stations?limit=200
 /api/v1/reliability
@@ -33,6 +35,7 @@
 /api/v1/events?limit=20
 /api/v1/results?limit=50
 /api/v1/areas
+/api/v1/imagery
 /api/v1/reports/weekly
 /api/v1/reports/criteria
 /api/v1/datasets

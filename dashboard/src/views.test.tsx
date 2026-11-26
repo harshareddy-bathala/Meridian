@@ -27,6 +27,9 @@ import { criteriaBody, weeklyBody } from "./fixtures-reports.test-data";
 import { datasetsBody } from "./fixtures-data.test-data";
 import { Packages } from "./Data";
 import { decodeDatasets, type EvidencePackage } from "./datasets";
+import { imageryBody, sceneBody, sceneItem } from "./fixtures-imagery.test-data";
+import { Gallery, MarkerTable, SceneBody } from "./Imagery";
+import { decodeImagery, decodeSceneDetail, type SceneDetail } from "./imagery";
 import { decodeInsights } from "./insights";
 import { ModelPanel } from "./ModelSummary";
 import { decodeLoss } from "./losses";
@@ -51,6 +54,7 @@ import { decodeStationSchedule } from "./stationSchedule";
 // map is not what is under test here.
 vi.mock("./StationMap", () => ({ StationMap: () => null }));
 vi.mock("./AreaMap", () => ({ AreaMap: () => null }));
+vi.mock("./SceneMap", () => ({ SceneMap: () => null }));
 
 const BADGE = 'class="badge badge-simulated"';
 const go = () => undefined;
@@ -295,5 +299,91 @@ describe("the data page", () => {
     const markup = renderToStaticMarkup(<Packages read={read} />);
     expect(markup).toContain("No evidence package has been published yet.");
     expect(badges(markup)).toBe(0);
+  });
+});
+
+const imageryNow = new Date("2026-11-20T06:00:00Z");
+
+function scene(body: Record<string, unknown> = sceneBody()): SceneDetail {
+  const read = decodeSceneDetail(body);
+  if (!("scene" in read)) throw new Error("expected a scene");
+  return read.scene;
+}
+
+describe("the imagery gallery", () => {
+  const now = imageryNow;
+
+  it("keeps what Meridian received apart from the archive's, and says it has received none", () => {
+    const markup = renderToStaticMarkup(<Gallery read={decodeImagery(imageryBody)} now={now} />);
+    const received = markup.indexOf("Received by Meridian");
+    const archive = markup.indexOf("Public archive imagery, credited");
+    const card = markup.indexOf('class="scene-card"');
+    expect(received).toBeGreaterThan(-1);
+    expect(archive).toBeGreaterThan(received);
+    expect(card).toBeGreaterThan(archive);
+    expect(markup.slice(received, archive)).toContain("have received no image yet");
+    expect(markup.slice(received, archive)).not.toContain("<img");
+  });
+
+  it("draws each card with its caption as alt text, its source, cloud and age", () => {
+    const markup = renderToStaticMarkup(<Gallery read={decodeImagery(imageryBody)} now={now} />);
+    expect(markup).toContain('alt="High-resolution satellite image of Bengaluru urban."');
+    expect(markup).toContain('src="/imagery/0123456789ab/display.png"');
+    expect(markup).toContain('href="#/imagery/0123456789ab"');
+    expect(markup).toContain("Sentinel-2B MSI, sharpest recent view");
+    expect(markup).toContain("4% cloud over the area");
+    expect(markup).toContain("2 d ago");
+  });
+
+  it("badges no archive scene, and badges one the platform says is simulated", () => {
+    const archive = renderToStaticMarkup(<Gallery read={decodeImagery(imageryBody)} now={now} />);
+    const simulated = renderToStaticMarkup(
+      <Gallery read={decodeImagery({ status: "computed", items: [sceneItem({ simulated: true })] })} now={now} />,
+    );
+    expect(badges(archive)).toBe(0);
+    expect(badges(simulated)).toBe(1);
+    const viewer = renderToStaticMarkup(
+      <SceneBody scene={scene()} selected={null} onSelect={go} tiles="loaded" onTiles={go} />,
+    );
+    expect(badges(viewer)).toBe(0);
+  });
+
+});
+
+describe("one scene's viewer", () => {
+  it("lists every marker with the records it cites, as text, never as markup", () => {
+    const markers = scene().manifest.markers;
+    const markup = renderToStaticMarkup(<MarkerTable markers={markers} />);
+    for (const marker of markers) {
+      expect(markup).toContain(`<td>${String(marker.number)}</td>`);
+      for (const citation of marker.citations) {
+        expect(markup).toContain(citation.recordId);
+      }
+    }
+    expect(markup).toContain("Aranpur &lt;b&gt;");
+    expect(markup).not.toContain("Aranpur <b>");
+    expect(markup).toContain('href="https://www.geonames.org/9100001"');
+  });
+
+  it("says in words when the scene's tiles could not be loaded", () => {
+    const failed = renderToStaticMarkup(
+      <SceneBody scene={scene()} selected={null} onSelect={go} tiles="failed" onTiles={go} />,
+    );
+    const loaded = renderToStaticMarkup(
+      <SceneBody scene={scene()} selected={null} onSelect={go} tiles="loaded" onTiles={go} />,
+    );
+    expect(failed).toContain("map tiles could not be loaded");
+    expect(loaded).not.toContain("map tiles could not be loaded");
+  });
+
+  it("offers every file to keep, under the scene's name, and the chosen marker's sources", () => {
+    const markup = renderToStaticMarkup(
+      <SceneBody scene={scene()} selected={2} onSelect={go} tiles="loaded" onTiles={go} />,
+    );
+    for (const path of ["scene.tif", "scene.png", "scene.pgw", "display.png", "manifest.json"]) {
+      expect(markup).toContain(`download="0123456789ab-${path}"`);
+    }
+    expect(markup).toContain("2. Fire");
+    expect(markup).toContain("0123456789ab row 1");
   });
 });

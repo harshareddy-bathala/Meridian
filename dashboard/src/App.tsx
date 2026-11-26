@@ -4,6 +4,7 @@ import { fetchPlatformHealth, type PlatformHealth } from "./health";
 import { Kiosk } from "./Kiosk";
 import { AreasView } from "./Areas";
 import { ChangesView } from "./Changes";
+import { ImageryView } from "./Imagery";
 import { Nav } from "./Nav";
 import { DataView } from "./Data";
 import { PlanView } from "./Plan";
@@ -114,6 +115,7 @@ const VIEWS: Record<Route["view"], (route: Route, go: Go) => ReactElement> = {
   schedule: (route, go) => <ScheduleView stationId={route.stationId} go={go} />,
   results: (_, go) => <ResultsView go={go} />,
   areas: (route, go) => <AreasView areaId={route.areaId ?? null} go={go} />,
+  imagery: (route, go) => <ImageryView hash={route.sceneHash ?? null} go={go} />,
   changes: (_, go) => <ChangesView go={go} />,
   reports: () => <ReportsView />,
   data: () => <DataView />,
