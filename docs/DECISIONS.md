@@ -7608,6 +7608,50 @@ The API now serves each published scene, its manifest and its files (D-376). The
 
 ---
 
+## D-378 — A scene says whether it is simulated, the demonstration has one of its own, and imagery joins the area, changes and site pages
+
+**2026-11-26 · accepted** · *`ingest/src/meridian_ingest/imagery/{demo,sources,caption,build,publish,model_checks,model_manifest,model_index,model}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run}.py`; `platform/src/meridian/api/public/{imagery,models/imagery}.py`; `dashboard/src/{imagery,Imagery,Areas,Changes}.ts(x)`; `deploy/{docker-compose.demo.yml,front/snapshot-routes.txt}`; `deploy/tools/{demo_imagery,demo_rehearsal,front_warm}.py`; `pyproject.toml`; `site/{areas,data}/index.html`; `site/tools/content_checks.py`; `docs/{THREAT-MODEL,OPERATIONS}.md`; their tests; Stage 38. Applies rule 5 and D-086, D-138, D-326, D-335, D-363, D-372 to D-377.*
+
+Part 8 puts imagery where a reader already looks: an area's page, the Changes page and the public site. It also gives the demonstration a picture, so the rehearsal has one with no network. A demonstration picture with no network has to be synthetic. Rule 5 says simulated data is labelled at every layer, and until now no layer of a scene could say so. The team chose to add the field rather than demonstrate with a real scene rendered from stored files.
+
+**Decision.**
+- **`simulated` at every layer of a scene.**
+  - The manifest and the index entry carry it. No manifest had been published, so the shapes keep their names.
+  - The API's models carry it, and a manifest that disagrees with its index entry is refused.
+  - The listing and the detail answer with it, where they had said `false` by construction.
+  - The dashboard badges a simulated scene on its card, in the viewer and on the Changes page.
+  - A simulated scene's caption begins "Simulated image of…: synthetic pixels written for Meridian's demonstration, not a satellite's", and names no satellite. Its credit, drawn on the picture, begins "Simulated:".
+  - `imagery-caption-1`'s pinned digest is unchanged for every real scene.
+- **The demonstration has an archive of its own, `simulated_scene`**, shaped as Sentinel-2's.
+  - `meridian-ingest imagery demo` writes a catalogue answer and one item's `visual` and `scl` rasters, a plain pattern of bands no reader could take for a place, to a scratch directory.
+  - It then searches them through the same `search_area` a real search uses, with the catalogue and pixels served from those files. So the cloud count, the windows kept, the rendering, the manifest and the publishing are the real ones, and `imagery verify` checks the scene like any other.
+  - `search` and `refresh` refuse the source by name, since no network holds it.
+  - It needs no `ATTRIBUTION.md` entry, being nobody else's data. Its licence names Meridian's own.
+- **`deploy/tools/demo_imagery.py`** gives a running demo stack one area and that scene, the way `OPERATIONS.md` gives a real deployment its areas:
+  - it registers Bengaluru urban if no area is registered;
+  - it exports a snapshot of the demo's own database, runs `regions report` and `regions summary` to `data/published/areas.json`, and runs `imagery demo` in the ingest image, with no network;
+  - each container runs as the invoking user;
+  - the demo override names the two paths, and `AREAS_PUBLISHED=true` serves them.
+
+  The tool changes no setting itself. It refuses a `data/published` it cannot write, and says why: the first run met one Docker had created as root from a mount.
+- **An area's page shows its latest scene from each class.** That is one request per class, `?area={area}&source_class=…&limit=1`, rather than the plan's single `limit=1`, so that the daily view, published every day, never crowds the sharper ones out. The warmer expands `{area}` from `/api/v1/areas` (D-376), and the three routes join the routes file.
+- **The Changes page lists the scenes published in the last seven days.** They come from the listing the gallery reads. They are not events, because `/events` reads the database's records and a scene is a published file (D-363). This keeps Stage 37's promise that imagery would join what changes.
+- **The Live page shows no imagery.** It is about the network now, and a test reads its modules for an imagery import.
+- **The public site's areas and data pages** describe the pictures as public archive imagery, credited, kept apart from what Meridian's stations receive, and link to the dashboard's Imagery page. `verify_site.py` checks both pages for the words and the link.
+- **The rehearsal walks the Imagery page.** It checks that:
+  - the gallery keeps the two kinds apart, and the demonstration's scene is badged;
+  - the viewer draws its own tiles, lists its markers and offers five downloads;
+  - an area's page shows its scene;
+  - with the api stopped, the gallery says *Not live*, and the viewer, opened fresh so no cached tile hides it, says the tiles are missing.
+
+*Rejected: a synthetic scene under Sentinel-2's own source id.* Its credit would claim Copernicus data, and nothing in the record would tell it from a real scene.
+
+*Rejected: a `--simulated` flag on `render`.* The label would then be whatever an operator remembered to type. Here it follows from the source the pixels were read from.
+
+*Rejected: writing the demo's areas summary by hand.* It would name a report that was never computed. The tool computes the real one from the demo's own database, which says honestly that no product has a value yet.
+
+---
+
 
 ## Open
 
@@ -8018,6 +8062,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-375 a scene published under its manifest's digest, capped, and made again | `ingest/src/meridian_ingest/imagery/{build,publish,render,caption,sources,model_checks}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run,config_imagery}.py`; `deploy/docker-compose.ingest.yml`; `deploy/ingest{,.live}.toml.example`; `tests/unit/{test_imagery_publish,test_imagery_boundaries,test_imagery_annotate,test_imagery_catalogue,test_compose_hardening}.py` |
 | D-376 scenes listed only while their area is, each file served while it matches | `platform/src/meridian/api/public/{imagery,areas,envelope,surface}.py`; `platform/src/meridian/api/public/models/imagery.py`; `platform/src/meridian/api/{imagery_files,rate_limits,app}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example}`; `deploy/front/nginx.conf`; `deploy/tools/front_warm.py`; `docs/THREAT-MODEL.md`; `tests/unit/{test_imagery_endpoint_models,test_public_privacy,test_front_config,test_front_warm}.py`; `tests/msp_conformance/{test_public_imagery_endpoint,test_rate_limits}.py` |
 | D-377 the Imagery page: Meridian's own pictures apart, every marker from the manifest | `dashboard/src/{imagery,Imagery,SceneMap,graticule,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `dashboard/src/{imagery,route,views,snapshotRoutes}.test.ts(x)`; `dashboard/src/fixtures-imagery.test-data.ts` |
+| D-378 a scene says whether it is simulated; the demo's scene; imagery on areas, changes and the site | `ingest/src/meridian_ingest/imagery/{demo,sources,caption,build,publish,model_checks,model_manifest,model_index,model}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run}.py`; `platform/src/meridian/api/public/{imagery,models/imagery}.py`; `dashboard/src/{imagery,Imagery,Areas,Changes}.ts(x)`; `deploy/{docker-compose.demo.yml,front/snapshot-routes.txt}`; `deploy/tools/{demo_imagery,demo_rehearsal,front_warm}.py`; `pyproject.toml`; `site/{areas,data}/index.html`; `site/tools/content_checks.py`; `docs/{THREAT-MODEL,OPERATIONS}.md` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

@@ -190,6 +190,8 @@ convention = "google"
 "deploy/tools/front_drill.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # Drives a browser against a running stack and prints its checks (D-335).
 "deploy/tools/demo_rehearsal.py" = ["T201", "D", "ANN", "PLR", "C90", "BLE001"]
+# Gives a demo stack an area and a simulated scene of it, offline (D-378).
+"deploy/tools/demo_imagery.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # The station tier's backup, a host script like backup.py (D-287).
 "deploy/tools/station_archive.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.

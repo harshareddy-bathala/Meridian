@@ -9,10 +9,18 @@
 # the figures from classifications the jobs service wrote, found by the hash of
 # the same table.
 
+#
+# A rehearsal shows imagery with no network too (D-378):
+# `python deploy/tools/demo_imagery.py` registers one area, writes its regional
+# summary from a snapshot, and publishes a simulated scene of it, labelled so
+# at every layer. Then `AREAS_PUBLISHED=true` and `up -d api` serve both; the
+# two paths below are where that tool writes them.
 services:
   api:
     environment:
       MERIDIAN_RELIABILITY_CONFIG: /app/deploy/reliability.demo.toml
+      AREAS_SUMMARY: ${AREAS_SUMMARY:-/published/areas.json}
+      IMAGERY_INDEX: ${IMAGERY_INDEX:-/published/imagery/index.json}
   jobs:
     environment:
       MERIDIAN_RELIABILITY_CONFIG: /app/deploy/reliability.demo.toml

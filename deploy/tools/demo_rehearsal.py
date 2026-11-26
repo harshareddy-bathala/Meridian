@@ -15,7 +15,11 @@ the ``demo`` profile as a visitor meets it, through the front:
    360 px as well as 1280 px.
 2. **Simulated figures say so.** The network and a station's schedule, drawn
    from a simulated fleet, carry the simulated badge (rule 5).
-3. **A pass is explained.** Choosing a station and one of its passes opens the
+3. **Imagery is shown and labelled** (D-377, D-378), with the demo's scene
+   published by ``deploy/tools/demo_imagery.py``: the gallery keeps Meridian's
+   own pictures apart, the simulated scene carries the badge, the viewer draws
+   its tiles, markers and downloads, and the area's page shows it.
+   **A pass is explained.** Choosing a station and one of its passes opens the
    explanation, with the orbit's age.
    **A place is planned.** The planner answers for a typed place, asks the
    platform for it to a tenth of a degree only, and leaves the page's address
@@ -23,7 +27,8 @@ the ``demo`` profile as a visitor meets it, through the front:
 4. **The api stops,** as an operator would stop it, and every page Stage 37's
    gate names is served from the front's copy **marked not live** (D-282,
    D-284). The planner, which
-   the front never keeps, says in words that no copy was kept.
+   the front never keeps, says in words that no copy was kept, and the scene
+   viewer, whose tiles the front never keeps, says the picture is missing.
 5. **The api starts again,** always, whatever happened above, and the next
    refresh clears every mark.
 
@@ -57,13 +62,15 @@ VIEWS = (
     "schedule",
     "results",
     "areas",
+    "imagery",
     "changes",
     "reports",
     "data",
     "plan",
     "kiosk",
 )
-"""Every view the dashboard has (D-334, D-364, D-366, D-367, D-369, D-370)."""
+"""Every view the dashboard has (D-334, D-364, D-366, D-367, D-369, D-370,
+D-377)."""
 
 PHONE = {"width": 360, "height": 740}
 """The narrowest screen the dashboard is checked at (D-341, D-348)."""
@@ -74,7 +81,7 @@ PLACE = ("12.97164", "77.59456")
 PLACE_QUERY = "lat=13.0&lon=77.6"
 """The only form of it the platform may be asked about (D-370)."""
 
-OUTAGE_VIEWS = ("live", "results", "areas", "changes", "reports", "data")
+OUTAGE_VIEWS = ("live", "results", "areas", "imagery", "changes", "reports", "data")
 """The views asked for again with the api stopped: every page Stage 37's gate
 names, what is happening now, every pass's result, an area's changes, a plain
 report and the downloadable dataset."""
@@ -128,6 +135,7 @@ def rehearse_views(page: Any, base: str, verdict: Verdict, errors: list[str]) ->
     )
     explain_a_pass(page, base, verdict)
     plan_a_place(page, base, verdict)
+    show_imagery(page, base, verdict)
 
 
 def rehearse_phone(browser: Any, base: str, verdict: Verdict) -> None:
@@ -202,8 +210,80 @@ def explain_a_pass(page: Any, base: str, verdict: Verdict) -> None:
     )
 
 
+def first_scene(page: Any, base: str) -> str | None:
+    """The gallery's first scene, by its viewer's address, or ``None``."""
+    open_view(page, base, "imagery")
+    card = page.locator(".scene-card h4 a")
+    return card.first.get_attribute("href") if card.count() > 0 else None
+
+
+def show_imagery(page: Any, base: str, verdict: Verdict) -> None:
+    """Step 3: the gallery, a scene in the viewer, and the area's own scene."""
+    viewer = first_scene(page, base)
+    gallery = page.locator("main").inner_text()
+    verdict.check(
+        "Received by Meridian" in gallery
+        and "Public archive imagery, credited" in gallery,
+        "imagery: Meridian's own pictures are kept apart from the archive's",
+    )
+    verdict.check(viewer is not None, "imagery: a scene is published")
+    if viewer is None:
+        return
+    verdict.check(
+        page.locator(".scene-card .badge-simulated").count() > 0,
+        "imagery: the demonstration's scene is marked simulated",
+    )
+    page.goto(f"{base}/{viewer}")
+    page.wait_for_timeout(SETTLE_MS)
+    verdict.check(
+        page.locator(".scene-map img.leaflet-tile-loaded").count() > 0,
+        "imagery: the viewer draws the scene's own tiles",
+    )
+    verdict.check(
+        page.locator("table tbody tr").count() > 0,
+        "imagery: every marker is listed, with its sources",
+    )
+    verdict.check(
+        page.locator(".downloads a[download]").count() == 5,
+        "imagery: the GeoTIFF, the PNG, its world file, the picture and the manifest",
+    )
+    open_view(page, base, "areas")
+    area = page.locator("main ul li a[href^='#/areas/']")
+    if area.count() > 0:
+        page.goto(f"{base}/{area.first.get_attribute('href')}")
+        page.wait_for_timeout(SETTLE_MS)
+    verdict.check(
+        page.locator(".scene-card").count() > 0,
+        "areas: an area's page shows its latest scene",
+    )
+
+
+def viewer_without_tiles(
+    browser: Any, base: str, viewer: str, verdict: Verdict
+) -> None:
+    """Step 4, the viewer: no copy of a file is kept, and the page says so.
+
+    In a context of its own, so no tile the first context cached hides the
+    failure: a file is immutable, and a browser keeps it (D-376).
+    """
+    context = browser.new_context(viewport={"width": 1280, "height": 900})
+    page = context.new_page()
+    page.goto(f"{base}/{viewer}")
+    said = page.locator("p[role=alert]:has-text('map tiles could not be loaded')")
+    try:
+        said.first.wait_for(timeout=NOT_LIVE_MS)
+        missing = True
+    except Exception:
+        missing = False
+    verdict.check(
+        missing, "imagery: with the api stopped, the viewer says the tiles are missing"
+    )
+    context.close()
+
+
 def rehearse_outage(page: Any, base: str, compose: Compose, verdict: Verdict) -> None:
     """Steps 4 and 5: stop the api, read every view as a copy, start it again."""
+    viewer = first_scene(page, base)
     print("-> stop the api", flush=True)
     run(compose, "stop", "api")
     try:
@@ -227,6 +307,8 @@ def rehearse_outage(page: Any, base: str, compose: Compose, verdict: Verdict) ->
         except Exception:
             kept_none = False
         verdict.check(kept_none, "plan: with the api stopped, it says no copy was kept")
+        if viewer is not None:
+            viewer_without_tiles(page.context.browser, base, viewer, verdict)
     finally:
         print("-> start the api", flush=True)
         run(compose, "start", "api")
