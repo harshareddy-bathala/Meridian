@@ -19,6 +19,16 @@ raw_root = "../data/ingest/raw"
 [sources.reference_archive]
 enabled = false
 
+# --- Stage 38 --------------------------------------------------------------
+
+# Place names for labelling imagery, one file each, fetched monthly. Labels
+# only: loading one records the file and writes no sample (D-374).
+[sources.geonames_cities1000]
+enabled = true
+
+[sources.natural_earth_places]
+enabled = true
+
 # --- Stage 34 --------------------------------------------------------------
 
 # Current element sets for the satellites the catalogue holds (D-320). Load
@@ -73,3 +83,14 @@ points = [[12.97, 77.59]]
 enabled = true
 bbox = [77.3, 12.8, 77.9, 13.2]
 layers = ["MODIS_Terra_CorrectedReflectance_TrueColor"]
+
+# Open imagery of the published areas, searched, rendered and published once a
+# day by the ingest-imagery service (D-372 to D-375). The paths are as that
+# container sees them: PUBLISHED_DIR is /published, read-only but for
+# /published/imagery, which the API's IMAGERY_INDEX names. Each source's terms
+# page is re-read before its first search (D-220).
+[imagery]
+summary = "/published/areas-summary.json"   # the file AREAS_SUMMARY names
+published = "/published/imagery"
+sources = ["sentinel2_l2a", "landsat_c2_l2", "nasa_gibs"]
+# max_bytes = 5368709120   # 5 GiB; each area's latest scene per class is kept anyway

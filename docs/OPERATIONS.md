@@ -1189,7 +1189,16 @@ Open `http://localhost:8080/#/kiosk` on the screen it is shown on. The kiosk cyc
 - **About an hour after the first passes:** the first diagnosed losses.
 - **Never, from a cold start:** a receive-chain warning, because a chain needs two weeks of its own history first (D-293). The view says *No receive-chain warning is open*, and that is true. SC-9's sealed fleets are the evidence that warnings work.
 
-**Rehearse it in a browser** before it is shown, against the running stack. The tool walks every view and fails on a content-security-policy violation or a console error. It checks that simulated figures carry the badge and that a chosen pass is explained. Then it stops the api for about a minute, checks that every view says *Not live*, and starts the api again (D-335):
+**Give it an area and a picture of it, offline** (D-378). The demonstration has no network, so its one picture is simulated: a synthetic archive, searched, counted, drawn and published by the same code a real scene goes through, and labelled *Simulated* in its credit, its caption, its manifest, the API and the dashboard. With the stack up:
+
+```bash
+python deploy/tools/demo_imagery.py -p meridian-demo --env-file <the env file the stack uses>
+AREAS_PUBLISHED=true docker compose -p meridian-demo -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml --profile demo up -d api
+```
+
+The tool registers Bengaluru urban if no area is, writes the area's regional summary from a snapshot of the demo's own database to `data/published/areas.json`, and publishes the simulated scene under `data/published/imagery/`. With no public product loaded, each of the area's series says why it has no value. If `data/published` belongs to root, Docker made it from a mount that found it missing. Remove it while it is empty, and run the tool again.
+
+**Rehearse it in a browser** before it is shown, against the running stack. The tool walks every view and fails on a content-security-policy violation or a console error. It checks that simulated figures carry the badge and that a chosen pass is explained. It checks the Imagery page: the gallery keeps Meridian's own pictures apart, the simulated scene is badged, the viewer draws its tiles, markers and downloads, and the area's page shows the scene. Then it stops the api for about a minute, checks that every view says *Not live* and that the viewer says its tiles are missing, and starts the api again (D-335, D-378):
 
 ```bash
 uvx --with playwright python deploy/tools/demo_rehearsal.py --base http://localhost:8080

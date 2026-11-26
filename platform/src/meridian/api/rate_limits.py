@@ -5,6 +5,8 @@ station is one caller wherever its requests come from. Every MSP request and
 every public API request is also limited by the caller's address, which bounds
 anyone rotating tokens. The station planner, which searches orbits for every
 place it is asked about, has a stricter bucket of its own beside that (D-370).
+A scene's files under ``/imagery/`` draw on a looser bucket instead of the
+public one, because one viewer asks for dozens of tiles at once (D-376).
 ``/``, ``/assets/``, ``/healthz`` and ``/metrics`` are not limited.
 
 A refused request is answered before routing, with MSP §6's ``rate_limited`` on
@@ -17,7 +19,8 @@ The limiter is built by the application's lifespan from ``Settings`` and read
 from ``app.state`` per request, so a process with ``RATE_LIMITS=off`` — or a
 test that never started the lifespan — has none and passes everything through.
 
-Reference: docs/MSP-SPEC.md §6; docs/DECISIONS.md D-051, D-088, D-202, D-370.
+Reference: docs/MSP-SPEC.md §6; docs/DECISIONS.md D-051, D-088, D-202, D-370,
+D-376.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ from meridian.api.token_bucket import BucketStore, Clock, Rate, retry_after_s
 
 __all__ = [
     "HEARTBEAT_RATE",
+    "IMAGERY_FILES_RATE",
     "MSP_CLIENT_RATE",
     "OBSERVATIONS_RATE",
     "PLAN_CLIENT_RATE",
@@ -67,7 +71,14 @@ read costs a query. Six places at once, then one every ten seconds:
 more than a person trying places on a map, and far less than a script
 walking the globe (D-370)."""
 
+IMAGERY_FILES_RATE = Rate(capacity=200, per_second=50)
+"""Per client on ``/imagery/``, instead of the public bucket. A viewer opening
+a scene asks for a few dozen tiles at once and more as it is panned; two
+hundred at once, then fifty a second, covers a reader and bounds a script.
+Each file is hashed as it is served, which is the work this bounds (D-376)."""
+
 _PLAN_PATH = "/api/v1/plan"
+_IMAGERY_PREFIX = "/imagery/"
 
 _MSP_PREFIX = "/msp/"
 _TOKEN_ENDPOINTS = {"/heartbeat": "heartbeat", "/observations": "observations"}
@@ -76,7 +87,7 @@ _UNKNOWN_CLIENT = "unknown"
 
 
 class RateLimiter:
-    """The four buckets of D-202 and the planner's, and which a request draws on."""
+    """D-202's four buckets, the planner's and imagery's, and which a request takes."""
 
     def __init__(
         self, *, clock: Clock = time.monotonic, client_header: str = ""
@@ -95,6 +106,7 @@ class RateLimiter:
             "msp": BucketStore(MSP_CLIENT_RATE, clock=clock),
             "public": BucketStore(PUBLIC_CLIENT_RATE, clock=clock),
             "plan": BucketStore(PLAN_CLIENT_RATE, clock=clock),
+            "imagery_files": BucketStore(IMAGERY_FILES_RATE, clock=clock),
         }
 
     def admit(self, scope: Scope) -> float:
@@ -116,11 +128,12 @@ class RateLimiter:
     def _charges(self, scope: Scope) -> list[tuple[str, str]]:
         path = cast(str, scope["path"])
         headers = _headers(scope)
+        if path.startswith(_IMAGERY_PREFIX):
+            return [("imagery_files", self._client(scope, headers))]
         if is_public_surface(path):
             client = self._client(scope, headers)
-            if path == _PLAN_PATH:
-                return [("public", client), ("plan", client)]
-            return [("public", client)]
+            planner = [("plan", client)] if path == _PLAN_PATH else []
+            return [("public", client), *planner]
         if not path.startswith(_MSP_PREFIX):
             return []
         charges = [("msp", self._client(scope, headers))]

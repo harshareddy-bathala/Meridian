@@ -2001,6 +2001,8 @@ The build lives in the image at the path `DASHBOARD_DIR` names. It is read when 
 
 *Rejected: HTML5 history routing with the fallback limited to paths without a dot.* Nicer URLs, and it still answers `200` for `/anything-at-all`, which is a page telling a caller that a URL exists when it does not.
 
+*Amended 2026-11-26 (D-376):* a published scene's files are served at `/imagery/{hash}/{path}` by one explicit route, not a static mount. The route serves only a file the scene's manifest lists, so every other path under `/imagery/` stays unrouted or `not_found`, as this entry requires.
+
 ---
 
 ## D-092 — The station map draws its own graticule; tiles are optional decoration from OpenStreetMap
@@ -4414,6 +4416,8 @@ Heartbeats and observations have separate buckets so that a queue flush can neve
 *Rejected: a shared store such as Redis.* It would give exact network-wide figures, at the cost of a service on the Pi that must be up for the platform to answer at all. The edge already gives the network-wide figure for the public API.
 
 *Amended 2026-11-14 (D-370):* the station planner draws on a fifth bucket beside the public one, six places then one every ten seconds per caller, because a new place costs an orbit search where any other read costs a query.
+
+*Amended 2026-11-26 (D-376):* a published scene's files under `/imagery/` draw on a sixth bucket, `imagery_files`, instead of the public one: 200 at once, then 50 a second per caller. A viewer asks for a few dozen tiles at once, which the public bucket's five a second would refuse.
 
 ---
 
@@ -7351,6 +7355,304 @@ The roadmap's last page is for someone who owns no station and is deciding wheth
 
 ---
 
+## D-371 — Open imagery is decoded in one package of the archive layer, behind an extra, and its sources were credited before any was fetched
+
+**2026-11-14 · accepted** · *`ingest/src/meridian_ingest/imagery/{__init__,available,model,model_checks,model_geometry,model_files,model_manifest}.py`; `ingest/pyproject.toml` (`[imagery]`); root `pyproject.toml`; `uv.lock`; `deploy/ingest/Dockerfile`; `.github/workflows/ci.yml` (`image`); `ATTRIBUTION.md`; `tests/conftest.py` (the `gdal` layer); `tests/unit/{test_imagery_boundaries,test_imagery_model,test_public_sources}.py`; Stage 38. Narrows D-133's construction, not its rule. Applies D-134, D-138, D-141, D-142, D-226 and D-326.*
+
+Stage 38 publishes the clearest recent open scene over each published area, with latitude and longitude drawn by our own code and every marker cited. Three things had to be settled before any of it is written. Rendering a scene means decoding it, and since Stage 31 a test has forbidden every image library anywhere in `meridian_ingest`: that is how D-133 was made true by construction. GDAL, which reads a window of a remote scene, does its own HTTP in C, where the network guard of D-142 cannot see it. And four new sources need their terms recorded before the first fetch (D-134).
+
+**Decision.**
+- **One package decodes, and its edges are tested.** `meridian_ingest.imagery` may import an image library; nothing else in the distribution may, so every adapter and normaliser stays under Stage 31's test unchanged. D-133's rule is that no number comes from a picture, and four boundary rules keep it here:
+  - nothing outside the package imports it, except the command that runs it;
+  - it imports no loader and nothing from `meridian.store`, so nothing it computes from a pixel has a way to become a sample. It may read records, such as a FIRMS normaliser's output or a published summary;
+  - its record-only modules (the model, the annotator, the caption and the gazetteer) import no image library and no NumPy, so a marker cannot be placed by reading the scene;
+  - GDAL is reached by one door: rasterio is called as `rasterio.open` and never bound early, and one module alone may write a `/vsicurl/` path.
+- **A fourth layer for the network guard.** `network_guard` now patches `rasterio.open` to refuse any path naming one of GDAL's network file systems, or any URL scheme. With the rules above, that is where every network read must enter. It has its own positive controls, as the socket layer has, and a local scene still opens under it. Like `psycopg`, it can be left alone by name.
+- **An extra, `meridian-ingest[imagery]`: rasterio, NumPy and Pillow.** An installation that never renders carries no GDAL, as one that never reads night-time lights carries no HDF5 (D-226). The ingest image installs it, and CI's image job checks that the image imports it and still has no station client. The image also installs `libexpat1`, the one library rasterio's wheel does not bundle. Without it, `import rasterio` failed in the image while passing on every development machine, which the first local build showed. The platform image does not install it (D-138). A missing extra is refused by name before any work starts. The lock has a manylinux aarch64 wheel for every new package, because the cloud host is arm64.
+- **No tiling library.** The plan named rio-tiler. Its current release depends on an HTTP client this project has not vetted, plus some twenty STAC extension packages. A tile pyramid is rasterio's own reprojection over each Web Mercator tile's bounds, and those bounds are five lines of arithmetic with a ground-truth test. The extra stays at three libraries.
+- **The shapes come first.** `imagery/model.py` defines the stored window, the citation, the marker, the manifest (`imagery-manifest-1`) and the index (`imagery-index-1`), in stdlib only. Everything imports them from `model.py`, which gathers them from four modules (the shared checks, the markers, the window and its files, the manifest and its index), so that each stays under `CODE-STANDARDS.md`'s 400 lines. Each refuses a rule broken when it is made, and any field it does not know when it is read back:
+  - a marker cites at least one record;
+  - a fire or a place is a point inside the scene;
+  - an area or its change is the area's box, never its polygon (D-326);
+  - a caption hashes to the digest its manifest states;
+  - a stored address has no query, which is where a provider's token rides;
+  - a window's longest side is at most 4096 px;
+  - a file's name is one we chose, never a source's string (D-141).
+
+  The publication time lives in the index, not the manifest. In the manifest it would give the same scene a new digest every day.
+- **The sources, credited first.** The new entries in `ATTRIBUTION.md`:
+  - Sentinel‑2 L2A on Earth Search (Copernicus free, full and open; adapted data carries "Contains modified Copernicus Sentinel data [Year]");
+  - Landsat Collection 2 Level‑2 through Planetary Computer (public domain);
+  - GeoNames cities1000 (CC BY 4.0);
+  - Natural Earth populated places (public domain).
+
+  Each was read from its own page on 2026-11-14, Planetary Computer's in a browser because its page renders only there. Its supplemental terms forbid sharing a token with a third party, which is why no address is stored with its query. The GIBS row now quotes its acknowledgement as its page gives it today: "Earth Science Data and Information System (ESDIS)", where the row had EOSDIS.
+
+*Rejected: deleting Stage 31's test.* It is the reason no adapter can read a pixel, and that is still true of every adapter.
+
+*Rejected: a second distribution for imagery.* The scene's provenance belongs in the same raw store, under the same attribution check and the same politeness, and a fifth distribution would have to depend on this one to reach them.
+
+*Rejected: guarding GDAL with its own configuration, such as a proxy that leads nowhere.* That still opens a connection, which is the thing a guard must refuse, and it would pass quietly if GDAL ignored the option.
+
+---
+
+## D-372 — A scene is chosen by the cloud its own classification layer counts over the area, and what was read is kept in the raw store
+
+**2026-11-18 · accepted** · *`ingest/src/meridian_ingest/imagery/{areas,sources,stac,pixels,cloud,stored,search,outcome}.py`; `ingest/src/meridian_ingest/{cli,cli_imagery,config,config_imagery}.py`; `pyproject.toml` (mypy, `rasterio.*`); `tests/unit/{test_imagery_catalogue,test_imagery_search,test_imagery_boundaries,test_ingest_config}.py`; Stage 38. Applies D-133, D-134, D-141, D-142, D-220, D-326 and D-371.*
+
+A published area needs one scene from each archive: the clearest recent one that shows it. Three things had to be settled first. Which areas are imaged at all. What "clearest" is measured by, when the only number a catalogue gives is a whole granule's cloud cover. And what is kept, so that the choice and the pixels can be checked later without going back to the archive.
+
+**Decision.**
+- **The areas are the published file's.** `meridian-ingest imagery search` reads `areas-summary-1`, the file `meridian regions summary` wrote and `AREAS_SUMMARY` names, and never `areas_of_interest`. An area that is registered but not published has no image, because nothing here can see it (D-326). Only each area's id, label and box are read. An area entry carrying any other field, a polygon above all, is refused.
+- **Clearest means least cloud over the area, counted from the product's own classification layer.**
+  - Sentinel‑2's SCL: classes 8, 9 and 10 are cloud, and 0 and 1 are not valid.
+  - Landsat's QA_PIXEL: bits 1, 2 and 3 are cloud, and bit 0 is fill.
+
+  The count runs over the window around the area's box on the scene's own grid. The visual asset is never consulted, because a cloud fraction read from the picture would be a number measured off a rendering (D-133). Scene-wide `eo:cloud_cover` only orders the passes and drops any over 80 %. The six least cloudy passes are counted. A pass that leaves more than 1 % of the box without data does not cover it and is refused, with its share said. A tie goes to the newer scene. The lookback is 30 days for Sentinel‑2 and 90 for Landsat. Landsat means 8 and 9 only, since Landsat 7's scenes since 2003 carry stripes of missing data.
+- **One pass is one scene, on one grid.** Granules of one acquisition are grouped: Sentinel‑2's datatake, or Landsat's platform, day and WRS-2 path. They are placed side by side on their shared grid, the first valid pixel in item-id order winning where they overlap. A pass across a UTM zone boundary becomes two candidate scenes, one per zone. So does a pass whose granules' overview grids do not line up. Joining either would mean resampling one granule onto another's grid.
+- **A window is the source's own pixels.** GDAL reads it over `/vsicurl/` by range requests, through `imagery/pixels.py`, the one door (D-371). It is cut outward to whole pixels on the source's grid, at native resolution, or at the finest of the source's own overviews that brings the longer side to 4096 px or under. Nothing is resampled.
+- **What is kept, and as what.** Everything goes into the raw store's existing layout (D-141):
+  - the search answer, exactly as it arrived;
+  - every classification window that was counted, so the choice can be checked again from the raw store alone;
+  - the chosen scene's display windows.
+
+  A window is a deflated GeoTIFF that gives the same bytes for the same pixels. It carries its `SceneWindow` record as a tag: item, asset, address without its query, grid and overview level. Its `source_version` is the item's own `updated` time, else its `created` time.
+- **The payload kinds stay `data` and `tile`.** The plan named two new kinds, `catalogue` and `scene`. `ingest_records.payload_kind` is CHECKed to the two existing kinds (0016), so a third kind would be a migration for rows that are never written: the imagery sources are not in the fetch registry, and `load` never visits them. A search answer and a classification window are `data`, records a number is read from. A display window and a GIBS tile are `tile`, pictures that are never sampled.
+- **GIBS is the daily wide view, with no cloud fraction.** It has no catalogue and no classification layer. The view is the previous UTC day's NOAA-20 VIIRS true colour, kept as tiles at level 8 of the geographic `250m` set, about 244 m a pixel. It states no cloud fraction rather than one guessed from the picture. NOAA-20 is used, not the Terra MODIS layer the display adapter uses, because Terra is decades past its design life. Part 9's live fetch confirms the layer is served at that level.
+- **A token is used in memory only.** Planetary Computer's anonymous read token is asked for through the retriever, paid from the budget, and never published. It is appended to an address at the door alone. A reader's `repr` and every message GDAL raises have it withheld. A test checks that no stored byte under `landsat_c2_l2/` contains it.
+- **Held to the same rules as `fetch`.** A source is refused unless its `ATTRIBUTION.md` entry is found (D-134). No imagery source runs unless one is named or listed in `[imagery] sources` (D-220). A run spends one budget per source across every area: the search, the token, and one request per window read. One area's failure stops no other.
+
+*Rejected: choosing by `eo:cloud_cover`.* It describes a 110 km granule. A few kilometres of city can sit under the one cloud of a clear scene, or in the one clear corner of a cloudy one.
+
+*Rejected: storing only the chosen scene's classification window.* Then the published fraction could be checked, but not the choice it won.
+
+*Rejected: the ETag as a window's version.* GDAL's range reads do not hand the response headers back. The item's own `updated` time names the same thing: which version of the scene the catalogue pointed at.
+
+---
+
+## D-373 — A scene is rendered from the raw store alone, with latitude and longitude drawn by our own arithmetic
+
+**2026-11-19 · accepted** · *`ingest/src/meridian_ingest/imagery/{scene,render,display,encode,graticule,webmercator,sources,model_manifest}.py`; `ingest/src/meridian_ingest/imagery/fonts/` (IBM Plex Sans Regular and its `OFL.txt`); `ATTRIBUTION.md`; `tests/unit/{test_imagery_render,test_imagery_graticule,test_imagery_boundaries,test_imagery_model}.py`; Stage 38. Applies D-133, D-141, D-326, D-371 and D-372.*
+
+A search keeps the source's own pixels over an area (D-372). What is published is something else: a picture a person can look at and a file a GIS tool can open in the right place. Four things had to be settled. What rendering may read. How each archive's pixels become colour. Which files a scene publishes. And how latitude and longitude get onto the picture without a library deciding where they go.
+
+**Decision.**
+- **Rendering reads the raw store and nothing else.** `render_scene(store, raw_paths, bounds, directory)` takes no address and no client, so a published scene can be made again from what was kept, with every archive offline (rule 8). Only `tile` payloads are drawn: a classification window is a record, and is refused. One picture comes from one source.
+- **The picture is EPSG:4326, north-up, from the box's north-west corner.** A projected scene is reprojected onto pixels as long on the ground as the source's own, in each direction, at the box's centre latitude, using the WGS 84 length of a degree there. So the pixels stay square on the ground and the resolution a manifest states is the one drawn. Granules are placed in item-id order, the first to cover a pixel winning, as the cloud count placed them. Coverage travels through the warp as an alpha band, not as a nodata value: a nodata value is per band, so a valid pixel with one band at 0 would lose that band, and GDAL moves a valid value off the nodata value as it writes. The first synthetic test showed both.
+- **Each archive's colour is its source's `rendering`, stated in the manifest's new `rendering` field.**
+  - Sentinel‑2: the `visual` asset as published, reprojected by bilinear resampling.
+  - Landsat: surface reflectance from the red, green and blue assets, scaled and offset as the product states, with reflectance 0 to 0.25 drawn as 0 to 255 and clipped above.
+  - GIBS: its tiles side by side on their own geographic grid, cut outward to whole pixels around the box, never resampled.
+- **The files.**
+  - `scene.tif`: a cloud-optimised GeoTIFF, red, green, blue and alpha. Deflate at level 9 with the horizontal predictor, 256-pixel blocks, averaged overviews, one encoding thread and no date tag.
+  - `scene.png` with `scene.pgw`. A world file names the centre of the top-left pixel, where the transform names its corner, so its origin is moved in by half a pixel.
+  - `tiles/<z>/<x>/<y>.webp`: 256-pixel Web Mercator tiles at quality 82, with no tile written where the scene shows nothing. The deepest zoom is the first whose pixel at the box's centre latitude is no larger than the scene's own, capped at 18. Three zooms above it are cut too. A tile's bounds are our own arithmetic, checked against the tile OpenStreetMap serves London from (D-371 dropped the tiling library).
+  - `display.png`: the picture people look at, described next.
+- **The display picture.** The scene is drawn at 1,200 px on its longer side, enlarged by repeating pixels, so a 30 m scene still looks like 30 m pixels, or reduced by averaging. Around it are:
+  - **the graticule.** Its interval is the finest of 0.01°, 0.02°, 0.05°, 0.1°, 0.2°, 0.5° and 1° that puts at most five lines across the longer side. Lines are held as whole hundredths of a degree, so none drifts. Each is taken to a pixel row or column through the picture's own affine transform and labelled like `12.90°N` and `77.60°E`.
+  - **a scale bar**: the longest 1, 2 or 5 × 10ⁿ m that fits in a quarter of the width.
+  - **a north arrow**, which on a north-up grid points up the picture.
+  - **the source's credit**, wrapped to fit: "Contains modified Copernicus Sentinel data [Year]", the USGS's courtesy line, and GIBS's acknowledgement in full.
+
+  Text is IBM Plex Sans, carried inside the package with its licence so the ingest image needs no system font. It is laid out by FreeType's basic layout, so the result does not depend on whether a shaping library is installed.
+- **The same inputs write the same bytes.** Every encoder has fixed options and nothing that carries a time, and a test renders a scene twice and compares every file. That is what lets Part 5 name a directory by its contents and check it by rendering it again.
+- **Where a line or a tile falls is arithmetic on coordinates.** `graticule.py` and `webmercator.py` are stdlib only and join the record-only list in the boundary test, so neither can read a pixel (D-133).
+
+*Rejected: a mapping library for the graticule.* In an EPSG:4326 picture every latitude and longitude line is straight. The arithmetic is a few lines with a ground-truth test, and a plotting stack would be the largest dependency in the image.
+
+*Rejected: a per-scene stretch for Landsat, such as cutting at percentiles.* Two scenes of one area would then not be comparable in brightness, and a picture's colour would depend on how much cloud was in it.
+
+*Rejected: cutting tiles straight from the source windows.* That would save one resampling, the source to EPSG:4326 and then to Web Mercator. But each tile would repeat the granule merge, and the picture it is cut from is already at the source's resolution, so the second resampling loses little.
+
+---
+
+## D-374 — Markers are placed from records and cite them, and the caption is a versioned function of the facts
+
+**2026-11-25 · accepted** · *`ingest/src/meridian_ingest/imagery/{annotate,annotate_fires,gazetteer,caption,display,display_markers,render,sources,model_checks,model_geometry}.py`; `ingest/src/meridian_ingest/adapters/public/{gazetteers,registrations}.py`; `ingest/src/meridian_ingest/config_imagery.py`; `deploy/ingest{,.live}.toml.example`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_annotate,test_gazetteer_sources,test_imagery_render,test_imagery_model,test_imagery_catalogue,test_public_sources,test_ingest_config}.py`; `tests/integration/test_environment_load.py`; Stage 38. Applies D-133, D-141, D-221, D-303, D-326 and D-371 to D-373.*
+
+The gate asks for every marker on a scene to be explained and cited, and for a caption that regenerates. Four things had to be settled. What a marker may be placed from. Where place names come from, for a city and for a forest a hundred kilometres across. How a fire that nobody looked for differs from a fire that was not there. And what the caption says, so that it is also the picture's alt text.
+
+**Decision.**
+- **A marker comes from a record, never from the picture.** The annotator takes records and a box and returns records. It and the caption are on the boundary test's record-only list, so neither can import an image library or NumPy (D-371). A scene's markers come in one order, numbered from one, and the number on the picture is the marker's index in the manifest:
+  - **the area**, drawn as the box `areas-summary-1` publishes, never its polygon (D-326);
+  - **its changes**, each as the summary states it: the quantity, both periods, the change and its interval, the verdict and its reason;
+  - **fires** from NASA FIRMS;
+  - **places** from a gazetteer.
+- **Each marker has a short `label` beside its `text`.** The label is what the picture and the map write next to the marker: a place's name, "Fire", the area's name. The text is the explanation. With two fields, nothing has to cut a label out of a sentence. `Annotation` gains the field, and a manifest is still `imagery-manifest-1`, since none has been published yet.
+- **Meridian's own records are cited where they are served.** The area and its changes cite `/api/v1/areas`, with the sealed report's hash as the record id. A citation's address is an https URL or a path under `/api/v1/`, and nothing else. A path is right on any deployment, where a hostname written into ingest would point a self-hosted copy at someone else's site.
+- **Fires are FIRMS detections inside the box within a day of the scene.** The window touches up to three UTC days. Each day is read from the newest FIRMS artefact that covers all of that day and a box holding the area's, because FIRMS revises a near-real-time day as it settles. The detections are re-read by the same `FirmsNormaliser` that `load` uses, so a marker and a stored sample are one reading of the same bytes. Each marker cites the artefact's digest and its CSV row. At most 30 are marked, the most powerful first, and the caption says how many were found.
+- **A day nobody fetched is not a day without fire.** The record keeps which days were held. The caption says "no active fire detected" only for held days. Days not held are "not checked", which is rule 7's distinction applied to someone else's records.
+- **Places come from two registered gazetteers, chosen by the area's size.**
+  - The sources are `geonames_cities1000` (CC BY 4.0) and `natural_earth_places` (public domain), each one file fetched by `follow` once a month.
+  - Each normaliser reads its file whole, to refuse one that is not the format, and returns an empty batch. So `load` records where the file came from and writes no sample: a place name labels a picture and is never a quantity.
+  - Their class is `regional_product`, the nearest of the classes `ingest_sources` is CHECKed against. Nothing reads the class to decide anything, and a new one would be a migration for no behaviour.
+  - Natural Earth comes as GeoJSON from the project's own repository, which its download page links to. The standard library reads it, where the zipped shapefile would need a shapefile reader.
+  - GeoNames labels a box at most 50 km on its longer side, where a 10 m scene shows towns. Natural Earth labels a larger box. `[imagery.areas."<id>"] gazetteer` overrides the rule for one area. When the chosen gazetteer has never been fetched, the scene has no labels and says so, and does not fall back to the other.
+  - Labels are thinned the same way every time: by population, then name, then id. A place closer than a tenth of the box's longer side to one already kept is dropped, and at most 12 are kept.
+- **Markers are drawn on the display picture, and only there.** The area and its changes share one outlined box, numbered in its corner. A fire is a numbered dot and a place is a named ring. Each is placed through the picture's own transform, as the graticule is. A key under the picture says what the numbers are. The credits each marked source asks for are added to the image's own: GeoNames' CC BY credit, FIRMS' requested citation, and Natural Earth's, which it does not ask for. The GeoTIFF, the PNG and the tiles carry the scene's pixels and nothing drawn over them, and a test checks that a marked render differs from an unmarked one in `display.png` alone. A GIS tool or the viewer draws markers as layers of its own.
+- **The caption is `imagery-caption-1`, a plain-text function of its facts (D-303).**
+  - It states what the picture is, of which area, from which satellite and instrument, and when.
+  - It gives the box's extent and the pixel size the files keep.
+  - It gives the cloud over the area's box and the layer that counted it. GIBS states no share, and says why.
+  - It names each kind of marker with its source, and closes with the image's credit.
+  - No clock, locale or environment enters it. A test pins its digest on fixed facts, so a changed sentence is a new version, and a published caption still hashes to its manifest's digest. It is also the alt text.
+
+*Rejected: placing a marker where the picture shows it*, such as a burn scar or a town's roofs. That is a number read off a rendering (D-133), and a marker nobody could cite.
+
+*Rejected: drawing markers into the GeoTIFF and the tiles.* The download would no longer be the archive's pixels, and the viewer could not turn a layer off.
+
+*Rejected: the scene's own day only, for fires.* A daytime scene and the night's overpass would then never meet, and a fire detected an hour after midnight UTC would vanish from a morning scene.
+
+*Rejected: a `reference` source class.* It would be a migration to a CHECKed column for a class that changes nothing.
+
+---
+
+## D-375 — A scene is published under its manifest's digest, kept under a size cap, and made again from the inputs it names
+
+**2026-11-26 · accepted** · *`ingest/src/meridian_ingest/imagery/{build,publish,render,caption,sources,model_checks}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run,config_imagery}.py`; `deploy/docker-compose.ingest.yml`; `deploy/ingest{,.live}.toml.example`; `tests/unit/{test_imagery_publish,test_imagery_boundaries,test_imagery_annotate,test_imagery_catalogue,test_compose_hardening}.py`; Stage 38. Applies D-141, D-206, D-229, D-326, D-369 and D-371 to D-374.*
+
+Parts 2 to 4 find a scene, draw it and mark it. Part 5 turns that into something the API can serve and an outsider can check. Four things had to be settled. What one published scene is made from, so that it can be made again. Where it goes and how a reader never sees half of one. What happens on a daily refresh when the clearest scene is the one already shown. And how the disk on a 2 GB host is kept from filling.
+
+**Decision.**
+- **A scene is made from raw paths, by one function.** `build_scene` takes the area and a list of raw paths, and sorts them by what the raw store says each one is. A `tile` is the picture. A `data` window is a classification layer. Any other `data` is the catalogue's answer. A daily refresh and `imagery verify` both call it, so there is one way a scene comes to be.
+  - **The cloud fraction is counted again from the stored classification windows**, through the same door a search reads the archive through, pointed at the stored file. It is never carried over from the search. A test shows the two counts agree.
+  - **The satellite is read from the catalogue's answer**, for the items drawn, and named as its operator names it: `sentinel-2b` becomes Sentinel-2B, and `landsat-9` becomes Landsat 9.
+  - A STAC scene without its catalogue answer, or without its classification windows, is refused. A GIBS view takes its tiles and nothing else.
+- **The manifest names every input by its digest.** That covers the catalogue answer, each classification window (a new input kind, `classification`, since no manifest has been published yet), each display window, the areas summary, the FIRMS files, the gazetteer and the caption template. The template is named by `TEMPLATE_SHA256`, the digest of its caption of the reference facts the caption test pins. An edited sentence that kept the version's name would then show as an input that no longer matches.
+- **Publishing is a rename, and the index comes after it.** A scene is rendered under `<imagery>/.incoming/`. Its manifest is written beside the files and everything is made read-only. The top directory is sealed after its rename, as the raw store's is. It is renamed to `<imagery>/<hash12>/`, the first twelve digits of the manifest's digest. Then `index.json` is replaced whole. Only after that is any directory the index no longer lists removed. A publish interrupted before the index is rewritten leaves the index as it was. One publish runs at a time, under a file lock, whichever process runs it. A damaged index stops a publish and is never replaced on a guess.
+- **A scene already shown is not shown again.** A refresh fetches the clearest scene again every day, so its raw paths, and therefore its manifest, are new even when the scene is not. If a listed scene of the same area, source and acquisition would publish the same files, markers and caption, it is kept and nothing is written. If they differ, the new one replaces it in the index and the old directory goes. That happens when a FIRMS day has settled or a new areas summary has changed the markers. So the gallery shows each acquisition once, and its newest reading.
+- **The cap is 5 GiB, `[imagery] max_bytes`, and the latest scene of each area and class is kept regardless.** Above the cap, the oldest acquisitions go first. An area with no picture is a worse answer than a disk a little over its budget. The cap is in the settings file and not an environment variable, as the plan had it, so that ingest has one place where its settings are written.
+- **`verify` sees only what the manifest names.** Markers are chosen from the raw store: the newest FIRMS file for each day, and the newest gazetteer. Months later there are newer ones. A `PinnedStore` lists only the manifest's inputs, so the same choice is made again, and the rebuilt manifest is compared with the held one digest for digest. Every published file is also checked against its stated digest and size. The areas summary must be the file the scene was made from. If it has been rewritten since, `verify` says which report to write it again from (rule 8, through the sealed report).
+- **The commands.**
+  - `imagery refresh`: every published area in every enabled source. One area's failure stops no other.
+  - `imagery render --area N <raw paths>`: publishes from raw paths already held, with no socket. Part 8's offline demo scene comes this way.
+  - `imagery list`: runs without the extra.
+  - `imagery verify <hash>`.
+
+  They live in `cli_imagery_run.py`, beside `cli_imagery.py`, which keeps the parser and `search`, so that each stays under 400 lines. The boundary test's list of importers gains the one file, and `publish` joins the record-only modules: publishing moves files and decodes nothing.
+- **The `ingest-imagery` service runs `refresh --interval 86400`.** It uses the ingest image, hardened as D-206 asks. It has no database URL and no `depends_on`, because a scene is a manifest and files, never a row (D-229). It has a 1 GB memory limit. `PUBLISHED_DIR` is mounted read-only, apart from `PUBLISHED_DIR/imagery`, which the host creates, owned by uid 10001. Its healthcheck asks only whether it is alive: the file is touched every minute while it waits and between areas while it works. Whether a source answered is in the log, and a restart would not make one answer.
+
+*Rejected: naming the directory by the files alone, leaving the inputs out of the digest.* Then two manifests that name different raw paths would claim one directory, and the one already there would no longer describe its own provenance.
+
+*Rejected: publishing every day's fetch of a scene.* That would mean three areas and three sources, a new directory each every day, of pictures identical to yesterday's. Each would push the last out of Cloudflare's cache, and the gallery would list one acquisition many times.
+
+*Rejected: keeping a copy of the areas summary inside each scene.* The summary is regenerable from its sealed report, which is kept. A copy in each directory would be a second record of the same facts, able to disagree with the first.
+
+---
+
+## D-376 — Published scenes are listed only while their area is, and each file is served only while it matches its manifest
+
+**2026-11-26 · accepted** · *`meridian/api/public/{imagery,areas,envelope,surface}.py`; `meridian/api/public/models/imagery.py`; `meridian/api/{imagery_files,rate_limits,app}.py`; `meridian/config.py` (`IMAGERY_INDEX`); `deploy/{docker-compose.yml,.env.example}`; `deploy/front/nginx.conf`; `deploy/tools/front_warm.py`; `docs/THREAT-MODEL.md`; `tests/unit/{test_imagery_endpoint_models,test_public_privacy,test_front_config,test_front_warm}.py`; `tests/msp_conformance/{test_public_imagery_endpoint,test_rate_limits}.py`; Stage 38. Amends D-091 and D-202. Applies D-085, D-086, D-138, D-208, D-282, D-326, D-332, D-369 and D-375.*
+
+Part 5 publishes each scene as a directory named by its manifest, with an index beside them (D-375). Part 6 serves them. Five things had to be settled. Which scenes a reader may see. How far the API trusts what ingest wrote. Where the files are served, given that a viewer asks for dozens of tiles at once. How long a copy may be kept. And what the front keeps when the API is down.
+
+**Decision.**
+- **`IMAGERY_INDEX` names the index**, as the API container sees it: `/published/imagery/index.json`. The files are read from beside it.
+- **A scene is listed only while its area is published.** That means `AREAS_PUBLISHED` is on, and the area is in the summary `AREAS_SUMMARY` names, read through the same function `/api/v1/areas` uses. A scene of any other area is not listed, its detail is `not_found`, and so is each of its files. Without the index, or without published areas, the listing and the detail are D-086's `not_yet_computed`.
+- **`GET /api/v1/imagery`** lists the scenes, newest acquisition first. It can filter by `area`, `source_class`, `since` and `until`, both bounds inclusive and with a time zone. It pages by keyset on the acquisition time, area, class and name (D-085). An item says enough to draw a gallery card: the area's label, the satellite and instrument, when the scene was acquired and published, the cloud share, the caption (which is the alt text), the credit and the display picture's address. **`GET /api/v1/imagery/{hash}`** is one scene's manifest as published, with the address its files are under. Both say `simulated: false`: public archive imagery is the archive's measurement, and none is simulated.
+- **Checked, not trusted** (D-332, D-369). The API has its own strict models of the index and the manifest, because the platform does not install ingest (D-138). A test holds them equal to what the publisher writes. On top of what the models check:
+  - a manifest's bytes must hash to the name it is published under;
+  - its area, source, class and acquisition must be its index entry's.
+
+  A damaged index or manifest is a `server_error` naming the setting, never part of a list. A manifest is parsed once per version of its file, keyed on the file's size and time, so a viewer's tile requests do not parse it again each time.
+- **The files are served at `/imagery/{hash}/{path}`, by an explicit route** (amending D-091).
+  - It serves a file the manifest lists, or the manifest itself, and nothing else.
+  - A file is hashed in pieces as it is served, and refused if it no longer has its manifest's digest and size.
+  - Every response is `Cache-Control: public, max-age=31536000, immutable`, since the name is the content's.
+  - The GeoTIFF, the PNG, its world file and the manifest are attachments. The display picture and the tiles are inline.
+  - Errors under `/imagery/` use the public API's words: `is_public_surface` now covers the prefix, so a refusal there is `not_found` or `invalid_query`, as on `/api/v1`.
+  - The content-security policy is the platform's own and unchanged: `img-src 'self'` already admits same-origin pictures.
+- **A rate bucket of its own** (amending D-202). The edge rule covers `/api/` only. The public bucket's five a second would refuse a viewer's first screen of tiles. So `/imagery/` draws on `imagery_files`, 200 at once then 50 a second per caller, and not on the public bucket. Hashing each file as it is served is the work it bounds.
+- **The front forwards `/imagery/` and never keeps a copy.** Its location streams a large file to the reader rather than spooling it to `/tmp`, which is the container's memory. During an outage the listing and the detail are served from the front's copies, as every view is (D-282). The viewer then says the tiles are unavailable (Part 7).
+- **The warmer learns `{area}` and the scenes.** A route naming `{area}` is asked for each area `/api/v1/areas` publishes, and every scene the listing names has its detail warmed. Files under `/imagery/` are never warmed. The routes themselves join `snapshot-routes.txt` in Part 7, with the dashboard's fetch functions, because `snapshotRoutes.test.ts` compares the two both ways.
+- **The privacy review gains a row** (`THREAT-MODEL.md` §7), and every new field is pinned. A scene discloses nothing about a station or a person. A raw-store path in its inputs says when the ingest host fetched an artefact, and nothing else.
+
+*Rejected: tiles under `/api/v1`.* There they would share the public bucket and the edge rule, which are sized for reading views, not for drawing a map.
+
+*Rejected: the front keeping the files.* They are immutable, so a copy would always be right. But it would go on serving a scene for 30 days after its area was taken down, which D-369 refused for evidence packages too.
+
+*Rejected: trusting the index's sizes and skipping the hash on each request.* A file damaged on disk would then be served under a name that promises other bytes. Hashing a tile costs microseconds, and a GeoTIFF is downloaded rarely.
+
+*Accepted with a step: the edge may keep a file after its area is taken down.* `immutable` for a year lets Cloudflare and browsers hold a scene's files. Taking an area down therefore includes purging the edge cache. Part 9 writes that step into `OPERATIONS.md`, and the §7 row says so.
+
+---
+
+## D-377 — The Imagery page keeps Meridian's own pictures apart from the archive's, and its viewer draws every marker from the manifest
+
+**2026-11-26 · accepted** · *`dashboard/src/{imagery,Imagery,SceneMap,graticule,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `dashboard/src/{imagery,route,views,snapshotRoutes}.test.ts(x)`; `dashboard/src/fixtures-imagery.test-data.ts`; Stage 38. Applies D-086, D-091, D-092, D-208, D-282, D-284, D-326, D-341, D-373, D-374 and D-376.*
+
+The API now serves each published scene, its manifest and its files (D-376). The dashboard has to show them. Four things had to be settled. How pictures Meridian received are told apart from an archive's, when there are none of the first kind yet. What the viewer draws, and from what. How a reader without a pointer or without sight reads the markers. And what the page says when the platform is away.
+
+**Decision.**
+- **Two views, linked as every view is.** `#/imagery` is the gallery and `#/imagery/<hash>` is one scene, by its twelve-digit name. Anything else after `#/imagery/` opens the gallery. "Imagery" joins the navigation after "Areas".
+- **Two kinds, never mixed.** The gallery's first section, *Received by Meridian*, says in words that Meridian's stations have received no image yet (D-086). Stage 40 fills it. The second section, *Public archive imagery, credited*, holds the cards.
+  - A card shows the display picture, with its caption as its alt text. Beside it are the area, the satellite and instrument with the class in a reader's words, when the scene was taken, the cloud share over the area, how long ago it was published, and the credit.
+  - A test checks that no picture appears in the first section, and that the archive's section comes after it.
+  - The simulated badge is drawn only when the platform says a scene is simulated. No archive scene is, so no badge appears today, and a test checks both cases (rule 5).
+- **The viewer is the manifest, drawn.**
+  - The published display picture, with its caption.
+  - The scene's facts: source, time, pixel size, cloud and how it was counted, rendering, credit and licence.
+  - A map of the scene's own tiles, same-origin, bounded to the scene and zoomed to its pyramid.
+  - Every marker, numbered as on the picture, with the records it cites.
+  - The files to keep, each named by the scene's digest.
+- **The map's graticule is the picture's.** `graticule.ts` gains `sceneStep` and `sceneGraticule`, written to ingest's rule: the finest of 0.01° to 1° that puts at most five lines a side, with values held as whole hundredths and labelled to the decimals the step needs. A test pins the answers ingest gives for three boxes, so the map's lines fall where the picture's do. Each line is labelled at the scene's edge, latitudes at the west and longitudes at the south, so no label covers a marker. The first browser check had them mid-line, which is why.
+- **Markers are layers built from the manifest, and nothing is HTML.** An area or its change is its box, never a polygon (D-326); a fire or a place is a point. Each label, tooltip and citation is set as text, so a place name with angle brackets is shown as written. Choosing a marker shows its number, its explanation and every record it cites. A citation is a link only when its address is `https://` or the API's own `/api/v1/` path. The decoder refuses a marker with no citation, so the page cannot show one.
+- **Under the pointer, the latitude and longitude.** The map says where the pointer is, to four decimals. The first check put the pointer on a fire and read back the fire's own coordinates.
+- **Every marker is in a table too.** It is in a `TableScroll` (D-341), numbered as on the picture, with its kind, its explanation and its sources, for a keyboard or a screen reader. The map's region label says so.
+- **When the platform is away.** The gallery and the scene's description are views like any other, kept by the front and marked *Not live* with their age (D-284). Each card also says how long ago its scene was published, which is the gate's "says how old it is". The files are never kept (D-376). So when the map's tiles fail before any has loaded, the page says in words that the map shows its graticule and markers without the picture.
+- **The routes file gains `/api/v1/imagery`,** with `fetchImagery` in the test that holds the file to the dashboard's requests. A scene's detail is warmed from the listing, as a package's files are from the datasets listing, so `fetchScene` is not in that test. The area page's route comes with it in Part 8.
+
+*Rejected: drawing the markers into the map as an image overlay of the display picture.* The picture's markers are pixels. As layers, each can be chosen, read and cited, and the tiles stay the archive's pixels (D-374).
+
+*Rejected: a fixed 0.1° graticule on the map, as the station map's is fixed at 10°.* On a 2 km box it would draw no line at all, and its lines would not match the published picture's.
+
+---
+
+## D-378 — A scene says whether it is simulated, the demonstration has one of its own, and imagery joins the area, changes and site pages
+
+**2026-11-26 · accepted** · *`ingest/src/meridian_ingest/imagery/{demo,sources,caption,build,publish,model_checks,model_manifest,model_index,model}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run}.py`; `platform/src/meridian/api/public/{imagery,models/imagery}.py`; `dashboard/src/{imagery,Imagery,Areas,Changes}.ts(x)`; `deploy/{docker-compose.demo.yml,front/snapshot-routes.txt}`; `deploy/tools/{demo_imagery,demo_rehearsal,front_warm}.py`; `pyproject.toml`; `site/{areas,data}/index.html`; `site/tools/content_checks.py`; `docs/{THREAT-MODEL,OPERATIONS}.md`; their tests; Stage 38. Applies rule 5 and D-086, D-138, D-326, D-335, D-363, D-372 to D-377.*
+
+Part 8 puts imagery where a reader already looks: an area's page, the Changes page and the public site. It also gives the demonstration a picture, so the rehearsal has one with no network. A demonstration picture with no network has to be synthetic. Rule 5 says simulated data is labelled at every layer, and until now no layer of a scene could say so. The team chose to add the field rather than demonstrate with a real scene rendered from stored files.
+
+**Decision.**
+- **`simulated` at every layer of a scene.**
+  - The manifest and the index entry carry it. No manifest had been published, so the shapes keep their names.
+  - The API's models carry it, and a manifest that disagrees with its index entry is refused.
+  - The listing and the detail answer with it, where they had said `false` by construction.
+  - The dashboard badges a simulated scene on its card, in the viewer and on the Changes page.
+  - A simulated scene's caption begins "Simulated image of…: synthetic pixels written for Meridian's demonstration, not a satellite's", and names no satellite. Its credit, drawn on the picture, begins "Simulated:".
+  - `imagery-caption-1`'s pinned digest is unchanged for every real scene.
+- **The demonstration has an archive of its own, `simulated_scene`**, shaped as Sentinel-2's.
+  - `meridian-ingest imagery demo` writes a catalogue answer and one item's `visual` and `scl` rasters, a plain pattern of bands no reader could take for a place, to a scratch directory.
+  - It then searches them through the same `search_area` a real search uses, with the catalogue and pixels served from those files. So the cloud count, the windows kept, the rendering, the manifest and the publishing are the real ones, and `imagery verify` checks the scene like any other.
+  - `search` and `refresh` refuse the source by name, since no network holds it.
+  - It needs no `ATTRIBUTION.md` entry, being nobody else's data. Its licence names Meridian's own.
+- **`deploy/tools/demo_imagery.py`** gives a running demo stack one area and that scene, the way `OPERATIONS.md` gives a real deployment its areas:
+  - it registers Bengaluru urban if no area is registered;
+  - it exports a snapshot of the demo's own database, runs `regions report` and `regions summary` to `data/published/areas.json`, and runs `imagery demo` in the ingest image, with no network;
+  - each container runs as the invoking user;
+  - the demo override names the two paths, and `AREAS_PUBLISHED=true` serves them.
+
+  The tool changes no setting itself. It refuses a `data/published` it cannot write, and says why: the first run met one Docker had created as root from a mount.
+- **An area's page shows its latest scene from each class.** That is one request per class, `?area={area}&source_class=…&limit=1`, rather than the plan's single `limit=1`, so that the daily view, published every day, never crowds the sharper ones out. The warmer expands `{area}` from `/api/v1/areas` (D-376), and the three routes join the routes file.
+- **The Changes page lists the scenes published in the last seven days.** They come from the listing the gallery reads. They are not events, because `/events` reads the database's records and a scene is a published file (D-363). This keeps Stage 37's promise that imagery would join what changes.
+- **The Live page shows no imagery.** It is about the network now, and a test reads its modules for an imagery import.
+- **The public site's areas and data pages** describe the pictures as public archive imagery, credited, kept apart from what Meridian's stations receive, and link to the dashboard's Imagery page. `verify_site.py` checks both pages for the words and the link.
+- **The rehearsal walks the Imagery page.** It checks that:
+  - the gallery keeps the two kinds apart, and the demonstration's scene is badged;
+  - the viewer draws its own tiles, lists its markers and offers five downloads;
+  - an area's page shows its scene;
+  - with the api stopped, the gallery says *Not live*, and the viewer, opened fresh so no cached tile hides it, says the tiles are missing.
+
+*Rejected: a synthetic scene under Sentinel-2's own source id.* Its credit would claim Copernicus data, and nothing in the record would tell it from a real scene.
+
+*Rejected: a `--simulated` flag on `render`.* The label would then be whatever an operator remembered to type. Here it follows from the source the pixels were read from.
+
+*Rejected: writing the demo's areas summary by hand.* It would name a report that was never computed. The tool computes the real one from the demo's own database, which says honestly that no product has a value yet.
+
+---
+
+
 ## Open
 
 All four questions carried from `MSP-SPEC.md` §9 are now resolved.
@@ -7753,6 +8055,14 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-368 the success criteria, published from a sealed run | `platform/src/meridian/reports/criteria.py`; `platform/src/meridian/cli_report.py`; `platform/src/meridian/api/public/{reports,models/criteria}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Criteria,criteria,Reports}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_report_criteria,test_public_privacy}.py`; `tests/integration/test_public_reports_endpoint.py` |
 | D-369 the data page and the public cut of an evidence package | `platform/src/meridian/public_precision.py`; `platform/src/meridian/datasets/{evidence_config,evidence_public,evidence_dataset,evidence_datasheet,evidence_index}.py`; `platform/src/meridian/cli_dataset.py`; `platform/src/meridian/api/public/{datasets,models/datasets,window_privacy,surface}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example,Dockerfile}`; `.dockerignore`; `deploy/front/{nginx.conf,snapshot-routes.txt}`; `deploy/tools/front_warm.py`; `dashboard/src/{Data,datasets,apiReference,credits,InlineParts,ReleaseNotes,releaseNotes,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `analysis/configs/dataset.toml.example`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_evidence_publish,test_evidence_config,test_public_privacy,test_front_warm,test_front_config}.py`; `tests/integration/test_public_datasets_endpoint.py` |
 | D-370 the station planner, and the batched coarse scan | `platform/src/meridian/api/public/{plan,plan_search,plan_model,models/plan,models/plan_model,surface}.py`; `platform/src/meridian/orbit/{pass_search,skyfield_service,range_rate}.py`; `platform/src/meridian/prediction/planner_file.py`; `platform/src/meridian/cli_model.py`; `platform/src/meridian/config.py`; `platform/src/meridian/api/rate_limits.py`; `platform/src/meridian/log_redaction.py`; `deploy/front/nginx.conf`; `deploy/{docker-compose.yml,.env.example}`; `dashboard/src/{Plan,plan,route,Nav,App,WaysIn}.ts(x)`; `dashboard/src/app.css`; `docs/{THREAT-MODEL,OPERATIONS}.md`; `tests/unit/{test_station_plan,test_pass_search,test_pass_windows_reference,test_public_privacy,test_front_config,test_log_redaction}.py`; `tests/integration/test_public_plan_endpoint.py`; `dashboard/src/plan.test.ts` |
+| D-371 imagery decoded in one package, behind an extra; its sources credited first | `ingest/src/meridian_ingest/imagery/{__init__,available,model,model_checks,model_geometry,model_files,model_manifest}.py`; `ingest/pyproject.toml`; `pyproject.toml`; `uv.lock`; `deploy/ingest/Dockerfile`; `.github/workflows/ci.yml`; `ATTRIBUTION.md`; `tests/conftest.py`; `tests/unit/{test_imagery_boundaries,test_imagery_model,test_public_sources}.py` |
+| D-372 a scene chosen by its own classification layer, and what was read kept | `ingest/src/meridian_ingest/imagery/{areas,sources,stac,pixels,cloud,stored,search,outcome}.py`; `ingest/src/meridian_ingest/{cli,cli_imagery,config,config_imagery}.py`; `pyproject.toml`; `tests/unit/{test_imagery_catalogue,test_imagery_search,test_imagery_boundaries,test_ingest_config}.py` |
+| D-373 a scene rendered from the raw store alone, its graticule our own arithmetic | `ingest/src/meridian_ingest/imagery/{scene,render,display,encode,graticule,webmercator,sources,model_manifest}.py`; `ingest/src/meridian_ingest/imagery/fonts/`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_render,test_imagery_graticule,test_imagery_boundaries,test_imagery_model}.py` |
+| D-374 markers placed from records and cited, and the caption a versioned function | `ingest/src/meridian_ingest/imagery/{annotate,annotate_fires,gazetteer,caption,display,display_markers,render,sources,model_checks,model_geometry}.py`; `ingest/src/meridian_ingest/adapters/public/{gazetteers,registrations}.py`; `ingest/src/meridian_ingest/config_imagery.py`; `deploy/ingest{,.live}.toml.example`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_annotate,test_gazetteer_sources,test_imagery_render,test_imagery_model,test_imagery_catalogue,test_public_sources,test_ingest_config}.py`; `tests/integration/test_environment_load.py` |
+| D-375 a scene published under its manifest's digest, capped, and made again | `ingest/src/meridian_ingest/imagery/{build,publish,render,caption,sources,model_checks}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run,config_imagery}.py`; `deploy/docker-compose.ingest.yml`; `deploy/ingest{,.live}.toml.example`; `tests/unit/{test_imagery_publish,test_imagery_boundaries,test_imagery_annotate,test_imagery_catalogue,test_compose_hardening}.py` |
+| D-376 scenes listed only while their area is, each file served while it matches | `platform/src/meridian/api/public/{imagery,areas,envelope,surface}.py`; `platform/src/meridian/api/public/models/imagery.py`; `platform/src/meridian/api/{imagery_files,rate_limits,app}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example}`; `deploy/front/nginx.conf`; `deploy/tools/front_warm.py`; `docs/THREAT-MODEL.md`; `tests/unit/{test_imagery_endpoint_models,test_public_privacy,test_front_config,test_front_warm}.py`; `tests/msp_conformance/{test_public_imagery_endpoint,test_rate_limits}.py` |
+| D-377 the Imagery page: Meridian's own pictures apart, every marker from the manifest | `dashboard/src/{imagery,Imagery,SceneMap,graticule,route,Nav,App}.ts(x)`; `dashboard/src/app.css`; `deploy/front/snapshot-routes.txt`; `dashboard/src/{imagery,route,views,snapshotRoutes}.test.ts(x)`; `dashboard/src/fixtures-imagery.test-data.ts` |
+| D-378 a scene says whether it is simulated; the demo's scene; imagery on areas, changes and the site | `ingest/src/meridian_ingest/imagery/{demo,sources,caption,build,publish,model_checks,model_manifest,model_index,model}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run}.py`; `platform/src/meridian/api/public/{imagery,models/imagery}.py`; `dashboard/src/{imagery,Imagery,Areas,Changes}.ts(x)`; `deploy/{docker-compose.demo.yml,front/snapshot-routes.txt}`; `deploy/tools/{demo_imagery,demo_rehearsal,front_warm}.py`; `pyproject.toml`; `site/{areas,data}/index.html`; `site/tools/content_checks.py`; `docs/{THREAT-MODEL,OPERATIONS}.md` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

@@ -16,6 +16,7 @@ each is a guard that can stop guarding in one of them without anybody noticing.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
@@ -109,8 +110,15 @@ class NetworkAccessError(AssertionError):
     """
 
 
-NETWORK_LAYERS = ("socket", "httpx", "psycopg")
+NETWORK_LAYERS = ("socket", "httpx", "psycopg", "gdal")
 """The layers :func:`network_guard` can patch, and can be asked to leave alone."""
+
+_NETWORK_PATH = re.compile(
+    r"/vsi(?:curl|s3|gs|az|adls|oss|swift|webhdfs|hdfs)|^[a-z][a-z0-9+.-]*://", re.I
+)
+"""A path GDAL would satisfy over a network: one of its network file systems
+anywhere in the path (``/vsizip//vsicurl/…`` chains them), or a URL scheme.
+``/vsimem/`` and local files never match."""
 
 
 @pytest.fixture
@@ -158,6 +166,8 @@ def network_guard(monkeypatch: pytest.MonkeyPatch) -> Any:
             _guard_httpx(monkeypatch)
         if "psycopg" not in exempt:
             _guard_psycopg(monkeypatch)
+        if "gdal" not in exempt:
+            _guard_gdal(monkeypatch)
 
     return install
 
@@ -181,6 +191,33 @@ def _guard_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
     import httpx
 
     monkeypatch.setattr(httpx.Client, "send", _refuses("httpx.Client.send"))
+
+
+def _guard_gdal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse a network path handed to ``rasterio.open`` — the one layer sockets miss.
+
+    GDAL reads a remote raster through its own libcurl, in C, exactly as libpq
+    talks to Postgres: no patch of Python's ``socket`` can see it. So the guard
+    sits where a path enters GDAL from our code. Two boundary rules make that
+    the only entrance (``tests/unit/test_imagery_boundaries.py``): ingest calls
+    rasterio as ``rasterio.open`` and never binds the name early, and one module
+    alone may write a ``/vsicurl/`` path (D-371).
+
+    Absent the imagery extra there is no GDAL to guard, and nothing is patched.
+    """
+    try:
+        import rasterio
+    except ImportError:
+        return
+    real = rasterio.open
+
+    def guarded(fp: object, *args: Any, **kwargs: Any) -> Any:
+        if isinstance(fp, str | os.PathLike) and _NETWORK_PATH.search(os.fspath(fp)):
+            message = f"rasterio.open reached for the network: {os.fspath(fp)}"
+            raise NetworkAccessError(message)
+        return real(fp, *args, **kwargs)
+
+    monkeypatch.setattr(rasterio, "open", guarded)
 
 
 def _guard_psycopg(monkeypatch: pytest.MonkeyPatch) -> None:

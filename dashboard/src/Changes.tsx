@@ -2,6 +2,7 @@ import { ChangeLine } from "./Areas";
 import { fetchAreas } from "./areas";
 import { fetchEventPage, type NetworkEvent } from "./events";
 import { Feed } from "./Feed";
+import { ImageryChanges } from "./Imagery";
 import { ReleaseNotes } from "./ReleaseNotes";
 import type { Route } from "./route";
 import { SnapshotNote } from "./SnapshotNote";
@@ -10,8 +11,9 @@ import { usePolled } from "./usePolled";
 import { useStations } from "./useStations";
 
 // What has changed: every change measured in an area, with its interval and the
-// report it came from (D-231, D-326); the network's events, older ones on
-// request (D-363); and every release (D-366). A change in an area is a
+// report it came from (D-231, D-326); the scenes published this week, which
+// Stage 37 promised would join the feed (D-378); the network's events, older
+// ones on request (D-363); and every release (D-366). A change in an area is a
 // report's, read from the summary file, not an event the database records.
 
 type Go = (route: Route) => void;
@@ -81,6 +83,8 @@ export function ChangesView({ go }: { go: Go }) {
       <h2 id="changes-heading">Changes</h2>
       <h3>In the areas of interest</h3>
       <AreaChanges />
+      <h3>Newly published imagery</h3>
+      <ImageryChanges />
       <h3>On the network, over the last week</h3>
       <NetworkEvents names={names} go={go} />
       <h3>Releases</h3>

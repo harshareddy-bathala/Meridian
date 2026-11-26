@@ -265,3 +265,53 @@ def test_an_answer_is_reported_without_its_body_for_the_drill(
         "date": "Fri, 02 Oct 2026 15:08:12 GMT",
         "seconds": 2.004,
     }
+
+
+def test_a_route_naming_an_area_is_asked_for_each_published_area(
+    warm: ModuleType,
+) -> None:
+    bodies = _site(warm)
+    bodies[warm.AREAS] = json.dumps(
+        {"status": "computed", "summary": {"areas": [{"area_id": 1}, {"area_id": 3}]}}
+    ).encode()
+    asked: list[str] = []
+
+    def fetch(path: str) -> object:
+        asked.append(path)
+        return warm.Answer(path, 200, "MISS", bodies.get(path, b"{}"))
+
+    warm.warm(fetch, [warm.DIRECTORY, warm.AREAS, "/api/v1/imagery?area={area}"])
+
+    assert "/api/v1/imagery?area=1" in asked
+    assert "/api/v1/imagery?area=3" in asked
+    assert asked.count(warm.AREAS) == 1, "asked once, for its ids and its copy"
+
+
+def test_every_listed_scene_has_its_detail_warmed_and_none_of_its_files(
+    warm: ModuleType,
+) -> None:
+    bodies = _site(warm)
+    bodies[warm.IMAGERY] = json.dumps(
+        {
+            "status": "computed",
+            "items": [{"hash": "0123456789ab", "display": "/imagery/x/display.png"}],
+            "next_cursor": None,
+        }
+    ).encode()
+    asked: list[str] = []
+
+    def fetch(path: str) -> object:
+        asked.append(path)
+        return warm.Answer(path, 200, "MISS", bodies.get(path, b"{}"))
+
+    warm.warm(fetch, [warm.DIRECTORY, warm.IMAGERY])
+
+    assert asked[-2:] == [warm.IMAGERY, "/api/v1/imagery/0123456789ab"]
+    assert not any(path.startswith("/imagery/") for path in asked)
+
+
+def test_nothing_published_names_no_area_and_no_scene(warm: ModuleType) -> None:
+    not_yet = json.dumps({"status": "not_yet_computed", "reason": "none"}).encode()
+
+    assert warm.area_ids(not_yet) == warm.scene_details(not_yet) == []
+    assert warm.area_ids(b"not json") == warm.scene_details(b"not json") == []

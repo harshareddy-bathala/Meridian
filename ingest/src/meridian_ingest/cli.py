@@ -7,6 +7,10 @@ So "downloaded once, then normalised and evaluated with no network" is
 something an operator does at a shell prompt rather than something a document
 claims (D-142).
 
+``follow`` runs ``fetch`` on a timer, and ``imagery`` reads windows of open
+scenes over the published areas (D-372); both reach a network through the
+same retriever and budget as ``fetch``, and neither writes a row.
+
 **A separate binary, not a ``meridian`` subcommand.** ``meridian.cli`` imports
 every ``cli_*`` module eagerly, so a subcommand would make the platform import
 the archive layer at start-up — an external archive one import from the
@@ -34,6 +38,7 @@ from meridian_ingest import __version__
 from meridian_ingest.adapters import REGISTRY, UnknownSourceError, normaliser_for
 from meridian_ingest.cli_fetch import run_fetch
 from meridian_ingest.cli_follow import add_follow, describe_limits, run_follow
+from meridian_ingest.cli_imagery import add_imagery, run_imagery
 from meridian_ingest.cli_load import run_load
 from meridian_ingest.config import ConfigurationError, IngestSettings, load_settings
 from meridian_ingest.console import refuse as _refuse
@@ -94,9 +99,10 @@ def _dispatch(args: argparse.Namespace, settings: IngestSettings) -> int:
     so there is no decision here to read — which is the point, because the
     decisions worth reading are inside the verbs.
     """
-    if args.source is not None and args.source not in REGISTRY:
+    named = getattr(args, "source", None)
+    if named is not None and named not in REGISTRY:
         known = ", ".join(sorted(REGISTRY))
-        message = f"no source is registered as {args.source!r}; registered: {known}"
+        message = f"no source is registered as {named!r}; registered: {known}"
         raise UnknownSourceError(message)
     verbs = {
         "sources": _run_sources,
@@ -105,6 +111,7 @@ def _dispatch(args: argparse.Namespace, settings: IngestSettings) -> int:
         "verify": _run_verify,
         "load": _run_load,
         "follow": run_follow,
+        "imagery": run_imagery,
     }
     return verbs[args.command](args, settings)
 
@@ -253,6 +260,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_source(commands.add_parser("load", help="load into the archive tables"))
     _add_source(commands.add_parser("verify", help="re-hash the raw store; exits 3"))
     add_follow(commands, _add_source)
+    add_imagery(commands)
     return parser
 
 

@@ -27,6 +27,7 @@ from meridian.api.public import (
     conditions,
     datasets,
     events,
+    imagery,
     losses,
     observations,
     passes,
@@ -63,4 +64,5 @@ router.include_router(events.router)
 router.include_router(results.router)
 router.include_router(reports.router)
 router.include_router(datasets.router)
+router.include_router(imagery.router)
 router.include_router(plan.router)

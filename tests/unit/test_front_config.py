@@ -96,3 +96,11 @@ def test_the_station_planner_is_forwarded_and_never_kept() -> None:
     """
     body = _locations(_conf())["= /api/v1/plan"]
     assert body.strip() == "proxy_pass http://platform;"
+
+
+def test_imagery_files_are_forwarded_and_never_kept() -> None:
+    """A copy here would outlive an area taken down (D-376); the api is asked."""
+    locations = _locations(_conf())
+    body = _directives(locations["/imagery/"])
+    assert body == ["proxy_pass http://platform;", "proxy_max_temp_file_size 0;"]
+    assert SNAPSHOT_INCLUDE not in locations["/imagery/"]

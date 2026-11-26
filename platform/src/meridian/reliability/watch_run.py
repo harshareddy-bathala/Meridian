@@ -215,12 +215,15 @@ class _Run:
             if written is not None:
                 self.raised.append(label)
                 self.open_now[(chain[0], chain[1])] = written
-        elif warning is not None and judgement.clears:
-            if clear_warning(
+        elif (
+            warning is not None
+            and judgement.clears
+            and clear_warning(
                 self.conn, warning, at=self.now, shortfall_db=judgement.shortfall_db
-            ):
-                self.cleared.append(label)
-                del self.open_now[(chain[0], chain[1])]
+            )
+        ):
+            self.cleared.append(label)
+            del self.open_now[(chain[0], chain[1])]
 
     def _recent(
         self,

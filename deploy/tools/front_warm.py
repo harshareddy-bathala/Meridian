@@ -10,8 +10,12 @@ view nobody opened before an outage has no copy, and a visitor arriving during
 the outage would find that station's page empty. This makes the requests the
 dashboard would make, for every station the directory lists, through the front:
 the page, the assets the page names, each route in
-``deploy/front/snapshot-routes.txt`` (D-283), and every file of every evidence
-package ``/api/v1/datasets`` lists, which the data page links to (D-369).
+``deploy/front/snapshot-routes.txt`` (D-283), every file of every evidence
+package ``/api/v1/datasets`` lists, which the data page links to (D-369), and
+the detail of every scene ``/api/v1/imagery`` lists, which the viewer opens
+from the gallery. A route naming ``{area}`` is asked for each area
+``/api/v1/areas`` publishes. A scene's files under ``/imagery/`` are never
+warmed: the front never keeps them (D-376).
 
 **It goes through the front, never to the api directly,** because a copy is kept
 only of what passes through the front, under the exact path and query a browser
@@ -57,6 +61,12 @@ STATION = "{station}"
 DIRECTORY = "/api/v1/stations?limit=200"
 """The directory's first page, as the dashboard asks for it; later pages add
 ``&cursor=``, which the dashboard appends after ``limit`` in the same way."""
+AREA = "{area}"
+AREAS = "/api/v1/areas"
+"""The published areas, whose ids a route naming ``{area}`` is asked for."""
+IMAGERY = "/api/v1/imagery"
+"""The published scenes. The viewer opens a scene's detail from the gallery,
+so each listed scene's is warmed from this answer."""
 DATASETS = "/api/v1/datasets"
 """The published evidence packages. Their files are links on the data page, not
 requests a view makes, so they are not in the routes file: they are read from
@@ -184,6 +194,34 @@ def dataset_files(body: bytes) -> list[str]:
     ]
 
 
+def area_ids(body: bytes) -> list[str]:
+    """The id of every area the areas answer publishes, in its order."""
+    try:
+        listed = json.loads(body)
+    except ValueError:
+        return []
+    if not isinstance(listed, dict) or listed.get("status") != "computed":
+        return []
+    summary = listed.get("summary")
+    areas = summary.get("areas", []) if isinstance(summary, dict) else []
+    return [str(one["area_id"]) for one in areas if isinstance(one, dict)]
+
+
+def scene_details(body: bytes) -> list[str]:
+    """The detail of every scene the imagery answer lists, as the viewer asks."""
+    try:
+        listed = json.loads(body)
+    except ValueError:
+        return []
+    if not isinstance(listed, dict) or listed.get("status") != "computed":
+        return []
+    return [
+        f"{IMAGERY}/{path_segment(str(one['hash']))}"
+        for one in listed.get("items", [])
+        if isinstance(one, dict)
+    ]
+
+
 def station_ids(fetch: Fetch, first: str = DIRECTORY) -> tuple[list[str], list[Answer]]:
     """Every station in the directory, following ``next_cursor`` as the dashboard."""
     ids: list[str] = []
@@ -219,16 +257,29 @@ def warm(fetch: Fetch, routes: Iterable[str]) -> Round:
     ids, pages = station_ids(fetch)
     result.answers.extend(pages)
     result.stations = len(ids)
+    routes = list(routes)
+    areas: list[str] = []
+    named = any(AREA in route for route in routes)
+    if named:
+        # Asked once, for its ids and for its own copy.
+        answer = fetch(AREAS)
+        result.answers.append(answer)
+        areas = area_ids(answer.body) if answer.status == 200 else []
     for route in routes:
-        if route == DIRECTORY:
+        if route == DIRECTORY or (route == AREAS and named):
             continue
         if STATION in route:
             result.answers.extend(fetch(expand(route, station)) for station in ids)
+            continue
+        if AREA in route:
+            result.answers.extend(fetch(route.replace(AREA, one)) for one in areas)
             continue
         answer = fetch(route)
         result.answers.append(answer)
         if route == DATASETS and answer.status == 200:
             result.answers.extend(fetch(path) for path in dataset_files(answer.body))
+        if route == IMAGERY and answer.status == 200:
+            result.answers.extend(fetch(path) for path in scene_details(answer.body))
     return result
 
 

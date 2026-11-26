@@ -51,6 +51,7 @@ import { decodeStationSchedule } from "./stationSchedule";
 // map is not what is under test here.
 vi.mock("./StationMap", () => ({ StationMap: () => null }));
 vi.mock("./AreaMap", () => ({ AreaMap: () => null }));
+vi.mock("./SceneMap", () => ({ SceneMap: () => null }));
 
 const BADGE = 'class="badge badge-simulated"';
 const go = () => undefined;

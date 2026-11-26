@@ -163,3 +163,28 @@ def test_a_fetched_fire_day_carries_its_box_and_day_in_the_record(
     assert scalar(
         "select valid_from from ingest_records where source_id = 'nasa_firms'"
     ) == datetime(2026, 9, 27, tzinfo=UTC)
+
+
+def test_a_gazetteer_is_recorded_and_writes_no_sample(
+    rollback: Any, store: RawStore, publish_public: Any, scalar: Any, tmp_path: Path
+) -> None:
+    """A place name labels a picture; it is never a quantity (D-374)."""
+    file = tmp_path / "ne.json"
+    file.write_text(
+        '{"type": "FeatureCollection", "features": [{"type": "Feature", '
+        '"properties": {"name": "Aranpur", "pop_max": 1000, "ne_id": 9100001}, '
+        '"geometry": {"type": "Point", "coordinates": [77.59, 12.97]}}]}',
+        encoding="utf-8",
+    )
+    remote = REGISTRY["natural_earth_places"].adapter.plan(FetchRequest())[0]
+    publish_public(store, "natural_earth_places", remote, file, FETCHED)
+
+    report = load_source(rollback, store, "natural_earth_places")
+
+    assert [one.record_written for one in report.artefacts] == [True]
+    assert [one.samples_written for one in report.artefacts] == [0]
+    source = "source_id = 'natural_earth_places'"
+    assert scalar(f"select count(*) from environment_samples where {source}") == 0
+    assert scalar(f"select source_class from ingest_sources where {source}") == (
+        "regional_product"
+    )

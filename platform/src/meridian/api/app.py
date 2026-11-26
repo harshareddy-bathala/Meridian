@@ -21,6 +21,7 @@ from meridian import __version__
 from meridian.api.dashboard import dashboard_directory, mount_dashboard
 from meridian.api.domain_collector import DomainCollector
 from meridian.api.errors import install_error_handlers, no_such_endpoint_response
+from meridian.api.imagery_files import router as imagery_files_router
 from meridian.api.msp import router as msp_router
 from meridian.api.public.surface import router as public_router
 from meridian.api.rate_limits import RateLimiter, RateLimitMiddleware
@@ -124,6 +125,10 @@ def create_app() -> FastAPI:
     # sub-application: inside a `Mount`, `request.app` is the sub-application, and
     # every route's connection and settings dependencies read `app.state` (D-084).
     app.include_router(public_router)
+    # A published scene's files, by an explicit route rather than a mount, so
+    # nothing the directory holds is served unless its manifest lists it, and
+    # no path outside the routes is claimed (D-091, D-376).
+    app.include_router(imagery_files_router)
 
     @app.get("/healthz")
     def healthz() -> JSONResponse:

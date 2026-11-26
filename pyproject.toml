@@ -27,7 +27,7 @@ dev = [
     "meridian[fit]",
     "meridian-client",
     "meridian-sim",
-    "meridian-ingest[hdf5]",
+    "meridian-ingest[hdf5,imagery]",
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.11",
@@ -190,6 +190,8 @@ convention = "google"
 "deploy/tools/front_drill.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # Drives a browser against a running stack and prints its checks (D-335).
 "deploy/tools/demo_rehearsal.py" = ["T201", "D", "ANN", "PLR", "C90", "BLE001"]
+# Gives a demo stack an area and a simulated scene of it, offline (D-378).
+"deploy/tools/demo_imagery.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # The station tier's backup, a host script like backup.py (D-287).
 "deploy/tools/station_archive.py" = ["T201", "D", "ANN", "PLR", "C90"]
 # ARCHITECTURE.md rule 2: only platform/orbit imports propagation libraries.
@@ -252,6 +254,13 @@ ignore_missing_imports = true
 # night-time lights normaliser (D-226), which turns every value it reads into
 # a float before the number leaves it.
 module = ["h5py.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# rasterio ships no type information. It is imported by two modules of the
+# imagery package, `pixels` and `stored` (D-371, D-372), which hand on numpy
+# arrays and plain floats, never a rasterio object.
+module = ["rasterio.*"]
 ignore_missing_imports = true
 
 # There is deliberately no `tests.*` override. CI type-checks

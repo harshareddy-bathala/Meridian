@@ -126,6 +126,33 @@ request_budget = 50
 # bbox = [74.0, 11.5, 78.6, 18.5]
 # layers = ["<a Bhuvan layer name>"] # display only; there is no default
 
+# The two gazetteers imagery is labelled from (D-374) take no place and no
+# key: each is one file, asked for once a month.
+#
+# [sources.geonames_cities1000]
+# [sources.natural_earth_places]
+
+# Open imagery of the published areas (D-372 to D-375). Only an area in the
+# published summary is imaged, and no imagery source runs until it is listed.
+#
+# [imagery]
+# summary = "published/areas-summary.json"   # what `meridian regions summary` wrote
+# sources = ["sentinel2_l2a", "landsat_c2_l2", "nasa_gibs"]
+# request_budget = 200                        # per source, per run, every area
+# published = "published/imagery"             # where scenes go; none until named
+# max_bytes = 5368709120                      # 5 GiB, oldest scenes first (D-375)
+#
+# `meridian-ingest imagery refresh` searches, renders and publishes; with
+# `--interval 86400` it does so daily. Each area's latest scene from each class
+# is kept whatever max_bytes says. `imagery verify <hash>` renders a published
+# scene again from its inputs and compares.
+#
+# An area's place names come from GeoNames when its box is at most 50 km on
+# its longer side, and from Natural Earth above that. One area may choose:
+#
+# [imagery.areas."3"]
+# gazetteer = "geonames_cities1000"
+
 # An example of a real archive source, once one is adopted. Adding it here is refused
 # until an adapter carries its licence, its terms and its ATTRIBUTION.md entry
 # (D-134) — the entry lands before the first retrieval, not after it.

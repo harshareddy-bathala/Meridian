@@ -32,6 +32,19 @@ describe("the route in the fragment", () => {
     expect(parseRoute("#/changes")).toEqual({ view: "changes", stationId: null });
   });
 
+  it("names a scene by its twelve digits, and opens the gallery otherwise", () => {
+    expect(parseRoute("#/imagery/0123456789ab")).toEqual({
+      view: "imagery",
+      stationId: null,
+      sceneHash: "0123456789ab",
+    });
+    expect(parseRoute("#/imagery")).toEqual({ view: "imagery", stationId: null });
+    expect(parseRoute("#/imagery/../index")).toEqual({ view: "imagery", stationId: null });
+    expect(formatRoute({ view: "imagery", stationId: null, sceneHash: "0123456789ab" })).toBe(
+      "#/imagery/0123456789ab",
+    );
+  });
+
   it("round-trips a station id that needs encoding", () => {
     const route = { view: "schedule" as const, stationId: "st a/b" };
     expect(formatRoute(route)).toBe("#/schedule/st%20a%2Fb");

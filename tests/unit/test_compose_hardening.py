@@ -153,3 +153,26 @@ def test_ingest_reads_keys_from_files_it_cannot_write() -> None:
     secrets = [v for v in binds if v["target"] == "/run/secrets/meridian-ingest"]
     assert secrets and secrets[0]["read_only"] is True
     assert secrets[0]["bind"]["create_host_path"] is False
+
+
+def test_imagery_refreshes_daily_with_no_database_and_one_writable_directory() -> None:
+    """A scene is a manifest and files, never a row: only imagery/ is written."""
+    imagery = _services("docker-compose.ingest.yml")["ingest-imagery"]
+    assert imagery["image"].startswith("${MERIDIAN_INGEST_IMAGE")
+    assert imagery["pull_policy"] == "build"
+    assert imagery["command"][:3] == ["meridian-ingest", "imagery", "refresh"]
+    assert imagery["command"][3:5] == ["--interval", "86400"]
+    assert "DATABASE_URL" not in imagery["environment"]
+    assert "depends_on" not in imagery
+    assert "ports" not in imagery and "expose" not in imagery
+    assert imagery["mem_limit"] == "1g"
+    assert "/tmp/imagery-alive" in imagery["healthcheck"]["test"][-1]
+
+    binds = {v["target"]: v for v in imagery["volumes"] if isinstance(v, dict)}
+    assert binds["/published"]["read_only"] is True
+    assert binds["/run/config/ingest.toml"]["read_only"] is True
+    assert binds["/published/imagery"].get("read_only", False) is False
+    assert binds["/published/imagery"]["source"].endswith("/imagery")
+    assert binds["/published/imagery"]["bind"]["create_host_path"] is False
+    writable = [t for t, v in binds.items() if not v.get("read_only", False)]
+    assert writable == ["/published/imagery"]
