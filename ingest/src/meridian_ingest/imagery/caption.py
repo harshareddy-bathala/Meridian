@@ -71,6 +71,9 @@ class CaptionFacts:
     gazetteer: str
     places_named_by: str | None
     places: int
+    simulated: bool = False
+    """A scene of synthetic pixels: the caption says so before anything else,
+    and names no satellite (rule 5, D-378)."""
 
 
 def caption(facts: CaptionFacts) -> str:
@@ -87,6 +90,12 @@ def caption(facts: CaptionFacts) -> str:
 
 def _what(facts: CaptionFacts) -> str:
     at = facts.acquired_at
+    if facts.simulated:
+        return (
+            f"Simulated image of {facts.area_label}: synthetic pixels written for "
+            "Meridian's demonstration, not a satellite's, dated "
+            f"{_day(at.date())} at {at:%H:%M} UTC"
+        )
     return (
         f"{_WHAT[facts.source_class]} of {facts.area_label}, taken by "
         f"{facts.platform}'s {facts.instrument} on {_day(at.date())} at "

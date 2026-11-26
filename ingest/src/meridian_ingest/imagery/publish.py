@@ -318,6 +318,7 @@ def _entry(
         acquired_at=manifest.acquired_at,
         published_at=now,
         size_bytes=size,
+        simulated=manifest.simulated,
     )
 
 

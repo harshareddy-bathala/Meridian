@@ -127,6 +127,13 @@ def integer(value: object, field: str, *, minimum: int = 0) -> int:
     return value
 
 
+def boolean(value: object, field: str) -> bool:
+    """``value`` as a JSON boolean, never a number standing in for one."""
+    if not isinstance(value, bool):
+        raise fail(f"{field} must be true or false")
+    return value
+
+
 def https(value: object, field: str) -> str:
     """``value`` as text that is an https URL."""
     written = text(value, field)

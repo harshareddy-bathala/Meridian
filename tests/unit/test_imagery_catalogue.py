@@ -21,6 +21,8 @@ from meridian_ingest.imagery.sources import (
     IMAGERY_SOURCES,
     LANDSAT_SOURCE,
     SENTINEL2_SOURCE,
+    SIMULATED_SOURCE,
+    StacSource,
     UnknownImagerySourceError,
     imagery_source,
 )
@@ -147,14 +149,25 @@ def test_every_imagery_source_is_credited_in_attribution() -> None:
     text = (REPO_ROOT / "ATTRIBUTION.md").read_text(encoding="utf-8")
 
     for source in IMAGERY_SOURCES.values():
+        if isinstance(source, StacSource) and source.simulated:
+            continue  # our own synthetic pixels: nobody else's to credit
         assert source.descriptor.attribution_entry in text, source.source_id
 
 
-def test_one_source_per_public_archive_class() -> None:
-    classes = sorted(one.source_class for one in IMAGERY_SOURCES.values())
+def test_one_source_per_public_archive_class_and_one_simulated() -> None:
+    archives = [
+        one
+        for one in IMAGERY_SOURCES.values()
+        if not (isinstance(one, StacSource) and one.simulated)
+    ]
 
-    assert classes == ["daily_wide", "high_resolution", "older_record"]
+    assert sorted(one.source_class for one in archives) == [
+        "daily_wide",
+        "high_resolution",
+        "older_record",
+    ]
     assert GIBS_SOURCE.source_id == "nasa_gibs"
+    assert SIMULATED_SOURCE.simulated and "Simulated" in SIMULATED_SOURCE.credit
 
 
 def test_an_unknown_imagery_source_is_refused_by_name() -> None:

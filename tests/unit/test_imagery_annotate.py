@@ -518,6 +518,16 @@ def test_the_caption_is_its_template_on_fixed_facts() -> None:
     assert PINNED_SHA256 == TEMPLATE_SHA256, "a manifest names the template by it"
 
 
+def test_a_simulated_scenes_caption_says_so_first_and_names_no_satellite() -> None:
+    written = caption(facts(simulated=True))
+
+    assert written.startswith(
+        "Simulated image of Bengaluru urban: synthetic pixels written for "
+        "Meridian's demonstration, not a satellite's, dated 12 November 2026"
+    )
+    assert "Sentinel-2B" not in written
+
+
 def test_the_caption_regenerates_from_the_same_facts() -> None:
     assert caption(facts()) == caption(facts())
 

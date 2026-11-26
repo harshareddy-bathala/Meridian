@@ -57,7 +57,9 @@ if TYPE_CHECKING:
     from meridian_ingest.imagery.search import SceneSearch, SearchContext
 
 __all__ = [
+    "NO_PUBLISHED",
     "credited",
+    "publish_request",
     "report_search",
     "run_list",
     "run_refresh",
@@ -82,7 +84,7 @@ def run_refresh(
     """Search, render and publish, once or every ``--interval`` seconds."""
     root = settings.imagery.published
     if root is None:
-        return refuse(_NO_PUBLISHED)
+        return refuse(NO_PUBLISHED)
     alive: Path | None = args.alive
 
     def beat() -> None:
@@ -141,7 +143,7 @@ def refresh_round(  # noqa: PLR0913 — the settings, what to image, and the bea
                         raw_paths=_kept(found),
                         gazetteer=settings.imagery.gazetteers.get(area.area_id),
                     )
-                    _publish(settings, request, at)
+                    publish_request(settings, request, at)
                 except _FAILURES as exc:
                     warn(f"imagery: area {area.area_id}, {source.source_id}: {exc}")
                     failed = True
@@ -155,7 +157,7 @@ def run_render(
     from meridian_ingest.imagery.build import SceneRequest  # noqa: PLC0415
 
     if settings.imagery.published is None:
-        return refuse(_NO_PUBLISHED)
+        return refuse(NO_PUBLISHED)
     try:
         published = read_published_areas(summary)
         (area,) = published.chosen(args.area)
@@ -166,7 +168,7 @@ def run_render(
             raw_paths=tuple(args.raw_paths),
             gazetteer=settings.imagery.gazetteers.get(area.area_id),
         )
-        _publish(settings, request, datetime.now(tz=UTC))
+        publish_request(settings, request, datetime.now(tz=UTC))
     except _FAILURES as exc:
         return refuse(f"meridian-ingest imagery render: {exc}")
     return 0
@@ -176,7 +178,7 @@ def run_list(settings: IngestSettings) -> int:
     """Print every scene the index lists, newest acquisition first."""
     root = settings.imagery.published
     if root is None:
-        return refuse(_NO_PUBLISHED)
+        return refuse(NO_PUBLISHED)
     try:
         index = read_index(root)
     except MalformedImageryError as exc:
@@ -198,7 +200,7 @@ def run_verify(
     """Render a published scene again from its inputs and compare the manifests."""
     root = settings.imagery.published
     if root is None:
-        return refuse(_NO_PUBLISHED)
+        return refuse(NO_PUBLISHED)
     verb = "meridian-ingest imagery verify"
     try:
         held = read_manifest(root, args.hash)
@@ -340,7 +342,7 @@ def report_search(found: SceneSearch) -> None:
 
 # --- the steps ---------------------------------------------------------------------
 
-_NO_PUBLISHED = (
+NO_PUBLISHED = (
     "meridian-ingest imagery: name where scenes are published with [imagery] "
     "published, the imagery directory under PUBLISHED_DIR (D-375)"
 )
@@ -367,7 +369,10 @@ def _kept(found: SceneSearch) -> tuple[str, ...]:
     return (*answer, *chosen.raw_paths, *found.windows)
 
 
-def _publish(settings: IngestSettings, request: SceneRequest, now: datetime) -> None:
+def publish_request(
+    settings: IngestSettings, request: SceneRequest, now: datetime
+) -> None:
+    """Build the requested scene in a scratch directory and publish it."""
     from meridian_ingest.imagery.build import build_scene  # noqa: PLC0415
 
     root = settings.imagery.published

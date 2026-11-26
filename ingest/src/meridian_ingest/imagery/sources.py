@@ -41,6 +41,8 @@ __all__ = [
     "LANDSAT_WHITE",
     "SENTINEL2",
     "SENTINEL2_SOURCE",
+    "SIMULATED",
+    "SIMULATED_SOURCE",
     "GibsSource",
     "ImagerySource",
     "StacSource",
@@ -48,6 +50,7 @@ __all__ = [
     "cloud_method_for",
     "credit_for",
     "imagery_source",
+    "is_simulated",
     "platform_name",
 ]
 
@@ -119,6 +122,10 @@ class StacSource:
 
     platforms: tuple[str, ...] = ()
     colour: Colour = "as_published"
+    simulated: bool = False
+    """True for the demonstration's source alone, whose pixels are synthetic.
+    It is never searched over a network: ``imagery demo`` writes its archive
+    locally, and every scene drawn from it says it is simulated (D-378)."""
     """``as_published`` when the display assets are already a picture;
     ``surface_reflectance`` when they are reflectance, stretched to one."""
 
@@ -148,6 +155,37 @@ class GibsSource:
 
 
 ImagerySource = StacSource | GibsSource
+
+SIMULATED = SourceDescriptor(
+    source_id="simulated_scene",
+    source_class="imagery",
+    name="Synthetic scenes written by meridian-ingest imagery demo (simulated)",
+    licence="Apache-2.0, as Meridian's own code; synthetic, no archive's data",
+    terms_url="https://github.com/harshareddy-bathala/Meridian/blob/main/LICENSE",
+    attribution_entry="Synthetic imagery for the demonstration",
+    access_constraint="none",
+)
+
+SIMULATED_SOURCE = StacSource(
+    descriptor=SIMULATED,
+    source_class="high_resolution",
+    search_url="https://simulated.invalid/search",
+    collection="simulated-scene",
+    lookback_days=30,
+    display_assets=("visual",),
+    classification_asset="scl",
+    classifier="scl",
+    instrument="no instrument",
+    rendering=(
+        "synthetic pixels written by meridian-ingest imagery demo, read through "
+        "the same search, cloud count and rendering as Sentinel-2's visual asset"
+    ),
+    credit="Simulated: synthetic pixels, no satellite's data ({year})",
+    simulated=True,
+)
+"""The demonstration's own archive (D-378). Shaped as Sentinel-2's, so a
+rehearsal with no network goes through every step a real scene does, and
+labelled at each one: its credit, its caption, its manifest and the API."""
 
 SENTINEL2_SOURCE = StacSource(
     descriptor=SENTINEL2,
@@ -226,7 +264,8 @@ every day should come from a satellite in its operational life. Part 9's live
 fetch confirms the layer is served at this level."""
 
 IMAGERY_SOURCES: dict[str, ImagerySource] = {
-    one.source_id: one for one in (SENTINEL2_SOURCE, LANDSAT_SOURCE, GIBS_SOURCE)
+    one.source_id: one
+    for one in (SENTINEL2_SOURCE, LANDSAT_SOURCE, GIBS_SOURCE, SIMULATED_SOURCE)
 }
 
 
@@ -249,6 +288,11 @@ def cloud_method_for(source: ImagerySource) -> str:
 def credit_for(source: ImagerySource, year: int) -> str:
     """The credit line for a picture acquired in ``year``."""
     return source.credit.format(year=year)
+
+
+def is_simulated(source: ImagerySource) -> bool:
+    """Whether ``source`` is the demonstration's synthetic archive."""
+    return isinstance(source, StacSource) and source.simulated
 
 
 def platform_name(platform: str) -> str:

@@ -55,6 +55,7 @@ from meridian_ingest.imagery.sources import (
     cloud_method_for,
     credit_for,
     imagery_source,
+    is_simulated,
     platform_name,
 )
 from meridian_ingest.imagery.stac import parse_search
@@ -180,6 +181,7 @@ def build_scene(
             Input("template", CAPTION_TEMPLATE, TEMPLATE_SHA256),
         ),
         files=rendered.files,
+        simulated=is_simulated(parts.source),
     )
 
 
@@ -268,6 +270,8 @@ def _platform(parts: _Parts) -> str:
     source = parts.source
     if isinstance(source, GibsSource):
         return source.platform
+    if source.simulated:
+        return "No satellite (simulated)"
     drawn = {read_scene_window(one.artefact).item_id for one in parts.display}
     body = parts.catalogue[0].artefact.read_bytes()
     candidates, _, _ = parse_search(body, source)
@@ -313,6 +317,7 @@ def _facts(  # noqa: PLR0913 — a caption states each of these
         gazetteer=places.named_by,
         places_named_by=None if places.raw_path is None else places.named_by,
         places=len(places.places),
+        simulated=is_simulated(source),
     )
 
 

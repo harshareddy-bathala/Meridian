@@ -21,13 +21,16 @@ Reference: docs/DECISIONS.md D-134, D-220, D-326, D-371, D-372, D-375.
 from __future__ import annotations
 
 import argparse
+import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from meridian_ingest.cli_imagery_run import (
+    NO_PUBLISHED,
     credited,
+    publish_request,
     report_search,
     run_list,
     run_refresh,
@@ -44,7 +47,9 @@ from meridian_ingest.imagery.sources import (
     ImagerySource,
     UnknownImagerySourceError,
     imagery_source,
+    is_simulated,
 )
+from meridian_ingest.raw_store import RawStore
 from meridian_ingest.retrieval import RetrievalError
 
 if TYPE_CHECKING:
@@ -85,6 +90,14 @@ def add_imagery(commands: _SubParsersAction[argparse.ArgumentParser]) -> None:
     render.add_argument("--area", type=int, required=True, help="the published area")
     _summary(render)
     render.add_argument("raw_paths", nargs="+", help="the scene's raw paths")
+    demo = verbs.add_parser(
+        "demo",
+        help="publish a simulated scene of each area, for a rehearsal (no socket)",
+    )
+    demo.add_argument(
+        "--area", type=int, default=None, help="one published area id; default all"
+    )
+    _summary(demo)
     verbs.add_parser("list", help="print every published scene, newest first")
     verify = verbs.add_parser(
         "verify", help="render a published scene again from its inputs and compare"
@@ -155,9 +168,17 @@ def _sources(
             "one with --source or list them in [imagery] sources (D-220)"
         )
     try:
-        return tuple(imagery_source(one) for one in named)
+        sources = tuple(imagery_source(one) for one in named)
     except UnknownImagerySourceError as exc:
         return refuse(f"meridian-ingest imagery {verb}: {exc}")
+    simulated = [one.source_id for one in sources if is_simulated(one)]
+    if simulated:
+        return refuse(
+            f"meridian-ingest imagery {verb}: {', '.join(simulated)} is the "
+            "demonstration's synthetic archive, which no network holds; "
+            "`imagery demo` writes it (D-378)"
+        )
+    return sources
 
 
 def _search(args: argparse.Namespace, settings: IngestSettings, summary: Path) -> int:
@@ -205,7 +226,54 @@ def _search_source(
     return finished
 
 
+def _demo(args: argparse.Namespace, settings: IngestSettings, summary: Path) -> int:
+    """Publish a simulated scene of each published area, with no socket (D-378).
+
+    The scene is searched, counted, rendered and published by the same code a
+    real one is, from a synthetic archive written to a scratch directory, and
+    is labelled simulated at every layer.
+    """
+    from meridian_ingest.imagery.build import SceneRequest  # noqa: PLC0415
+    from meridian_ingest.imagery.demo import demo_search  # noqa: PLC0415
+
+    if settings.imagery.published is None:
+        return refuse(NO_PUBLISHED)
+    now = datetime.now(tz=UTC)
+    try:
+        published = read_published_areas(summary)
+        areas = published.chosen(args.area)
+    except (MalformedImageryError, LookupError) as exc:
+        return refuse(f"meridian-ingest imagery demo: {exc}")
+    failed = False
+    for area in areas:
+        with tempfile.TemporaryDirectory(prefix="meridian-demo-") as scratch:
+            try:
+                found = demo_search(
+                    RawStore(settings.raw_root), area, now, Path(scratch)
+                )
+                report_search(found)
+                if found.chosen is None:
+                    failed = True
+                    continue
+                request = SceneRequest(
+                    area=area,
+                    published=published,
+                    summary_path=summary,
+                    raw_paths=(
+                        *((found.search_path,) if found.search_path else ()),
+                        *found.chosen.raw_paths,
+                        *found.windows,
+                    ),
+                )
+                publish_request(settings, request, now)
+            except (RetrievalError, ValueError, OSError) as exc:
+                warn(f"meridian-ingest imagery demo: area {area.area_id}: {exc}")
+                failed = True
+    return 1 if failed else 0
+
+
 _VERBS: dict[str, Callable[[argparse.Namespace, IngestSettings, Path], int]] = {
+    "demo": _demo,
     "search": _search,
     "refresh": _refresh,
     "render": run_render,

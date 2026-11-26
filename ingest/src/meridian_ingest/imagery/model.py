@@ -49,12 +49,8 @@ from meridian_ingest.imagery.model_geometry import (
     Point,
     caption_sha256,
 )
-from meridian_ingest.imagery.model_manifest import (
-    ImageryIndex,
-    ImageryManifest,
-    IndexEntry,
-    manifest_sha256,
-)
+from meridian_ingest.imagery.model_index import ImageryIndex, IndexEntry
+from meridian_ingest.imagery.model_manifest import ImageryManifest, manifest_sha256
 
 __all__ = [
     "ANNOTATION_KINDS",
