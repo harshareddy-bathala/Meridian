@@ -29,7 +29,14 @@ from meridian.api.public.envelope import SERVER_ERROR, PublicError
 from meridian.api.public.models.areas import AreasSummary, PublicAreas
 from meridian.api.public.models.not_yet_computed import NotYetComputed
 
-__all__ = ["AREAS_PUBLISHED_ENV", "AREAS_STAGE", "AREAS_SUMMARY_ENV", "router"]
+__all__ = [
+    "AREAS_PUBLISHED_ENV",
+    "AREAS_STAGE",
+    "AREAS_SUMMARY_ENV",
+    "published_area_ids",
+    "published_summary",
+    "router",
+]
 
 AREAS_PUBLISHED_ENV = "AREAS_PUBLISHED"
 AREAS_SUMMARY_ENV = "AREAS_SUMMARY"
@@ -47,9 +54,8 @@ def areas_of_interest() -> PublicAreas | NotYetComputed:
     Raises:
         PublicError: ``server_error``, if the published file is refused.
     """
-    published = os.environ.get(AREAS_PUBLISHED_ENV, "").strip().lower() == "true"
-    named = os.environ.get(AREAS_SUMMARY_ENV, "").strip()
-    if not published or not named:
+    summary = published_summary()
+    if summary is None:
         return NotYetComputed(
             reason=(
                 "This deployment publishes no areas of interest yet: it does so "
@@ -58,9 +64,22 @@ def areas_of_interest() -> PublicAreas | NotYetComputed:
             ),
             available_from_stage=AREAS_STAGE,
         )
+    return PublicAreas(summary=summary)
+
+
+def published_summary() -> AreasSummary | None:
+    """The published summary, or ``None`` while the deployment publishes none.
+
+    Raises:
+        PublicError: ``server_error``, if the published file is refused.
+    """
+    published = os.environ.get(AREAS_PUBLISHED_ENV, "").strip().lower() == "true"
+    named = os.environ.get(AREAS_SUMMARY_ENV, "").strip()
+    if not published or not named:
+        return None
     try:
         raw = json.loads(Path(named).read_text(encoding="utf-8"))
-        summary = AreasSummary.model_validate(raw)
+        return AreasSummary.model_validate(raw)
     except (OSError, ValueError, ValidationError):
         _log.warning("the published areas file was refused", exc_info=True)
         raise PublicError(
@@ -68,4 +87,18 @@ def areas_of_interest() -> PublicAreas | NotYetComputed:
             f"The file {AREAS_SUMMARY_ENV} names was refused; the platform's log "
             "says why.",
         ) from None
-    return PublicAreas(summary=summary)
+
+
+def published_area_ids() -> frozenset[int] | None:
+    """The ids of the published areas, or ``None`` while none is published.
+
+    What else is published about an area — its pictures above all — is
+    published only while the area is (D-326, D-376).
+
+    Raises:
+        PublicError: ``server_error``, if the published file is refused.
+    """
+    summary = published_summary()
+    if summary is None:
+        return None
+    return frozenset(one.area_id for one in summary.areas)

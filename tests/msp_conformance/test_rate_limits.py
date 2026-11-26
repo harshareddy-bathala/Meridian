@@ -294,3 +294,31 @@ def test_rate_limits_off_means_no_limiter(monkeypatch: pytest.MonkeyPatch) -> No
         statuses = {started.get(PUBLIC_PATH).status_code for _ in range(60)}
 
     assert statuses == {404}
+
+
+IMAGERY_PATH = "/imagery/0123456789ab/tiles/12/2918/1898.webp"
+IMAGERY_FILES_BURST = 200
+
+
+def test_a_scenes_files_draw_on_their_own_bucket_not_the_public_one(
+    client: TestClient,
+) -> None:
+    """A viewer asks for dozens of tiles at once; the public five a second would
+    refuse it (D-376). The file is not there, so each answer is a 404."""
+    for _ in range(IMAGERY_FILES_BURST):
+        assert client.get(IMAGERY_PATH).status_code == 404
+
+    refused = client.get(IMAGERY_PATH)
+
+    assert refused.status_code == 429
+    assert refused.json()["error"] == "rate_limited", "the public vocabulary"
+    assert client.get(PUBLIC_PATH).status_code == 404, "the public bucket is full"
+
+
+def test_the_public_bucket_spent_leaves_the_files_bucket_alone(
+    client: TestClient,
+) -> None:
+    for _ in range(PUBLIC_CLIENT_BURST + 5):
+        client.get(PUBLIC_PATH)
+
+    assert client.get(IMAGERY_PATH).status_code == 404

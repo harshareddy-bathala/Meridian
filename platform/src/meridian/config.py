@@ -114,6 +114,12 @@ class Settings:
     each package's files are read from beside it (D-369). Defaulted, for the
     reason ``verdict_model`` is."""
 
+    imagery_index: str = ""
+    """The published scenes' index, ``imagery-index-1``, as the API container
+    sees it, or empty for none: ``/api/v1/imagery`` then answers
+    ``not_yet_computed``, and each scene's files are read from beside it
+    (D-376). Defaulted, for the reason ``verdict_model`` is."""
+
     plan_model: str = ""
     """Configuration A's model for the station planner, as ``plan-model-1``, as
     the API container sees it, or empty for none: ``/api/v1/plan`` then lists
@@ -328,6 +334,7 @@ def load_settings(*, secrets_held: frozenset[str] = EVERY_SECRET) -> Settings:
         report_summary=os.environ.get("REPORT_SUMMARY", "").strip(),
         report_criteria=os.environ.get("REPORT_CRITERIA", "").strip(),
         evidence_index=os.environ.get("EVIDENCE_INDEX", "").strip(),
+        imagery_index=os.environ.get("IMAGERY_INDEX", "").strip(),
         plan_model=os.environ.get("PLAN_MODEL", "").strip(),
     )
 

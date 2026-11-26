@@ -26,6 +26,7 @@ from http import HTTPStatus
 
 __all__ = [
     "API_PREFIX",
+    "IMAGERY_FILES_PREFIX",
     "INVALID_QUERY",
     "METHOD_NOT_ALLOWED",
     "NOT_FOUND",
@@ -37,6 +38,10 @@ __all__ = [
 ]
 
 API_PREFIX = "/api/v1"
+IMAGERY_FILES_PREFIX = "/imagery/"
+"""Where a published scene's files are served (D-376). Outside ``/api/v1``,
+so that they have a rate bucket of their own, and answered in the public API's
+words, because they are what its imagery listing points at."""
 """Where the whole read surface lives (D-083).
 
 Named here rather than beside the router because both the error layer and the
@@ -115,7 +120,8 @@ def is_public_surface(path: str) -> bool:
         path: The request's URL path, as ``request.url.path`` gives it.
 
     Returns:
-        True for ``/api/v1`` itself and anything beneath it.
+        True for ``/api/v1`` itself and anything beneath it, and for a
+        published scene's files under ``/imagery/``.
 
     Note:
         The match is the prefix exactly, or the prefix followed by ``/`` — never
@@ -123,4 +129,8 @@ def is_public_surface(path: str) -> bool:
         future second version answering in the wrong vocabulary is the kind of
         bug that only shows up once ``v10`` exists to be confused with.
     """
-    return path == API_PREFIX or path.startswith(f"{API_PREFIX}/")
+    return (
+        path == API_PREFIX
+        or path.startswith(f"{API_PREFIX}/")
+        or path.startswith(IMAGERY_FILES_PREFIX)
+    )
