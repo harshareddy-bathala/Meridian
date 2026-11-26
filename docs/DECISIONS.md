@@ -2001,6 +2001,8 @@ The build lives in the image at the path `DASHBOARD_DIR` names. It is read when 
 
 *Rejected: HTML5 history routing with the fallback limited to paths without a dot.* Nicer URLs, and it still answers `200` for `/anything-at-all`, which is a page telling a caller that a URL exists when it does not.
 
+*Amended 2026-11-26 (D-376):* a published scene's files are served at `/imagery/{hash}/{path}` by one explicit route, not a static mount. The route serves only a file the scene's manifest lists, so every other path under `/imagery/` stays unrouted or `not_found`, as this entry requires.
+
 ---
 
 ## D-092 — The station map draws its own graticule; tiles are optional decoration from OpenStreetMap
@@ -4414,6 +4416,8 @@ Heartbeats and observations have separate buckets so that a queue flush can neve
 *Rejected: a shared store such as Redis.* It would give exact network-wide figures, at the cost of a service on the Pi that must be up for the platform to answer at all. The edge already gives the network-wide figure for the public API.
 
 *Amended 2026-11-14 (D-370):* the station planner draws on a fifth bucket beside the public one, six places then one every ten seconds per caller, because a new place costs an orbit search where any other read costs a query.
+
+*Amended 2026-11-26 (D-376):* a published scene's files under `/imagery/` draw on a sixth bucket, `imagery_files`, instead of the public one: 200 at once, then 50 a second per caller. A viewer asks for a few dozen tiles at once, which the public bucket's five a second would refuse.
 
 ---
 
@@ -7536,6 +7540,43 @@ Parts 2 to 4 find a scene, draw it and mark it. Part 5 turns that into something
 
 ---
 
+## D-376 — Published scenes are listed only while their area is, and each file is served only while it matches its manifest
+
+**2026-11-26 · accepted** · *`meridian/api/public/{imagery,areas,envelope,surface}.py`; `meridian/api/public/models/imagery.py`; `meridian/api/{imagery_files,rate_limits,app}.py`; `meridian/config.py` (`IMAGERY_INDEX`); `deploy/{docker-compose.yml,.env.example}`; `deploy/front/nginx.conf`; `deploy/tools/front_warm.py`; `docs/THREAT-MODEL.md`; `tests/unit/{test_imagery_endpoint_models,test_public_privacy,test_front_config,test_front_warm}.py`; `tests/msp_conformance/{test_public_imagery_endpoint,test_rate_limits}.py`; Stage 38. Amends D-091 and D-202. Applies D-085, D-086, D-138, D-208, D-282, D-326, D-332, D-369 and D-375.*
+
+Part 5 publishes each scene as a directory named by its manifest, with an index beside them (D-375). Part 6 serves them. Five things had to be settled. Which scenes a reader may see. How far the API trusts what ingest wrote. Where the files are served, given that a viewer asks for dozens of tiles at once. How long a copy may be kept. And what the front keeps when the API is down.
+
+**Decision.**
+- **`IMAGERY_INDEX` names the index**, as the API container sees it: `/published/imagery/index.json`. The files are read from beside it.
+- **A scene is listed only while its area is published.** That means `AREAS_PUBLISHED` is on, and the area is in the summary `AREAS_SUMMARY` names, read through the same function `/api/v1/areas` uses. A scene of any other area is not listed, its detail is `not_found`, and so is each of its files. Without the index, or without published areas, the listing and the detail are D-086's `not_yet_computed`.
+- **`GET /api/v1/imagery`** lists the scenes, newest acquisition first. It can filter by `area`, `source_class`, `since` and `until`, both bounds inclusive and with a time zone. It pages by keyset on the acquisition time, area, class and name (D-085). An item says enough to draw a gallery card: the area's label, the satellite and instrument, when the scene was acquired and published, the cloud share, the caption (which is the alt text), the credit and the display picture's address. **`GET /api/v1/imagery/{hash}`** is one scene's manifest as published, with the address its files are under. Both say `simulated: false`: public archive imagery is the archive's measurement, and none is simulated.
+- **Checked, not trusted** (D-332, D-369). The API has its own strict models of the index and the manifest, because the platform does not install ingest (D-138). A test holds them equal to what the publisher writes. On top of what the models check:
+  - a manifest's bytes must hash to the name it is published under;
+  - its area, source, class and acquisition must be its index entry's.
+
+  A damaged index or manifest is a `server_error` naming the setting, never part of a list. A manifest is parsed once per version of its file, keyed on the file's size and time, so a viewer's tile requests do not parse it again each time.
+- **The files are served at `/imagery/{hash}/{path}`, by an explicit route** (amending D-091).
+  - It serves a file the manifest lists, or the manifest itself, and nothing else.
+  - A file is hashed in pieces as it is served, and refused if it no longer has its manifest's digest and size.
+  - Every response is `Cache-Control: public, max-age=31536000, immutable`, since the name is the content's.
+  - The GeoTIFF, the PNG, its world file and the manifest are attachments. The display picture and the tiles are inline.
+  - Errors under `/imagery/` use the public API's words: `is_public_surface` now covers the prefix, so a refusal there is `not_found` or `invalid_query`, as on `/api/v1`.
+  - The content-security policy is the platform's own and unchanged: `img-src 'self'` already admits same-origin pictures.
+- **A rate bucket of its own** (amending D-202). The edge rule covers `/api/` only. The public bucket's five a second would refuse a viewer's first screen of tiles. So `/imagery/` draws on `imagery_files`, 200 at once then 50 a second per caller, and not on the public bucket. Hashing each file as it is served is the work it bounds.
+- **The front forwards `/imagery/` and never keeps a copy.** Its location streams a large file to the reader rather than spooling it to `/tmp`, which is the container's memory. During an outage the listing and the detail are served from the front's copies, as every view is (D-282). The viewer then says the tiles are unavailable (Part 7).
+- **The warmer learns `{area}` and the scenes.** A route naming `{area}` is asked for each area `/api/v1/areas` publishes, and every scene the listing names has its detail warmed. Files under `/imagery/` are never warmed. The routes themselves join `snapshot-routes.txt` in Part 7, with the dashboard's fetch functions, because `snapshotRoutes.test.ts` compares the two both ways.
+- **The privacy review gains a row** (`THREAT-MODEL.md` §7), and every new field is pinned. A scene discloses nothing about a station or a person. A raw-store path in its inputs says when the ingest host fetched an artefact, and nothing else.
+
+*Rejected: tiles under `/api/v1`.* There they would share the public bucket and the edge rule, which are sized for reading views, not for drawing a map.
+
+*Rejected: the front keeping the files.* They are immutable, so a copy would always be right. But it would go on serving a scene for 30 days after its area was taken down, which D-369 refused for evidence packages too.
+
+*Rejected: trusting the index's sizes and skipping the hash on each request.* A file damaged on disk would then be served under a name that promises other bytes. Hashing a tile costs microseconds, and a GeoTIFF is downloaded rarely.
+
+*Accepted with a step: the edge may keep a file after its area is taken down.* `immutable` for a year lets Cloudflare and browsers hold a scene's files. Taking an area down therefore includes purging the edge cache. Part 9 writes that step into `OPERATIONS.md`, and the §7 row says so.
+
+---
+
 
 ## Open
 
@@ -7944,6 +7985,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-373 a scene rendered from the raw store alone, its graticule our own arithmetic | `ingest/src/meridian_ingest/imagery/{scene,render,display,encode,graticule,webmercator,sources,model_manifest}.py`; `ingest/src/meridian_ingest/imagery/fonts/`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_render,test_imagery_graticule,test_imagery_boundaries,test_imagery_model}.py` |
 | D-374 markers placed from records and cited, and the caption a versioned function | `ingest/src/meridian_ingest/imagery/{annotate,annotate_fires,gazetteer,caption,display,display_markers,render,sources,model_checks,model_geometry}.py`; `ingest/src/meridian_ingest/adapters/public/{gazetteers,registrations}.py`; `ingest/src/meridian_ingest/config_imagery.py`; `deploy/ingest{,.live}.toml.example`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_annotate,test_gazetteer_sources,test_imagery_render,test_imagery_model,test_imagery_catalogue,test_public_sources,test_ingest_config}.py`; `tests/integration/test_environment_load.py` |
 | D-375 a scene published under its manifest's digest, capped, and made again | `ingest/src/meridian_ingest/imagery/{build,publish,render,caption,sources,model_checks}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run,config_imagery}.py`; `deploy/docker-compose.ingest.yml`; `deploy/ingest{,.live}.toml.example`; `tests/unit/{test_imagery_publish,test_imagery_boundaries,test_imagery_annotate,test_imagery_catalogue,test_compose_hardening}.py` |
+| D-376 scenes listed only while their area is, each file served while it matches | `platform/src/meridian/api/public/{imagery,areas,envelope,surface}.py`; `platform/src/meridian/api/public/models/imagery.py`; `platform/src/meridian/api/{imagery_files,rate_limits,app}.py`; `platform/src/meridian/config.py`; `deploy/{docker-compose.yml,.env.example}`; `deploy/front/nginx.conf`; `deploy/tools/front_warm.py`; `docs/THREAT-MODEL.md`; `tests/unit/{test_imagery_endpoint_models,test_public_privacy,test_front_config,test_front_warm}.py`; `tests/msp_conformance/{test_public_imagery_endpoint,test_rate_limits}.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

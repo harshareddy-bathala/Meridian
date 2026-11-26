@@ -177,6 +177,10 @@ services:
       # The published evidence packages' index under /published, for
       # /api/v1/datasets; empty answers not_yet_computed (D-369).
       EVIDENCE_INDEX: ${EVIDENCE_INDEX:-}
+      # The published scenes' index under /published, for /api/v1/imagery and
+      # /imagery/; empty, or no areas published, answers not_yet_computed
+      # (D-376). ingest-imagery writes it (D-375).
+      IMAGERY_INDEX: ${IMAGERY_INDEX:-}
       # Configuration A's model for the station planner under /published, for
       # /api/v1/plan; empty lists each pass with no predicted yield (D-370).
       PLAN_MODEL: ${PLAN_MODEL:-}
