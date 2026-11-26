@@ -259,12 +259,14 @@ def warm(fetch: Fetch, routes: Iterable[str]) -> Round:
     result.stations = len(ids)
     routes = list(routes)
     areas: list[str] = []
-    if any(AREA in route for route in routes):
+    named = any(AREA in route for route in routes)
+    if named:
+        # Asked once, for its ids and for its own copy.
         answer = fetch(AREAS)
         result.answers.append(answer)
         areas = area_ids(answer.body) if answer.status == 200 else []
     for route in routes:
-        if route == DIRECTORY or (route == AREAS and areas):
+        if route == DIRECTORY or (route == AREAS and named):
             continue
         if STATION in route:
             result.answers.extend(fetch(expand(route, station)) for station in ids)
