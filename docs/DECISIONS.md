@@ -7503,6 +7503,39 @@ The gate asks for every marker on a scene to be explained and cited, and for a c
 
 ---
 
+## D-375 — A scene is published under its manifest's digest, kept under a size cap, and made again from the inputs it names
+
+**2026-11-26 · accepted** · *`ingest/src/meridian_ingest/imagery/{build,publish,render,caption,sources,model_checks}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run,config_imagery}.py`; `deploy/docker-compose.ingest.yml`; `deploy/ingest{,.live}.toml.example`; `tests/unit/{test_imagery_publish,test_imagery_boundaries,test_imagery_annotate,test_imagery_catalogue,test_compose_hardening}.py`; Stage 38. Applies D-141, D-206, D-229, D-326, D-369 and D-371 to D-374.*
+
+Parts 2 to 4 find a scene, draw it and mark it. Part 5 turns that into something the API can serve and an outsider can check. Four things had to be settled. What one published scene is made from, so that it can be made again. Where it goes and how a reader never sees half of one. What happens on a daily refresh when the clearest scene is the one already shown. And how the disk on a 2 GB host is kept from filling.
+
+**Decision.**
+- **A scene is made from raw paths, by one function.** `build_scene` takes the area and a list of raw paths, and sorts them by what the raw store says each one is. A `tile` is the picture. A `data` window is a classification layer. Any other `data` is the catalogue's answer. A daily refresh and `imagery verify` both call it, so there is one way a scene comes to be.
+  - **The cloud fraction is counted again from the stored classification windows**, through the same door a search reads the archive through, pointed at the stored file. It is never carried over from the search. A test shows the two counts agree.
+  - **The satellite is read from the catalogue's answer**, for the items drawn, and named as its operator names it: `sentinel-2b` becomes Sentinel-2B, and `landsat-9` becomes Landsat 9.
+  - A STAC scene without its catalogue answer, or without its classification windows, is refused. A GIBS view takes its tiles and nothing else.
+- **The manifest names every input by its digest.** That covers the catalogue answer, each classification window (a new input kind, `classification`, since no manifest has been published yet), each display window, the areas summary, the FIRMS files, the gazetteer and the caption template. The template is named by `TEMPLATE_SHA256`, the digest of its caption of the reference facts the caption test pins. An edited sentence that kept the version's name would then show as an input that no longer matches.
+- **Publishing is a rename, and the index comes after it.** A scene is rendered under `<imagery>/.incoming/`. Its manifest is written beside the files and everything is made read-only. The top directory is sealed after its rename, as the raw store's is. It is renamed to `<imagery>/<hash12>/`, the first twelve digits of the manifest's digest. Then `index.json` is replaced whole. Only after that is any directory the index no longer lists removed. A publish interrupted before the index is rewritten leaves the index as it was. One publish runs at a time, under a file lock, whichever process runs it. A damaged index stops a publish and is never replaced on a guess.
+- **A scene already shown is not shown again.** A refresh fetches the clearest scene again every day, so its raw paths, and therefore its manifest, are new even when the scene is not. If a listed scene of the same area, source and acquisition would publish the same files, markers and caption, it is kept and nothing is written. If they differ, the new one replaces it in the index and the old directory goes. That happens when a FIRMS day has settled or a new areas summary has changed the markers. So the gallery shows each acquisition once, and its newest reading.
+- **The cap is 5 GiB, `[imagery] max_bytes`, and the latest scene of each area and class is kept regardless.** Above the cap, the oldest acquisitions go first. An area with no picture is a worse answer than a disk a little over its budget. The cap is in the settings file and not an environment variable, as the plan had it, so that ingest has one place where its settings are written.
+- **`verify` sees only what the manifest names.** Markers are chosen from the raw store: the newest FIRMS file for each day, and the newest gazetteer. Months later there are newer ones. A `PinnedStore` lists only the manifest's inputs, so the same choice is made again, and the rebuilt manifest is compared with the held one digest for digest. Every published file is also checked against its stated digest and size. The areas summary must be the file the scene was made from. If it has been rewritten since, `verify` says which report to write it again from (rule 8, through the sealed report).
+- **The commands.**
+  - `imagery refresh`: every published area in every enabled source. One area's failure stops no other.
+  - `imagery render --area N <raw paths>`: publishes from raw paths already held, with no socket. Part 8's offline demo scene comes this way.
+  - `imagery list`: runs without the extra.
+  - `imagery verify <hash>`.
+
+  They live in `cli_imagery_run.py`, beside `cli_imagery.py`, which keeps the parser and `search`, so that each stays under 400 lines. The boundary test's list of importers gains the one file, and `publish` joins the record-only modules: publishing moves files and decodes nothing.
+- **The `ingest-imagery` service runs `refresh --interval 86400`.** It uses the ingest image, hardened as D-206 asks. It has no database URL and no `depends_on`, because a scene is a manifest and files, never a row (D-229). It has a 1 GB memory limit. `PUBLISHED_DIR` is mounted read-only, apart from `PUBLISHED_DIR/imagery`, which the host creates, owned by uid 10001. Its healthcheck asks only whether it is alive: the file is touched every minute while it waits and between areas while it works. Whether a source answered is in the log, and a restart would not make one answer.
+
+*Rejected: naming the directory by the files alone, leaving the inputs out of the digest.* Then two manifests that name different raw paths would claim one directory, and the one already there would no longer describe its own provenance.
+
+*Rejected: publishing every day's fetch of a scene.* That would mean three areas and three sources, a new directory each every day, of pictures identical to yesterday's. Each would push the last out of Cloudflare's cache, and the gallery would list one acquisition many times.
+
+*Rejected: keeping a copy of the areas summary inside each scene.* The summary is regenerable from its sealed report, which is kept. A copy in each directory would be a second record of the same facts, able to disagree with the first.
+
+---
+
 
 ## Open
 
@@ -7910,6 +7943,7 @@ All four questions carried from `MSP-SPEC.md` §9 are now resolved.
 | D-372 a scene chosen by its own classification layer, and what was read kept | `ingest/src/meridian_ingest/imagery/{areas,sources,stac,pixels,cloud,stored,search,outcome}.py`; `ingest/src/meridian_ingest/{cli,cli_imagery,config,config_imagery}.py`; `pyproject.toml`; `tests/unit/{test_imagery_catalogue,test_imagery_search,test_imagery_boundaries,test_ingest_config}.py` |
 | D-373 a scene rendered from the raw store alone, its graticule our own arithmetic | `ingest/src/meridian_ingest/imagery/{scene,render,display,encode,graticule,webmercator,sources,model_manifest}.py`; `ingest/src/meridian_ingest/imagery/fonts/`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_render,test_imagery_graticule,test_imagery_boundaries,test_imagery_model}.py` |
 | D-374 markers placed from records and cited, and the caption a versioned function | `ingest/src/meridian_ingest/imagery/{annotate,annotate_fires,gazetteer,caption,display,display_markers,render,sources,model_checks,model_geometry}.py`; `ingest/src/meridian_ingest/adapters/public/{gazetteers,registrations}.py`; `ingest/src/meridian_ingest/config_imagery.py`; `deploy/ingest{,.live}.toml.example`; `ATTRIBUTION.md`; `tests/unit/{test_imagery_annotate,test_gazetteer_sources,test_imagery_render,test_imagery_model,test_imagery_catalogue,test_public_sources,test_ingest_config}.py`; `tests/integration/test_environment_load.py` |
+| D-375 a scene published under its manifest's digest, capped, and made again | `ingest/src/meridian_ingest/imagery/{build,publish,render,caption,sources,model_checks}.py`; `ingest/src/meridian_ingest/{cli_imagery,cli_imagery_run,config_imagery}.py`; `deploy/docker-compose.ingest.yml`; `deploy/ingest{,.live}.toml.example`; `tests/unit/{test_imagery_publish,test_imagery_boundaries,test_imagery_annotate,test_imagery_catalogue,test_compose_hardening}.py` |
 
 **On the joint review.** `MSP-SPEC.md` required a joint review by all three team members before Phase 1 implementation began. That review did not take place as a meeting. D-012 through D-022 were written instead: every gap the review would have been convened to find is recorded above with its reasoning and its rejected alternative, and the specification is frozen at 0.1 by that written record.
 

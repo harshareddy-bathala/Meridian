@@ -65,6 +65,57 @@ services:
         source: ./secrets/ingest
         target: /run/secrets/meridian-ingest
 
+  # Open imagery of the published areas, once a day (D-375): search each area's
+  # clearest scene, render it from the raw store, publish it under
+  # ${PUBLISHED_DIR}/imagery for the API. The same image as `ingest`, but no
+  # database: a scene is a manifest and files, never a row (D-229).
+  #
+  # It needs, on the host, [imagery] in deploy/ingest.toml (see
+  # deploy/ingest.live.toml.example) and ${PUBLISHED_DIR}/imagery created, owned
+  # by uid 10001. The rest of PUBLISHED_DIR is read-only here: it reads the areas
+  # summary and writes nothing else the API serves.
+  ingest-imagery:
+    image: ${MERIDIAN_INGEST_IMAGE:-meridian-ingest:local}
+    build:
+      context: ..
+      dockerfile: deploy/ingest/Dockerfile
+    pull_policy: build
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    logging: *logging
+    # A 4096 px window of three bands, warped and tiled, fits well inside this;
+    # the cloud host has 2 GB for everything (D-372).
+    mem_limit: 1g
+    tmpfs:
+      - /tmp
+    command: ["meridian-ingest", "imagery", "refresh", "--interval", "86400", "--alive", "/tmp/imagery-alive"]
+    environment:
+      MERIDIAN_INGEST_CONFIG: /run/config/ingest.toml
+    # Alive, not successful: the file is touched every minute while it waits
+    # and between areas while it works. Whether a source answered is in the
+    # log, and a restart would not make one answer.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/imagery-alive') < 1800 else 1)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - ingest-raw:/var/lib/meridian-ingest
+      - <<: *read-only
+        source: ./ingest.toml
+        target: /run/config/ingest.toml
+      - <<: *read-only
+        source: ${PUBLISHED_DIR:-../data/published}
+        target: /published
+      - type: bind
+        source: ${PUBLISHED_DIR:-../data/published}/imagery
+        target: /published/imagery
+        bind:
+          create_host_path: false
+
 volumes:
   # The raw store cannot be recreated without going back to every source, and is
   # not in the database dump (OPERATIONS.md § The raw store is not in the
