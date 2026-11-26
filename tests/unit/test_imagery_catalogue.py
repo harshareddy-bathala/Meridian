@@ -324,6 +324,34 @@ def test_the_imagery_table_is_read_and_its_path_resolved(tmp_path: Path) -> None
     assert settings.imagery.request_budget == 40
 
 
+def test_where_scenes_are_published_and_their_cap_are_read(tmp_path: Path) -> None:
+    """Nothing is published until a directory is named; the cap is 5 GiB (D-375)."""
+    config = tmp_path / "ingest.toml"
+    config.write_text("", encoding="utf-8")
+    assert load_settings(config).imagery.published is None
+    assert load_settings(config).imagery.max_bytes == 5 * 1024**3
+
+    config.write_text(
+        '[imagery]\npublished = "published/imagery"\nmax_bytes = 1000\n',
+        encoding="utf-8",
+    )
+    settings = load_settings(config)
+
+    assert settings.imagery.published == tmp_path / "published" / "imagery"
+    assert settings.imagery.max_bytes == 1000
+
+
+@pytest.mark.parametrize("value", ["0", "true", "'5GB'"])
+def test_a_cap_that_is_not_a_number_of_bytes_is_refused(
+    tmp_path: Path, value: str
+) -> None:
+    config = tmp_path / "ingest.toml"
+    config.write_text(f"[imagery]\nmax_bytes = {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="max_bytes"):
+        load_settings(config)
+
+
 def test_no_imagery_source_is_on_by_default(tmp_path: Path) -> None:
     config = tmp_path / "ingest.toml"
     config.write_text("", encoding="utf-8")

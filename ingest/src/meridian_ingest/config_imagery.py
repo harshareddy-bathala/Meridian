@@ -25,6 +25,7 @@ from meridian_ingest.provenance import SOURCE_ID
 
 __all__ = [
     "DEFAULT_IMAGERY_BUDGET",
+    "DEFAULT_MAX_BYTES",
     "GAZETTEERS",
     "ImagerySettings",
     "ImagerySettingsError",
@@ -35,7 +36,13 @@ DEFAULT_IMAGERY_BUDGET = 200
 """Requests one imagery source may make in one run, across every published
 area: a search, a token, and one per window read (D-372)."""
 
-_IMAGERY_KEYS = frozenset({"summary", "sources", "request_budget", "areas"})
+DEFAULT_MAX_BYTES = 5 * 1024**3
+"""What the published scenes may hold together before the oldest go: 5 GiB.
+Each area's latest scene from each class is kept whatever this says (D-375)."""
+
+_IMAGERY_KEYS = frozenset(
+    {"summary", "sources", "request_budget", "areas", "published", "max_bytes"}
+)
 _AREA_KEYS = frozenset({"gazetteer"})
 GAZETTEERS = (GEONAMES.source_id, NATURAL_EARTH.source_id)
 """The sources an area's place names may come from."""
@@ -67,6 +74,13 @@ class ImagerySettings:
     gazetteers: Mapping[int, str] = field(default_factory=dict)
     """An area's chosen gazetteer, by area id, where it overrides the rule."""
 
+    published: Path | None = None
+    """The directory scenes are published into, ``<PUBLISHED_DIR>/imagery``,
+    which the API reads its index from. Nothing is published until it is
+    named (D-375)."""
+
+    max_bytes: int = DEFAULT_MAX_BYTES
+
 
 def parse_imagery(value: object, found: Path) -> ImagerySettings:
     """The ``[imagery]`` table, its path resolved against the settings file.
@@ -83,10 +97,8 @@ def parse_imagery(value: object, found: Path) -> ImagerySettings:
         known = ", ".join(sorted(_IMAGERY_KEYS))
         message = f"{found} [imagery]: unknown key {unknown}; known: {known}"
         raise ImagerySettingsError(message)
-    summary = value.get("summary")
-    if summary is not None and (not isinstance(summary, str) or not summary.strip()):
-        message = f"imagery.summary must be a non-empty path, not {summary!r}"
-        raise ImagerySettingsError(message)
+    summary = _path(value.get("summary"), "summary", found)
+    published = _path(value.get("published"), "published", found)
     sources = value.get("sources", [])
     if not isinstance(sources, list) or not all(
         isinstance(one, str) and SOURCE_ID.fullmatch(one) for one in sources
@@ -94,11 +106,25 @@ def parse_imagery(value: object, found: Path) -> ImagerySettings:
         message = f"imagery.sources must be a list of source ids, not {sources!r}"
         raise ImagerySettingsError(message)
     return ImagerySettings(
-        summary=None if summary is None else (found.parent / summary).resolve(),
+        summary=summary,
         sources=tuple(sources),
-        request_budget=_budget(value.get("request_budget", DEFAULT_IMAGERY_BUDGET)),
+        request_budget=_positive(
+            value.get("request_budget", DEFAULT_IMAGERY_BUDGET), "request_budget"
+        ),
         gazetteers=_gazetteers(value.get("areas", {}), found),
+        published=published,
+        max_bytes=_positive(value.get("max_bytes", DEFAULT_MAX_BYTES), "max_bytes"),
     )
+
+
+def _path(value: object, key: str, found: Path) -> Path | None:
+    """A path key, resolved against the settings file's directory."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        message = f"imagery.{key} must be a non-empty path, not {value!r}"
+        raise ImagerySettingsError(message)
+    return (found.parent / value).resolve()
 
 
 def _gazetteers(value: object, found: Path) -> dict[int, str]:
@@ -128,11 +154,8 @@ def _gazetteers(value: object, found: Path) -> dict[int, str]:
     return chosen
 
 
-def _budget(value: object) -> int:
+def _positive(value: object, key: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        message = (
-            "imagery.request_budget must be a whole number of at least 1, "
-            f"not {value!r}"
-        )
+        message = f"imagery.{key} must be a whole number of at least 1, not {value!r}"
         raise ImagerySettingsError(message)
     return value

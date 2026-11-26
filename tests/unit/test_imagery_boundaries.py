@@ -37,7 +37,7 @@ IMAGERY = INGEST / "imagery"
 IMAGE_LIBRARIES = ("PIL", "imageio", "cv2", "skimage", "matplotlib", "rasterio")
 """Every library that can turn bytes into pixels, as ``test_public_sources`` lists."""
 
-MAY_IMPORT_IMAGERY = frozenset({"cli.py", "cli_imagery.py"})
+MAY_IMPORT_IMAGERY = frozenset({"cli.py", "cli_imagery.py", "cli_imagery_run.py"})
 """The modules outside the package that may import it: the command and its verbs."""
 
 WRITERS = ("meridian_ingest.load", "meridian_ingest.load_rows", "meridian.store")
@@ -55,6 +55,7 @@ RECORD_ONLY = (
     "gazetteer",
     "graticule",
     "webmercator",
+    "publish",
 )
 """Imagery modules built from records alone, or from arithmetic on them, by
 name or name prefix. The first five are also what ``cli_imagery`` imports

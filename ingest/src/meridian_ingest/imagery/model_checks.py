@@ -43,10 +43,17 @@ AnnotationKind = Literal["fire", "area", "change", "place"]
 ANNOTATION_KINDS: tuple[AnnotationKind, ...] = ("fire", "area", "change", "place")
 
 InputKind = Literal[
-    "catalogue", "scene", "firms", "gazetteer", "areas_summary", "template"
+    "catalogue",
+    "classification",
+    "scene",
+    "firms",
+    "gazetteer",
+    "areas_summary",
+    "template",
 ]
 INPUT_KINDS: tuple[InputKind, ...] = (
     "catalogue",
+    "classification",
     "scene",
     "firms",
     "gazetteer",
@@ -55,7 +62,9 @@ INPUT_KINDS: tuple[InputKind, ...] = (
 )
 """What a manifest names as an input. Each is a raw artefact, a published file
 or a template, named by its digest, so a scene can be rendered again from the
-same inputs and land on the same directory (rule 8)."""
+same inputs and land on the same directory (rule 8). ``classification`` is a
+window of the product's own cloud verdicts, which the cloud fraction is
+counted from again; ``scene`` is a display window or tile, which is drawn."""
 
 REQUIRED_FILES = ("scene.tif", "scene.png", "scene.pgw", "display.png")
 """The four files every scene publishes beside its tiles."""

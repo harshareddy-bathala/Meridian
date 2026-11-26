@@ -48,6 +48,7 @@ __all__ = [
     "cloud_method_for",
     "credit_for",
     "imagery_source",
+    "platform_name",
 ]
 
 SENTINEL2 = SourceDescriptor(
@@ -248,6 +249,21 @@ def cloud_method_for(source: ImagerySource) -> str:
 def credit_for(source: ImagerySource, year: int) -> str:
     """The credit line for a picture acquired in ``year``."""
     return source.credit.format(year=year)
+
+
+def platform_name(platform: str) -> str:
+    """A catalogue's platform id as the satellite is named: ``Sentinel-2B``.
+
+    Earth Search writes ``sentinel-2b`` and Planetary Computer ``landsat-9``;
+    a caption says "Sentinel-2B's MSI" and "Landsat 9's OLI". Anything else is
+    kept as the catalogue gave it, rather than guessed at.
+    """
+    lowered = platform.strip().lower()
+    if lowered.startswith("sentinel-") and len(lowered) > len("sentinel-"):
+        return "Sentinel-" + lowered.removeprefix("sentinel-").upper()
+    if lowered.startswith("landsat-") and lowered.removeprefix("landsat-").isdigit():
+        return "Landsat " + lowered.removeprefix("landsat-")
+    return platform.strip()
 
 
 class UnknownImagerySourceError(LookupError):

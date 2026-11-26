@@ -51,7 +51,13 @@ from meridian_ingest.imagery.webmercator import (
 )
 from meridian_ingest.raw_store import RawStore
 
-__all__ = ["RenderedScene", "geotiff_bytes", "render_scene", "tile_bytes"]
+__all__ = [
+    "RenderedScene",
+    "geotiff_bytes",
+    "render_composed",
+    "render_scene",
+    "tile_bytes",
+]
 
 WEB_MERCATOR = "EPSG:3857"
 _COG_OPTIONS = {
@@ -101,6 +107,26 @@ def render_scene(  # noqa: PLR0913 — what is drawn, where, and what is marked 
         FileExistsError: ``directory`` is already there.
     """
     scene = compose(store, raw_paths, bounds)
+    return render_composed(scene, directory, markers=markers, credits=credits)
+
+
+def render_composed(
+    scene: Scene,
+    directory: Path,
+    *,
+    markers: Sequence[Annotation] = (),
+    credits: Sequence[str] = (),
+) -> RenderedScene:
+    """Write an already composed scene's files into ``directory``.
+
+    :func:`render_scene` composes and then calls this. A publisher composes
+    first because the markers are placed for the scene's own acquisition time,
+    which only the composed scene knows (D-375).
+
+    Raises:
+        FileExistsError: ``directory`` is already there.
+    """
+    bounds = scene.bounds
     directory.mkdir(parents=True)
     centre = (bounds.south + bounds.north) / 2.0
     zoom_min, zoom_max = zoom_range(scene.resolution_m, centre)

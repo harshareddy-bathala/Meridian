@@ -24,7 +24,12 @@ import pytest
 from meridian_ingest.imagery.annotate import annotate_scene, marker_key, read_changes
 from meridian_ingest.imagery.annotate_fires import MAX_FIRES, fire_records
 from meridian_ingest.imagery.areas import read_published_areas
-from meridian_ingest.imagery.caption import CAPTION_TEMPLATE, CaptionFacts, caption
+from meridian_ingest.imagery.caption import (
+    CAPTION_TEMPLATE,
+    TEMPLATE_SHA256,
+    CaptionFacts,
+    caption,
+)
 from meridian_ingest.imagery.gazetteer import (
     gazetteer_for,
     long_side_km,
@@ -510,6 +515,7 @@ def test_the_caption_is_its_template_on_fixed_facts() -> None:
     assert CAPTION_TEMPLATE == "imagery-caption-1"
     assert written == PINNED
     assert hashlib.sha256(written.encode()).hexdigest() == PINNED_SHA256
+    assert PINNED_SHA256 == TEMPLATE_SHA256, "a manifest names the template by it"
 
 
 def test_the_caption_regenerates_from_the_same_facts() -> None:

@@ -29,9 +29,14 @@ from datetime import date, datetime
 
 from meridian_ingest.imagery.model import Bounds, SourceClass
 
-__all__ = ["CAPTION_TEMPLATE", "CaptionFacts", "caption"]
+__all__ = ["CAPTION_TEMPLATE", "TEMPLATE_SHA256", "CaptionFacts", "caption"]
 
 CAPTION_TEMPLATE = "imagery-caption-1"
+TEMPLATE_SHA256 = "f65521aeb2ef1cb974e2211873f0408ac96eb58664c4214e2b92fb615efbf242"
+"""The template's fingerprint: the digest of its caption of the reference facts
+``tests/unit/test_imagery_annotate.py`` pins. A manifest names the template it
+was captioned by with this digest, so an edited sentence that kept the version
+name would show as an input that no longer matches (D-375)."""
 
 _WHAT: dict[SourceClass, str] = {
     "high_resolution": "High-resolution satellite image",
