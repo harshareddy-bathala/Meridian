@@ -171,6 +171,31 @@ def check_shape(site: Path, pages: list[str]) -> list[str]:
     return problems
 
 
+IMAGERY_PAGES = ("areas/index.html", "data/index.html")
+IMAGERY_LINK = 'href="https://dash.meridian.org.in/#/imagery"'
+
+
+def check_imagery(site: Path) -> list[str]:
+    """Where the site speaks of pictures of an area, it names them as an archive's.
+
+    The areas and data pages point to the dashboard's Imagery page, and say
+    the pictures are public archive imagery, credited, so no reader takes an
+    archive's scene for one Meridian's own stations received (D-378).
+    """
+    problems = []
+    for name in IMAGERY_PAGES:
+        page = (site / name).read_text(encoding="utf-8")
+        if "public archive imagery, credited" not in " ".join(
+            visible_text(page).split()
+        ):
+            problems.append(
+                f"{name}: does not call the pictures public archive imagery, credited"
+            )
+        if IMAGERY_LINK not in page:
+            problems.append(f"{name}: does not link to the dashboard's Imagery page")
+    return problems
+
+
 def check_content(site: Path, pages: list[str], css: str) -> list[str]:
     """Every check in this file."""
     return (
@@ -181,4 +206,5 @@ def check_content(site: Path, pages: list[str], css: str) -> list[str]:
         + check_figures(site, pages)
         + check_wording(site, pages)
         + check_shape(site, pages)
+        + check_imagery(site)
     )
