@@ -23,8 +23,9 @@ This module imports nothing from ``meridian_ingest``, which the platform image
 does not install (D-138). ``tests/unit/test_imagery_endpoint_models.py`` holds
 its fields equal to the records the publisher writes.
 
-Every scene is public archive imagery, credited: none is received by Meridian
-yet, and none is simulated (D-086).
+Every scene is public archive imagery, credited, but for the demonstration's
+synthetic scene, which every layer labels simulated (rule 5, D-378). None is
+received by Meridian yet (D-086).
 """
 
 from __future__ import annotations
@@ -86,6 +87,7 @@ class ImageryIndexEntry(_Strict):
     acquired_at: datetime
     published_at: datetime
     size_bytes: int = Field(ge=0)
+    simulated: bool
 
 
 class ImageryIndexFile(_Strict):
@@ -197,6 +199,9 @@ class SceneManifest(_Strict):
     rendering: str = Field(min_length=1)
     zoom_min: int = Field(ge=0, le=22)
     zoom_max: int = Field(ge=0, le=22)
+    simulated: bool
+    """True for the demonstration's synthetic scene alone (rule 5, D-378)."""
+
     credit: str = Field(min_length=1)
     licence: str = Field(min_length=1)
     caption: str = Field(min_length=1)
@@ -246,8 +251,9 @@ class ImageryScene(BaseModel):
     """The display picture's address, ``/imagery/<hash>/display.png``."""
 
     size_bytes: int
-    simulated: Literal[False] = False
-    """Public archive imagery is measured by its archive, never simulated."""
+    simulated: bool
+    """True only for the demonstration's synthetic scene; an archive's scene is
+    its archive's measurement (rule 5, D-378)."""
 
 
 class ImageryList(BaseModel):
@@ -268,4 +274,4 @@ class ImagerySceneDetail(BaseModel):
     """Every listed file is at ``base`` + its path; ``manifest.json`` too."""
 
     manifest: SceneManifest
-    simulated: Literal[False] = False
+    simulated: bool

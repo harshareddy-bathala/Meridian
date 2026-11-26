@@ -81,6 +81,7 @@ def manifest(
         "rendering": "the visual asset as published",
         "zoom_min": 9,
         "zoom_max": 12,
+        "simulated": False,
         "credit": "Contains modified Copernicus Sentinel data 2026",
         "licence": "Copernicus free, full and open",
         "caption": CAPTION,
@@ -172,6 +173,7 @@ class Published:
                 "acquired_at": acquired_at,
                 "published_at": "2026-11-18T06:00:00Z",
                 "size_bytes": sum(len(one) for one in files.values()) + len(data),
+                "simulated": False,
             }
         )
         self.write()
@@ -480,6 +482,38 @@ def test_a_manifest_of_another_scene_than_its_entry_is_refused(
 ) -> None:
     published.scene()
     published.entries[0]["acquired_at"] = "2026-11-15T05:21:00Z"
+    published.write()
+
+    assert client.get("/api/v1/imagery").status_code == 500
+
+
+def test_a_simulated_scene_says_so_in_the_listing_and_the_detail(
+    client: TestClient, published: Published
+) -> None:
+    """The demonstration's synthetic scene, labelled at the API too (rule 5)."""
+    name = published.scene()
+    path = published.root / name / "manifest.json"
+    body = json.loads(path.read_bytes())
+    body["simulated"] = True
+    data = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    simulated = hashlib.sha256(data).hexdigest()[:12]
+    (published.root / name).rename(published.root / simulated)
+    (published.root / simulated / "manifest.json").write_bytes(data)
+    published.entries[0].update(hash=simulated, simulated=True)
+    published.write()
+
+    (item,) = client.get("/api/v1/imagery").json()["items"]
+    detail = client.get(f"/api/v1/imagery/{simulated}").json()
+
+    assert item["simulated"] is True
+    assert detail["simulated"] is True and detail["manifest"]["simulated"] is True
+
+
+def test_an_entry_that_disagrees_with_its_manifest_about_simulation_is_refused(
+    client: TestClient, published: Published
+) -> None:
+    published.scene()
+    published.entries[0]["simulated"] = True
     published.write()
 
     assert client.get("/api/v1/imagery").status_code == 500

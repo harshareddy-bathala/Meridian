@@ -18,8 +18,10 @@ to the name it is published under and describe the scene its index entry says.
 A parsed manifest is kept for as long as its file's size and time are
 unchanged, so a viewer's thirty tile requests do not parse it thirty times.
 
-Every scene is public archive imagery, credited, and never simulated. Images
-received by Meridian's own stations arrive with Stage 40.
+Every scene is public archive imagery, credited, except the demonstration's
+synthetic one, which says it is simulated in its index entry, its manifest and
+every answer here (rule 5, D-378). Images received by Meridian's own stations
+arrive with Stage 40.
 
 Reference: docs/DECISIONS.md D-085, D-086, D-326, D-332, D-369, D-375, D-376.
 """
@@ -175,6 +177,7 @@ def imagery_scene(
         published_at=found.entry.published_at,
         base=f"{FILES_PREFIX}/{found.entry.hash}/",
         manifest=found.manifest,
+        simulated=found.manifest.simulated,
     )
 
 
@@ -247,7 +250,14 @@ def _manifest(root: Path, entry: ImageryIndexEntry) -> SceneManifest:
         manifest.source_id,
         manifest.source_class,
         manifest.acquired_at,
-    ) != (entry.area_id, entry.source_id, entry.source_class, entry.acquired_at):
+        manifest.simulated,
+    ) != (
+        entry.area_id,
+        entry.source_id,
+        entry.source_class,
+        entry.acquired_at,
+        entry.simulated,
+    ):
         _log.warning("imagery manifest is not its index entry's scene: %s", path)
         raise PublicError(SERVER_ERROR, _damaged(entry.hash))
     return manifest
@@ -287,6 +297,7 @@ def _scene(entry: ImageryIndexEntry, manifest: SceneManifest) -> ImageryScene:
         credit=manifest.credit,
         display=f"{FILES_PREFIX}/{entry.hash}/display.png",
         size_bytes=entry.size_bytes,
+        simulated=entry.simulated,
     )
 
 
