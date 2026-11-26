@@ -7,6 +7,7 @@ import {
   citationHref,
   cloudLabel,
   downloads,
+  fetchAreaScenes,
   fetchImagery,
   fetchScene,
   type ImageryRead,
@@ -14,6 +15,8 @@ import {
   type SceneDetail,
   type SceneMarker,
   type SceneRead,
+  NEW_FOR_DAYS,
+  newlyPublished,
 } from "./imagery";
 import type { Route } from "./route";
 import { SceneMap, type TileStatus } from "./SceneMap";
@@ -103,6 +106,55 @@ export function Gallery({ read, now }: { read: ImageryRead; now: Date }) {
         </ul>
       )}
     </>
+  );
+}
+
+/** An area's latest scene of each class, on the area's own page (D-378). */
+export function AreaScenes({ read, now }: { read: ImageryRead; now: Date }) {
+  if ("notYetComputed" in read) {
+    return <p className="dim">{read.notYetComputed}</p>;
+  }
+  if (read.scenes.length === 0) {
+    return <p className="dim">No scene of this area is published yet.</p>;
+  }
+  return (
+    <>
+      <p className="dim">Public archive imagery, credited: the latest scene from each archive.</p>
+      <ul className="scene-grid">
+        {read.scenes.map((one) => (
+          <SceneCard key={one.hash} scene={one} now={now} />
+        ))}
+      </ul>
+    </>
+  );
+}
+
+/** Scenes published in the last week, for the changes page. Not an event:
+ * events are the database's records, and a scene is a published file (D-363). */
+export function NewImagery({ read, now }: { read: ImageryRead; now: Date }) {
+  if ("notYetComputed" in read) {
+    return <p className="dim">{read.notYetComputed}</p>;
+  }
+  const fresh = newlyPublished(read.scenes, now);
+  if (fresh.length === 0) {
+    return <p className="dim">No scene was published in the last {NEW_FOR_DAYS} days.</p>;
+  }
+  return (
+    <ul>
+      {fresh.map((one) => (
+        <li key={one.hash}>
+          <a href={`#/imagery/${encodeURIComponent(one.hash)}`}>{one.areaLabel}</a>
+          {one.simulated && (
+            <>
+              {" "}
+              <SimBadge title="A scene rendered from simulated data" />
+            </>
+          )}
+          , {sourceLine(one.platform, one.instrument, one.sourceClass)}, taken {formatMinute(one.acquiredAt)}: published{" "}
+          {formatAge(one.publishedAt, now)}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -312,6 +364,30 @@ function GalleryView() {
       )}
     </section>
   );
+}
+
+/** An area's latest scenes, read for the area page. */
+export function AreaImagery({ areaId }: { areaId: number }) {
+  const read = usePolled(
+    `area-imagery-${String(areaId)}`,
+    (fetcher, signal) => fetchAreaScenes(fetcher, areaId, signal),
+    IMAGERY_REFRESH_MS,
+  );
+  const now = useNow(60_000);
+  if (read.value === null) {
+    return read.error === null ? <p className="dim">Loading the area&apos;s imagery…</p> : <p role="alert">{read.error}</p>;
+  }
+  return <AreaScenes read={read.value} now={now} />;
+}
+
+/** Scenes published this week, read for the changes page. */
+export function ImageryChanges() {
+  const read = usePolled("imagery", fetchImagery, IMAGERY_REFRESH_MS);
+  const now = useNow(60_000);
+  if (read.value === null) {
+    return read.error === null ? <p className="dim">Loading the published imagery…</p> : <p role="alert">{read.error}</p>;
+  }
+  return <NewImagery read={read.value} now={now} />;
 }
 
 export function ImageryView({ hash, go }: { hash: string | null; go: (route: Route) => void }) {

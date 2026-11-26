@@ -266,6 +266,34 @@ export async function fetchImagery(fetcher: Fetcher, signal: AbortSignal): Promi
   return decodeImagery(await getJson(fetcher, "/api/v1/imagery", "the published imagery", signal));
 }
 
+/**
+ * An area's latest scene of each class, one request a class, so a daily view
+ * published every day never crowds the sharper ones out. A class with no scene
+ * yet is left out; a deployment that publishes no imagery says so.
+ */
+export async function fetchAreaScenes(fetcher: Fetcher, areaId: number, signal: AbortSignal): Promise<ImageryRead> {
+  const reads = await Promise.all(
+    SOURCE_CLASSES.map(async (one) => {
+      const url = `/api/v1/imagery?area=${String(areaId)}&source_class=${one}&limit=1`;
+      return decodeImagery(await getJson(fetcher, url, "the area's imagery", signal));
+    }),
+  );
+  const closed = reads.find((one) => "notYetComputed" in one);
+  if (closed !== undefined) return closed;
+  return { scenes: reads.flatMap((one) => ("scenes" in one ? one.scenes : [])) };
+}
+
+/** How long a scene counts as newly published on the changes page. */
+export const NEW_FOR_DAYS = 7;
+
+/** The scenes published in the last week, the most recently published first. */
+export function newlyPublished(scenes: ImageryScene[], now: Date, days: number = NEW_FOR_DAYS): ImageryScene[] {
+  const since = now.getTime() - days * 86_400_000;
+  return scenes
+    .filter((one) => Date.parse(one.publishedAt) >= since)
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+}
+
 /** One scene. Not in the routes file: the warmer reads each from the listing. */
 export async function fetchScene(fetcher: Fetcher, hash: string, signal: AbortSignal): Promise<SceneRead> {
   const url = `/api/v1/imagery/${encodeURIComponent(hash)}`;

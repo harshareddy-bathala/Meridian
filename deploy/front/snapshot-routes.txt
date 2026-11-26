@@ -7,7 +7,8 @@
 # the front keys a copy on the exact path and query: a route that drifts here
 # would be warmed under a key no visitor ever asks for.
 #
-# One route a line. `{station}` is every station the directory lists. The
+# One route a line. `{station}` is every station the directory lists, and
+# `{area}` every area /api/v1/areas publishes. The
 # directory itself is followed through `next_cursor`, as the dashboard does.
 # The page and the assets it names are warmed too, and are not listed here, and
 # so is every file of every package /api/v1/datasets lists, which the data page
@@ -36,6 +37,9 @@
 /api/v1/results?limit=50
 /api/v1/areas
 /api/v1/imagery
+/api/v1/imagery?area={area}&source_class=high_resolution&limit=1
+/api/v1/imagery?area={area}&source_class=older_record&limit=1
+/api/v1/imagery?area={area}&source_class=daily_wide&limit=1
 /api/v1/reports/weekly
 /api/v1/reports/criteria
 /api/v1/datasets

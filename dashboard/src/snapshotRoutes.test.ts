@@ -19,7 +19,7 @@ import { fetchConditions } from "./conditions";
 import { fetchCriteria } from "./criteria";
 import { fetchDatasets } from "./datasets";
 import { fetchEvents } from "./events";
-import { fetchImagery } from "./imagery";
+import { fetchAreaScenes, fetchImagery } from "./imagery";
 import { fetchInsights } from "./insights";
 import { fetchLosses } from "./losses";
 import { fetchOpenWarnings } from "./networkWarnings";
@@ -39,6 +39,9 @@ import { fetchUptime } from "./uptime";
 // What the warmer substitutes; a station id as the platform mints them.
 const STATION = "{station}";
 const STATION_ID = "st_0123456789ab";
+// What the warmer substitutes for each area /api/v1/areas publishes.
+const AREA = "{area}";
+const AREA_ID = 3;
 
 function routes(): string[] {
   return routesFile
@@ -80,6 +83,7 @@ async function requests(): Promise<string[]> {
     // A scene's detail is warmed from this listing, as a package's files are
     // from the datasets', so fetchScene is not one of these (D-376).
     fetchImagery(fetcher, signal),
+    fetchAreaScenes(fetcher, AREA_ID, signal),
     fetchWeekly(fetcher, signal),
     fetchCriteria(fetcher, signal),
     fetchDatasets(fetcher, signal),
@@ -91,7 +95,7 @@ async function requests(): Promise<string[]> {
 
 describe("the routes the front is warmed with", () => {
   it("are exactly the requests the dashboard makes", async () => {
-    const warmed = routes().map((route) => route.replace(STATION, STATION_ID));
+    const warmed = routes().map((route) => route.replace(STATION, STATION_ID).replace(AREA, String(AREA_ID)));
     expect(new Set(await requests())).toEqual(new Set(warmed));
   });
 

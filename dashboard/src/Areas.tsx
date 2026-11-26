@@ -13,6 +13,7 @@ import {
   type SeriesPoint,
 } from "./areas";
 import { formatDay } from "./format";
+import { AreaImagery } from "./Imagery";
 import type { Route } from "./route";
 import { SnapshotNote } from "./SnapshotNote";
 import { snapshotClass } from "./snapshot";
@@ -116,6 +117,8 @@ function AreaDetail({ area, summary, go }: { area: Area; summary: AreasSummary; 
           Every area
         </button>
       </p>
+      <h4>Latest imagery</h4>
+      <AreaImagery areaId={area.areaId} />
       <h4>Changes</h4>
       {changes.length === 0 ? (
         <p className="dim">No quantity of this area has a change rule.</p>

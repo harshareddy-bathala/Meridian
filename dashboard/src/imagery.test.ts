@@ -8,10 +8,12 @@ import {
   decodeImagery,
   decodeSceneDetail,
   downloads,
+  fetchAreaScenes,
   fetchImagery,
   fetchScene,
   formatLat,
   formatLon,
+  newlyPublished,
   tileTemplate,
 } from "./imagery";
 
@@ -150,5 +152,49 @@ describe("the scene's graticule", () => {
   it("keeps a line on the box's edge, as the picture does", () => {
     const lines = sceneGraticule([77.5804, 12.9601, 77.6003, 12.9799]);
     expect(lines.map((one) => one.value)).toEqual([12.97, 77.59, 77.6]);
+  });
+});
+
+describe("an area's imagery", () => {
+  it("asks for the latest scene of each class, and keeps the ones there are", async () => {
+    const asked: string[] = [];
+    const fetcher = (url: string) => {
+      asked.push(url);
+      const items = url.includes("daily_wide") ? [] : [sceneItem({ hash: url.includes("older") ? "b".repeat(12) : HASH })];
+      return Promise.resolve(new Response(JSON.stringify({ status: "computed", items, next_cursor: null })));
+    };
+    const read = await fetchAreaScenes(fetcher, 3, new AbortController().signal);
+    expect(asked).toEqual([
+      "/api/v1/imagery?area=3&source_class=high_resolution&limit=1",
+      "/api/v1/imagery?area=3&source_class=older_record&limit=1",
+      "/api/v1/imagery?area=3&source_class=daily_wide&limit=1",
+    ]);
+    expect("scenes" in read && read.scenes.map((one) => one.hash)).toEqual([HASH, "b".repeat(12)]);
+  });
+
+  it("says nothing is published when the platform says so", async () => {
+    const closed = { status: "not_yet_computed", reason: "No open imagery is published yet." };
+    const read = await fetchAreaScenes(
+      () => Promise.resolve(new Response(JSON.stringify(closed))),
+      3,
+      new AbortController().signal,
+    );
+    expect(read).toEqual({ notYetComputed: "No open imagery is published yet." });
+  });
+});
+
+describe("newly published imagery", () => {
+  it("keeps the last week's, the most recently published first", () => {
+    const read = decodeImagery({
+      status: "computed",
+      items: [
+        sceneItem({ hash: "a".repeat(12), published_at: "2026-11-15T06:00:00Z" }),
+        sceneItem({ hash: "b".repeat(12), published_at: "2026-11-19T06:00:00Z" }),
+        sceneItem({ hash: "c".repeat(12), published_at: "2026-11-01T06:00:00Z" }),
+      ],
+    });
+    if (!("scenes" in read)) throw new Error("expected scenes");
+    const fresh = newlyPublished(read.scenes, new Date("2026-11-20T06:00:00Z"));
+    expect(fresh.map((one) => one.hash[0])).toEqual(["b", "a"]);
   });
 });
